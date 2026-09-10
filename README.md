@@ -94,7 +94,7 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 
 1. Đọc phần thư mục liên quan đến nhóm của bạn và các tài liệu trong `docs/`.
 2. Thống nhất API trước khi frontend/backend triển khai tính năng mới.
-3. Tạo branch theo tiền tố `feature/`, `fix/` hoặc `docs/`.
+3. Tạo branch theo tiền tố `feature/`, `fix/` hoặc `docs/`. Ví dụ: `feature/backend-machine-inventory`
 4. Không commit file môi trường, mật khẩu, token hay khóa của cổng thanh toán.
 
 Các hướng dẫn chạy, biến môi trường và quy ước code sẽ được bổ sung khi từng module bắt đầu được triển khai.
