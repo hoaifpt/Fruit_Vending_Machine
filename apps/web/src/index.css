@@ -1,0 +1,21 @@
+:root {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: oklch(0.316 0.05 163); background: oklch(1 0 0);
+  --ink: oklch(0.316 0.05 163); --muted: oklch(0.49 0.033 158);
+  --brand: oklch(0.532 0.099 152); --brand-hover: oklch(0.44 0.081 154);
+  --surface: oklch(1 0 0); --identity: oklch(0.964 0.012 155);
+  --border: oklch(0.66 0.035 157); --error: oklch(0.46 0.16 27); --error-surface: oklch(0.977 0.011 27);
+  font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 0; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; }
+button:focus-visible, [tabindex='-1']:focus-visible { outline: 3px solid var(--brand); outline-offset: 5px; }
+h1, h2, p { margin: 0; }
+h1, h2 { text-wrap: balance; }
+p { text-wrap: pretty; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+

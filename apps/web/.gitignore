@@ -1,0 +1,53 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm/
+.pnpm-store/
+
+# Vite / TypeScript build output and caches
+/dist/
+/dist-ssr/
+.vite/
+.vite-temp/
+.cache/
+*.tsbuildinfo
+
+# Local environment values (keep the shared template)
+.env
+.env.*
+!.env.example
+
+# Logs and process files
+logs/
+*.log
+*.pid
+*.pid.lock
+
+# Test output
+/coverage/
+/.nyc_output/
+/playwright-report/
+/test-results/
+
+# Local FK live-session configuration
+/.fk-skills/live/
+
+# Editor settings (keep shared VS Code recommendations)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.suo
+*.user
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Keep source, docs, skills, public assets and package-lock.json in Git.
