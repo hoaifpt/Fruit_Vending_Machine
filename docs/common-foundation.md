@@ -18,16 +18,18 @@ com.fruitmachine.backend
 │   ├── response     # ApiResponse<T>, ApiErrorResponse
 │   └── util         # chỗ cho utility khi có use case thực
 ├── config           # JpaConfig
-├── persistence      # mappings và enum đã có từ dev
+├── audit            # AuditLog entity
 ├── security / auth
 ├── user / product / machine / inventory
 ├── sensor / alert / order / payment / dispense
 └── mqtt
 ```
 
-Feature packages mới chỉ có package-info.java nêu phạm vi tương lai; không có business code.
+Các package chưa có nghiệp vụ giữ package-info.java theo quyết định của chủ dự án.
 Đặt controller/DTO/service/repository mới trong feature tương ứng khi issue đó được triển khai.
-Không di chuyển toàn bộ entity hiện có chỉ để đổi folder trong issue foundation.
+Sau đợt thống nhất quy định, entity/enum đã chuyển về feature tương ứng, không đổi mapping.
+Các superclass CreatedEntity/UpdatedEntity nằm trong common.entity cùng BaseEntity/UuidEntity.
+Không triển khai nghiệp vụ các issue tương lai khi chuyển package.
 
 ## Database, UUID và auditing
 

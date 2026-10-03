@@ -1,5 +1,0 @@
-package com.fruitmachine.backend.persistence.enums;
-
-public enum AlertType {
-    HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK
-}

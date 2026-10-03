@@ -1,8 +1,10 @@
 # Entity JPA theo schema Flyway
 
 SQL V1–V8 là nguồn schema. Không sửa migration để phù hợp entity và không thêm bảng/cột ngoài
-migration. Package entity là `com.fruitmachine.backend.persistence.entity`, enum trong
-`com.fruitmachine.backend.persistence.enums`. Java 21, Spring Boot 3.5.14, Hibernate 6.6.49.Final,
+migration. Entity nằm trong `com.fruitmachine.backend.<feature>.entity`, enum trong
+`com.fruitmachine.backend.<feature>.enums`; các superclass dùng chung nằm ở `common.entity`.
+User/Role thuộc user; ProductBatch thuộc product; MachineEvent thuộc machine;
+OrderItemAllocation thuộc order; AuditLog thuộc audit. Java 21, Spring Boot 3.5.14, Hibernate 6.6.49.Final,
 Flyway 11.20.1; dependencies được khai báo tại `backend/pom.xml`.
 
 ## Quản lý schema

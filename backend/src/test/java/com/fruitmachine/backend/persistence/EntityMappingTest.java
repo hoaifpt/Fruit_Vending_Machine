@@ -1,9 +1,32 @@
 package com.fruitmachine.backend.persistence;
 
+import com.fruitmachine.backend.alert.entity.Alert;
+import com.fruitmachine.backend.alert.enums.AlertSeverity;
+import com.fruitmachine.backend.alert.enums.AlertType;
+import com.fruitmachine.backend.audit.entity.AuditLog;
+import com.fruitmachine.backend.dispense.entity.DispenseCommand;
+import com.fruitmachine.backend.dispense.enums.DispenseStatus;
+import com.fruitmachine.backend.inventory.entity.InventoryItem;
+import com.fruitmachine.backend.inventory.entity.InventoryTransaction;
+import com.fruitmachine.backend.inventory.enums.InventoryTransactionType;
+import com.fruitmachine.backend.machine.entity.Machine;
+import com.fruitmachine.backend.machine.entity.MachineEvent;
+import com.fruitmachine.backend.machine.entity.MachineSlot;
+import com.fruitmachine.backend.order.entity.Order;
+import com.fruitmachine.backend.order.entity.OrderItem;
+import com.fruitmachine.backend.order.entity.OrderItemAllocation;
+import com.fruitmachine.backend.payment.entity.Payment;
+import com.fruitmachine.backend.payment.entity.PaymentWebhookLog;
+import com.fruitmachine.backend.product.entity.Product;
+import com.fruitmachine.backend.product.entity.ProductBatch;
+import com.fruitmachine.backend.user.entity.Role;
+import com.fruitmachine.backend.sensor.entity.SensorReading;
+import com.fruitmachine.backend.user.entity.User;
+import com.fruitmachine.backend.user.entity.UserRole;
+import com.fruitmachine.backend.user.entity.UserRoleId;
+
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fruitmachine.backend.persistence.entity.*;
-import com.fruitmachine.backend.persistence.enums.*;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.Table;
@@ -12,6 +35,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -89,8 +113,20 @@ class EntityMappingTest {
                 .collect(Collectors.toSet())).isEqualTo(tables);
 
         var sessionFactory = entityManagerFactory.unwrap(SessionFactoryImplementor.class);
+        Map<String, String> tableFeatures = Map.ofEntries(
+                Map.entry("users", "user"), Map.entry("roles", "user"), Map.entry("user_roles", "user"),
+                Map.entry("machines", "machine"), Map.entry("machine_slots", "machine"),
+                Map.entry("machine_events", "machine"), Map.entry("products", "product"),
+                Map.entry("product_batches", "product"), Map.entry("inventory_items", "inventory"),
+                Map.entry("inventory_transactions", "inventory"), Map.entry("sensor_readings", "sensor"),
+                Map.entry("alerts", "alert"), Map.entry("orders", "order"), Map.entry("order_items", "order"),
+                Map.entry("order_item_allocations", "order"), Map.entry("payments", "payment"),
+                Map.entry("payment_webhook_logs", "payment"), Map.entry("dispense_commands", "dispense"),
+                Map.entry("audit_logs", "audit"));
         for (var entity : entities) {
             String table = entity.getJavaType().getAnnotation(Table.class).name();
+            assertThat(entity.getJavaType().getPackageName()).as("Feature owner of %s", table)
+                    .isEqualTo("com.fruitmachine.backend." + tableFeatures.get(table) + ".entity");
             var persister = (AbstractEntityPersister) sessionFactory.getMappingMetamodel()
                     .getEntityDescriptor(entity.getJavaType());
             Set<String> mappedColumns = new HashSet<>(Arrays.asList(persister.getIdentifierColumnNames()));
