@@ -59,6 +59,9 @@ Không dựng collection cho mỗi bảng sensor/event/history có lưu lượng
 sẽ thuộc repository khi triển khai sau. UserRole là entity của join table, không cần một
 @ManyToMany khác ghi cùng bảng. Khi thêm membership, persist UserRole riêng với user/role.
 Các collection inverse không tự persist con; phải đặt owning relationship và persist con riêng.
+Issue #5 thêm UserRepository/RoleRepository, RoleName cho known names và getRoles() dẫn xuất,
+read-only. Fetch user cùng roles bằng graph roleMemberships.role; không thêm mapping ghi thứ hai
+cho user_roles. Xem [user-role-persistence.md](user-role-persistence.md).
 
 ### Composite foreign keys
 

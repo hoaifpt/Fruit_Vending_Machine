@@ -6,6 +6,7 @@ import com.fruitmachine.backend.user.enums.UserStatus;
 import jakarta.persistence.*;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -39,4 +40,10 @@ public class User extends UpdatedEntity {
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)
     private Set<UserRole> roleMemberships = new HashSet<>();
+
+    /** Read-only derived roles; use the repository fetch graph outside a persistence context. */
+    @Transient
+    public Set<Role> getRoles() {
+        return roleMemberships.stream().map(UserRole::getRole).collect(Collectors.toUnmodifiableSet());
+    }
 }
