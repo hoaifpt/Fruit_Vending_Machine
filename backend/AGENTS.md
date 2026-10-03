@@ -171,6 +171,53 @@ Use Jakarta Validation for request validation.
 
 Use the project's global exception handler.
 
+### API Documentation and Swagger UI
+
+Every issue that introduces or changes an application REST API must include matching
+OpenAPI documentation and a working Swagger UI for development/testing in the same
+delivery. When introducing the first business API, add the Swagger/OpenAPI integration;
+do not defer it to an unspecified later issue. Choose a dependency compatible with the
+current Spring Boot version and explain the addition before changing dependencies.
+
+- Use understandable resource names, correct HTTP methods and consistent /api/v1 paths.
+  Example: GET /api/v1/products/{id}, not /getProductById.
+- Organize controller/DTO/service/repository code by feature. Group Swagger operations
+  with clear feature tags (Auth, Users, Products, Machines, Inventory, Orders, Payments).
+  Distinguish management, kiosk and provider-webhook audiences when relevant; do not
+  mix unrelated operations into a single miscellaneous/default group.
+- Give each operation a clear summary, purpose and stable unique operationId. Describe
+  path/query parameters, request/response DTO fields, required values, formats, enum
+  values, validation rules and safe realistic examples.
+- Document applicable success/error HTTP statuses and the actual common response/error
+  schemas. Describe pagination/filtering only when implemented; do not invent endpoints.
+- Document authentication schemes and role/access requirements when applicable. Enable
+  Swagger UI authorization for testing protected endpoints without weakening API security.
+  Do not publish real credentials, tokens, password hashes or provider signatures in examples.
+- Every application API addition/change must also create/update the version-controlled
+  contract under repository-root api-contract/ in the same delivery. Swagger UI/generated
+  OpenAPI does NOT replace that contract. Follow the existing contract entry point and
+  file organization; do not create competing specifications for the same endpoint.
+- Keep implementation, Swagger/OpenAPI and api-contract/ semantically synchronized:
+  paths/methods, operationIds/tags, parameters, request/response schemas, validation,
+  status/error responses, examples and authentication/access requirements must agree.
+  Include relevant webhook signature/provider requirements without bypassing verification
+  or trust boundaries. Do not place credentials or secrets in the contract.
+- Validate the updated contract and compare it against the exposed OpenAPI document
+  (automate consistency checks where practical). At handoff, list changed contract files
+  and verification results so frontend developers can use the repository contract.
+- At handoff, provide the actual Swagger UI and OpenAPI document URLs and local setup
+  instructions. Verify both load and reflect the delivered APIs; include an appropriate
+  documentation smoke test and verify a representative safe request via Swagger UI when
+  possible. Disclose any UI testing limitation and leave unverified checklist items unchecked.
+- Swagger Try it out is not a replacement for automated API/business-rule tests. Use
+  isolated development/test data for writes, never real payments or hardware dispensing.
+- Restrict or disable Swagger UI/OpenAPI in production according to the deployment policy;
+  do not expose sensitive/internal endpoints or add a blanket security permitAll for APIs.
+
+An API issue is not complete if its required Swagger UI/OpenAPI documentation or
+api-contract/ contract is missing, out of date, inconsistent or unverified.
+Persistence-only issues do not require inventing REST endpoints.
+
 ---
 
 ## 8. Security Rules
