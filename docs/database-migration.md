@@ -210,7 +210,7 @@ transaction ID trong payload. Audit entity_id là tham chiếu đa hình không 
 
 Mọi `id` là UUID DEFAULT gen_random_uuid(), trừ sensor identity; user_roles dùng PK kép.
 Timestamp dùng TIMESTAMPTZ; created_at và updated_at (nếu có) NOT NULL có default.
-Mapping JPA dùng @UpdateTimestamp để ghi updated_at; SQL trực tiếp phải tự ghi timestamp này,
+Mapping JPA dùng Spring Data auditing @LastModifiedDate để ghi updated_at; SQL trực tiếp phải tự ghi timestamp này,
 vì default không tự chạy lại khi UPDATE.
 PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 

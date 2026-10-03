@@ -1,8 +1,10 @@
 # Entity JPA theo schema Flyway
 
 SQL V1–V8 là nguồn schema. Không sửa migration để phù hợp entity và không thêm bảng/cột ngoài
-migration. Package entity là `com.fruitmachine.backend.persistence.entity`, enum trong
-`com.fruitmachine.backend.persistence.enums`. Java 21, Spring Boot 3.5.14, Hibernate 6.6.49.Final,
+migration. Entity nằm trong `com.fruitmachine.backend.<feature>.entity`, enum trong
+`com.fruitmachine.backend.<feature>.enums`; các superclass dùng chung nằm ở `common.entity`.
+User/Role thuộc user; ProductBatch thuộc product; MachineEvent thuộc machine;
+OrderItemAllocation thuộc order; AuditLog thuộc audit. Java 21, Spring Boot 3.5.14, Hibernate 6.6.49.Final,
 Flyway 11.20.1; dependencies được khai báo tại `backend/pom.xml`.
 
 ## Quản lý schema
@@ -94,9 +96,11 @@ Không đổi slot/machine của bản ghi lịch sử hoặc item đã có comm
   đúng BIGINT GENERATED ALWAYS AS IDENTITY; không thêm sequence riêng.
 - NUMERIC dùng BigDecimal với precision/scale đúng migration: 12,2 cho tiền; 5,2 cho cảm biến
   và ngưỡng. Quantity/capacity dùng Integer. Không dùng double cho tiền.
-- TIMESTAMPTZ dùng Instant; Hibernate JDBC timezone UTC. created_at đọc từ default DB qua
-  @Generated(INSERT), không cho JPA ghi đè. updated_at dùng @UpdateTimestamp(source=DB).
-  received_at webhook đọc từ default DB tương tự created_at.
+- TIMESTAMPTZ dùng Instant; Hibernate JDBC timezone UTC. Với bảng có cả created_at/updated_at,
+  UpdatedEntity kế thừa common.entity.BaseEntity dùng @CreatedDate/@LastModifiedDate và
+  AuditingEntityListener. JpaConfig cung cấp clock UTC với microsecond precision. Với bảng chỉ
+  có created_at, CreatedEntity vẫn đọc default DB qua @Generated(INSERT). received_at webhook
+  đọc từ default DB tương tự. UUID superclass nằm trong common.entity.UuidEntity.
 - InventoryTransaction @Immutable chống dirty-update của Hibernate. created_at riêng dùng
   @CreationTimestamp (JVM, trước INSERT) để tránh lỗi Hibernate khi refresh DB-generated value
   trên immutable entity. Trigger append-only trong V6 vẫn bảo vệ UPDATE/DELETE/TRUNCATE ở DB.
@@ -131,7 +135,9 @@ mvn test
 mvn '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC' spring-boot:run
 ```
 
-Bootstrap hiện chỉ khởi tạo persistence/Flyway, chưa có HTTP server hay API. Spring config
+Bootstrap hiện khởi tạo persistence/Flyway và HTTP server với common exception handling,
+validation và GET /actuator/health; chưa có API nghiệp vụ. Xem [common-foundation.md](common-foundation.md).
+Spring config
 đọc `.env` ở root hoặc working directory qua file import. Dùng giá trị dạng properties đơn
 giản (không bọc password trong dấu nháy, không inline comment hay shell expansion); biến
 môi trường vẫn có ưu tiên cao hơn file. Không log/commit password.
@@ -143,7 +149,7 @@ JVM timezone UTC tránh JDBC gửi timezone alias Asia/Saigon không được se
 hibernate.jdbc.time_zone chỉ điều khiển JDBC binding, không thay múi giờ JVM lúc handshake.
 
 `EntityMappingTest` dùng PostgreSQL 18 Testcontainers riêng, không dùng credentials hoặc dữ
-liệu development. Flyway áp dụng V1–V8, rồi Hibernate validate. Ba integration tests đã đạt:
+liệu development. Flyway áp dụng V1–V8, rồi Hibernate validate. Các integration tests đã đạt:
 
 1. 19 entity khớp 19 bảng nghiệp vụ, toàn bộ column mappings được đối chiếu với database.
 2. Persist/reload mọi entity, membership khóa kép, composite navigation, lazy collections,
@@ -151,6 +157,8 @@ liệu development. Flyway áp dụng V1–V8, rồi Hibernate validate. Ba inte
    JSONB/TEXT, timestamps và immutable inventory history.
 3. Trong schema test riêng, chủ động xóa products.image_url: validation phải thất bại,
    cột không bị Hibernate tạo lại; schema public vẫn còn nguyên cột.
+4. HTTP server khởi động ở cổng ngẫu nhiên; health trả đúng trạng thái UP, PostgreSQL connection
+   và Flyway validation hoạt động; /actuator/env và /actuator/configprops không truy cập được.
 
 Docker cần chạy để test; không fallback sang H2 và không bỏ qua test khi thiếu Docker.
 Testcontainers tự dọn container test sau khi chạy. Migration V1–V8 không thay đổi trong bước này.

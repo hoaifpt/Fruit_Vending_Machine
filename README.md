@@ -2,7 +2,7 @@
 
 Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-> **Trạng thái hiện tại:** repository đang ở giai đoạn khởi tạo cấu trúc. Một số file mới là placeholder và chưa thể chạy ngay.
+> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation và health check. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
 
 ## Tổng quan kiến trúc
 
@@ -11,11 +11,11 @@ Người dùng
     │ chạm màn hình / quét QR
     ▼
 Kiosk (Electron + React) ── Serial/USB ──> ESP32 ──> Motor, cảm biến
-    │ REST / MQTT                                │
-    └──────────────────> Backend (Spring Boot) <─┘
+    │ REST / kênh trạng thái backend
+    └──────────────────> Backend (Spring Boot)
                                │
                                ├── PostgreSQL
-                               ├── MQTT broker (Mosquitto)
+                               ├── MQTT telemetry/events (tích hợp tương lai)
                                ├── Cổng thanh toán QR
                                └── Web quản trị (React)
 ```
@@ -23,12 +23,20 @@ Kiosk (Electron + React) ── Serial/USB ──> ESP32 ──> Motor, cảm bi
 ### Luồng mua hàng
 
 1. Khách chọn sản phẩm trên **kiosk**.
-2. Kiosk gọi **backend** tạo giao dịch và nhận dữ liệu QR.
-3. Cổng thanh toán gửi webhook xác nhận thanh toán về backend.
-4. Backend thông báo trạng thái thanh toán cho kiosk.
-5. Kiosk gửi lệnh nhả sản phẩm tới **ESP32** qua Serial/USB.
-6. ESP32 điều khiển động cơ, đọc cảm biến xác nhận hàng đã rơi và trả kết quả.
-7. Kiosk báo kết quả nhả hàng lên backend; backend cập nhật giao dịch và tồn kho.
+2. Kiosk gọi `POST /api/v1/orders`; backend kiểm tra/giữ hàng và tạo Order = PENDING_PAYMENT.
+3. Backend tạo QR payment; kiosk hiển thị QR.
+4. Khách thanh toán; provider gửi webhook về backend.
+5. Backend verify payment và chuyển Order = PAID.
+6. Backend tạo/lưu DispenseCommand; kiosk nhận PAID cùng commandId/slot được backend cấp.
+7. Kiosk gửi `DISPENSE <commandId> <slot=A2>` tới **ESP32** qua Serial/USB.
+8. ESP32 điều khiển motor, xác nhận kết quả vật lý và trả `DISPENSE_SUCCESS <commandId>` cho kiosk.
+9. Kiosk báo kết quả tương ứng lên backend.
+10. Backend kiểm tra quyền máy/command/trạng thái, xử lý idempotent: command SUCCESS,
+    allocation DISPENSED, item SOLD; Order COMPLETED khi tất cả phần hàng đã nhả thành công.
+
+Trong lúc nhả hàng dùng trạng thái DISPENSING. Kiosk không tự tạo command hay đánh dấu PAID.
+Mất kết nối/timeout/kết quả không rõ phải đối soát, không gửi lại mù quáng gây nhả hàng hai lần.
+MQTT không thay thế đường Serial/USB cho dispense trong flow đã thống nhất.
 
 Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồng bộ giao dịch khi mất điện/mất mạng.
 
@@ -75,7 +83,7 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 - Mọi thay đổi API REST phải cập nhật `api-contract/api.yaml` trước hoặc cùng lúc với backend/frontend.
 - Mọi lệnh Serial giữa kiosk và ESP32 phải được mô tả trong `packages/protocol` và tài liệu tương ứng.
 - ESP32 chỉ xử lý các việc thời gian thực: điều khiển motor, đọc cảm biến, nhiệt độ và bảo vệ an toàn. Không đưa logic thanh toán xuống firmware.
-- Trạng thái giao dịch do backend quản lý, tối thiểu gồm: `PENDING_PAYMENT`, `PAID`, `DISPENSING`, `SUCCESS`, `DISPENSE_FAILED`.
+- Trạng thái Order do backend quản lý: `PENDING_PAYMENT`, `PAID`, `DISPENSING`, `COMPLETED` và các trạng thái lỗi/hủy/hoàn tiền theo Flyway. `SUCCESS` là trạng thái của Payment/DispenseCommand, không phải Order.
 
 ## Công nghệ dự kiến
 
