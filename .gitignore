@@ -1,0 +1,3 @@
+# Local database credentials; commit only the example.
+/.env
+/backend/target/
