@@ -354,6 +354,36 @@ After implementation:
 
 An issue is NOT complete merely because the code compiles.
 
+### Issue Checklist Reporting
+
+At every issue handoff, including completion or a blocked/partial result, the final
+response must reproduce ALL checklist items from the assigned issue, grouped under
+their original headings (tasks, testing and acceptance criteria included). Preserve
+each item's meaning; do not replace the full checklist with a summary or test count.
+
+- Mark `[x]` only when implemented and supported by the required verification.
+- Mark `[ ]` for incomplete, blocked or unverified items. For each, state what is
+  missing, why, and the next step or user decision needed to resolve it.
+- If an item is not applicable or satisfied by an existing implementation/approved
+  alternative, explain the reason and evidence; never silently omit it.
+- Include relevant code/test evidence for completed groups. Passing tests alone do
+  not prove unrelated acceptance criteria are complete.
+- If no items remain incomplete, explicitly say so. Separately report local testing,
+  commit/push and merge status; do not imply that implementation completion means merged.
+- Keep the corresponding checklist and verification status in `.ai/CURRENT_TASK.md`
+  aligned with the final report. If the issue checklist cannot be retrieved, disclose
+  that limitation instead of claiming exhaustive checklist completion.
+
+Example handoff item:
+
+```markdown
+- [x] User can be found by email — repository integration test passed on PostgreSQL.
+- [ ] Deployment verification — missing target environment access; user must provide it.
+```
+
+This reporting rule does NOT authorize editing GitHub issue checkboxes, closing issues,
+creating PRs or merging branches. Perform those actions only when the user requests them.
+
 ---
 
 ## 15. Current Work
