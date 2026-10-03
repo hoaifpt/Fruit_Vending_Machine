@@ -26,7 +26,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest(GlobalExceptionHandlerTest.TestController.class)
+// This slice tests MVC response handling only; authentication is covered by full-chain tests.
+@WebMvcTest(value = GlobalExceptionHandlerTest.TestController.class,
+        excludeAutoConfiguration = org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration.class)
+@org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc(addFilters = false)
 @Import({GlobalExceptionHandler.class, GlobalExceptionHandlerTest.TestController.class})
 class GlobalExceptionHandlerTest {
     @Autowired MockMvc mvc;

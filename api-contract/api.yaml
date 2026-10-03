@@ -1,0 +1,150 @@
+openapi: 3.1.0
+info:
+  title: Fruit Machine Backend API
+  version: v1
+  description: Management API. Login is public; other application endpoints require Bearer authentication. No refresh tokens or ADMIN/STAFF endpoint policies yet.
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: Auth
+    description: Management authentication; ADMIN/STAFF endpoint policies are not implemented yet.
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Login using email and password
+      description: >-
+        Public endpoint for existing ACTIVE management accounts with BCrypt password hashes.
+        Email is normalized to lowercase. Password is never trimmed or normalized.
+        Password must be nonblank, at most 72 characters AND 72 UTF-8 bytes.
+        Unknown email, wrong password, INACTIVE and LOCKED accounts return the same generic 401.
+        No refresh token. Send the access token as Authorization: Bearer <token> for protected APIs.
+        Do not attach an invalid or expired Authorization header to login: the JWT filter rejects it.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: developer@example.com
+              password: '<your-account-password>'
+      responses:
+        '200':
+          description: Authenticated; response is not cacheable
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            Pragma:
+              schema: {type: string, const: no-cache}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseLoginResponse'
+              example:
+                timestamp: '2026-10-03T00:00:00Z'
+                message: Login successful
+                data:
+                  accessToken: '<access-token>'
+                  tokenType: Bearer
+                  expiresIn: 3600
+        '400':
+          description: Missing/malformed JSON or invalid email/password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example:
+                timestamp: '2026-10-03T00:00:00Z'
+                status: 400
+                error: Validation Failed
+                message: Request validation failed
+                path: /api/v1/auth/login
+                fieldErrors:
+                  email: must be a well-formed email address
+        '401':
+          description: Invalid email or password, unavailable account, or invalid Bearer header
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example:
+                timestamp: '2026-10-03T00:00:00Z'
+                status: 401
+                error: Unauthorized
+                message: Invalid email or password
+                path: /api/v1/auth/login
+        '500':
+          description: Unexpected server error; no internal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Paste the access token only (without the Bearer prefix).
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      description: Management account login. Email is normalized to lowercase; password is not modified.
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+          description: Account email (maximum 254 characters); must be nonblank and well formed.
+          example: developer@example.com
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 1
+          maxLength: 72
+          description: Account password; nonblank; at most 72 UTF-8 bytes as well as 72 characters.
+    LoginResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+          description: Signed HS256 JWT access token. Never log or share it.
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 86400
+          description: Access token lifetime in seconds
+          example: 3600
+    ApiResponseLoginResponse:
+      type: object
+      properties:
+        timestamp: {type: string, format: date-time}
+        message: {type: string}
+        data:
+          $ref: '#/components/schemas/LoginResponse'
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp: {type: string, format: date-time}
+        status: {type: integer, format: int32}
+        error: {type: string}
+        message: {type: string}
+        path: {type: string}
+        fieldErrors:
+          type: object
+          description: Optional field-to-validation-message map; omitted when empty. No rejected values.
+          additionalProperties: {type: string}

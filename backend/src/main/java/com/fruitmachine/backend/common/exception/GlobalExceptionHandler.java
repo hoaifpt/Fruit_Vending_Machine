@@ -25,9 +25,21 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
+    @ExceptionHandler(org.springframework.security.core.AuthenticationException.class)
+    public ResponseEntity<Object> handleAuthentication(WebRequest request) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).header("Cache-Control", "no-store")
+                .header("WWW-Authenticate", "Bearer")
+                .body(response(401, "Unauthorized", "Invalid email or password", Map.of(), request));
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Object> handleNotFound(ResourceNotFoundException ex, WebRequest request) {
         return error(HttpStatus.NOT_FOUND, "Not Found", ex.getMessage(), Map.of(), request);
+    }
+
+    @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+    public ResponseEntity<Object> handleAccessDenied(WebRequest request) {
+        return error(HttpStatus.FORBIDDEN, "Forbidden", "Access denied", Map.of(), request);
     }
 
     @ExceptionHandler(BadRequestException.class)

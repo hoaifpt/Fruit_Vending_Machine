@@ -2,7 +2,10 @@
 
 Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation và health check. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
+> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Swagger/OpenAPI và health check. Chưa có refresh token hay policy ADMIN/STAFF. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
+
+Hướng dẫn chạy backend, cấu hình `JWT_SECRET`, Swagger và login: [JWT authentication](docs/jwt-authentication.md).
+Hợp đồng API cho frontend: [api-contract/api.yaml](api-contract/api.yaml).
 
 ## Tổng quan kiến trúc
 
@@ -102,7 +105,7 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 
 1. Đọc phần thư mục liên quan đến nhóm của bạn và các tài liệu trong `docs/`.
 2. Thống nhất API trước khi frontend/backend triển khai tính năng mới.
-3. Tạo branch theo tiền tố `feature/`, `fix/` hoặc `docs/`. Ví dụ: `feature/backend-machine-inventory`
+3. Tạo branch từ `dev` mới nhất theo `feature/<issue-number>-<description>`, `fix/` hoặc `docs/`. Ví dụ: `feature/6-jwt-authentication`.
 4. Không commit file môi trường, mật khẩu, token hay khóa của cổng thanh toán.
 
 Các hướng dẫn chạy, biến môi trường và quy ước code sẽ được bổ sung khi từng module bắt đầu được triển khai.

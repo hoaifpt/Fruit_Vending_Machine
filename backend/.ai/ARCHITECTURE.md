@@ -97,21 +97,21 @@ Examples:
 
 Contains cross-cutting Spring Security infrastructure.
 
-Examples later:
+Implemented by issue #6:
 
-- security configuration
-- authentication filters
-- security context helpers
+- stateless Spring Security configuration; BCrypt AuthenticationManager
+- JOSE/Nimbus HS256 JWT service and authentication filter
+- UserDetails adapter loading current account/roles through existing repositories
+- common JSON authentication entry point / access-denied handler
 
 ### auth
 
 Contains authentication use cases.
 
-Examples later:
+Current and future use cases:
 
-- login
-- token creation
-- refresh token flow if introduced
+- email/password login and access-token creation (issue #6)
+- refresh token flow only if explicitly assigned in a later issue (not implemented)
 
 `auth` and `security` are intentionally different:
 
