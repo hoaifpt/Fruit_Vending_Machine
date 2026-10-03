@@ -1,5 +1,6 @@
 package com.fruitmachine.backend.persistence.entity;
 
+import com.fruitmachine.backend.common.entity.UuidEntity;
 import com.fruitmachine.backend.persistence.enums.InventoryTransactionType;
 import jakarta.persistence.*;
 import java.time.Instant;

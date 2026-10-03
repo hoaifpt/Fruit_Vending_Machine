@@ -1,5 +1,6 @@
 package com.fruitmachine.backend.persistence.entity;
 
+import com.fruitmachine.backend.common.entity.UuidEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.MappedSuperclass;
 import java.time.Instant;

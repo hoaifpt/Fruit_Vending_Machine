@@ -1,4 +1,4 @@
-package com.fruitmachine.backend.persistence.entity;
+package com.fruitmachine.backend.common.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.GeneratedValue;

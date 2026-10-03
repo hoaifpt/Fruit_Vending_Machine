@@ -1,5 +1,6 @@
 package com.fruitmachine.backend.persistence.entity;
 
+import com.fruitmachine.backend.common.entity.UuidEntity;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import java.time.Instant;

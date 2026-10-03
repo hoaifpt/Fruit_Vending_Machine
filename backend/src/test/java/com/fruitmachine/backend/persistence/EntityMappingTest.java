@@ -1,6 +1,7 @@
 package com.fruitmachine.backend.persistence;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fruitmachine.backend.persistence.entity.*;
 import com.fruitmachine.backend.persistence.enums.*;
 import jakarta.persistence.EntityManager;
@@ -23,6 +24,8 @@ import org.hibernate.tool.schema.spi.SchemaManagementException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -35,7 +38,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest(properties = "spring.config.import=")
+@SpringBootTest(properties = "spring.config.import=", webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
 class EntityMappingTest {
     @Container
@@ -52,6 +55,21 @@ class EntityMappingTest {
     @Autowired EntityManagerFactory entityManagerFactory;
     @Autowired JdbcTemplate jdbc;
     @Autowired Environment environment;
+    @Autowired TestRestTemplate http;
+    @Autowired ObjectMapper objectMapper;
+    @Autowired Flyway flyway;
+
+    @Test
+    void healthChecksRealDatabaseWithoutExposingConfiguration() throws Exception {
+        assertThat(jdbc.queryForObject("SELECT 1", Integer.class)).isEqualTo(1);
+        assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
+        var health = http.getForEntity("/actuator/health", String.class);
+        assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(objectMapper.readTree(health.getBody()))
+                .isEqualTo(JsonNodeFactory.instance.objectNode().put("status", "UP"));
+        assertThat(http.getForEntity("/actuator/env", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(http.getForEntity("/actuator/configprops", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
 
     @Test
     void validatesFlywaySchemaAndMapsEveryBusinessTableAndColumn() {
@@ -252,9 +270,14 @@ class EntityMappingTest {
                 .isEqualTo("LOAD");
         Product loadedProduct = entityManager.find(Product.class, product.getId());
         Instant beforeUpdate = loadedProduct.getUpdatedAt();
+        Instant originalCreatedAt = loadedProduct.getCreatedAt();
         loadedProduct.setPrice(new BigDecimal("40000.00"));
         entityManager.flush();
-        assertThat(loadedProduct.getUpdatedAt()).isAfterOrEqualTo(beforeUpdate);
+        assertThat(loadedProduct.getUpdatedAt()).isAfter(beforeUpdate);
+        Instant auditedUpdate = loadedProduct.getUpdatedAt();
+        entityManager.refresh(loadedProduct);
+        assertThat(loadedProduct.getCreatedAt()).isEqualTo(originalCreatedAt);
+        assertThat(loadedProduct.getUpdatedAt()).isEqualTo(auditedUpdate);
         assertThat(entityManager.find(OrderItem.class, line.getId()).getUnitPrice()).isEqualByComparingTo("35000.00");
     }
 
