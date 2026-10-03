@@ -257,13 +257,14 @@ Current backend stack:
 - Lombok
 - Spring Boot Actuator
 - Docker Compose for local PostgreSQL; Testcontainers for PostgreSQL integration tests
+- User/Role persistence, Spring Security BCrypt and stateless JWT access-token authentication
+- OpenAPI / Swagger for development; versioned REST contract at repository-root api-contract/api.yaml
 
 Planned integrations:
 
-- Spring Security / authentication and authorization
+- ADMIN/STAFF endpoint authorization (authentication is implemented by issue #6; no refresh token)
 - MQTT
 - QR payment provider
-- OpenAPI / Swagger
 - Application container deployment
 
 ---

@@ -70,6 +70,9 @@ class EntityMappingTest {
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
+        byte[] key = new byte[32];
+        new java.security.SecureRandom().nextBytes(key);
+        registry.add("security.jwt.secret", () -> java.util.Base64.getEncoder().encodeToString(key));
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
@@ -91,8 +94,9 @@ class EntityMappingTest {
         assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(objectMapper.readTree(health.getBody()))
                 .isEqualTo(JsonNodeFactory.instance.objectNode().put("status", "UP"));
-        assertThat(http.getForEntity("/actuator/env", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
-        assertThat(http.getForEntity("/actuator/configprops", String.class).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        // Security now rejects unauthenticated access before MVC endpoint lookup.
+        assertThat(http.getForEntity("/actuator/env", String.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(http.getForEntity("/actuator/configprops", String.class).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     @Test

@@ -44,3 +44,19 @@ management:
       access: read-only
       show-details: never
       show-components: never
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+
+# Opt in locally; production profile always disables documentation.
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+    persist-authorization: false
+    disable-swagger-default-url: true
+  paths-to-match: /api/v1/**
+  override-with-generic-response: false
