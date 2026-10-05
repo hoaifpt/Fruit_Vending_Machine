@@ -75,7 +75,11 @@ Evidence by group:
   checks pass. Authorization/no-secret logging is verified by tests and source inspection.
 
 All 57 source checklist items complete; source sections 24/25 (no checkboxes) also verified.
-No implementation blocker. Commit/push/PR/merge/GitHub checkbox changes NOT performed.
+No implementation blocker. At implementation completion, no Git delivery was performed.
+On 2026-10-05 the user authorized commit/push: 10276d5 contains the issue #10 implementation
+and guidance updates and was pushed to origin/feature/10-admin-staff-authorization.
+A documentation follow-up records this delivery. PR/merge/GitHub checkbox changes NOT
+performed; the user handles merge manually. See HANDOFF.md and verify current Git state.
 Future features must explicitly annotate Spring-managed use-case entry points; unannotated
 methods are not automatically role-protected. Self-invocation/private/final proxy limits
 and non-HTTP principal trust boundaries are documented. No User Management/refresh token.

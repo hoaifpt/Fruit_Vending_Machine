@@ -8,12 +8,14 @@ Read AGENTS.md and the .ai guidance; verify Git status and test evidence before 
 - Repository: C:/Users/north/Documents/School/9/FruitMachine/backend.
 - Spring Boot module: repository-root backend/ (Java 21, Maven).
 - Current branch: feature/10-admin-staff-authorization.
-- Base/local HEAD: 1706bd2, merged issue #8 through PR #11.
+- Base: 1706bd2, merged issue #8 through PR #11.
 - Issue #10 scope, original checklist and verification: CURRENT_TASK.md.
-- Issue #10 implementation is complete locally but remains uncommitted/unpushed.
+- Issue #10 implementation and guidance were committed as 10276d5 and successfully
+  pushed to origin/feature/10-admin-staff-authorization on 2026-10-05.
   The user reports normal operation; this does not independently verify every criterion.
-- Pending changes include method-security configuration, authorization tests, OpenAPI/
-  API-contract metadata, documentation and this guidance maintenance. Preserve them.
+- Delivered changes include method-security configuration, authorization tests, OpenAPI/
+  API-contract metadata, documentation and guidance maintenance. This delivery-status
+  update follows in a documentation commit; verify local HEAD/remote and clean status.
 
 ## Verification and implemented boundaries
 
@@ -38,8 +40,8 @@ Read AGENTS.md and the .ai guidance; verify Git status and test evidence before 
   repository api-contract, including request/response, validation, errors and access rights.
 - Every issue handoff reports its entire checklist, with evidence and reasons/next steps
   for every incomplete or unverified item; update CURRENT_TASK when a new issue is assigned.
-- User handles merge manually. No commit/push/PR/merge/issue edits performed in this
-  maintenance request. Wait for the user's next issue or explicit delivery instruction.
+- User handles merge manually. Commit/push was explicitly requested and 10276d5 was
+  pushed successfully. No PR/merge/issue edits performed. Wait for the user's next issue.
 
 The branch and working-tree snapshot above must be rechecked in the next chat; do not
-switch branches over pending issue #10 changes or infer that they have already been merged.
+switch branches over any pending changes or infer that issue #10 has already been merged.
