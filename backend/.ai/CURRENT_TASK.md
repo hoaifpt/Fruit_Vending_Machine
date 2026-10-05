@@ -71,12 +71,13 @@ isolated fixture config in production-doc/schema tests; README, bootstrap/JWT do
 
 No incomplete issue checklist items. User also confirmed successful local application
 startup and initial ADMIN creation. User authorized commit/push to
-feature/8-initial-admin-bootstrap. Local commit completed, but GitHub rejected push with
-"Invalid username or token". Credential Manager lists no GitHub account and no alternative
-GitHub CLI/environment authentication is available. User must authenticate GitHub with
-repository write access before push can be retried. Final Git handoff reports the local
-commit; remote delivery is NOT complete. No PR, merge or GitHub checklist changes;
-user handles merge manually. All 58 implementation checklist items remain complete.
+feature/8-initial-admin-bootstrap. Initial push failed authentication; after user
+re-authentication, retry succeeded. Implementation commit 1eee570 was verified against
+the GitHub branch head; branch tracks origin/feature/8-initial-admin-bootstrap.
+This delivery-status update is committed/pushed separately without rewriting published
+history. Final Git handoff verifies the resulting remote head. No PR, merge or GitHub
+checklist changes; user handles merge manually. All 58 implementation checklist items
+remain complete; no outstanding authentication blocker.
 Remaining operational requirement (not an implementation blocker): developer must supply
 INITIAL_ADMIN_EMAIL/PASSWORD in ignored .env or environment for a DB without ADMIN.
 After first provisioning, remove bootstrap secrets; JWT_SECRET remains required.
