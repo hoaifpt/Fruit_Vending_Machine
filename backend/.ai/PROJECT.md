@@ -258,6 +258,8 @@ Current backend stack:
 - Spring Boot Actuator
 - Docker Compose for local PostgreSQL; Testcontainers for PostgreSQL integration tests
 - User/Role persistence, Spring Security BCrypt and stateless JWT access-token authentication
+- Initial Admin Bootstrap (issue #8): environment-driven first ADMIN, atomic and idempotent;
+  existing ADMIN always wins, no public registration or User Management API yet
 - OpenAPI / Swagger for development; versioned REST contract at repository-root api-contract/api.yaml
 
 Planned integrations:

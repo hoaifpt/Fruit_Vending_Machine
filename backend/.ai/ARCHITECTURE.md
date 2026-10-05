@@ -125,6 +125,18 @@ security
 
 ---
 
+### user bootstrap (issue #8)
+
+`user/bootstrap/InitialAdminBootstrap` is an ApplicationRunner delegating to a
+transactional service, separate from auth/security infrastructure. Typed properties live
+in config/properties; AccountCredentialPolicy is reusable for account creation only.
+UserRepository performs efficient ADMIN-role existence checks; UserRoleRepository saves
+the explicit membership without changing shared-role cascades. BootstrapLockRepository
+acquires a PostgreSQL transaction advisory lock on the same JpaTransactionManager
+datasource connection; READ_COMMITTED rechecks after the lock. No schema changes.
+Existing ADMIN (any status) skips validation and all writes; configuration cannot reset
+passwords/reactivate users/promote STAFF. See ../../docs/initial-admin-bootstrap.md.
+
 ## 4. Layer Responsibilities
 
 Normal request flow:

@@ -2,10 +2,11 @@
 
 Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Swagger/OpenAPI và health check. Chưa có refresh token hay policy ADMIN/STAFF. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
+> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, Swagger/OpenAPI và health check. Chưa có User Management API, refresh token hay policy ADMIN/STAFF cho endpoint. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
 
 Hướng dẫn chạy backend, cấu hình `JWT_SECRET`, Swagger và login: [JWT authentication](docs/jwt-authentication.md).
 Hợp đồng API cho frontend: [api-contract/api.yaml](api-contract/api.yaml).
+Database chưa có ADMIN cần cấu hình lần đầu: [Initial Admin Bootstrap](docs/initial-admin-bootstrap.md).
 
 ## Tổng quan kiến trúc
 
