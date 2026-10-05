@@ -64,6 +64,8 @@ class AuthIntegrationTest {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("security.jwt.secret", () -> KEY);
+        registry.add("app.bootstrap.admin.email", () -> "bootstrap-auth@example.invalid");
+        registry.add("app.bootstrap.admin.password", () -> "Test-only-bootstrap-passphrase!");
     }
 
     @Autowired MockMvc mvc;
@@ -95,6 +97,22 @@ class AuthIntegrationTest {
                 .andReturn();
         assertThat(result.getRequest().getSession(false)).isNull();
         return mapper.readTree(result.getResponse().getContentAsString()).at("/data/accessToken").asText();
+    }
+
+    @Test
+    void bootstrappedAdminCanLoginAndUseJwtWithAdminAuthority(
+            org.springframework.boot.test.system.CapturedOutput output) throws Exception {
+        User admin = users.findWithRolesByEmail("bootstrap-auth@example.invalid").orElseThrow();
+        var result = mvc.perform(post("/api/v1/auth/login").contentType("application/json")
+                        .content(mapper.writeValueAsString(new LoginRequest(admin.getEmail(), "Test-only-bootstrap-passphrase!"))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.tokenType").value("Bearer"))
+                .andReturn();
+        String token = mapper.readTree(result.getResponse().getContentAsString()).at("/data/accessToken").asText();
+        assertThat(tokens.extractSubject(token)).isEqualTo(admin.getId());
+        mvc.perform(get("/api/v1/test-only/principal").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(admin.getId().toString()))
+                .andExpect(jsonPath("$.authorities[0]").value("ROLE_ADMIN"));
+        assertThat(output.getAll()).doesNotContain("Test-only-bootstrap-passphrase!", admin.getPasswordHash(), token, KEY);
     }
 
     @Test

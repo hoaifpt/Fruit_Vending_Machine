@@ -38,6 +38,8 @@ class ProductionDocumentationTest {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("security.jwt.secret", () -> KEY);
+        registry.add("app.bootstrap.admin.email", () -> "bootstrap-prod@example.invalid");
+        registry.add("app.bootstrap.admin.password", () -> "Test-only-bootstrap-passphrase!");
     }
     @Autowired MockMvc mvc;
     @Autowired Environment environment;

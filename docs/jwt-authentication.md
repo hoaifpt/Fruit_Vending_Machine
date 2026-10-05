@@ -6,8 +6,11 @@ Management login only: `POST /api/v1/auth/login`. No refresh token, registration
 user CRUD or ADMIN/STAFF endpoint policy. Expired access tokens require logging in again.
 Accounts already exist in PostgreSQL and must use BCrypt hashes from Spring's
 `BCryptPasswordEncoder`. Historical arbitrary test hashes are not usable credentials.
-Flyway seeds ADMIN/STAFF roles only; no account, password or new schema is introduced.
-User provisioning belongs to the future User Management issue; do not add a default admin.
+Flyway seeds ADMIN/STAFF roles only; no account/password is seeded in migrations.
+Issue #8 adds environment-driven [Initial Admin Bootstrap](initial-admin-bootstrap.md)
+for the first administrator, with no default credentials or schema change. A database
+without any ADMIN now requires INITIAL_ADMIN_EMAIL/INITIAL_ADMIN_PASSWORD on first startup.
+Normal user management remains a future issue.
 
 ## Local configuration and startup
 

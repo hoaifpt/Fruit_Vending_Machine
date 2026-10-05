@@ -45,6 +45,16 @@ management:
       show-details: never
       show-components: never
 
+app:
+  bootstrap:
+    admin:
+      email: ${INITIAL_ADMIN_EMAIL:}
+      password: ${INITIAL_ADMIN_PASSWORD:}
+      full-name: ${INITIAL_ADMIN_FULL_NAME:Initial Administrator}
+  account:
+    password:
+      min-length: ${PASSWORD_MIN_LENGTH:12}
+
 security:
   jwt:
     secret: ${JWT_SECRET:}
