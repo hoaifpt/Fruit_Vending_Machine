@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
-@Tag(name = "Auth", description = "Management authentication; ADMIN/STAFF endpoint policies are not implemented yet.")
+@Tag(name = "Auth", description = "Management authentication. Login remains public; ADMIN/STAFF roles are independent.")
 public class AuthController {
     private final AuthService auth;
 

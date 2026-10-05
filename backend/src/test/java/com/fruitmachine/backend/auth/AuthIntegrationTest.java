@@ -221,6 +221,8 @@ class AuthIntegrationTest {
         String body = mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         var actual = mapper.readTree(body);
         var contract = new ObjectMapper(new YAMLFactory()).readTree(Path.of("../api-contract/api.yaml").toFile());
+        assertThat(actual.path("info")).isEqualTo(contract.path("info"));
+        assertThat(actual.path("tags")).isEqualTo(contract.path("tags"));
         assertThat(actual.at("/paths").fieldNames()).toIterable().containsExactly("/api/v1/auth/login");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");

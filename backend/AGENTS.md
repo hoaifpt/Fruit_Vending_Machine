@@ -2,6 +2,16 @@
 
 ## 1. Project
 
+### Working scope and session startup
+
+Work in the backend repository, not whichever frontend/kiosk workspace the chat opens.
+Resolve the repository root with Git before acting. The Spring Boot module and this file
+are under repository-root backend/; docs/ and api-contract/ are at repository root.
+Do not modify apps, frontend, kiosk or firmware unless the user explicitly changes scope.
+Preserve existing uncommitted work; inspect status/diff before switching branches.
+For a new chat, read .ai/CURRENT_TASK.md and .ai/HANDOFF.md if present, then verify their
+branch, working-tree and verification claims against local evidence before continuing.
+
 This repository contains the backend for an IoT-based automatic fruit
 vending machine system.
 
@@ -236,6 +246,9 @@ Never log:
 ADMIN and STAFF permissions must be enforced by backend security,
 not only by the frontend.
 
+Refresh tokens are deliberately deferred. Do not add refresh-token endpoints, persistence
+or rotation until the user assigns a dedicated issue for that scope.
+
 ---
 
 ## 9. Payment Rules
@@ -332,6 +345,11 @@ feature/3-user-role-persistence
 fix/24-duplicate-payment-webhook
 ```
 
+Use feature/ for new features and fix/ for bug-report issues (for example,
+titles prefixed with [BUG]). A bracketed prefix alone does not imply a bug;
+determine the issue type from its title and scope. Create both from the latest dev.
+Use the actual GitHub issue number and a lowercase kebab-case description.
+
 Normal workflow:
 
 ```text
@@ -351,6 +369,11 @@ Merge into dev
 ```
 
 Do not work directly on dev.
+
+Read .ai/GIT_WORKFLOW.md before Git delivery actions. Commit/push only when requested;
+an implementation request does not automatically authorize them. The user merges into
+dev manually: a commit/push request never authorizes merge, PR creation, issue closure
+or GitHub checklist edits. Only a new explicit request can authorize those actions.
 
 ---
 
@@ -446,6 +469,13 @@ issue link/number, scope, acceptance criteria, non-goals, database impact and ve
 Do not invent issue numbers or treat an empty task file as authorization for future work.
 An explicit non-issue maintenance request is scoped by the user's request; do not
 overwrite CURRENT_TASK.md with an invented issue.
+
+Record newly approved persistent project rules in the relevant guidance files and keep
+their examples consistent. The user's latest explicit decision supersedes earlier chat
+decisions; report unresolved conflicts rather than silently choosing a different scope.
+Before handing off to another chat, update .ai/HANDOFF.md with the actual branch/base,
+pending changes, test evidence/limitations, Git delivery status and next authorized step.
+Never include secrets or present a target workflow as already implemented functionality.
 
 Keep the approved feature package-info.java placeholders. Shared mapped superclasses
 belong in common.entity; domain entities/enums belong in their owning feature.

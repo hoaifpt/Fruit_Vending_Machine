@@ -104,6 +104,13 @@ Implemented by issue #6:
 - UserDetails adapter loading current account/roles through existing repositories
 - common JSON authentication entry point / access-denied handler
 
+Issue #10 enables @EnableMethodSecurity in existing SecurityConfig. Reuse the current
+CustomUserDetailsService/AuthenticatedUser mapping and current DB roles for every JWT
+request, no duplicate filter/role model or implicit ADMIN > STAFF hierarchy. Future
+Spring-managed use-case entry points use @PreAuthorize with ADMIN, STAFF, either or
+isAuthenticated; invocation must cross the Spring proxy. No production role-protected
+business operation is invented in this issue. See ../../docs/admin-staff-authorization.md.
+
 ### auth
 
 Contains authentication use cases.

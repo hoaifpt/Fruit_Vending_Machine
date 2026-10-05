@@ -537,6 +537,12 @@ Real `.env` files and secret local configuration must not be committed.
 
 Provide `.env.example` where useful.
 
+Use the existing local `.env` mechanism for database and application connection settings;
+do not require repeated manual credential entry or introduce competing configuration.
+Document which launcher loads `.env`; do not assume every IDE, JVM or database client
+automatically reads it. Keep `.env.example` synchronized using placeholders only.
+Never print real `.env` contents or copy credentials into guidance/API documentation.
+
 ---
 
 ## 23. Passwords

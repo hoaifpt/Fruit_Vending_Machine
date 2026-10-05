@@ -68,7 +68,8 @@ Responsible for operational activities such as:
 - monitoring temperature/humidity
 - handling operational alerts
 
-Authorization rules will be implemented in dedicated issues.
+Issue #10 establishes ADMIN/STAFF method authorization infrastructure with independent
+roles. Role policies for each business use case belong to its dedicated issue.
 
 ---
 
@@ -260,11 +261,13 @@ Current backend stack:
 - User/Role persistence, Spring Security BCrypt and stateless JWT access-token authentication
 - Initial Admin Bootstrap (issue #8): environment-driven first ADMIN, atomic and idempotent;
   existing ADMIN always wins, no public registration or User Management API yet
+- ADMIN/STAFF method authorization (issue #10): @PreAuthorize, independent roles,
+  current DB authorities, common 401/403; no business or User Management API yet
 - OpenAPI / Swagger for development; versioned REST contract at repository-root api-contract/api.yaml
 
 Planned integrations:
 
-- ADMIN/STAFF endpoint authorization (authentication is implemented by issue #6; no refresh token)
+- Per-feature business authorization policies (RBAC infrastructure exists; no refresh token)
 - MQTT
 - QR payment provider
 - Application container deployment

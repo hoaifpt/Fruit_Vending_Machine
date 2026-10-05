@@ -45,7 +45,7 @@ public class OpenApiConfig {
     public OpenAPI backendOpenApi() {
         return new OpenAPI().info(new Info().title("Fruit Machine Backend API").version("v1")
                 .description("Management API. Login is public; other application endpoints require Bearer authentication. "
-                        + "No refresh tokens or ADMIN/STAFF endpoint policies yet."))
+                        + "ADMIN/STAFF method authorization is enabled with independent roles. No refresh tokens or business APIs yet."))
                 .components(new Components().addSecuritySchemes("bearerAuth", new SecurityScheme()
                         .type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")
                         .description("Paste the access token only (without the Bearer prefix).")));
