@@ -80,6 +80,7 @@ Authorization header, JWT, password/hash hoặc key; không bật bind/body debu
 
 Không có operation RBAC mới; không xuất endpoint test vào Swagger hoặc contract.
 Sau issue #12, `api-contract/api.yaml` mô tả POST login và năm API quản lý user dưới tag Users.
+Issue #14 thêm năm API dưới tag Products: ADMIN/STAFF được GET, chỉ ADMIN được POST/PUT/PATCH.
 Generated OpenAPI và contract giữ cùng metadata, Auth grouping và public login/security schema.
 Mỗi API nghiệp vụ tương lai phải ghi rõ role policy thực tế, 401/403 và DTO/validation/error
 trong cả Swagger và contract cùng lúc triển khai; không ghi ví dụ tương lai như API đã chạy.

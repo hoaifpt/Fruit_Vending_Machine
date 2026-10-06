@@ -56,6 +56,8 @@ public class SecurityConfig {
                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll();
                     }
                     authorize.requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN");
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/products", "/api/v1/products/**").hasAnyRole("ADMIN", "STAFF");
+                    authorize.requestMatchers("/api/v1/products", "/api/v1/products/**").hasRole("ADMIN");
                     authorize.anyRequest().authenticated();
                 })
                 .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class);

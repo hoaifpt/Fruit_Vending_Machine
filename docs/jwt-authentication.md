@@ -11,6 +11,7 @@ Issue #8 adds environment-driven [Initial Admin Bootstrap](initial-admin-bootstr
 for the first administrator, with no default credentials or schema change. A database
 without any ADMIN now requires INITIAL_ADMIN_EMAIL/INITIAL_ADMIN_PASSWORD on first startup.
 Issue #12 adds [ADMIN-only User Management](user-management.md) for operational STAFF accounts.
+Issue #14 adds [Product Management](product-management.md): ADMIN catalog writes, ADMIN/STAFF reads.
 Issue #10 enables [ADMIN/STAFF method authorization](admin-staff-authorization.md).
 Roles remain independent; User Management requires ADMIN using this infrastructure.
 
@@ -76,6 +77,7 @@ For authenticated API requests send `Authorization: Bearer YOUR_ACCESS_TOKEN`.
 Swagger Authorize accepts only the token value (omit `Bearer`); it does not persist
 authorization between browser sessions. The Users tag exposes the five ADMIN-only
 User Management operations; GET users is a safe authenticated request.
+The Products tag adds five catalog operations; GET products is safe for ADMIN/STAFF.
 
 Error responses follow common ApiErrorResponse (timestamp/status/error/message/path;
 fieldErrors only when nonempty). No rejected password value, hash, JWT or internal details.
@@ -87,6 +89,7 @@ fieldErrors only when nonempty). No rejected password value, hash, JWT or intern
   Security 401 responses include `WWW-Authenticate: Bearer` and no-store.
 - `403`: common `Access denied` for authenticated users lacking required authority;
   User Management uses ADMIN-only method RBAC and HTTP path authorization.
+  Product reads require ADMIN/STAFF; product writes require ADMIN at both HTTP/method boundaries.
 - `500`: generic unexpected error, never internal/security details.
 
 ## Token and security design

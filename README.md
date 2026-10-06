@@ -2,13 +2,14 @@
 
 Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, nền ADMIN/STAFF method authorization, Swagger/OpenAPI và health check. Đã có User Management API dành cho ADMIN; chưa có refresh token hoặc các API nghiệp vụ khác. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
+> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, nền ADMIN/STAFF method authorization, Swagger/OpenAPI và health check. Đã có User Management API dành cho ADMIN và Product Management API (ADMIN đọc/ghi, STAFF chỉ đọc); chưa có refresh token hoặc các API nghiệp vụ khác. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
 
 Hướng dẫn chạy backend, cấu hình `JWT_SECRET`, Swagger và login: [JWT authentication](docs/jwt-authentication.md).
 Hợp đồng API cho frontend: [api-contract/api.yaml](api-contract/api.yaml).
 Database chưa có ADMIN cần cấu hình lần đầu: [Initial Admin Bootstrap](docs/initial-admin-bootstrap.md).
 Quyền ADMIN/STAFF, `@PreAuthorize` và lỗi 401/403: [Authorization](docs/admin-staff-authorization.md).
 API tạo STAFF, phân trang/lọc, cập nhật hồ sơ và trạng thái: [User Management](docs/user-management.md).
+API danh mục sản phẩm, SKU, giá và ACTIVE/INACTIVE: [Product Management](docs/product-management.md).
 
 ## Tổng quan kiến trúc
 
