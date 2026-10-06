@@ -2,6 +2,13 @@
 
 # Git Workflow
 
+## User-controlled delivery
+
+Commit and push only when the user asks. The user performs merges into `dev` manually;
+requests to finish an issue or commit/push do not authorize merge, PR creation, issue
+closure or GitHub checklist edits. A new explicit request is required for those actions.
+Inspect the working tree first and preserve pending work before any branch switch.
+
 ## 1. Main Branches
 
 The project uses:
@@ -107,6 +114,10 @@ Example:
 fix/27-duplicate-payment-webhook
 ```
 
+Use `fix/`, not `feature/` or `bug/`, for a bug-report issue (for example,
+an issue titled `[BUG] ...`). Determine the issue type from its title and scope;
+brackets alone do not make an issue a bug. New features continue to use `feature/`.
+
 Refactoring:
 
 ```text
@@ -155,6 +166,8 @@ Feature branches should independently originate from the appropriate current `de
 ## 6. Commits
 
 Use Conventional Commit-style messages.
+
+Bug-fix branches use `fix/`; bug-fix commit messages use `fix:`.
 
 Examples:
 
@@ -355,7 +368,7 @@ Example:
 #27 [BUG] Duplicate payment webhook can trigger processing twice
 ```
 
-Create:
+Create a branch from the latest `dev`:
 
 ```text
 fix/27-duplicate-payment-webhook

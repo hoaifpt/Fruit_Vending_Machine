@@ -1,170 +1,176 @@
-# Issue #8 — Initial Admin Bootstrap
+# Issue #10 — ADMIN/STAFF authorization
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/8
-Title: [BE] Implement Initial Admin Bootstrap
-Branch: feature/8-initial-admin-bootstrap
-Base: origin/dev at d7b0833.
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/10
+Title: [BE] Implement ADMIN/STAFF authorization
+Branch: feature/10-admin-staff-authorization
+Base: origin/dev at 1706bd2 (issue #8 merged by user through PR #11).
 
-## Scope
+## Scope and design
 
-Provision the first ACTIVE ADMIN through ApplicationRunner and a transactional service.
-Typed environment configuration; skip before validating credentials if ANY ADMIN exists,
-including INACTIVE/LOCKED. Reuse V8 ADMIN role and existing PasswordEncoder. Never overwrite
-accounts or promote an existing email. PostgreSQL transaction advisory lock serializes
-bootstrap instances; READ_COMMITTED sees the preceding committed administrator.
-Shared account creation validation: normalized email, default minimum 12 password characters
-(configurable PASSWORD_MIN_LENGTH 8–72),
-maximum 72 UTF-8 bytes (BCrypt); no trimming passwords. Existing login policy unchanged.
+Enable Spring Security method authorization with @EnableMethodSecurity in existing
+SecurityConfig. Reuse CustomUserDetailsService/AuthenticatedUser ROLE_ mapping and
+existing JWT filter; PostgreSQL current memberships remain authoritative on each request.
+Keep ADMIN/STAFF independent, no hierarchy or fabricated STAFF authority for ADMIN.
+Support ADMIN-only, STAFF-only, either role and any-authenticated method expressions.
+Preserve public POST login/GET health, stateless bearer authentication and blocked
+INACTIVE/LOCKED/deleted accounts. Reuse common 401 entry point, 403 access-denied handler
+and MVC error handling; no duplicate auth pipeline or business role-check conditionals.
 
-Changed files: user/bootstrap, user/repository, config/properties, account validation,
-application.yaml, .env.example, isolated tests, README/docs and this task tracker.
+Changed groups: SecurityConfig method-security activation; authority mapping/method-security/
+JWT integration and security-error tests; metadata in AuthController/OpenApiConfig and
+api-contract/api.yaml, contract info/tag comparison test; docs/admin-staff-authorization.md,
+README/JWT docs and .ai PROJECT/ARCHITECTURE/CURRENT_TASK.
+Only test fixtures expose protected operations, including a Spring-managed service proxy.
+Test-only routes stay hidden from generated OpenAPI and out of the production JAR.
 
-## Database impact
+## Database and API impact
 
-No schema change. Reuse users/roles/user_roles; Flyway V1–V8 unchanged; ddl-auto=validate.
-Creation and membership assignment are atomic. No passwords/accounts in Flyway.
+No schema/dependency/entity changes. Flyway V1–V8 unchanged; ddl-auto=validate.
+No production REST operation is added/changed; login remains public and unchanged.
+Swagger/api-contract info and Auth tag descriptions now reflect the implemented RBAC
+foundation. Semantic comparison includes matching info/tags, existing operation/schemas/
+headers/examples/security. No test-only operation is exposed.
 
 ## Non-goals
 
-No registration, user CRUD, password reset/rotation, refresh tokens, new role endpoint
-policy, product/machine/inventory/payment/MQTT/dispensing work. Apps/kiosk/firmware untouched.
-No REST API change; Swagger and api-contract retain the existing login contract.
-No automatic commit, push, PR, merge or GitHub checklist mutation.
+No User Management or /api/v1/users API, CRUD/registration, bootstrap changes, password
+reset, refresh tokens, dynamic roles/permission management/role hierarchy, business-domain
+APIs, MQTT/payment/dispense. Apps/kiosk/firmware untouched. No automatic commit/push/PR/
+merge/issue checkbox changes.
 
-## Verification
+## Verification status
 
-Complete locally. `mvn clean verify` passed: 94 tests, 0 failures/errors/skips; executable
-JAR built with Java 21. PostgreSQL 18.6 isolated Testcontainers; no developer DB or .env
-was read/modified. Testcontainers cleaned up automatically; no containers remain.
+Complete locally. Final `mvn clean verify` passed with Java 21: 123 tests, 0 failures,
+0 errors, 0 skips; executable Spring Boot JAR built. PostgreSQL 18.6 isolated Testcontainers.
+No developer .env/database is read/modified, no real credential is used or introduced.
 
-Evidence:
-- InitialAdminBootstrapIntegrationTest: 18 tests — creation/hash/matches/status/seeded
-  role, complete-row/membership idempotency, all ADMIN statuses skip missing/invalid
-  config, missing ADMIN role with no replacement, missing keys without values, STAFF
-  conflict unchanged, membership-save failure rolls back user, two concurrent transactions
-  with different emails create one ADMIN, normalization/default name/untrimmed password,
-  invalid email/password/name/UTF-8 limits, redacted configuration.
-- InitialAdminStartupTest: 1 multi-start test — actual servlet startup fails without
-  credentials and leaves zero users; environment-variable binding provisions ADMIN;
-  close context/restart same database with blank bootstrap secrets skips creation and
-  preserves all user/membership columns. Success/skip log captured without credentials/hash/key.
-- AccountCredentialPolicyTest: 5 tests — configurable minimum, safe invalid-policy errors,
-  BCrypt 72-byte boundary and Unicode code-point minimum.
-- AuthIntegrationTest: 17 tests including bootstrapped ADMIN login -> JWT -> current
-  ROLE_ADMIN on test-only protected endpoint; password/hash/JWT/key absent from logs.
-  Swagger/OpenAPI smoke and full semantic comparison against api-contract/api.yaml pass.
-- Regression: ProductionDocumentationTest 1, GlobalExceptionHandlerTest 7,
-  EntityMappingTest 4, JwtAuthenticationFilterTest 10, JwtServiceTest 14,
-  UserRolePersistenceTest 17. Production docs disabled; 19 entity/table/column mappings
-  validate; Flyway V1–V8 apply/validate. Hibernate never creates/repairs schema.
+Evidence by group:
+- AuthorityMappingTest: 9 tests, existing mapping reused for ADMIN/STAFF, multiple/duplicate/
+  no roles, normalized username and UUID lookup, all account statuses. Existing entities
+  retain immutable IDs; ReflectionTestUtils is used only for isolated unit fixtures.
+- AuthorizationIntegrationTest: 18 tests, full login -> JWT -> filter -> principal/context
+  -> real Spring @PreAuthorize service/controller proxy. ADMIN/STAFF/shared/any-authenticated
+  allow/deny, no implicit hierarchy, duplicate-free principal and SecurityContext authorities,
+  no-role user, anonymous 401 on every protected fixture, invalid/expired/wrong-key/malformed
+  bearer 401, valid STAFF lacking ADMIN 403 with common safe JSON. Denied method body does
+  not execute. Same JWT follows immediate DB role removal/addition despite stale role claims.
+  INACTIVE/LOCKED/deleted accounts remain blocked. Context is cleared between requests;
+  log capture contains no password/hash/token/key. Public login/health/docs preserved.
+- SecurityErrorHandlerTest: 2 tests, existing entry point and access-denied handler produce
+  common 401/403 schema, safe generic messages, expected headers and no exception details.
+- AuthIntegrationTest: 17 tests, login/JWT regressions, full semantic contract comparison
+  including updated info/tags, paths/methods/operationId/request/response/schemas/headers/
+  examples/security; Swagger UI/OpenAPI GET smoke. No test-only paths in generated docs.
+- Existing suites: ProductionDocumentationTest 1 (prod docs disabled), GlobalExceptionHandlerTest
+  7, EntityMappingTest 4 (19 entities/tables/columns, Flyway V1–V8 and validate-only Hibernate),
+  JwtAuthenticationFilterTest 10, JwtServiceTest 14, AccountCredentialPolicyTest 5,
+  InitialAdminBootstrapIntegrationTest 18, InitialAdminStartupTest 1 (actual servlet startup
+  and restart same DB without bootstrap secrets), UserRolePersistenceTest 17.
+- Production JAR inspection: zero AuthorizationIntegrationTest/RbacTest/RbacOperations/
+  AuthorityMappingTest/SecurityErrorHandlerTest entries. Protected fixtures only exist in
+  src/test, marked test component/hidden; no production business or demo endpoint.
+- Source/diff audit: no JWT/role mapping/status/bootstrap/schema/dependency implementation
+  replacement, no role hierarchy, no manual business role checks. Existing Flyway/entity
+  files, pom.xml, .env/.env.example and apps/kiosk/firmware remain unchanged. Whitespace
+  checks pass. Authorization/no-secret logging is verified by tests and source inspection.
 
-Source/diff audit: no production password defaults or hardcoded credentials, no credential
-log statements, no dependencies or migrations changed. .env remains ignored/untracked;
-.env.example INITIAL_ADMIN_EMAIL/PASSWORD and JWT_SECRET are empty placeholders.
-No changes to apps/kiosk/firmware or api-contract; no REST API change requires a new
-contract operation. git diff --check and new-file whitespace checks passed.
+All 57 source checklist items complete; source sections 24/25 (no checkboxes) also verified.
+No implementation blocker. At implementation completion, no Git delivery was performed.
+On 2026-10-05 the user authorized commit/push: 10276d5 contains the issue #10 implementation
+and guidance updates and was pushed to origin/feature/10-admin-staff-authorization.
+A documentation follow-up records this delivery. PR/merge/GitHub checkbox changes NOT
+performed; the user handles merge manually. See HANDOFF.md and verify current Git state.
+Future features must explicitly annotate Spring-managed use-case entry points; unannotated
+methods are not automatically role-protected. Self-invocation/private/final proxy limits
+and non-HTTP principal trust boundaries are documented. No User Management/refresh token.
 
-Changed groups: user/bootstrap, user repositories, reusable account-creation policy,
-config/properties, application.yaml, .env.example; bootstrap/policy/startup/auth tests and
-isolated fixture config in production-doc/schema tests; README, bootstrap/JWT docs and
-.ai PROJECT/ARCHITECTURE/CURRENT_TASK. AGENTS.md and coding/Git rules unchanged.
+Swagger UI: http://localhost:8080/swagger-ui/index.html; OpenAPI: http://localhost:8080/v3/api-docs.
+Local startup instructions remain in JWT/bootstrap docs (ignored .env, running PostgreSQL,
+valid JWT_SECRET, JVM UTC); existing ADMIN makes bootstrap skip. UI/API smoke verified by
+MockMvc; no browser Try it out is performed in this infrastructure-only issue, no production
+role-protected operation exists to demonstrate. New metadata matches generated OpenAPI.
 
-No incomplete issue checklist items. User also confirmed successful local application
-startup and initial ADMIN creation. User authorized commit/push to
-feature/8-initial-admin-bootstrap. Initial push failed authentication; after user
-re-authentication, retry succeeded. Implementation commit 1eee570 was verified against
-the GitHub branch head; branch tracks origin/feature/8-initial-admin-bootstrap.
-This delivery-status update is committed/pushed separately without rewriting published
-history. Final Git handoff verifies the resulting remote head. No PR, merge or GitHub
-checklist changes; user handles merge manually. All 58 implementation checklist items
-remain complete; no outstanding authentication blocker.
-Remaining operational requirement (not an implementation blocker): developer must supply
-INITIAL_ADMIN_EMAIL/PASSWORD in ignored .env or environment for a DB without ADMIN.
-After first provisioning, remove bootstrap secrets; JWT_SECRET remains required.
-Maven/Java runtime must use UTC as documented to avoid PostgreSQL Asia/Saigon alias errors.
-See docs/initial-admin-bootstrap.md. No refresh token, CRUD or endpoint RBAC added.
+## 1. Integrate Roles with Spring Security
 
-## 22. Security Requirements
+- [x] `ADMIN` maps to `ROLE_ADMIN`
+- [x] `STAFF` maps to `ROLE_STAFF`
+- [x] Authorities are available through the authenticated principal
+- [x] Authorities are available through `SecurityContext`
+- [x] Multiple roles are supported
+- [x] Duplicate authorities are avoided
 
-- [x] No hardcoded admin password
-- [x] No plaintext password stored in database
-- [x] No real bootstrap credentials committed to Git
-- [x] Password is encoded using the existing `PasswordEncoder`
-- [x] Existing ADMIN accounts are never overwritten
-- [x] Existing users are not silently promoted to ADMIN
-- [x] Bootstrap is skipped once an ADMIN exists
-- [x] Secrets are never written to logs
-- [x] ADMIN role comes from the existing role model
+## 21. Authority Mapping Tests
 
-## 23. Bootstrap Creation Test
+- [x] ADMIN maps to `ROLE_ADMIN`
+- [x] STAFF maps to `ROLE_STAFF`
+- [x] Multiple roles map correctly
+- [x] Duplicate authorities are not produced
 
-- [x] One User is created
-- [x] User has configured email
-- [x] User status is `ACTIVE`
-- [x] User has `ADMIN` role
-- [x] Stored password is encoded
-- [x] Stored password is not equal to plaintext password
-- [x] Encoded password matches using `PasswordEncoder.matches(...)`
+## 22. ADMIN Authorization Tests
 
-## 24. Idempotency Test
+- [x] ADMIN can access ADMIN-only protected functionality
+- [x] STAFF cannot access ADMIN-only functionality
+- [x] STAFF receives `403`
+- [x] unauthenticated request receives `401`
 
-- [x] ADMIN count remains one
-- [x] Existing ADMIN is unchanged
+## 23. STAFF Authorization Tests
 
-## 25. Existing ADMIN Test
+- [x] STAFF can access STAFF-protected functionality
+- [x] ADMIN/STAFF shared authorization works
+- [x] unauthenticated request receives `401`
 
-- [x] Bootstrap creates no user
-- [x] Existing password is unchanged
-- [x] Existing email is unchanged
-- [x] Existing roles are unchanged
+## 26. Authentication Regression Tests
 
-## 26. Missing Role Test
+- [x] ACTIVE user can authenticate
+- [x] invalid credentials return `401`
+- [x] invalid JWT is rejected
+- [x] expired JWT is rejected
+- [x] INACTIVE user remains blocked
+- [x] LOCKED user remains blocked
+- [x] valid JWT still establishes authentication
 
-- [x] Bootstrap fails/reports clearly
-- [x] No partial user is created
-- [x] No replacement role is silently created
+## 27. Application Regression
 
-## 27. Missing Configuration Test
-
-- [x] Bootstrap/startup fails clearly
-- [x] Error identifies missing configuration
-- [x] Error does not expose password values
-- [x] No partial administrator is created
-
-## 28. Existing Email Conflict Test
-
-- [x] Existing STAFF is NOT silently promoted
-- [x] Bootstrap reports the conflict
-- [x] Existing account remains unchanged
-
-## 29. Authentication Integration Test
-
-- [x] Bootstrapped administrator can authenticate
-- [x] JWT authentication works with the account
-- [x] ADMIN authority is available after authentication
+- [x] Application starts successfully
+- [x] Existing tests continue to pass
+- [x] Flyway validation passes
+- [x] Hibernate `ddl-auto=validate` passes
+- [x] No unexpected database migration is introduced
 
 ## Acceptance Criteria
 
-- [x] Application can provision the first ADMIN account
-- [x] Bootstrap credentials come from environment/configuration
-- [x] No real credentials are committed to Git
-- [x] Initial password is encoded using the existing `PasswordEncoder`
-- [x] Bootstrapped user has status `ACTIVE`
-- [x] Bootstrapped user receives the existing `ADMIN` role
-- [x] Existing ADMIN prevents additional bootstrap creation
-- [x] Restarting the application does not create duplicate ADMIN accounts
-- [x] Existing ADMIN data is never overwritten
-- [x] Existing non-ADMIN account is not silently promoted
-- [x] Missing ADMIN role is handled safely
-- [x] Missing required bootstrap configuration is handled clearly
-- [x] Bootstrap operation is transactional
-- [x] Password/password hash is not exposed in logs
-- [x] Bootstrapped ADMIN can login through the existing JWT authentication flow
-- [x] Bootstrapped ADMIN receives the expected ADMIN authority
-- [x] No unnecessary database migration is created
+- [x] `ADMIN` maps to `ROLE_ADMIN`
+- [x] `STAFF` maps to `ROLE_STAFF`
+- [x] Authenticated users expose correct authorities
+- [x] Authorities are available through Spring Security
+- [x] Method security is enabled
+- [x] `@PreAuthorize("hasRole('ADMIN')")` works
+- [x] `@PreAuthorize("hasRole('STAFF')")` works
+- [x] `@PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")` works
+- [x] ADMIN can access ADMIN-protected functionality
+- [x] STAFF cannot access ADMIN-only functionality
+- [x] STAFF can access STAFF-allowed functionality
+- [x] Missing authentication results in `401`
+- [x] Invalid/expired authentication results in `401`
+- [x] Authenticated user without permission receives `403`
+- [x] AuthenticationEntryPoint handles unauthenticated access
+- [x] AccessDeniedHandler handles forbidden access
+- [x] Existing JWT authentication continues working
+- [x] User account status restrictions continue working
+- [x] Backend remains authoritative for authorization
+- [x] No duplicate role model is introduced
+- [x] No role hierarchy is introduced
+- [x] No database schema change is required
 - [x] Existing Flyway migrations remain unchanged
-- [x] Tests pass
-- [x] Application starts successfully after successful bootstrap
-- [x] Flyway validation passes
-- [x] Hibernate `ddl-auto=validate` passes
+- [x] Authorization tests pass
+- [x] Existing authentication tests pass
+- [x] Application starts successfully
+- [x] No User Management functionality is implemented
 - [x] No unrelated feature is implemented
+
+## Additional source testing requirements (no checkbox in issue)
+
+24. Method Security Tests: actual ADMIN allow/STAFF deny through @PreAuthorize Spring proxy.
+25. 401 / 403 Tests: missing/invalid/expired authentication -> 401, ADMIN allowed, STAFF -> 403.
+Also verify no implicit hierarchy, immediate DB role changes, multiple/no-role accounts,
+current principal/SecurityContext, safe consistent errors and no token/credential logging.

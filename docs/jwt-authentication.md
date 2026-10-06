@@ -11,6 +11,8 @@ Issue #8 adds environment-driven [Initial Admin Bootstrap](initial-admin-bootstr
 for the first administrator, with no default credentials or schema change. A database
 without any ADMIN now requires INITIAL_ADMIN_EMAIL/INITIAL_ADMIN_PASSWORD on first startup.
 Normal user management remains a future issue.
+Issue #10 enables [ADMIN/STAFF method authorization](admin-staff-authorization.md).
+Roles remain independent; no business/User Management endpoint is introduced.
 
 ## Local configuration and startup
 
@@ -83,7 +85,8 @@ fieldErrors only when nonempty). No rejected password value, hash, JWT or intern
   Missing/invalid Bearer authentication uses `Authentication required or access token invalid`.
   A present invalid header is rejected even on public login/health/docs; remove it first.
   Security 401 responses include `WWW-Authenticate: Bearer` and no-store.
-- `403`: common `Access denied` baseline; detailed RBAC is not implemented in this issue.
+- `403`: common `Access denied` for authenticated users lacking required authority;
+  issue #10 enables method RBAC, without introducing business endpoints.
 - `500`: generic unexpected error, never internal/security details.
 
 ## Token and security design
@@ -106,7 +109,8 @@ reassess CSRF if cookie authentication is introduced later. No cross-origin CORS
 invented without the frontend's actual origins.
 
 Only POST login and GET health are public (plus opt-in documentation GETs). Other application
-requests require authentication; no hasRole/PreAuthorize policies yet. JWT filter is registered
+requests require authentication. Issue #10 enables @PreAuthorize for future use cases,
+using current database authorities and no implicit ADMIN > STAFF hierarchy. JWT filter is registered
 once inside the security chain, not additionally as a servlet filter. Error dispatch remains
 available so actual MVC failures retain their intended common status.
 
