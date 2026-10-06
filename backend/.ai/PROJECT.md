@@ -260,9 +260,11 @@ Current backend stack:
 - Docker Compose for local PostgreSQL; Testcontainers for PostgreSQL integration tests
 - User/Role persistence, Spring Security BCrypt and stateless JWT access-token authentication
 - Initial Admin Bootstrap (issue #8): environment-driven first ADMIN, atomic and idempotent;
-  existing ADMIN always wins, no public registration or User Management API yet
+  existing ADMIN always wins, no public registration
 - ADMIN/STAFF method authorization (issue #10): @PreAuthorize, independent roles,
-  current DB authorities, common 401/403; no business or User Management API yet
+  current DB authorities, common 401/403
+- User Management API (issue #12): five ADMIN-only operations; DB pagination/status-role
+  filters; create ACTIVE STAFF; profile replacement; status lifecycle/self/last-admin guards
 - OpenAPI / Swagger for development; versioned REST contract at repository-root api-contract/api.yaml
 
 Planned integrations:

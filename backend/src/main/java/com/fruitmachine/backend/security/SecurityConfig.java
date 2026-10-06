@@ -55,6 +55,7 @@ public class SecurityConfig {
                         authorize.requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll();
                     }
+                    authorize.requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN");
                     authorize.anyRequest().authenticated();
                 })
                 .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class);
