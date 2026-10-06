@@ -74,7 +74,9 @@ Use existing .env + PostgreSQL, API_DOCS_ENABLED=true and valid JWT_SECRET.
 From backend module: mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
 See ../../docs/product-management.md; updated frontend contract: api-contract/api.yaml.
 User's manual retest passed; commit/push for #14 is explicitly authorized.
-Delivery is pending remote verification. User handles merge into dev manually.
+Implementation e0f19fe was pushed to origin/feature/14-product-management-api.
+This documentation follow-up records delivery. User handles merge into dev manually;
+no PR/merge/GitHub issue edits performed.
 
 ## Source checklist under original headings
 

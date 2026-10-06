@@ -9,13 +9,14 @@ PR/merge/GitHub issue edits remain out of scope; user merges into dev manually.
 - Repository: C:/Users/north/Documents/School/9/FruitMachine/backend.
 - Spring module: repository-root backend/; docs/api-contract at repository root.
 - Branch: feature/14-product-management-api, from freshly fetched origin/dev a029904.
-  User merged #12 through PR #15. HEAD remains a029904; all #14 changes uncommitted.
+  User merged #12 through PR #15. Implementation e0f19fe is committed and pushed.
+  Branch tracks origin/feature/14-product-management-api; recheck live Git for current HEAD.
 - Issue: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/14,
   [BE] Implement Product Management API.
 - Implementation complete locally, all 79 checklist items plus section 39 verified.
   Full original grouped checklist and detailed evidence are in CURRENT_TASK.md.
 
-## Delivered behavior / pending changes
+## Delivered behavior / changed files
 
 Five /api/v1/products operations: ADMIN reads/writes, STAFF reads only.
 Reuse Product/ProductStatus mappings; new repository/specifications/mapper/service/controller/
@@ -61,10 +62,13 @@ With SERVER_PORT=8080, existing .env/PostgreSQL, API_DOCS_ENABLED=true and valid
 Swagger http://localhost:8080/swagger-ui/index.html; OpenAPI http://localhost:8080/v3/api-docs.
 From module: mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
 See docs/product-management.md and frontend contract api-contract/api.yaml.
-User's currently running old JAR does not gain #14 APIs until they rebuild/restart it.
+User subsequently confirmed their manual retest of #14 passed.
 
 User's manual retest passed; commit/push for #14 is now authorized.
-Delivery is pending remote verification. No PR/merge/issue edits are authorized.
+Implementation e0f19fe was pushed to origin/feature/14-product-management-api, using
+the existing Credential Manager account via a command-local helper override; global
+Git configuration unchanged. This documentation follow-up records the delivery.
+Next: user handles PR/merge into dev manually. No PR/merge/issue edits performed.
 Future issue branches start from latest dev (feature/<issue>-<description> or fix/...).
 Keep backend-only scope, contract/Swagger synchronized and full source checklist at handoff.
 Payment/dispensing remains approved future design, not implemented in this issue.
