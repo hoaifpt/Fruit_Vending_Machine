@@ -1,195 +1,218 @@
-# Issue #12 — User Management API
+# Issue #14 — Product Management API
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/12
-Title: [BE] Implement User Management API
-Branch: feature/12-user-management-api
-Base: origin/dev at 75fdfe0 (issue #10 merged by user through PR #13).
+Title: [BE] Implement Product Management API
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/14
+Branch: feature/14-product-management-api
+Base: origin/dev a029904 (issue #12 merged by user through PR #15).
 
 ## Scope and decisions
 
-Implement ADMIN-only GET /api/v1/users, GET /api/v1/users/{id}, POST /api/v1/users,
-PUT /api/v1/users/{id}, PATCH /api/v1/users/{id}/status. Reuse existing repositories,
-JWT, method security, PasswordEncoder, common response/errors and shared creation policy.
-List uses database pagination (page 0, size 20, max 100), combined optional status/role
-filters, createdAt DESC/id ASC and page-bounded role fetch (no collection-fetch pagination).
-Create assigns ACTIVE + STAFF server-side; strict DTOs reject extra fields. Normalize
-email with strip/lowercase, preserve password bytes, require configured minimum code
-points (default 12) and max 72 UTF-8 bytes. Profile replacement changes fullName/phone;
-email/password/roles/status remain controlled by their dedicated flows. Timestamp DTOs
-use Instant/UTC per project convention; role names remain extensible strings.
-Status updates preserve histories, reject own disable/lock and last ACTIVE ADMIN removal.
-PostgreSQL transaction advisory lock serializes status decisions across app instances;
-READ_COMMITTED rechecks actor after lock to prevent concurrent cross-disable lockout.
-OpenAPI Users tag + versioned api-contract/api.yaml must match all delivered operations.
+Five /api/v1/products operations. ADMIN reads/writes; STAFF reads only.
+Reuse Product/ProductStatus and existing security/common exceptions. Strict separate DTOs;
+SKU strip/uppercase (Locale.ROOT), immutable on update. Price BigDecimal, positive,
+maximum 9999999999.99 and two decimal places; reject excess precision rather than round.
+DB pagination defaults page 0/size 20, maximum 100, status + literal case-insensitive
+substring search on name/SKU; approved Spring Sort fields, deterministic UUID tie-break.
+Profile/status writes row-lock product to prevent stale cross-field overwrites.
+Image URL is a nullable reference only, no upload/storage or server-side URL fetching.
+UTC Instant timestamps follow repository convention (issue's OffsetDateTime example
+is conceptual). Existing NUMERIC check permits zero; service/API require strictly positive.
 
-## Database impact / non-goals
+## Database impact and non-goals
 
-No schema/dependency change; V1–V8 unchanged and Hibernate ddl-auto=validate.
-No registration, general ADMIN creation, role management, DELETE, email/password changes,
-refresh tokens, full audit subsystem, product/machine/inventory/payment/IoT features.
-Only backend/ + root documentation/contract; apps/frontend/kiosk/firmware out of scope.
-User confirmed manual testing and authorized commit/push on 2026-10-06.
-PR/merge/GitHub issue edits remain out of scope; user merges into dev manually.
+No schema/dependency change; applied V1–V8 unchanged, Hibernate ddl-auto=validate.
+No batch/inventory/quantity/expiration/machine/slot/order/payment/MQTT/dispensing/upload/
+hard delete/dashboard. Backend and root docs/contract only. User confirmed manual retest
+and authorized commit/push for #14. PR/merge/GitHub issue edits remain out of scope.
 
-## Verification status
+## Verification
 
-Complete locally on 2026-10-06. Final mvn -q clean verify passed on Java 21.0.10:
-177 tests, zero failures/errors/skips; executable Spring Boot JAR built.
-Isolated PostgreSQL 18.6 Testcontainers; no root .env/developer database read or modified.
+Implementation complete locally on 2026-10-06; all 79 source checklist items verified.
+Source section 39 (no checkboxes) verified by real ADMIN/STAFF login -> JWT -> products API.
+No incomplete checklist item or implementation/verification blocker remains.
 
-Evidence:
-- UserManagementIntegrationTest: 53 tests. All five real endpoints via login/JWT/security;
-  ADMIN success, STAFF 403/anonymous 401, expired/wrong-key/invalid JWT, role revocation;
-  ACTIVE + STAFF assignment, BCrypt hash/login and no secret response/log/toString;
-  strict create/update/status fields, validation/size/Unicode-byte/password minimum;
-  combined DB pagination/filtering, multi-role/no-role users, preserved identity/history;
-  missing UUID 404/malformed UUID 400; status disable/lock/login+old-token denial/reactivate;
-  self/sole-admin conflict and concurrent cross-disable leaves one usable ADMIN;
-  missing STAFF safe 500/no role creation, membership rollback and concurrent UNIQUE 409;
-  DELETE unsupported. Collection-fetch pagination configured to fail, ensuring DB paging.
-- UserManagementDocumentationTest: 1 test. UI/config/OpenAPI smoke; exact user operation,
-  parameters, examples, responses/statuses/headers/security comparison with api-contract;
-  safe schema fields/formats/required/nullability/enum/validation and local-ref checks.
-- Existing 123 tests: UserRolePersistenceTest 17, AuthIntegrationTest 17,
-  AuthorizationIntegrationTest 18, InitialAdminBootstrapIntegrationTest 18,
-  InitialAdminStartupTest 1, AccountCredentialPolicyTest 5, EntityMappingTest 4,
-  JwtAuthenticationFilterTest 10, JwtServiceTest 14, AuthorityMappingTest 9,
-  SecurityErrorHandlerTest 2, GlobalExceptionHandlerTest 7, ProductionDocumentationTest 1.
-  Flyway validates V1–V8, Hibernate validates all 19 business entity mappings; actual
-  servlet startup/restart and production Swagger disablement verified by existing tests.
-  The two older docs path assertions now include delivered user APIs and still exclude
-  test-only routes. No assertion of security/credential protection was weakened.
-- Actual JAR browser smoke on isolated localhost:62660/PostgreSQL: Swagger displays Auth
-  and Users with all five operations; login synthetic ADMIN -> 200; Bearer Authorize ->
-  GET /api/v1/users?page=0&size=20 -> 200, safe profile/roles and pagination, no-store.
-  PUT profile on synthetic QA account -> 200. Generated OpenAPI URL loaded with the four
-  correct paths. Screenshot: backend/target/user-management-swagger.png (ignored artifact).
-  QA tab closed, Java stopped and disposable --rm DB container removed afterwards.
-- Production JAR inspection excludes UserManagement tests/RbacTest/test-only fixtures.
-- Source/diff audit: Flyway, entities, pom.xml, .env/.env.example, apps and firmware unchanged.
-  git diff --check passes. No schema or dependency change; original JWT/RBAC pipeline reused.
+- Final full Maven test run: 237 tests, zero failures/errors/skips (all original 177 pass).
+- Final clean verify: mvn -q -f target/issue14-verification-pom.xml clean verify, exit 0.
+  Original target JAR is held by user's Java process (observed PID 26924), so verification
+  uses an ignored temporary copy of the unchanged pom.xml with absolute original source/
+  test/resource paths, module working directory and separate target/issue14-verification.
+  Dependencies/plugins remain the same; repository pom.xml is unchanged. Normal mvn clean
+  verify remains the usual workflow after the user stops their running JAR.
+- Java 21.0.10, PostgreSQL 18.6 Testcontainers, Flyway V1–V8 validation and Hibernate
+  ddl-auto=validate. EntityMappingTest covers all existing mappings and real servlet startup.
+- ProductManagementIntegrationTest: 59 tests. Create/default/normalized SKU, BCrypt-backed
+  real ADMIN/STAFF login + JWT authorization, all reads/writes/access errors and role
+  revocation; strict DTOs/blank/schema limits/positive NUMERIC precision/boundaries;
+  actual SQL OFFSET/FETCH FIRST verified; combined status/name+SKU literal search/paging/
+  approved sorting/tie-break; detail/404/UUID400; immutable SKU/status/general fields;
+  status roundtrip/idempotence, DELETE405; UNIQUE race returns 201/409 with rollback;
+  row-lock concurrent catalog/status writes; service validation/authorization outside MVC;
+  snapshot equality for related batch/inventory/order-item/order/payment fixture rows
+  after price update/deactivation. No future business workflow is introduced by fixtures.
+- ProductManagementDocumentationTest: 1 test. Swagger UI/config/OpenAPI smoke, complete
+  product operations/parameters/request/responses/headers/examples/security vs versioned
+  api-contract/api.yaml; semantic schemas/nullability/required/validation and local refs.
+  Independent required-field/length/positive bound/multipleOf/enum/response-field assertions.
+  JSON/YAML number nodes compare decimal meaning (35000 and 35000.0 are equivalent).
+- Existing Auth/RBAC docs tests now include Product paths but still exclude test-only APIs;
+  no security assertion weakened. Existing User/Auth/bootstrap/persistence tests pass.
+- Actual verification JAR browser smoke at localhost:64749 with disposable PostgreSQL:
+  synthetic ADMIN login 200; Swagger Products contains all five operations; Authorize +
+  POST normalized QA product 201; GET page=0,size=20,search=mango,sort=name,asc 200,
+  exact safe catalog/price/status/pagination and no-store, matching new product.
+  Proof: backend/target/product-management-swagger.jpg (ignored screenshot, no credentials).
+  QA token cleared, tab closed, exact QA Java process stopped and --rm DB auto-removed;
+  user's original app PID 26924 remains running, developer DB/environment untouched.
+- Verification JAR: backend/target/issue14-verification/backend-0.0.1-SNAPSHOT.jar;
+  includes ProductController/ProductService but no test/Rbac fixtures.
+- git diff --check passes; Flyway, Product entity/enum, pom.xml, .env/.env.example and
+  apps/frontend/kiosk/firmware unchanged. No schema/dependency change or unrelated feature.
 
-All 85 original source checklist items below complete. Source section 39 (no checkboxes)
-also verified by real login/JWT API tests. No implementation/verification blocker remains.
-User's manual retest passed on 2026-10-06. Implementation commit cde96a8 was pushed
-to origin/feature/12-user-management-api; this documentation follow-up records delivery.
-User handles merge into dev manually; no PR/merge/issue edits are authorized.
-
-Swagger UI: http://localhost:8080/swagger-ui/index.html
+Swagger (normal SERVER_PORT=8080): http://localhost:8080/swagger-ui/index.html
 OpenAPI JSON: http://localhost:8080/v3/api-docs
-Startup: existing root .env + running PostgreSQL, API_DOCS_ENABLED=true, valid JWT_SECRET;
-from backend module run mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
-See ../../docs/user-management.md. Updated frontend contract: api-contract/api.yaml.
+Use existing .env + PostgreSQL, API_DOCS_ENABLED=true and valid JWT_SECRET.
+From backend module: mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
+See ../../docs/product-management.md; updated frontend contract: api-contract/api.yaml.
+User's manual retest passed; commit/push for #14 is explicitly authorized.
+Delivery is pending remote verification. User handles merge into dev manually.
 
-## Source checklist (preserved under original headings)
+## Source checklist under original headings
 
-## 34. Create STAFF Tests
+## 34. Create Product Tests
 
-- [x] ADMIN can create STAFF
-- [x] Created account has `STAFF` role
-- [x] Created account has `ACTIVE` status
-- [x] Password is encoded
-- [x] Plaintext password is not stored
-- [x] Duplicate email returns `409`
-- [x] Invalid email returns `400`
-- [x] Blank password returns `400`
-- [x] Blank full name returns `400`
-- [x] Client cannot create ADMIN through this endpoint
-- [x] STAFF cannot create users
-- [x] Unauthenticated client cannot create users
+Verify:
 
-# 35. List User Tests
+- [x] ADMIN can create product
+- [x] Product defaults to ACTIVE
+- [x] SKU is stored correctly
+- [x] SKU normalization works if adopted
+- [x] Duplicate SKU returns `409`
+- [x] Blank SKU returns `400`
+- [x] Blank name returns `400`
+- [x] Zero price returns `400`
+- [x] Negative price returns `400`
+- [x] STAFF cannot create product
+- [x] Unauthenticated request receives `401`
 
-- [x] ADMIN can list users
+---
+
+
+# 35. List Product Tests
+
+Verify:
+
+- [x] ADMIN can list products
+- [x] STAFF can list products
 - [x] Pagination works
-- [x] Status filtering works
-- [x] Role filtering works
-- [x] Roles are returned correctly
-- [x] Status is returned correctly
-- [x] Password hash is never returned
-- [x] STAFF receives `403`
+- [x] ACTIVE filter works
+- [x] INACTIVE filter works
+- [x] Search works if implemented
+- [x] Sorting works if supported
 - [x] Unauthenticated request receives `401`
 
-# 36. Get User Tests
+---
 
-- [x] ADMIN can retrieve an existing user
-- [x] Missing user returns `404`
-- [x] Response contains expected roles
-- [x] Response does not expose password hash
-- [x] STAFF receives `403`
+
+# 36. Get Product Tests
+
+Verify:
+
+- [x] ADMIN can retrieve product
+- [x] STAFF can retrieve product
+- [x] Missing product returns `404`
 - [x] Unauthenticated request receives `401`
 
-# 37. Update User Tests
+---
 
-- [x] ADMIN can update full name
-- [x] ADMIN can update phone
-- [x] Missing user returns `404`
-- [x] General update cannot change password
-- [x] General update cannot change roles
-- [x] General update cannot change status
-- [x] General update cannot change email
+
+# 37. Update Product Tests
+
+Verify:
+
+- [x] ADMIN can update name
+- [x] ADMIN can update description
+- [x] ADMIN can update price
+- [x] ADMIN can update image URL
+- [x] SKU remains unchanged
+- [x] Status cannot be changed through general update
+- [x] Invalid price returns `400`
+- [x] Missing product returns `404`
 - [x] STAFF receives `403`
 
-# 38. Status Tests
+---
 
-- [x] ADMIN can set STAFF to `INACTIVE`
-- [x] ADMIN can reactivate STAFF to `ACTIVE`
-- [x] ADMIN can set STAFF to `LOCKED`
-- [x] INACTIVE STAFF cannot authenticate
-- [x] LOCKED STAFF cannot authenticate
-- [x] Current ADMIN cannot disable itself
-- [x] Current ADMIN cannot lock itself
-- [x] Last usable ADMIN protection works where applicable
+
+# 38. Product Status Tests
+
+Verify:
+
+- [x] ADMIN can set ACTIVE → INACTIVE
+- [x] ADMIN can set INACTIVE → ACTIVE
 - [x] STAFF cannot change status
+- [x] Invalid status returns `400`
+- [x] Missing product returns `404`
+
+---
+
 
 ## 39. Security Integration Tests (source has no checkboxes)
 
-Verified: ADMIN login -> JWT -> GET users = 200; STAFF login -> JWT -> GET users = 403;
-no JWT -> GET users = 401, through the existing authorization infrastructure.
+Verified: ADMIN login -> JWT -> POST products allowed; STAFF login -> JWT -> POST products
+403; STAFF GET products allowed; no JWT GET products 401 through existing security.
 
-# 40. Regression Tests
+# 40. Persistence / Regression Tests
 
-- [x] User/Role persistence tests pass
-- [x] JWT authentication tests pass
-- [x] ADMIN/STAFF authorization tests pass
-- [x] Initial Admin Bootstrap tests pass
+Verify:
+
+- [x] Product persists correctly
+- [x] Product status persists correctly
+- [x] BigDecimal price persists without floating-point conversion
+- [x] Unique SKU constraint works
+- [x] Existing User/Auth tests continue to pass
 - [x] Flyway validation passes
 - [x] Hibernate schema validation passes
 - [x] Application starts successfully
 
+---
+
+
 # Acceptance Criteria
 
-- [x] `GET /api/v1/users` is implemented
-- [x] `GET /api/v1/users/{id}` is implemented
-- [x] `POST /api/v1/users` is implemented
-- [x] `PUT /api/v1/users/{id}` is implemented
-- [x] `PATCH /api/v1/users/{id}/status` is implemented
-- [x] All User Management endpoints require ADMIN authorization
-- [x] STAFF receives `403` for User Management endpoints
+The issue is complete when:
+
+- [x] Product entity maps correctly to the existing `products` table
+- [x] ProductRepository is implemented
+- [x] ProductService is implemented
+- [x] ProductController is implemented
+- [x] `GET /api/v1/products` works
+- [x] `GET /api/v1/products/{id}` works
+- [x] `POST /api/v1/products` works
+- [x] `PUT /api/v1/products/{id}` works
+- [x] `PATCH /api/v1/products/{id}/status` works
+- [x] Product list supports pagination
+- [x] Basic status filtering works
+- [x] SKU is unique
+- [x] SKU is treated as stable/immutable after creation
+- [x] Price uses `BigDecimal`
+- [x] Price must be greater than zero
+- [x] New products default to ACTIVE
+- [x] ADMIN can read and write products
+- [x] STAFF can read products
+- [x] STAFF cannot create/update/change product status
 - [x] Unauthenticated requests receive `401`
-- [x] User listing supports pagination
-- [x] Basic status/role filtering works
-- [x] ADMIN can create STAFF
-- [x] New STAFF defaults to ACTIVE
-- [x] New STAFF password is securely encoded
-- [x] Duplicate email is rejected
-- [x] ADMIN cannot be created through the STAFF creation endpoint
-- [x] ADMIN can update allowed profile fields
-- [x] Email cannot be changed through general update
-- [x] Password cannot be changed through general update
-- [x] Roles cannot be changed through general update
-- [x] ADMIN can change STAFF status
-- [x] Users are not hard-deleted
-- [x] Current ADMIN self-lockout is prevented
-- [x] Last usable ADMIN is protected
-- [x] Password/password hash is never exposed
-- [x] Existing User/Role repositories are reused
-- [x] Existing JWT authentication is reused
-- [x] Existing ADMIN/STAFF authorization is reused
-- [x] Common API/error conventions are followed
+- [x] Unauthorized write attempts receive `403`
+- [x] Missing products return `404`
+- [x] Duplicate SKU returns `409`
+- [x] Products are deactivated instead of hard-deleted
+- [x] JPA entities are not exposed directly
+- [x] Product does not contain batch/inventory/slot responsibilities
+- [x] Existing common error handling is reused
+- [x] Existing authorization infrastructure is reused
 - [x] Tests pass
 - [x] Application starts successfully
 - [x] Flyway validation passes
 - [x] Hibernate `ddl-auto=validate` passes
-- [x] Existing applied migrations remain unchanged
+- [x] Existing migrations remain unchanged
 - [x] No unrelated feature is implemented
+
+---

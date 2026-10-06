@@ -140,6 +140,73 @@ public class OpenApiConfig {
     }
 
     @Bean
+    public OpenApiCustomizer productDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/products")) return;
+            var product = Map.of("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02", "sku", "MANGO-BOX-001",
+                    "name", "Mango Fruit Box", "description", "Fresh prepared mango", "price", new java.math.BigDecimal("35000.00"),
+                    "imageUrl", "https://example.com/products/mango.jpg", "status", "ACTIVE",
+                    "createdAt", "2026-10-06T00:00:00Z", "updatedAt", "2026-10-06T00:00:00Z");
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) {
+                    var fields = new java.util.HashMap<String, Object>();
+                    if (id.equals("updateProductStatus")) fields.put("status", "INACTIVE");
+                    else {
+                        fields.put("name", id.equals("updateProduct") ? "Updated Mango Fruit Box" : "Mango Fruit Box");
+                        fields.put("description", "Fresh prepared mango");
+                        fields.put("price", new java.math.BigDecimal("35000.00"));
+                        fields.put("imageUrl", "https://example.com/products/mango.jpg");
+                        if (id.equals("createProduct")) fields.put("sku", "MANGO-BOX-001");
+                    }
+                    operation.getRequestBody().getContent().get("application/json").setExample(fields);
+                }
+                operation.getResponses().forEach((code, response) -> {
+                    Object example;
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                        if (code.equals("201")) response.addHeaderObject("Location", new Header()
+                                .description("Relative URL of the created product.").schema(new StringSchema()));
+                        var updated = new java.util.HashMap<String, Object>(product);
+                        if (id.equals("updateProductStatus")) updated.put("status", "INACTIVE");
+                        if (id.equals("updateProduct")) updated.put("name", "Updated Mango Fruit Box");
+                        Object data = id.equals("listProducts") ? Map.of("content", List.of(product), "page", 0, "size", 20,
+                                "totalElements", 1, "totalPages", 1) : updated;
+                        String message = switch (id) {
+                            case "listProducts" -> "Products retrieved";
+                            case "createProduct" -> "Product created";
+                            case "updateProduct" -> "Product updated";
+                            case "updateProductStatus" -> "Product status updated";
+                            default -> "Product retrieved";
+                        };
+                        example = Map.of("timestamp", "2026-10-06T00:00:00Z", "message", message, "data", data);
+                    } else {
+                        if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                        String error = switch (code) {
+                            case "400" -> "Bad Request";
+                            case "401" -> "Unauthorized";
+                            case "403" -> "Forbidden";
+                            case "404" -> "Not Found";
+                            case "409" -> "Conflict";
+                            default -> "Internal Server Error";
+                        };
+                        String message = switch (code) {
+                            case "400" -> "Request body is missing or malformed";
+                            case "401" -> "Authentication required or access token invalid";
+                            case "403" -> "Access denied";
+                            case "404" -> "Product not found";
+                            case "409" -> "SKU is already in use";
+                            default -> "An unexpected error occurred";
+                        };
+                        example = Map.of("timestamp", "2026-10-06T00:00:00Z", "status", Integer.parseInt(code),
+                                "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
     public OpenAPI backendOpenApi() {
         return new OpenAPI().info(new Info().title("Fruit Machine Backend API").version("v1")
                 .description("Management API. Login is public; other application endpoints require Bearer authentication. "

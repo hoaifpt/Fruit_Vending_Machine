@@ -1,63 +1,70 @@
 # Chat handoff — 2026-10-06
 
 Read AGENTS.md and all .ai guidance; recheck Git/test evidence before continuing.
-User confirmed manual testing and authorized commit/push on 2026-10-06.
-PR/merge/GitHub issue edits and a new issue remain out of scope.
+User confirmed manual retest and explicitly authorized commit/push for Issue #14.
+PR/merge/GitHub issue edits remain out of scope; user merges into dev manually.
 
-## Workspace and current issue
+## Workspace and issue
 
 - Repository: C:/Users/north/Documents/School/9/FruitMachine/backend.
-- Spring Boot module: repository-root backend/; docs and api-contract at repository root.
-- Branch: feature/12-user-management-api, created from freshly fetched origin/dev 75fdfe0
-  (user merged issue #10 through PR #13). Implementation commit: cde96a8, pushed to origin.
-  Branch tracks origin/feature/12-user-management-api; recheck live Git for current HEAD.
-- Issue: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/12, [BE] Implement User Management API.
-- Implementation complete locally; all 85 source checklist items and source section 39
-  verified. Exact checklist and detailed evidence are in CURRENT_TASK.md.
+- Spring module: repository-root backend/; docs/api-contract at repository root.
+- Branch: feature/14-product-management-api, from freshly fetched origin/dev a029904.
+  User merged #12 through PR #15. HEAD remains a029904; all #14 changes uncommitted.
+- Issue: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/14,
+  [BE] Implement Product Management API.
+- Implementation complete locally, all 79 checklist items plus section 39 verified.
+  Full original grouped checklist and detailed evidence are in CURRENT_TASK.md.
 
-## Delivered behavior and changed files
+## Delivered behavior / pending changes
 
-- Five ADMIN-only /api/v1/users operations: list/details/create STAFF/profile/status.
-- PostgreSQL pagination + status/role filters, page-bounded roles fetch, strict safe DTOs;
-  shared credential policy/BCrypt, normalized email matching login/bootstrap, ACTIVE STAFF.
-- Dedicated status lifecycle and self/last-admin safety; advisory transaction lock and
-  actor availability recheck protect against concurrent administrators disabling each other.
-- Existing JWT and method authorization/common errors reused. Applied Flyway, entities,
-  pom.xml, .env/.env.example, apps/frontend/kiosk/firmware untouched; no dependency/schema change.
-- Changes span user controller/dto/mapper/service/repositories, existing credential policy
-  with bootstrap error adaptation, login DTO input normalization, users HTTP role policy,
-  OpenApiConfig, integration/docs tests, api-contract/api.yaml, docs/README and .ai guidance.
-- No registration, general ADMIN creation, role management, DELETE, password/email changes,
-  refresh tokens, full audit subsystem or unrelated feature.
+Five /api/v1/products operations: ADMIN reads/writes, STAFF reads only.
+Reuse Product/ProductStatus mappings; new repository/specifications/mapper/service/controller/
+strict create/update/status DTOs and safe response/page DTOs. DB pagination/status+literal
+name/SKU substring search, approved Spring sort with UUID tie-break; stable normalized SKU,
+positive exact BigDecimal NUMERIC(12,2), ACTIVE default, status lifecycle/no DELETE.
+Service/controller method RBAC and validation; HTTP role guards run before MVC parsing.
+Product row locks serialize profile/status writes, preserve unrelated fields and history.
+OpenApiConfig adds Products examples/headers; api-contract/api.yaml synchronized.
+New Product tests, old Auth/RBAC path expectations updated; README/docs/product-management.md/
+authorization/JWT docs and .ai architecture/project/task/handoff synchronized.
+Flyway, entity/enum, pom.xml, .env/.env.example and other apps/hardware unchanged.
+No dependencies/schema change; no batch/inventory/slot/order/payment/upload/IoT workflows.
 
-## Verification and local setup
+## Verification and build limitation handled
 
-- Final mvn -q clean verify: Java 21.0.10, 177 tests, zero failures/errors/skips; executable JAR.
-- PostgreSQL 18.6 Testcontainers; Flyway V1–V8 and Hibernate validate; all existing 123
-  regression tests pass. New tests: UserManagementIntegrationTest 53, documentation 1.
-- Exact Swagger/contract operation + example + parameter + security + response comparison
-  and semantic schema/nullability/validation/local-ref checks pass. Production docs disabled.
-- JAR contains no test fixtures. git diff --check passes; no unchanged-scope files modified.
-- Browser smoke: actual QA JAR at localhost:62660 with a disposable PostgreSQL, synthetic
-  ADMIN login 200; Swagger Users grouping with five endpoints; Authorize + Try it out GET
-  users 200 and safe paginated response. Synthetic profile PUT also 200.
-- Proof image: backend/target/user-management-swagger.png (ignored, removed by next clean).
-  QA tab closed, Java stopped, disposable DB container auto-removed; developer DB untouched.
-- Normal URLs (SERVER_PORT=8080): http://localhost:8080/swagger-ui/index.html and
-  http://localhost:8080/v3/api-docs. Use existing root .env, running PostgreSQL,
-  API_DOCS_ENABLED=true and valid JWT_SECRET; from backend module run mvn spring-boot:run
-  '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'. See docs/user-management.md.
-- Reports are backend/target/surefire-reports; rerun appropriate tests after code changes.
+- Final full mvn -q test: 237 tests, zero failures/errors/skips.
+- Final full mvn -q -f target/issue14-verification-pom.xml clean verify: exit 0,
+  same 237 tests; Java 21.0.10/PostgreSQL 18.6, Flyway V1–V8/Hibernate validate.
+- Normal clean verify cannot delete target/backend-0.0.1-SNAPSHOT.jar while user's existing
+  Java app holds it (observed PID 26924). Do not stop that app without user direction.
+  Ignored temporary verification POM copies unchanged dependencies/plugins and points
+  to original absolute sources/tests/resources, module working directory and separate
+  target/issue14-verification output. Actual repository pom.xml is unchanged.
+- New ProductManagementIntegrationTest 59 + documentation 1; all prior 177 tests pass.
+  DB SQL paging, UNIQUE race, concurrent status/profile writes, historical snapshot
+  preservation, strict input/decimal bounds, real JWT ADMIN/STAFF/anonymous access verified.
+- Full Product operation/schema/example/security/header/parameter contract checks, UI/
+  config/OpenAPI smoke, local reference resolution, existing production docs disablement pass.
+- Verification JAR includes business Product classes; no test/Rbac fixtures.
+- Browser smoke: actual new JAR localhost:64749 on disposable PostgreSQL; login ADMIN200,
+  all five Products operations, Authorize + POST201 + GET search/sort/page200.
+  Screenshot: backend/target/product-management-swagger.jpg (ignored, no secrets).
+  QA token/tab cleared/closed, QA Java stopped, --rm DB auto-removed.
+  User's original app remains running; developer database and .env untouched.
+- Reports: backend/target/issue14-verification/surefire-reports.
+  JAR: backend/target/issue14-verification/backend-0.0.1-SNAPSHOT.jar.
+  git diff --check passes; no unrelated scope changes.
 
-## Git delivery and next authorized step
+## Local URLs and next authorized step
 
-User's manual retest passed; commit/push of #12 is now explicitly authorized.
-Implementation cde96a8 was pushed successfully to origin/feature/12-user-management-api.
-Git's configured credential helper was empty; the push used the existing Git Credential
-Manager account via a command-local helper override, without changing global configuration.
-This documentation follow-up records delivery; verify its HEAD against origin after push.
-No PR/merge/GitHub checklist edit has been performed or authorized.
-User handles merges into dev manually. Future issue branches start
-from latest dev and use feature/<issue>-<description> or fix/<issue>-<description>.
-Only backend is in scope. Keep API contract/Swagger synchronized and reproduce the full
-source checklist at issue handoff. Payment/dispensing remains approved future design.
+With SERVER_PORT=8080, existing .env/PostgreSQL, API_DOCS_ENABLED=true and valid JWT_SECRET:
+Swagger http://localhost:8080/swagger-ui/index.html; OpenAPI http://localhost:8080/v3/api-docs.
+From module: mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
+See docs/product-management.md and frontend contract api-contract/api.yaml.
+User's currently running old JAR does not gain #14 APIs until they rebuild/restart it.
+
+User's manual retest passed; commit/push for #14 is now authorized.
+Delivery is pending remote verification. No PR/merge/issue edits are authorized.
+Future issue branches start from latest dev (feature/<issue>-<description> or fix/...).
+Keep backend-only scope, contract/Swagger synchronized and full source checklist at handoff.
+Payment/dispensing remains approved future design, not implemented in this issue.

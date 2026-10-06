@@ -160,7 +160,21 @@ READ_COMMITTED reloads actor after locking, prevents concurrent cross-disable, a
 self/last ACTIVE ADMIN. Profile/status writes use a user row lock to avoid stale updates.
 See ../../docs/user-management.md and repository api-contract/api.yaml.
 
+### product management (issue #14)
+
+ProductController -> ProductService -> ProductRepository reuses existing Product entity
+and enum (no schema change). Separate strict DTOs reject unknown/immutable fields; service
+validation, transactions and ADMIN/STAFF method guards reuse existing infrastructure.
+JpaSpecificationExecutor combines status + literal lowercased name/SKU substring matching;
+PageRequest and approved Spring Sort provide DB paging plus UUID tie-break, no collection fetch.
+Profile/status writes acquire PESSIMISTIC_WRITE to avoid stale cross-field overwrites.
+SKU strip/uppercase is stable and immutable; positive BigDecimal has NUMERIC(12,2) bounds,
+no silent rounding. Mapper exposes catalog fields only; no batch/inventory/slot workflows.
+OpenApiConfig supplies Products examples/headers; versioned api-contract/api.yaml is kept
+consistent by ProductManagementDocumentationTest. See ../../docs/product-management.md.
+
 ## 4. Layer Responsibilities
+
 
 Normal request flow:
 

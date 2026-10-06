@@ -309,7 +309,8 @@ class AuthorizationIntegrationTest {
         var result = mvc.perform(get("/v3/api-docs")).andExpect(status().isOk()).andReturn();
         assertThat(mapper.readTree(result.getResponse().getContentAsString()).path("paths").fieldNames())
                 .toIterable().containsExactlyInAnyOrder("/api/v1/auth/login", "/api/v1/users",
-                        "/api/v1/users/{id}", "/api/v1/users/{id}/status");
+                        "/api/v1/users/{id}", "/api/v1/users/{id}/status",
+                        "/api/v1/products", "/api/v1/products/{id}", "/api/v1/products/{id}/status");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());

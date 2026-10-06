@@ -8,6 +8,8 @@ servers:
 tags:
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
+  - name: Products
+    description: Management catalog. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
@@ -438,6 +440,609 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
               example: {"timestamp":"2026-10-06T00:00:00Z","status":409,"error":"Conflict","message":"You cannot disable or lock your own account","path":"/api/v1/users/{id}/status"}
+  "/api/v1/products/{id}":
+    get:
+      tags:
+        - "Products"
+      summary: "Get catalog product details"
+      description: "ADMIN or STAFF. Returns catalog fields for an existing UUID, including INACTIVE products; no batch/inventory collections."
+      operationId: "getProduct"
+      parameters:
+        -
+          name: "id"
+          in: "path"
+          description: "Product UUID."
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      responses:
+        "200":
+          description: "Catalog product"
+          headers:
+            Cache-Control:
+              schema:
+                type: "string"
+                const: "no-store"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiResponseProductResponse"
+              example:
+                timestamp: "2026-10-06T00:00:00Z"
+                data:
+                  createdAt: "2026-10-06T00:00:00Z"
+                  price: 35000
+                  imageUrl: "https://example.com/products/mango.jpg"
+                  name: "Mango Fruit Box"
+                  description: "Fresh prepared mango"
+                  id: "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  sku: "MANGO-BOX-001"
+                  status: "ACTIVE"
+                  updatedAt: "2026-10-06T00:00:00Z"
+                message: "Product retrieved"
+        "400":
+          description: "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Bad Request"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Request body is missing or malformed"
+                status: 400
+                path: "/api/v1/products/{id}"
+        "401":
+          description: "Missing/invalid/expired Bearer token or unavailable account"
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: "string"
+                const: "Bearer"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Unauthorized"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Authentication required or access token invalid"
+                status: 401
+                path: "/api/v1/products/{id}"
+        "403":
+          description: "Authenticated account lacks the required role"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Forbidden"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Access denied"
+                status: 403
+                path: "/api/v1/products/{id}"
+        "404":
+          description: "Product not found"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Not Found"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Product not found"
+                status: 404
+                path: "/api/v1/products/{id}"
+        "500":
+          description: "Unexpected server error; no internal details"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Internal Server Error"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "An unexpected error occurred"
+                status: 500
+                path: "/api/v1/products/{id}"
+      security:
+        -
+          bearerAuth: []
+    put:
+      tags:
+        - "Products"
+      summary: "Replace catalog product fields"
+      description: "ADMIN only. Replaces name/description/price/imageUrl. Omitted/null description/imageUrl clears them. SKU/status/id/timestamps are rejected. Does not rewrite historical order prices, payments or batches."
+      operationId: "updateProduct"
+      parameters:
+        -
+          name: "id"
+          in: "path"
+          description: "Product UUID."
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/UpdateProductRequest"
+            example:
+              price: 35000
+              imageUrl: "https://example.com/products/mango.jpg"
+              name: "Updated Mango Fruit Box"
+              description: "Fresh prepared mango"
+        required: true
+      responses:
+        "200":
+          description: "Updated catalog product"
+          headers:
+            Cache-Control:
+              schema:
+                type: "string"
+                const: "no-store"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiResponseProductResponse"
+              example:
+                timestamp: "2026-10-06T00:00:00Z"
+                data:
+                  createdAt: "2026-10-06T00:00:00Z"
+                  price: 35000
+                  imageUrl: "https://example.com/products/mango.jpg"
+                  name: "Updated Mango Fruit Box"
+                  description: "Fresh prepared mango"
+                  id: "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  sku: "MANGO-BOX-001"
+                  status: "ACTIVE"
+                  updatedAt: "2026-10-06T00:00:00Z"
+                message: "Product updated"
+        "400":
+          description: "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Bad Request"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Request body is missing or malformed"
+                status: 400
+                path: "/api/v1/products/{id}"
+        "401":
+          description: "Missing/invalid/expired Bearer token or unavailable account"
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: "string"
+                const: "Bearer"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Unauthorized"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Authentication required or access token invalid"
+                status: 401
+                path: "/api/v1/products/{id}"
+        "403":
+          description: "Authenticated account lacks the required role"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Forbidden"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Access denied"
+                status: 403
+                path: "/api/v1/products/{id}"
+        "404":
+          description: "Product not found"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Not Found"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Product not found"
+                status: 404
+                path: "/api/v1/products/{id}"
+        "500":
+          description: "Unexpected server error; no internal details"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Internal Server Error"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "An unexpected error occurred"
+                status: 500
+                path: "/api/v1/products/{id}"
+      security:
+        -
+          bearerAuth: []
+  "/api/v1/products/{id}/status":
+    patch:
+      tags:
+        - "Products"
+      summary: "Activate/deactivate catalog product"
+      description: "ADMIN only. Sets ACTIVE or INACTIVE, preserving identity and all related history. INACTIVE disables future operational use, not deletion. Same-status requests are idempotent. No inventory/batch/order changes or hard deletion."
+      operationId: "updateProductStatus"
+      parameters:
+        -
+          name: "id"
+          in: "path"
+          description: "Product UUID."
+          required: true
+          schema:
+            type: "string"
+            format: "uuid"
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/UpdateProductStatusRequest"
+            example:
+              status: "INACTIVE"
+        required: true
+      responses:
+        "200":
+          description: "Product with current catalog status"
+          headers:
+            Cache-Control:
+              schema:
+                type: "string"
+                const: "no-store"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiResponseProductResponse"
+              example:
+                timestamp: "2026-10-06T00:00:00Z"
+                data:
+                  createdAt: "2026-10-06T00:00:00Z"
+                  price: 35000
+                  imageUrl: "https://example.com/products/mango.jpg"
+                  name: "Mango Fruit Box"
+                  description: "Fresh prepared mango"
+                  id: "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  sku: "MANGO-BOX-001"
+                  status: "INACTIVE"
+                  updatedAt: "2026-10-06T00:00:00Z"
+                message: "Product status updated"
+        "400":
+          description: "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Bad Request"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Request body is missing or malformed"
+                status: 400
+                path: "/api/v1/products/{id}/status"
+        "401":
+          description: "Missing/invalid/expired Bearer token or unavailable account"
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: "string"
+                const: "Bearer"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Unauthorized"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Authentication required or access token invalid"
+                status: 401
+                path: "/api/v1/products/{id}/status"
+        "403":
+          description: "Authenticated account lacks the required role"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Forbidden"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Access denied"
+                status: 403
+                path: "/api/v1/products/{id}/status"
+        "404":
+          description: "Product not found"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Not Found"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Product not found"
+                status: 404
+                path: "/api/v1/products/{id}/status"
+        "500":
+          description: "Unexpected server error; no internal details"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Internal Server Error"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "An unexpected error occurred"
+                status: 500
+                path: "/api/v1/products/{id}/status"
+      security:
+        -
+          bearerAuth: []
+  "/api/v1/products":
+    get:
+      tags:
+        - "Products"
+      summary: "List/search catalog products"
+      description: "ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on name/SKU. Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. Both statuses are visible by default; out-of-range pages are empty."
+      operationId: "listProducts"
+      parameters:
+        -
+          name: "page"
+          in: "query"
+          description: "Zero-based page index."
+          required: false
+          schema:
+            type: "integer"
+            format: "int32"
+            default: 0
+            minimum: 0
+        -
+          name: "size"
+          in: "query"
+          description: "Page size, 1 to 100."
+          required: false
+          schema:
+            type: "integer"
+            format: "int32"
+            default: 20
+            maximum: 100
+            minimum: 1
+        -
+          name: "status"
+          in: "query"
+          description: "Optional ACTIVE or INACTIVE filter."
+          required: false
+          schema:
+            type: "string"
+            enum:
+              - "ACTIVE"
+              - "INACTIVE"
+        -
+          name: "search"
+          in: "query"
+          description: "Optional literal substring of name/SKU, case-insensitive, stripped; blank means no filter. Maximum 200 characters."
+          required: false
+          schema:
+            type: "string"
+            maxLength: 200
+            minLength: 0
+        -
+          name: "sort"
+          in: "query"
+          description: "One approved field: id, sku, name, price, status, createdAt, updatedAt; optional asc/desc (asc when omitted). Example name,asc."
+          required: false
+          schema:
+            type: "string"
+            default: "createdAt,desc"
+      responses:
+        "200":
+          description: "Paginated catalog products"
+          headers:
+            Cache-Control:
+              schema:
+                type: "string"
+                const: "no-store"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiResponseProductPageResponse"
+              example:
+                timestamp: "2026-10-06T00:00:00Z"
+                data:
+                  content:
+                    -
+                      status: "ACTIVE"
+                      sku: "MANGO-BOX-001"
+                      id: "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      imageUrl: "https://example.com/products/mango.jpg"
+                      price: 35000
+                      name: "Mango Fruit Box"
+                      updatedAt: "2026-10-06T00:00:00Z"
+                      createdAt: "2026-10-06T00:00:00Z"
+                      description: "Fresh prepared mango"
+                  size: 20
+                  page: 0
+                  totalPages: 1
+                  totalElements: 1
+                message: "Products retrieved"
+        "400":
+          description: "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Bad Request"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Request body is missing or malformed"
+                status: 400
+                path: "/api/v1/products"
+        "401":
+          description: "Missing/invalid/expired Bearer token or unavailable account"
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: "string"
+                const: "Bearer"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Unauthorized"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Authentication required or access token invalid"
+                status: 401
+                path: "/api/v1/products"
+        "403":
+          description: "Authenticated account lacks the required role"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Forbidden"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Access denied"
+                status: 403
+                path: "/api/v1/products"
+        "500":
+          description: "Unexpected server error; no internal details"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Internal Server Error"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "An unexpected error occurred"
+                status: 500
+                path: "/api/v1/products"
+      security:
+        -
+          bearerAuth: []
+    post:
+      tags:
+        - "Products"
+      summary: "Create catalog product"
+      description: "ADMIN only. Creates ACTIVE product with stripped/uppercased unique SKU and positive BigDecimal price. Only sku/name/description/price/imageUrl are accepted. Status/id/timestamps/batch/inventory fields are rejected. Price is at most 9999999999.99 and two decimal places; no silent rounding. Database UNIQUE protects concurrent creates."
+      operationId: "createProduct"
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/CreateProductRequest"
+            example:
+              price: 35000
+              imageUrl: "https://example.com/products/mango.jpg"
+              name: "Mango Fruit Box"
+              description: "Fresh prepared mango"
+              sku: "MANGO-BOX-001"
+        required: true
+      responses:
+        "201":
+          description: "ACTIVE product created; Location points to the product"
+          headers:
+            Cache-Control:
+              schema:
+                type: "string"
+                const: "no-store"
+            Location:
+              description: "Relative URL of the created product."
+              schema:
+                type: "string"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiResponseProductResponse"
+              example:
+                timestamp: "2026-10-06T00:00:00Z"
+                data:
+                  createdAt: "2026-10-06T00:00:00Z"
+                  price: 35000
+                  imageUrl: "https://example.com/products/mango.jpg"
+                  name: "Mango Fruit Box"
+                  description: "Fresh prepared mango"
+                  id: "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  sku: "MANGO-BOX-001"
+                  status: "ACTIVE"
+                  updatedAt: "2026-10-06T00:00:00Z"
+                message: "Product created"
+        "400":
+          description: "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Bad Request"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Request body is missing or malformed"
+                status: 400
+                path: "/api/v1/products"
+        "401":
+          description: "Missing/invalid/expired Bearer token or unavailable account"
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: "string"
+                const: "Bearer"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Unauthorized"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Authentication required or access token invalid"
+                status: 401
+                path: "/api/v1/products"
+        "403":
+          description: "Authenticated account lacks the required role"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Forbidden"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "Access denied"
+                status: 403
+                path: "/api/v1/products"
+        "409":
+          description: "SKU already exists or concurrent database uniqueness conflict"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Conflict"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "SKU is already in use"
+                status: 409
+                path: "/api/v1/products"
+        "500":
+          description: "Unexpected server error; no internal details"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              example:
+                error: "Internal Server Error"
+                timestamp: "2026-10-06T00:00:00Z"
+                message: "An unexpected error occurred"
+                status: 500
+                path: "/api/v1/products"
+      security:
+        -
+          bearerAuth: []
 components:
   securitySchemes:
     bearerAuth:
@@ -446,6 +1051,204 @@ components:
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
   schemas:
+    UpdateProductRequest:
+      type: "object"
+      additionalProperties: false
+      description: "Replace catalog fields only. SKU/status/identity/timestamps are rejected."
+      properties:
+        name:
+          type: "string"
+          description: "Nonblank catalog name, stripped before saving."
+          example: "Mango Fruit Box"
+          maxLength: 200
+          minLength: 1
+        description:
+          type:
+            - "string"
+            - "null"
+          description: "Optional catalog description; omitted/null clears it."
+          example: "Fresh prepared mango"
+        price:
+          type: "number"
+          description: "Positive catalog price, maximum 9999999999.99, at most two decimal places; historical prices unchanged."
+          example: 35000
+          multipleOf: 0.01
+          exclusiveMinimum: 0
+          maximum: 9999999999.99
+        imageUrl:
+          type:
+            - "string"
+            - "null"
+          description: "Optional image reference; omitted/null clears it. Maximum 2048 characters."
+          example: "https://example.com/products/mango.jpg"
+          maxLength: 2048
+          minLength: 0
+      required:
+        - "name"
+        - "price"
+    ApiResponseProductResponse:
+      type: "object"
+      properties:
+        timestamp:
+          type: "string"
+          format: "date-time"
+        message:
+          type: "string"
+        data:
+          "$ref": "#/components/schemas/ProductResponse"
+    ProductResponse:
+      type: "object"
+      description: "Catalog definition only; no batch/inventory/slot or history collections."
+      properties:
+        id:
+          type: "string"
+          format: "uuid"
+          description: "Product UUID."
+        sku:
+          type: "string"
+          description: "Immutable SKU."
+          example: "MANGO-BOX-001"
+        name:
+          type: "string"
+          description: "Catalog name."
+          example: "Mango Fruit Box"
+        description:
+          type:
+            - "string"
+            - "null"
+          description: "Optional description."
+        price:
+          type: "number"
+          description: "Current catalog price; historical order/payment snapshots unchanged."
+          example: 35000
+        imageUrl:
+          type:
+            - "string"
+            - "null"
+          description: "Optional image reference."
+        status:
+          type: "string"
+          description: "Current catalog availability."
+          enum:
+            - "ACTIVE"
+            - "INACTIVE"
+        createdAt:
+          type: "string"
+          format: "date-time"
+          description: "Creation instant in UTC."
+        updatedAt:
+          type: "string"
+          format: "date-time"
+          description: "Last modification instant in UTC."
+      required:
+        - "createdAt"
+        - "id"
+        - "name"
+        - "price"
+        - "sku"
+        - "status"
+        - "updatedAt"
+    UpdateProductStatusRequest:
+      type: "object"
+      additionalProperties: false
+      description: "Activate/deactivate catalog product without deleting histories."
+      properties:
+        status:
+          type: "string"
+          description: "ACTIVE permits future use; INACTIVE disables new use without deletion."
+          enum:
+            - "ACTIVE"
+            - "INACTIVE"
+          example: "INACTIVE"
+      required:
+        - "status"
+    ProductPageResponse:
+      type: "object"
+      description: "Database-paginated catalog matching combined status/search filters."
+      properties:
+        content:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/ProductResponse"
+        page:
+          type: "integer"
+          format: "int32"
+          description: "Zero-based page index."
+          minimum: 0
+        size:
+          type: "integer"
+          format: "int32"
+          description: "Requested page size."
+          maximum: 100
+          minimum: 1
+        totalElements:
+          type: "integer"
+          format: "int64"
+          description: "Total matching products."
+          minimum: 0
+        totalPages:
+          type: "integer"
+          format: "int32"
+          description: "Total pages."
+          minimum: 0
+      required:
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+    ApiResponseProductPageResponse:
+      type: "object"
+      properties:
+        timestamp:
+          type: "string"
+          format: "date-time"
+        message:
+          type: "string"
+        data:
+          "$ref": "#/components/schemas/ProductPageResponse"
+    CreateProductRequest:
+      type: "object"
+      additionalProperties: false
+      description: "Create catalog product; status is server-controlled ACTIVE."
+      properties:
+        sku:
+          type: "string"
+          description: "Stable unique SKU, stripped and uppercased with Locale.ROOT before validation."
+          example: "MANGO-BOX-001"
+          maxLength: 64
+          minLength: 1
+        name:
+          type: "string"
+          description: "Nonblank catalog name, stripped before saving."
+          example: "Mango Fruit Box"
+          maxLength: 200
+          minLength: 1
+        description:
+          type:
+            - "string"
+            - "null"
+          description: "Optional catalog description; null clears it."
+          example: "Fresh prepared mango"
+        price:
+          type: "number"
+          description: "Positive catalog price, maximum 9999999999.99, at most two decimal places; never rounded."
+          example: 35000
+          multipleOf: 0.01
+          exclusiveMinimum: 0
+          maximum: 9999999999.99
+        imageUrl:
+          type:
+            - "string"
+            - "null"
+          description: "Optional image reference, maximum 2048 characters. No upload or URL fetching."
+          example: "https://example.com/products/mango.jpg"
+          maxLength: 2048
+          minLength: 0
+      required:
+        - "name"
+        - "price"
+        - "sku"
     CreateUserRequest:
       type: object
       additionalProperties: false
