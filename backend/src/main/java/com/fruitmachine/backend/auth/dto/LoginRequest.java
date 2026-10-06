@@ -5,7 +5,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-@Schema(description = "Management account login. Email is normalized to lowercase; password is not modified.")
+@Schema(description = "Management account login. Email is stripped and lowercased; password is not modified.")
 public record LoginRequest(
         @NotBlank @Email @Size(min = 1, max = 254)
         @Schema(description = "Account email (maximum 254 characters)", example = "developer@example.com", format = "email")
@@ -14,6 +14,10 @@ public record LoginRequest(
         @Schema(description = "Account password; BCrypt accepts at most 72 UTF-8 bytes (not just characters).",
                 format = "password", accessMode = Schema.AccessMode.WRITE_ONLY)
         String password) {
+    public LoginRequest {
+        email = email == null ? null : email.strip().toLowerCase(java.util.Locale.ROOT);
+    }
+
     @Override
     public String toString() {
         return "LoginRequest[credentials=REDACTED]";

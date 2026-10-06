@@ -1,176 +1,194 @@
-# Issue #10 — ADMIN/STAFF authorization
+# Issue #12 — User Management API
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/10
-Title: [BE] Implement ADMIN/STAFF authorization
-Branch: feature/10-admin-staff-authorization
-Base: origin/dev at 1706bd2 (issue #8 merged by user through PR #11).
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/12
+Title: [BE] Implement User Management API
+Branch: feature/12-user-management-api
+Base: origin/dev at 75fdfe0 (issue #10 merged by user through PR #13).
 
-## Scope and design
+## Scope and decisions
 
-Enable Spring Security method authorization with @EnableMethodSecurity in existing
-SecurityConfig. Reuse CustomUserDetailsService/AuthenticatedUser ROLE_ mapping and
-existing JWT filter; PostgreSQL current memberships remain authoritative on each request.
-Keep ADMIN/STAFF independent, no hierarchy or fabricated STAFF authority for ADMIN.
-Support ADMIN-only, STAFF-only, either role and any-authenticated method expressions.
-Preserve public POST login/GET health, stateless bearer authentication and blocked
-INACTIVE/LOCKED/deleted accounts. Reuse common 401 entry point, 403 access-denied handler
-and MVC error handling; no duplicate auth pipeline or business role-check conditionals.
+Implement ADMIN-only GET /api/v1/users, GET /api/v1/users/{id}, POST /api/v1/users,
+PUT /api/v1/users/{id}, PATCH /api/v1/users/{id}/status. Reuse existing repositories,
+JWT, method security, PasswordEncoder, common response/errors and shared creation policy.
+List uses database pagination (page 0, size 20, max 100), combined optional status/role
+filters, createdAt DESC/id ASC and page-bounded role fetch (no collection-fetch pagination).
+Create assigns ACTIVE + STAFF server-side; strict DTOs reject extra fields. Normalize
+email with strip/lowercase, preserve password bytes, require configured minimum code
+points (default 12) and max 72 UTF-8 bytes. Profile replacement changes fullName/phone;
+email/password/roles/status remain controlled by their dedicated flows. Timestamp DTOs
+use Instant/UTC per project convention; role names remain extensible strings.
+Status updates preserve histories, reject own disable/lock and last ACTIVE ADMIN removal.
+PostgreSQL transaction advisory lock serializes status decisions across app instances;
+READ_COMMITTED rechecks actor after lock to prevent concurrent cross-disable lockout.
+OpenAPI Users tag + versioned api-contract/api.yaml must match all delivered operations.
 
-Changed groups: SecurityConfig method-security activation; authority mapping/method-security/
-JWT integration and security-error tests; metadata in AuthController/OpenApiConfig and
-api-contract/api.yaml, contract info/tag comparison test; docs/admin-staff-authorization.md,
-README/JWT docs and .ai PROJECT/ARCHITECTURE/CURRENT_TASK.
-Only test fixtures expose protected operations, including a Spring-managed service proxy.
-Test-only routes stay hidden from generated OpenAPI and out of the production JAR.
+## Database impact / non-goals
 
-## Database and API impact
-
-No schema/dependency/entity changes. Flyway V1–V8 unchanged; ddl-auto=validate.
-No production REST operation is added/changed; login remains public and unchanged.
-Swagger/api-contract info and Auth tag descriptions now reflect the implemented RBAC
-foundation. Semantic comparison includes matching info/tags, existing operation/schemas/
-headers/examples/security. No test-only operation is exposed.
-
-## Non-goals
-
-No User Management or /api/v1/users API, CRUD/registration, bootstrap changes, password
-reset, refresh tokens, dynamic roles/permission management/role hierarchy, business-domain
-APIs, MQTT/payment/dispense. Apps/kiosk/firmware untouched. No automatic commit/push/PR/
-merge/issue checkbox changes.
+No schema/dependency change; V1–V8 unchanged and Hibernate ddl-auto=validate.
+No registration, general ADMIN creation, role management, DELETE, email/password changes,
+refresh tokens, full audit subsystem, product/machine/inventory/payment/IoT features.
+Only backend/ + root documentation/contract; apps/frontend/kiosk/firmware out of scope.
+User confirmed manual testing and authorized commit/push on 2026-10-06.
+PR/merge/GitHub issue edits remain out of scope; user merges into dev manually.
 
 ## Verification status
 
-Complete locally. Final `mvn clean verify` passed with Java 21: 123 tests, 0 failures,
-0 errors, 0 skips; executable Spring Boot JAR built. PostgreSQL 18.6 isolated Testcontainers.
-No developer .env/database is read/modified, no real credential is used or introduced.
+Complete locally on 2026-10-06. Final mvn -q clean verify passed on Java 21.0.10:
+177 tests, zero failures/errors/skips; executable Spring Boot JAR built.
+Isolated PostgreSQL 18.6 Testcontainers; no root .env/developer database read or modified.
 
-Evidence by group:
-- AuthorityMappingTest: 9 tests, existing mapping reused for ADMIN/STAFF, multiple/duplicate/
-  no roles, normalized username and UUID lookup, all account statuses. Existing entities
-  retain immutable IDs; ReflectionTestUtils is used only for isolated unit fixtures.
-- AuthorizationIntegrationTest: 18 tests, full login -> JWT -> filter -> principal/context
-  -> real Spring @PreAuthorize service/controller proxy. ADMIN/STAFF/shared/any-authenticated
-  allow/deny, no implicit hierarchy, duplicate-free principal and SecurityContext authorities,
-  no-role user, anonymous 401 on every protected fixture, invalid/expired/wrong-key/malformed
-  bearer 401, valid STAFF lacking ADMIN 403 with common safe JSON. Denied method body does
-  not execute. Same JWT follows immediate DB role removal/addition despite stale role claims.
-  INACTIVE/LOCKED/deleted accounts remain blocked. Context is cleared between requests;
-  log capture contains no password/hash/token/key. Public login/health/docs preserved.
-- SecurityErrorHandlerTest: 2 tests, existing entry point and access-denied handler produce
-  common 401/403 schema, safe generic messages, expected headers and no exception details.
-- AuthIntegrationTest: 17 tests, login/JWT regressions, full semantic contract comparison
-  including updated info/tags, paths/methods/operationId/request/response/schemas/headers/
-  examples/security; Swagger UI/OpenAPI GET smoke. No test-only paths in generated docs.
-- Existing suites: ProductionDocumentationTest 1 (prod docs disabled), GlobalExceptionHandlerTest
-  7, EntityMappingTest 4 (19 entities/tables/columns, Flyway V1–V8 and validate-only Hibernate),
-  JwtAuthenticationFilterTest 10, JwtServiceTest 14, AccountCredentialPolicyTest 5,
-  InitialAdminBootstrapIntegrationTest 18, InitialAdminStartupTest 1 (actual servlet startup
-  and restart same DB without bootstrap secrets), UserRolePersistenceTest 17.
-- Production JAR inspection: zero AuthorizationIntegrationTest/RbacTest/RbacOperations/
-  AuthorityMappingTest/SecurityErrorHandlerTest entries. Protected fixtures only exist in
-  src/test, marked test component/hidden; no production business or demo endpoint.
-- Source/diff audit: no JWT/role mapping/status/bootstrap/schema/dependency implementation
-  replacement, no role hierarchy, no manual business role checks. Existing Flyway/entity
-  files, pom.xml, .env/.env.example and apps/kiosk/firmware remain unchanged. Whitespace
-  checks pass. Authorization/no-secret logging is verified by tests and source inspection.
+Evidence:
+- UserManagementIntegrationTest: 53 tests. All five real endpoints via login/JWT/security;
+  ADMIN success, STAFF 403/anonymous 401, expired/wrong-key/invalid JWT, role revocation;
+  ACTIVE + STAFF assignment, BCrypt hash/login and no secret response/log/toString;
+  strict create/update/status fields, validation/size/Unicode-byte/password minimum;
+  combined DB pagination/filtering, multi-role/no-role users, preserved identity/history;
+  missing UUID 404/malformed UUID 400; status disable/lock/login+old-token denial/reactivate;
+  self/sole-admin conflict and concurrent cross-disable leaves one usable ADMIN;
+  missing STAFF safe 500/no role creation, membership rollback and concurrent UNIQUE 409;
+  DELETE unsupported. Collection-fetch pagination configured to fail, ensuring DB paging.
+- UserManagementDocumentationTest: 1 test. UI/config/OpenAPI smoke; exact user operation,
+  parameters, examples, responses/statuses/headers/security comparison with api-contract;
+  safe schema fields/formats/required/nullability/enum/validation and local-ref checks.
+- Existing 123 tests: UserRolePersistenceTest 17, AuthIntegrationTest 17,
+  AuthorizationIntegrationTest 18, InitialAdminBootstrapIntegrationTest 18,
+  InitialAdminStartupTest 1, AccountCredentialPolicyTest 5, EntityMappingTest 4,
+  JwtAuthenticationFilterTest 10, JwtServiceTest 14, AuthorityMappingTest 9,
+  SecurityErrorHandlerTest 2, GlobalExceptionHandlerTest 7, ProductionDocumentationTest 1.
+  Flyway validates V1–V8, Hibernate validates all 19 business entity mappings; actual
+  servlet startup/restart and production Swagger disablement verified by existing tests.
+  The two older docs path assertions now include delivered user APIs and still exclude
+  test-only routes. No assertion of security/credential protection was weakened.
+- Actual JAR browser smoke on isolated localhost:62660/PostgreSQL: Swagger displays Auth
+  and Users with all five operations; login synthetic ADMIN -> 200; Bearer Authorize ->
+  GET /api/v1/users?page=0&size=20 -> 200, safe profile/roles and pagination, no-store.
+  PUT profile on synthetic QA account -> 200. Generated OpenAPI URL loaded with the four
+  correct paths. Screenshot: backend/target/user-management-swagger.png (ignored artifact).
+  QA tab closed, Java stopped and disposable --rm DB container removed afterwards.
+- Production JAR inspection excludes UserManagement tests/RbacTest/test-only fixtures.
+- Source/diff audit: Flyway, entities, pom.xml, .env/.env.example, apps and firmware unchanged.
+  git diff --check passes. No schema or dependency change; original JWT/RBAC pipeline reused.
 
-All 57 source checklist items complete; source sections 24/25 (no checkboxes) also verified.
-No implementation blocker. At implementation completion, no Git delivery was performed.
-On 2026-10-05 the user authorized commit/push: 10276d5 contains the issue #10 implementation
-and guidance updates and was pushed to origin/feature/10-admin-staff-authorization.
-A documentation follow-up records this delivery. PR/merge/GitHub checkbox changes NOT
-performed; the user handles merge manually. See HANDOFF.md and verify current Git state.
-Future features must explicitly annotate Spring-managed use-case entry points; unannotated
-methods are not automatically role-protected. Self-invocation/private/final proxy limits
-and non-HTTP principal trust boundaries are documented. No User Management/refresh token.
+All 85 original source checklist items below complete. Source section 39 (no checkboxes)
+also verified by real login/JWT API tests. No implementation/verification blocker remains.
+User's manual retest passed on 2026-10-06; commit/push delivery is authorized.
+User handles merge into dev manually; no PR/merge/issue edits are authorized.
 
-Swagger UI: http://localhost:8080/swagger-ui/index.html; OpenAPI: http://localhost:8080/v3/api-docs.
-Local startup instructions remain in JWT/bootstrap docs (ignored .env, running PostgreSQL,
-valid JWT_SECRET, JVM UTC); existing ADMIN makes bootstrap skip. UI/API smoke verified by
-MockMvc; no browser Try it out is performed in this infrastructure-only issue, no production
-role-protected operation exists to demonstrate. New metadata matches generated OpenAPI.
+Swagger UI: http://localhost:8080/swagger-ui/index.html
+OpenAPI JSON: http://localhost:8080/v3/api-docs
+Startup: existing root .env + running PostgreSQL, API_DOCS_ENABLED=true, valid JWT_SECRET;
+from backend module run mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
+See ../../docs/user-management.md. Updated frontend contract: api-contract/api.yaml.
 
-## 1. Integrate Roles with Spring Security
+## Source checklist (preserved under original headings)
 
-- [x] `ADMIN` maps to `ROLE_ADMIN`
-- [x] `STAFF` maps to `ROLE_STAFF`
-- [x] Authorities are available through the authenticated principal
-- [x] Authorities are available through `SecurityContext`
-- [x] Multiple roles are supported
-- [x] Duplicate authorities are avoided
+## 34. Create STAFF Tests
 
-## 21. Authority Mapping Tests
+- [x] ADMIN can create STAFF
+- [x] Created account has `STAFF` role
+- [x] Created account has `ACTIVE` status
+- [x] Password is encoded
+- [x] Plaintext password is not stored
+- [x] Duplicate email returns `409`
+- [x] Invalid email returns `400`
+- [x] Blank password returns `400`
+- [x] Blank full name returns `400`
+- [x] Client cannot create ADMIN through this endpoint
+- [x] STAFF cannot create users
+- [x] Unauthenticated client cannot create users
 
-- [x] ADMIN maps to `ROLE_ADMIN`
-- [x] STAFF maps to `ROLE_STAFF`
-- [x] Multiple roles map correctly
-- [x] Duplicate authorities are not produced
+# 35. List User Tests
 
-## 22. ADMIN Authorization Tests
-
-- [x] ADMIN can access ADMIN-only protected functionality
-- [x] STAFF cannot access ADMIN-only functionality
+- [x] ADMIN can list users
+- [x] Pagination works
+- [x] Status filtering works
+- [x] Role filtering works
+- [x] Roles are returned correctly
+- [x] Status is returned correctly
+- [x] Password hash is never returned
 - [x] STAFF receives `403`
-- [x] unauthenticated request receives `401`
+- [x] Unauthenticated request receives `401`
 
-## 23. STAFF Authorization Tests
+# 36. Get User Tests
 
-- [x] STAFF can access STAFF-protected functionality
-- [x] ADMIN/STAFF shared authorization works
-- [x] unauthenticated request receives `401`
+- [x] ADMIN can retrieve an existing user
+- [x] Missing user returns `404`
+- [x] Response contains expected roles
+- [x] Response does not expose password hash
+- [x] STAFF receives `403`
+- [x] Unauthenticated request receives `401`
 
-## 26. Authentication Regression Tests
+# 37. Update User Tests
 
-- [x] ACTIVE user can authenticate
-- [x] invalid credentials return `401`
-- [x] invalid JWT is rejected
-- [x] expired JWT is rejected
-- [x] INACTIVE user remains blocked
-- [x] LOCKED user remains blocked
-- [x] valid JWT still establishes authentication
+- [x] ADMIN can update full name
+- [x] ADMIN can update phone
+- [x] Missing user returns `404`
+- [x] General update cannot change password
+- [x] General update cannot change roles
+- [x] General update cannot change status
+- [x] General update cannot change email
+- [x] STAFF receives `403`
 
-## 27. Application Regression
+# 38. Status Tests
 
+- [x] ADMIN can set STAFF to `INACTIVE`
+- [x] ADMIN can reactivate STAFF to `ACTIVE`
+- [x] ADMIN can set STAFF to `LOCKED`
+- [x] INACTIVE STAFF cannot authenticate
+- [x] LOCKED STAFF cannot authenticate
+- [x] Current ADMIN cannot disable itself
+- [x] Current ADMIN cannot lock itself
+- [x] Last usable ADMIN protection works where applicable
+- [x] STAFF cannot change status
+
+## 39. Security Integration Tests (source has no checkboxes)
+
+Verified: ADMIN login -> JWT -> GET users = 200; STAFF login -> JWT -> GET users = 403;
+no JWT -> GET users = 401, through the existing authorization infrastructure.
+
+# 40. Regression Tests
+
+- [x] User/Role persistence tests pass
+- [x] JWT authentication tests pass
+- [x] ADMIN/STAFF authorization tests pass
+- [x] Initial Admin Bootstrap tests pass
+- [x] Flyway validation passes
+- [x] Hibernate schema validation passes
 - [x] Application starts successfully
-- [x] Existing tests continue to pass
+
+# Acceptance Criteria
+
+- [x] `GET /api/v1/users` is implemented
+- [x] `GET /api/v1/users/{id}` is implemented
+- [x] `POST /api/v1/users` is implemented
+- [x] `PUT /api/v1/users/{id}` is implemented
+- [x] `PATCH /api/v1/users/{id}/status` is implemented
+- [x] All User Management endpoints require ADMIN authorization
+- [x] STAFF receives `403` for User Management endpoints
+- [x] Unauthenticated requests receive `401`
+- [x] User listing supports pagination
+- [x] Basic status/role filtering works
+- [x] ADMIN can create STAFF
+- [x] New STAFF defaults to ACTIVE
+- [x] New STAFF password is securely encoded
+- [x] Duplicate email is rejected
+- [x] ADMIN cannot be created through the STAFF creation endpoint
+- [x] ADMIN can update allowed profile fields
+- [x] Email cannot be changed through general update
+- [x] Password cannot be changed through general update
+- [x] Roles cannot be changed through general update
+- [x] ADMIN can change STAFF status
+- [x] Users are not hard-deleted
+- [x] Current ADMIN self-lockout is prevented
+- [x] Last usable ADMIN is protected
+- [x] Password/password hash is never exposed
+- [x] Existing User/Role repositories are reused
+- [x] Existing JWT authentication is reused
+- [x] Existing ADMIN/STAFF authorization is reused
+- [x] Common API/error conventions are followed
+- [x] Tests pass
+- [x] Application starts successfully
 - [x] Flyway validation passes
 - [x] Hibernate `ddl-auto=validate` passes
-- [x] No unexpected database migration is introduced
-
-## Acceptance Criteria
-
-- [x] `ADMIN` maps to `ROLE_ADMIN`
-- [x] `STAFF` maps to `ROLE_STAFF`
-- [x] Authenticated users expose correct authorities
-- [x] Authorities are available through Spring Security
-- [x] Method security is enabled
-- [x] `@PreAuthorize("hasRole('ADMIN')")` works
-- [x] `@PreAuthorize("hasRole('STAFF')")` works
-- [x] `@PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")` works
-- [x] ADMIN can access ADMIN-protected functionality
-- [x] STAFF cannot access ADMIN-only functionality
-- [x] STAFF can access STAFF-allowed functionality
-- [x] Missing authentication results in `401`
-- [x] Invalid/expired authentication results in `401`
-- [x] Authenticated user without permission receives `403`
-- [x] AuthenticationEntryPoint handles unauthenticated access
-- [x] AccessDeniedHandler handles forbidden access
-- [x] Existing JWT authentication continues working
-- [x] User account status restrictions continue working
-- [x] Backend remains authoritative for authorization
-- [x] No duplicate role model is introduced
-- [x] No role hierarchy is introduced
-- [x] No database schema change is required
-- [x] Existing Flyway migrations remain unchanged
-- [x] Authorization tests pass
-- [x] Existing authentication tests pass
-- [x] Application starts successfully
-- [x] No User Management functionality is implemented
+- [x] Existing applied migrations remain unchanged
 - [x] No unrelated feature is implemented
-
-## Additional source testing requirements (no checkbox in issue)
-
-24. Method Security Tests: actual ADMIN allow/STAFF deny through @PreAuthorize Spring proxy.
-25. 401 / 403 Tests: missing/invalid/expired authentication -> 401, ADMIN allowed, STAFF -> 403.
-Also verify no implicit hierarchy, immediate DB role changes, multiple/no-role accounts,
-current principal/SecurityContext, safe consistent errors and no token/credential logging.

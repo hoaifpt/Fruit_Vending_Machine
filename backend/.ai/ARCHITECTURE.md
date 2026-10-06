@@ -144,6 +144,22 @@ datasource connection; READ_COMMITTED rechecks after the lock. No schema changes
 Existing ADMIN (any status) skips validation and all writes; configuration cannot reset
 passwords/reactivate users/promote STAFF. See ../../docs/initial-admin-bootstrap.md.
 
+### user management (issue #12)
+
+UserController uses dedicated strict request DTOs, common ApiResponse and safe UserResponse/
+UserPageResponse; UserService owns transactions, credential/role assignment and lifecycle rules.
+Existing repositories, JWT and @PreAuthorize ADMIN infrastructure are reused. Actual users
+HTTP paths also require ADMIN before MVC validation. Lists page root users in PostgreSQL,
+then graph-fetch roles only for page IDs; never paginate a collection fetch. Status/role
+filters combine without duplicate roots. Existing extensible role strings remain intact.
+AccountCredentialPolicy is shared with bootstrap; safe validation errors are adapted at
+each boundary without changing bootstrap provisioning rules. Login/create strip/lowercase
+email before validation; passwords remain unchanged. No schema/dependency change.
+UserStatusLockRepository reserves FVM advisory transaction operation 2 for status decisions;
+READ_COMMITTED reloads actor after locking, prevents concurrent cross-disable, and guards
+self/last ACTIVE ADMIN. Profile/status writes use a user row lock to avoid stale updates.
+See ../../docs/user-management.md and repository api-contract/api.yaml.
+
 ## 4. Layer Responsibilities
 
 Normal request flow:

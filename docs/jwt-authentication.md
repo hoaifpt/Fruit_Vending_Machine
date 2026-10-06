@@ -10,9 +10,9 @@ Flyway seeds ADMIN/STAFF roles only; no account/password is seeded in migrations
 Issue #8 adds environment-driven [Initial Admin Bootstrap](initial-admin-bootstrap.md)
 for the first administrator, with no default credentials or schema change. A database
 without any ADMIN now requires INITIAL_ADMIN_EMAIL/INITIAL_ADMIN_PASSWORD on first startup.
-Normal user management remains a future issue.
+Issue #12 adds [ADMIN-only User Management](user-management.md) for operational STAFF accounts.
 Issue #10 enables [ADMIN/STAFF method authorization](admin-staff-authorization.md).
-Roles remain independent; no business/User Management endpoint is introduced.
+Roles remain independent; User Management requires ADMIN using this infrastructure.
 
 ## Local configuration and startup
 
@@ -63,7 +63,7 @@ Integration tests parse YAML, resolve local references and compare methods, path
 operationId/tag/summary, request body, response/status/header/example definitions,
 schema fields/types/formats/required/validation/enum/refs and security schemes to OpenAPI.
 
-Login sends JSON with required nonblank valid email (max 254 characters) and nonblank
+Login sends JSON with required nonblank valid email (max 254 after strip/lowercase) and nonblank
 password (max 72 characters AND 72 UTF-8 bytes, due to BCrypt). Email is normalized to
 lowercase; password is never modified. Remove any Authorization header when logging in.
 
@@ -74,8 +74,8 @@ handling from XSS; production browser storage/refresh strategy belongs to a late
 
 For authenticated API requests send `Authorization: Bearer YOUR_ACCESS_TOKEN`.
 Swagger Authorize accepts only the token value (omit `Bearer`); it does not persist
-authorization between browser sessions. Currently login is the only shipped application
-endpoint; no unrelated protected business endpoint is invented for demonstration.
+authorization between browser sessions. The Users tag exposes the five ADMIN-only
+User Management operations; GET users is a safe authenticated request.
 
 Error responses follow common ApiErrorResponse (timestamp/status/error/message/path;
 fieldErrors only when nonempty). No rejected password value, hash, JWT or internal details.
@@ -86,7 +86,7 @@ fieldErrors only when nonempty). No rejected password value, hash, JWT or intern
   A present invalid header is rejected even on public login/health/docs; remove it first.
   Security 401 responses include `WWW-Authenticate: Bearer` and no-store.
 - `403`: common `Access denied` for authenticated users lacking required authority;
-  issue #10 enables method RBAC, without introducing business endpoints.
+  User Management uses ADMIN-only method RBAC and HTTP path authorization.
 - `500`: generic unexpected error, never internal/security details.
 
 ## Token and security design

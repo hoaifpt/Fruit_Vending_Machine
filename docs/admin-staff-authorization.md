@@ -2,7 +2,8 @@
 
 Backend đã có nền RBAC bằng Spring Security method authorization. Issue này **không**
 thêm User Management, `/api/v1/users`, permission API hay endpoint nghiệp vụ/demo.
-API ứng dụng hiện tại vẫn chỉ có login. Không có refresh token hoặc role hierarchy.
+Issue #12 bổ sung [User Management](user-management.md), tái sử dụng nền RBAC này
+với ADMIN-only policy trên các API thật. Không có refresh token hoặc role hierarchy.
 
 ## Nguồn quyền và tích hợp JWT
 
@@ -78,7 +79,7 @@ Authorization header, JWT, password/hash hoặc key; không bật bind/body debu
 ## Swagger và API contract
 
 Không có operation RBAC mới; không xuất endpoint test vào Swagger hoặc contract.
-`api-contract/api.yaml` vẫn chỉ mô tả POST login, metadata được cập nhật tình trạng nền RBAC.
+Sau issue #12, `api-contract/api.yaml` mô tả POST login và năm API quản lý user dưới tag Users.
 Generated OpenAPI và contract giữ cùng metadata, Auth grouping và public login/security schema.
 Mỗi API nghiệp vụ tương lai phải ghi rõ role policy thực tế, 401/403 và DTO/validation/error
 trong cả Swagger và contract cùng lúc triển khai; không ghi ví dụ tương lai như API đã chạy.
@@ -91,8 +92,8 @@ SERVER_PORT=8080:
 - OpenAPI JSON: http://localhost:8080/v3/api-docs
 - OpenAPI YAML: http://localhost:8080/v3/api-docs.yaml
 
-Authorize bằng access token (không gõ thêm Bearer). UI không thể thử ADMIN-only nghiệp vụ
-vì chưa có API đó; hành vi RBAC được kiểm chứng tự động bằng fixtures trong `src/test`.
+Authorize bằng access token (không gõ thêm Bearer). Có thể thử GET users bằng ADMIN token;
+STAFF nhận 403. Fixtures RBAC trong `src/test` tiếp tục kiểm tra các expression độc lập.
 Production tiếp tục tắt Swagger/OpenAPI. Không đưa credential/token thật vào ví dụ hoặc Git.
 
 ## Verification

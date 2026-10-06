@@ -21,9 +21,9 @@ public class AccountCredentialPolicy {
     }
 
     public String normalizeEmail(String email) {
-        String normalized = email.strip().toLowerCase(Locale.ROOT);
+        String normalized = email == null ? "" : email.strip().toLowerCase(Locale.ROOT);
         if (!validator.validate(new EmailValue(normalized)).isEmpty()) {
-            throw new IllegalStateException("Initial admin bootstrap: INITIAL_ADMIN_EMAIL must be a valid email (maximum 254 characters)");
+            throw new IllegalArgumentException("Email must be a valid email (maximum 254 characters)");
         }
         return normalized;
     }
@@ -33,9 +33,9 @@ public class AccountCredentialPolicy {
         if (minimum < 8 || minimum > 72) {
             throw new IllegalStateException("Account password policy: PASSWORD_MIN_LENGTH must be between 8 and 72");
         }
-        if (password.isBlank() || password.codePointCount(0, password.length()) < minimum
+        if (password == null || password.isBlank() || password.codePointCount(0, password.length()) < minimum
                 || password.getBytes(StandardCharsets.UTF_8).length > 72) {
-            throw new IllegalStateException("Initial admin bootstrap: INITIAL_ADMIN_PASSWORD must contain at least "
+            throw new IllegalArgumentException("Password must contain at least "
                     + minimum + " characters and at most 72 UTF-8 bytes");
         }
     }

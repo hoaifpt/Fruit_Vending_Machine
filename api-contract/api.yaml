@@ -2,12 +2,14 @@ openapi: 3.1.0
 info:
   title: Fruit Machine Backend API
   version: v1
-  description: Management API. Login is public; other application endpoints require Bearer authentication. ADMIN/STAFF method authorization is enabled with independent roles. No refresh tokens or business APIs yet.
+  description: Management API. Login is public; other application endpoints require Bearer authentication. ADMIN/STAFF roles are independent. User Management requires ADMIN and creates STAFF accounts. No refresh tokens.
 servers:
   - url: http://localhost:8080
 tags:
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
+  - name: Users
+    description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
   /api/v1/auth/login:
     post:
@@ -16,7 +18,7 @@ paths:
       summary: Login using email and password
       description: >-
         Public endpoint for existing ACTIVE management accounts with BCrypt password hashes.
-        Email is normalized to lowercase. Password is never trimmed or normalized.
+        Email is stripped and lowercased before validation. Password is never trimmed or normalized.
         Password must be nonblank, at most 72 characters AND 72 UTF-8 bytes.
         Unknown email, wrong password, INACTIVE and LOCKED accounts return the same generic 401.
         No refresh token. Send the access token as Authorization: Bearer <token> for protected APIs.
@@ -85,6 +87,357 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiErrorResponse'
+  /api/v1/users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      summary: List management users
+      description: >-
+        ADMIN only. Database pagination with optional combined status/role filters. Stable order: createdAt descending, UUID ascending. Default page 0, size 20; maximum size 100. Returns all account types without credentials. Out-of-range pages are empty.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          description: Zero-based page index.
+          schema: {type: integer, format: int32, minimum: 0, default: 0}
+        - name: size
+          in: query
+          required: false
+          description: Page size, 1 to 100.
+          schema: {type: integer, format: int32, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          required: false
+          description: Optional account status filter.
+          schema: {type: string, enum: [ACTIVE, INACTIVE, LOCKED]}
+        - name: role
+          in: query
+          required: false
+          description: Optional ADMIN or STAFF membership filter; roles remain independent.
+          schema: {type: string, enum: [ADMIN, STAFF]}
+      responses:
+        '200':
+          description: Paginated safe account profiles
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUserPageResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","message":"Users retrieved","data":{"content":[{"id":"c6a33ea7-0c1c-4bbf-a890-3b7286d10a01","email":"staff@example.com","fullName":"Nguyen Van A","phone":"0901234567","status":"ACTIVE","roles":["STAFF"],"createdAt":"2026-10-06T00:00:00Z","updatedAt":"2026-10-06T00:00:00Z"}],"page":0,"size":20,"totalElements":1,"totalPages":1}}
+        '400':
+          description: Invalid parameters, validation failure or malformed/unknown JSON fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":400,"error":"Bad Request","message":"Request body is missing or malformed","path":"/api/v1/users"}
+        '401':
+          description: Missing/invalid/expired Bearer token or unavailable account
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":401,"error":"Unauthorized","message":"Authentication required or access token invalid","path":"/api/v1/users"}
+        '403':
+          description: Authenticated account lacks ADMIN access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":403,"error":"Forbidden","message":"Access denied","path":"/api/v1/users"}
+        '500':
+          description: Unexpected server/configuration error; no internal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":500,"error":"Internal Server Error","message":"An unexpected error occurred","path":"/api/v1/users"}
+    post:
+      tags: [Users]
+      operationId: createStaff
+      summary: Create an operational STAFF account
+      description: >-
+        ADMIN only. Atomically creates an ACTIVE account with the existing STAFF role and BCrypt password. Email is stripped/lowercased, unique across all accounts. Password uses shared PASSWORD_MIN_LENGTH (default 12 code points), maximum 72 UTF-8 bytes. Only email, password, fullName and optional phone are accepted. Role/status/id/timestamp fields are rejected. A missing STAFF role returns safe 500.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+            example: {email: staff@example.com, password: '<new-staff-password>', fullName: Nguyen Van A, phone: '0901234567'}
+      responses:
+        '201':
+          description: ACTIVE STAFF created; Location points to the new account
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+            Location:
+              description: Relative URL of the created account.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUserResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","message":"STAFF account created","data":{"id":"c6a33ea7-0c1c-4bbf-a890-3b7286d10a01","email":"staff@example.com","fullName":"Nguyen Van A","phone":"0901234567","status":"ACTIVE","roles":["STAFF"],"createdAt":"2026-10-06T00:00:00Z","updatedAt":"2026-10-06T00:00:00Z"}}
+        '400':
+          description: Invalid parameters, validation failure or malformed/unknown JSON fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":400,"error":"Bad Request","message":"Request body is missing or malformed","path":"/api/v1/users"}
+        '401':
+          description: Missing/invalid/expired Bearer token or unavailable account
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":401,"error":"Unauthorized","message":"Authentication required or access token invalid","path":"/api/v1/users"}
+        '403':
+          description: Authenticated account lacks ADMIN access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":403,"error":"Forbidden","message":"Access denied","path":"/api/v1/users"}
+        '500':
+          description: Unexpected server/configuration error; no internal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":500,"error":"Internal Server Error","message":"An unexpected error occurred","path":"/api/v1/users"}
+        '409':
+          description: Email already exists or concurrent database uniqueness conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":409,"error":"Conflict","message":"Email is already in use","path":"/api/v1/users"}
+  /api/v1/users/{id}:
+    get:
+      tags: [Users]
+      operationId: getUser
+      summary: Get management user details
+      description: >-
+        ADMIN only. Returns a safe profile and current roles for the account UUID.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Account UUID.
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Safe account profile
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUserResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","message":"User retrieved","data":{"id":"c6a33ea7-0c1c-4bbf-a890-3b7286d10a01","email":"staff@example.com","fullName":"Nguyen Van A","phone":"0901234567","status":"ACTIVE","roles":["STAFF"],"createdAt":"2026-10-06T00:00:00Z","updatedAt":"2026-10-06T00:00:00Z"}}
+        '400':
+          description: Invalid parameters, validation failure or malformed/unknown JSON fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":400,"error":"Bad Request","message":"Request body is missing or malformed","path":"/api/v1/users/{id}"}
+        '401':
+          description: Missing/invalid/expired Bearer token or unavailable account
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":401,"error":"Unauthorized","message":"Authentication required or access token invalid","path":"/api/v1/users/{id}"}
+        '403':
+          description: Authenticated account lacks ADMIN access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":403,"error":"Forbidden","message":"Access denied","path":"/api/v1/users/{id}"}
+        '500':
+          description: Unexpected server/configuration error; no internal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":500,"error":"Internal Server Error","message":"An unexpected error occurred","path":"/api/v1/users/{id}"}
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":404,"error":"Not Found","message":"User not found","path":"/api/v1/users/{id}"}
+    put:
+      tags: [Users]
+      operationId: updateUser
+      summary: Update management user profile
+      description: >-
+        ADMIN only. Replaces fullName and phone. Omitted/null phone clears it. Email, password, roles, status and persistence fields are rejected. Account identity, membership and history are preserved.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Account UUID.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+            example: {fullName: Nguyen Van B, phone: '0912345678'}
+      responses:
+        '200':
+          description: Updated safe account profile
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUserResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","message":"User updated","data":{"id":"c6a33ea7-0c1c-4bbf-a890-3b7286d10a01","email":"staff@example.com","fullName":"Nguyen Van B","phone":"0912345678","status":"ACTIVE","roles":["STAFF"],"createdAt":"2026-10-06T00:00:00Z","updatedAt":"2026-10-06T00:00:00Z"}}
+        '400':
+          description: Invalid parameters, validation failure or malformed/unknown JSON fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":400,"error":"Bad Request","message":"Request body is missing or malformed","path":"/api/v1/users/{id}"}
+        '401':
+          description: Missing/invalid/expired Bearer token or unavailable account
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":401,"error":"Unauthorized","message":"Authentication required or access token invalid","path":"/api/v1/users/{id}"}
+        '403':
+          description: Authenticated account lacks ADMIN access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":403,"error":"Forbidden","message":"Access denied","path":"/api/v1/users/{id}"}
+        '500':
+          description: Unexpected server/configuration error; no internal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":500,"error":"Internal Server Error","message":"An unexpected error occurred","path":"/api/v1/users/{id}"}
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":404,"error":"Not Found","message":"User not found","path":"/api/v1/users/{id}"}
+  /api/v1/users/{id}/status:
+    patch:
+      tags: [Users]
+      operationId: updateUserStatus
+      summary: Change management user status
+      description: >-
+        ADMIN only. Sets ACTIVE, INACTIVE or LOCKED, preserving the account and its roles/history. INACTIVE/LOCKED immediately prevents login and reuse of issued JWTs. Self-disable/lock and disabling/locking the last ACTIVE ADMIN return 409. Status decisions are serialized and the acting ADMIN is rechecked after obtaining the lock; a concurrently disabled actor receives 403. Same-status requests are idempotent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Account UUID.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStatusRequest'
+            example: {status: INACTIVE}
+      responses:
+        '200':
+          description: Safe profile with current status
+          headers:
+            Cache-Control:
+              schema: {type: string, const: no-store}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponseUserResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","message":"User status updated","data":{"id":"c6a33ea7-0c1c-4bbf-a890-3b7286d10a01","email":"staff@example.com","fullName":"Nguyen Van A","phone":"0901234567","status":"INACTIVE","roles":["STAFF"],"createdAt":"2026-10-06T00:00:00Z","updatedAt":"2026-10-06T00:00:00Z"}}
+        '400':
+          description: Invalid parameters, validation failure or malformed/unknown JSON fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":400,"error":"Bad Request","message":"Request body is missing or malformed","path":"/api/v1/users/{id}/status"}
+        '401':
+          description: Missing/invalid/expired Bearer token or unavailable account
+          headers:
+            WWW-Authenticate:
+              schema: {type: string, const: Bearer}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":401,"error":"Unauthorized","message":"Authentication required or access token invalid","path":"/api/v1/users/{id}/status"}
+        '403':
+          description: Authenticated account lacks ADMIN access
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":403,"error":"Forbidden","message":"Access denied","path":"/api/v1/users/{id}/status"}
+        '500':
+          description: Unexpected server/configuration error; no internal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":500,"error":"Internal Server Error","message":"An unexpected error occurred","path":"/api/v1/users/{id}/status"}
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":404,"error":"Not Found","message":"User not found","path":"/api/v1/users/{id}/status"}
+        '409':
+          description: Self-lockout or last ACTIVE ADMIN conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorResponse'
+              example: {"timestamp":"2026-10-06T00:00:00Z","status":409,"error":"Conflict","message":"You cannot disable or lock your own account","path":"/api/v1/users/{id}/status"}
 components:
   securitySchemes:
     bearerAuth:
@@ -93,10 +446,115 @@ components:
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
   schemas:
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, fullName]
+      description: Create an ACTIVE STAFF account. Only these four fields are accepted; roles/status are server controlled.
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+          description: Login email; stripped and lowercased before validation and persistence.
+          example: staff@example.com
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 1
+          maxLength: 72
+          description: Unmodified password. Shared PASSWORD_MIN_LENGTH policy (default 12 Unicode code points); at most 72 UTF-8 bytes.
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Nonblank display name, stripped before saving.
+          example: Nguyen Van A
+        phone:
+          type: [string, 'null']
+          maxLength: 32
+          description: Optional contact phone, maximum 32 characters; null clears it.
+          minLength: 0
+          example: '0901234567'
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [fullName]
+      description: Replace profile fields only. Email, password, roles, status and persistence fields are rejected.
+      properties:
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Nonblank display name, stripped before saving.
+          example: Nguyen Van B
+        phone:
+          type: [string, 'null']
+          maxLength: 32
+          description: Optional contact phone; omitted/null clears it (PUT replacement).
+          minLength: 0
+          example: '0912345678'
+    UpdateUserStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      description: Change account availability. Self-disable/lock and removing the last ACTIVE ADMIN are conflicts.
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, LOCKED]
+          description: ACTIVE = usable; INACTIVE = disabled; LOCKED = blocked.
+          example: INACTIVE
+    UserResponse:
+      type: object
+      required: [id, email, fullName, status, roles, createdAt, updatedAt]
+      description: Safe account profile. No credentials or tokens. Timestamps are UTC instants.
+      properties:
+        id: {type: string, format: uuid, description: Account UUID.}
+        email: {type: string, format: email, description: Normalized login email.}
+        fullName: {type: string, description: Display name.}
+        phone: {type: [string, 'null'], description: Optional contact phone.}
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, LOCKED]
+          description: Current account availability.
+        roles:
+          type: array
+          uniqueItems: true
+          description: Distinct current role names, including ADMIN/STAFF; existing extensible roles are preserved.
+          items: {type: string}
+        createdAt: {type: string, format: date-time, description: Account creation instant.}
+        updatedAt: {type: string, format: date-time, description: Last profile/status modification instant.}
+    UserPageResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      description: Database-paginated accounts, ordered by createdAt descending then UUID ascending.
+      properties:
+        content:
+          type: array
+          items: {$ref: '#/components/schemas/UserResponse'}
+        page: {type: integer, format: int32, minimum: 0, description: Zero-based page index.}
+        size: {type: integer, format: int32, minimum: 1, maximum: 100, description: Requested page size.}
+        totalElements: {type: integer, format: int64, minimum: 0, description: Total matching accounts.}
+        totalPages: {type: integer, format: int32, minimum: 0, description: Total pages.}
+    ApiResponseUserResponse:
+      type: object
+      properties:
+        timestamp: {type: string, format: date-time}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/UserResponse'}
+    ApiResponseUserPageResponse:
+      type: object
+      properties:
+        timestamp: {type: string, format: date-time}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/UserPageResponse'}
     LoginRequest:
       type: object
       required: [email, password]
-      description: Management account login. Email is normalized to lowercase; password is not modified.
+      description: Management account login. Email is stripped and lowercased; password is not modified.
       properties:
         email:
           type: string

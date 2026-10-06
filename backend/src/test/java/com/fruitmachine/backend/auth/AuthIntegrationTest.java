@@ -223,7 +223,8 @@ class AuthIntegrationTest {
         var contract = new ObjectMapper(new YAMLFactory()).readTree(Path.of("../api-contract/api.yaml").toFile());
         assertThat(actual.path("info")).isEqualTo(contract.path("info"));
         assertThat(actual.path("tags")).isEqualTo(contract.path("tags"));
-        assertThat(actual.at("/paths").fieldNames()).toIterable().containsExactly("/api/v1/auth/login");
+        assertThat(actual.at("/paths").fieldNames()).toIterable().containsExactlyInAnyOrder(
+                "/api/v1/auth/login", "/api/v1/users", "/api/v1/users/{id}", "/api/v1/users/{id}/status");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

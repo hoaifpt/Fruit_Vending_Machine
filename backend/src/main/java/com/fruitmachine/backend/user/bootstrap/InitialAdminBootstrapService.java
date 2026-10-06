@@ -50,8 +50,17 @@ public class InitialAdminBootstrapService {
         if (!missing.isEmpty()) {
             throw new IllegalStateException("Initial admin bootstrap required: missing " + String.join(", ", missing));
         }
-        String email = credentials.normalizeEmail(properties.email());
-        credentials.validateNewPassword(properties.password());
+        String email;
+        try {
+            email = credentials.normalizeEmail(properties.email());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Initial admin bootstrap: INITIAL_ADMIN_EMAIL: " + ex.getMessage());
+        }
+        try {
+            credentials.validateNewPassword(properties.password());
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Initial admin bootstrap: INITIAL_ADMIN_PASSWORD: " + ex.getMessage());
+        }
         String fullName = properties.fullName() == null || properties.fullName().isBlank()
                 ? "Initial Administrator" : properties.fullName().strip();
         if (fullName.length() > 200) {
