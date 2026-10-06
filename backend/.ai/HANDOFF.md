@@ -9,12 +9,13 @@ PR/merge/GitHub issue edits and a new issue remain out of scope.
 - Repository: C:/Users/north/Documents/School/9/FruitMachine/backend.
 - Spring Boot module: repository-root backend/; docs and api-contract at repository root.
 - Branch: feature/12-user-management-api, created from freshly fetched origin/dev 75fdfe0
-  (user merged issue #10 through PR #13). HEAD remains 75fdfe0; #12 work is uncommitted.
+  (user merged issue #10 through PR #13). Implementation commit: cde96a8, pushed to origin.
+  Branch tracks origin/feature/12-user-management-api; recheck live Git for current HEAD.
 - Issue: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/12, [BE] Implement User Management API.
 - Implementation complete locally; all 85 source checklist items and source section 39
   verified. Exact checklist and detailed evidence are in CURRENT_TASK.md.
 
-## Delivered behavior and pending changes
+## Delivered behavior and changed files
 
 - Five ADMIN-only /api/v1/users operations: list/details/create STAFF/profile/status.
 - PostgreSQL pagination + status/role filters, page-bounded roles fetch, strict safe DTOs;
@@ -51,7 +52,11 @@ PR/merge/GitHub issue edits and a new issue remain out of scope.
 ## Git delivery and next authorized step
 
 User's manual retest passed; commit/push of #12 is now explicitly authorized.
-Delivery is pending verification against origin. No PR/merge/GitHub checklist edit is authorized.
+Implementation cde96a8 was pushed successfully to origin/feature/12-user-management-api.
+Git's configured credential helper was empty; the push used the existing Git Credential
+Manager account via a command-local helper override, without changing global configuration.
+This documentation follow-up records delivery; verify its HEAD against origin after push.
+No PR/merge/GitHub checklist edit has been performed or authorized.
 User handles merges into dev manually. Future issue branches start
 from latest dev and use feature/<issue>-<description> or fix/<issue>-<description>.
 Only backend is in scope. Keep API contract/Swagger synchronized and reproduce the full

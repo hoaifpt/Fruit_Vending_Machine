@@ -71,7 +71,8 @@ Evidence:
 
 All 85 original source checklist items below complete. Source section 39 (no checkboxes)
 also verified by real login/JWT API tests. No implementation/verification blocker remains.
-User's manual retest passed on 2026-10-06; commit/push delivery is authorized.
+User's manual retest passed on 2026-10-06. Implementation commit cde96a8 was pushed
+to origin/feature/12-user-management-api; this documentation follow-up records delivery.
 User handles merge into dev manually; no PR/merge/issue edits are authorized.
 
 Swagger UI: http://localhost:8080/swagger-ui/index.html
