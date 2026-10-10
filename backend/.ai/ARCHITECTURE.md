@@ -173,6 +173,18 @@ no silent rounding. Mapper exposes catalog fields only; no batch/inventory/slot 
 OpenApiConfig supplies Products examples/headers; versioned api-contract/api.yaml is kept
 consistent by ProductManagementDocumentationTest. See ../../docs/product-management.md.
 
+### machine management (issue #17)
+
+MachineController -> MachineService -> MachineRepository reuses existing Machine/MachineStatus
+and Flyway V2 without schema/dependency changes. Strict feature DTOs, explicit mapper,
+ADMIN writes/ADMIN-STAFF reads, DB page/status/literal code-name-location search and
+approved sorting follow existing Product conventions. POST explicitly sets INACTIVE;
+code normalized/immutable, lastSeenAt system-managed. BigDecimal thresholds enforce
+schema bounds/two decimals and strict minimum < maximum. Configuration/status writes
+lock the row and preserve related history; no slots/inventory/telemetry workflows.
+Swagger examples/headers and api-contract/api.yaml agree through Machine documentation tests.
+See ../../docs/machine-management.md.
+
 ## 4. Layer Responsibilities
 
 

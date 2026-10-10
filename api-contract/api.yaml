@@ -8,11 +8,636 @@ servers:
 tags:
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
+  - name: Machines
+    description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: Products
     description: Management catalog. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
+  "/api/v1/machines/{id}":
+    "get":
+      "tags":
+        - "Machines"
+      "summary": "Get machine details"
+      "description": "ADMIN or STAFF. Returns machine configuration fields for an existing UUID, including INACTIVE machines; no slot/inventory/sensor collections."
+      "operationId": "getMachine"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Machine configuration"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineResponse"
+              "example":
+                "data":
+                  "maxTemperature": 8.0
+                  "lastSeenAt": null
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "code": "FV-HCM-001"
+                  "minTemperature": 2.0
+                  "name": "Fruit Machine - Campus A"
+                  "location": "Building A - Ground Floor"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "maxHumidity": 80.0
+                  "minHumidity": 40.0
+                  "status": "INACTIVE"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                "message": "Machine retrieved"
+                "timestamp": "2026-10-10T00:00:00Z"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Machine not found"
+                "status": 404
+                "path": "/api/v1/machines/{id}"
+                "error": "Not Found"
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Request body is missing or malformed"
+                "status": 400
+                "path": "/api/v1/machines/{id}"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines/{id}"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks the required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines/{id}"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines/{id}"
+                "error": "Internal Server Error"
+      "security":
+        -
+          "bearerAuth": []
+    "put":
+      "tags":
+        - "Machines"
+      "summary": "Replace machine configuration"
+      "description": "ADMIN only. Replaces required name/location and four environmental thresholds. Minimum must be strictly below maximum; schema bounds and two decimal places enforced. code/status/id/lastSeenAt/timestamps are rejected. Preserves slots, sensor history and all related records."
+      "operationId": "updateMachine"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateMachineRequest"
+            "example":
+              "maxTemperature": 8.0
+              "minTemperature": 2.0
+              "name": "Updated Campus Machine"
+              "location": "Building A - Ground Floor"
+              "maxHumidity": 80.0
+              "minHumidity": 40.0
+        "required": true
+      "responses":
+        "200":
+          "description": "Updated machine configuration"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineResponse"
+              "example":
+                "data":
+                  "maxTemperature": 8.0
+                  "lastSeenAt": null
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "code": "FV-HCM-001"
+                  "minTemperature": 2.0
+                  "name": "Updated Campus Machine"
+                  "location": "Building A - Ground Floor"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "maxHumidity": 80.0
+                  "minHumidity": 40.0
+                  "status": "INACTIVE"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                "message": "Machine updated"
+                "timestamp": "2026-10-10T00:00:00Z"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Machine not found"
+                "status": 404
+                "path": "/api/v1/machines/{id}"
+                "error": "Not Found"
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Request body is missing or malformed"
+                "status": 400
+                "path": "/api/v1/machines/{id}"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines/{id}"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks the required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines/{id}"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines/{id}"
+                "error": "Internal Server Error"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines":
+    "get":
+      "tags":
+        - "Machines"
+      "summary": "List/search machines"
+      "description": "ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on code/name/location. Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. All three statuses are visible by default; out-of-range pages are empty."
+      "operationId": "listMachines"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional ACTIVE, INACTIVE or MAINTENANCE filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "ACTIVE"
+              - "INACTIVE"
+              - "MAINTENANCE"
+        -
+          "name": "search"
+          "in": "query"
+          "description": "Optional literal substring of code/name/location, case-insensitive, stripped; blank means no filter. Maximum 200 characters."
+          "required": false
+          "schema":
+            "type": "string"
+            "maxLength": 200
+            "minLength": 0
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "One approved field: id, code, name, location, status, createdAt, updatedAt; optional asc/desc (asc when omitted). Example name,asc."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "createdAt,desc"
+      "responses":
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Request body is missing or malformed"
+                "status": 400
+                "path": "/api/v1/machines"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks the required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines"
+                "error": "Internal Server Error"
+        "200":
+          "description": "Paginated machines"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachinePageResponse"
+              "example":
+                "data":
+                  "size": 20
+                  "page": 0
+                  "totalPages": 1
+                  "totalElements": 1
+                  "content":
+                    -
+                      "maxTemperature": 8.0
+                      "lastSeenAt": null
+                      "createdAt": "2026-10-10T00:00:00Z"
+                      "code": "FV-HCM-001"
+                      "minTemperature": 2.0
+                      "name": "Fruit Machine - Campus A"
+                      "location": "Building A - Ground Floor"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "maxHumidity": 80.0
+                      "minHumidity": 40.0
+                      "status": "INACTIVE"
+                      "updatedAt": "2026-10-10T00:00:00Z"
+                "message": "Machines retrieved"
+                "timestamp": "2026-10-10T00:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
+    "post":
+      "tags":
+        - "Machines"
+      "summary": "Register machine"
+      "description": "ADMIN only. Creates INACTIVE machine with stripped/uppercased unique code and null lastSeenAt. Only code/name/location/minTemperature/maxTemperature/minHumidity/maxHumidity are accepted. Status/id/lastSeenAt/timestamps/slot fields are rejected. Temperature bounds -100 to 100 Celsius; humidity 0 to 100 percent; minima strictly below maxima; at most two decimal places, never rounded. Database UNIQUE protects concurrent creates."
+      "operationId": "createMachine"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateMachineRequest"
+            "example":
+              "maxTemperature": 8.0
+              "code": "FV-HCM-001"
+              "minTemperature": 2.0
+              "name": "Fruit Machine - Campus A"
+              "location": "Building A - Ground Floor"
+              "maxHumidity": 80.0
+              "minHumidity": 40.0
+        "required": true
+      "responses":
+        "201":
+          "description": "INACTIVE machine created; Location points to the machine"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+            "Location":
+              "description": "Relative URL of the created machine."
+              "schema":
+                "type": "string"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineResponse"
+              "example":
+                "data":
+                  "maxTemperature": 8.0
+                  "lastSeenAt": null
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "code": "FV-HCM-001"
+                  "minTemperature": 2.0
+                  "name": "Fruit Machine - Campus A"
+                  "location": "Building A - Ground Floor"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "maxHumidity": 80.0
+                  "minHumidity": 40.0
+                  "status": "INACTIVE"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                "message": "Machine created"
+                "timestamp": "2026-10-10T00:00:00Z"
+        "409":
+          "description": "code already exists or concurrent database uniqueness conflict"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Machine code is already in use"
+                "status": 409
+                "path": "/api/v1/machines"
+                "error": "Conflict"
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Request body is missing or malformed"
+                "status": 400
+                "path": "/api/v1/machines"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks the required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines"
+                "error": "Internal Server Error"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{id}/status":
+    "patch":
+      "tags":
+        - "Machines"
+      "summary": "Change administrative machine status"
+      "description": "ADMIN only. Sets ACTIVE, INACTIVE or MAINTENANCE, preserving identity and all related history. INACTIVE disables future operational use, not deletion. Same-status requests are idempotent. No slot/inventory/IoT changes or hard deletion."
+      "operationId": "updateMachineStatus"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateMachineStatusRequest"
+            "example":
+              "status": "MAINTENANCE"
+        "required": true
+      "responses":
+        "200":
+          "description": "Machine with current administrative status"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineResponse"
+              "example":
+                "data":
+                  "maxTemperature": 8.0
+                  "lastSeenAt": null
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "code": "FV-HCM-001"
+                  "minTemperature": 2.0
+                  "name": "Fruit Machine - Campus A"
+                  "location": "Building A - Ground Floor"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "maxHumidity": 80.0
+                  "minHumidity": 40.0
+                  "status": "MAINTENANCE"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                "message": "Machine status updated"
+                "timestamp": "2026-10-10T00:00:00Z"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Machine not found"
+                "status": 404
+                "path": "/api/v1/machines/{id}/status"
+                "error": "Not Found"
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Request body is missing or malformed"
+                "status": 400
+                "path": "/api/v1/machines/{id}/status"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines/{id}/status"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks the required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines/{id}/status"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "timestamp": "2026-10-10T00:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines/{id}/status"
+                "error": "Internal Server Error"
+      "security":
+        -
+          "bearerAuth": []
   /api/v1/auth/login:
     post:
       tags: [Auth]
@@ -1051,6 +1676,251 @@ components:
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
   schemas:
+    "UpdateMachineRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Replace machine configuration only; code/status/lastSeenAt/identity/timestamps rejected."
+      "properties":
+        "name":
+          "type": "string"
+          "description": "Nonblank machine name, stripped."
+          "example": "Fruit Machine - Campus A"
+          "maxLength": 200
+          "minLength": 1
+        "location":
+          "type": "string"
+          "description": "Nonblank installation location, stripped."
+          "example": "Building A - Ground Floor"
+          "maxLength": 500
+          "minLength": 1
+        "minTemperature":
+          "type": "number"
+          "description": "Minimum configured Celsius threshold, strictly below maxTemperature; at most two decimals."
+          "example": 2.0
+          "maximum": 100
+          "minimum": -100
+          "multipleOf": 0.01
+        "maxTemperature":
+          "type": "number"
+          "description": "Maximum configured Celsius threshold, strictly above minTemperature; at most two decimals."
+          "example": 8.0
+          "maximum": 100
+          "minimum": -100
+          "multipleOf": 0.01
+        "minHumidity":
+          "type": "number"
+          "description": "Minimum configured humidity percentage, strictly below maxHumidity; at most two decimals."
+          "example": 40.0
+          "maximum": 100
+          "minimum": 0
+          "multipleOf": 0.01
+        "maxHumidity":
+          "type": "number"
+          "description": "Maximum configured humidity percentage, strictly above minHumidity; at most two decimals."
+          "example": 80.0
+          "maximum": 100
+          "minimum": 0
+          "multipleOf": 0.01
+      "required":
+        - "location"
+        - "maxHumidity"
+        - "maxTemperature"
+        - "minHumidity"
+        - "minTemperature"
+        - "name"
+    "ApiResponseMachineResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MachineResponse"
+    "MachineResponse":
+      "type": "object"
+      "description": "Machine identity, administrative status and environmental configuration; no slot/inventory/telemetry collections."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "description": "Machine UUID."
+        "code":
+          "type": "string"
+          "description": "Immutable business code."
+          "example": "FV-HCM-001"
+        "name":
+          "type": "string"
+          "description": "Machine name."
+        "location":
+          "type":
+            - "string"
+            - "null"
+          "description": "Installation location; legacy database rows may be null."
+        "status":
+          "type": "string"
+          "description": "Administrative status, not connectivity."
+          "enum":
+            - "ACTIVE"
+            - "INACTIVE"
+            - "MAINTENANCE"
+        "minTemperature":
+          "type": "number"
+          "description": "Configured minimum Celsius threshold."
+        "maxTemperature":
+          "type": "number"
+          "description": "Configured maximum Celsius threshold."
+        "minHumidity":
+          "type": "number"
+          "description": "Configured minimum humidity percentage."
+        "maxHumidity":
+          "type": "number"
+          "description": "Configured maximum humidity percentage."
+        "lastSeenAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "System-managed last communication instant, UTC; null until heartbeat exists. Read-only."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Creation instant, UTC."
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Modification instant, UTC."
+      "required":
+        - "code"
+        - "createdAt"
+        - "id"
+        - "maxHumidity"
+        - "maxTemperature"
+        - "minHumidity"
+        - "minTemperature"
+        - "name"
+        - "status"
+        - "updatedAt"
+    "CreateMachineRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Register machine, initial status INACTIVE and lastSeenAt null."
+      "properties":
+        "code":
+          "type": "string"
+          "description": "Stable unique code, stripped and uppercased with Locale.ROOT."
+          "example": "FV-HCM-001"
+          "maxLength": 64
+          "minLength": 1
+        "name":
+          "type": "string"
+          "description": "Nonblank machine name, stripped."
+          "example": "Fruit Machine - Campus A"
+          "maxLength": 200
+          "minLength": 1
+        "location":
+          "type": "string"
+          "description": "Nonblank installation location, stripped."
+          "example": "Building A - Ground Floor"
+          "maxLength": 500
+          "minLength": 1
+        "minTemperature":
+          "type": "number"
+          "description": "Minimum configured Celsius threshold, strictly below maxTemperature; at most two decimals."
+          "example": 2.0
+          "maximum": 100
+          "minimum": -100
+          "multipleOf": 0.01
+        "maxTemperature":
+          "type": "number"
+          "description": "Maximum configured Celsius threshold, strictly above minTemperature; at most two decimals."
+          "example": 8.0
+          "maximum": 100
+          "minimum": -100
+          "multipleOf": 0.01
+        "minHumidity":
+          "type": "number"
+          "description": "Minimum configured humidity percentage, strictly below maxHumidity; at most two decimals."
+          "example": 40.0
+          "maximum": 100
+          "minimum": 0
+          "multipleOf": 0.01
+        "maxHumidity":
+          "type": "number"
+          "description": "Maximum configured humidity percentage, strictly above minHumidity; at most two decimals."
+          "example": 80.0
+          "maximum": 100
+          "minimum": 0
+          "multipleOf": 0.01
+      "required":
+        - "code"
+        - "location"
+        - "maxHumidity"
+        - "maxTemperature"
+        - "minHumidity"
+        - "minTemperature"
+        - "name"
+    "UpdateMachineStatusRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Set administrative machine status without deleting histories."
+      "properties":
+        "status":
+          "type": "string"
+          "description": "ACTIVE, INACTIVE or MAINTENANCE; administrative configuration, not connectivity."
+          "enum":
+            - "ACTIVE"
+            - "INACTIVE"
+            - "MAINTENANCE"
+          "example": "MAINTENANCE"
+      "required":
+        - "status"
+    "ApiResponseMachinePageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MachinePageResponse"
+    "MachinePageResponse":
+      "type": "object"
+      "description": "Database-paginated machines matching combined status/search filters."
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MachineResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+          "minimum": 0
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+          "maximum": 100
+          "minimum": 1
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Total matching machines."
+          "minimum": 0
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Total pages."
+          "minimum": 0
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
     UpdateProductRequest:
       type: "object"
       additionalProperties: false

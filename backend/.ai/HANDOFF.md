@@ -1,74 +1,96 @@
-# Chat handoff — 2026-10-06
+# Chat handoff — Issue #17, 2026-10-10
 
-Read AGENTS.md and all .ai guidance; recheck Git/test evidence before continuing.
-User confirmed manual retest and explicitly authorized commit/push for Issue #14.
-PR/merge/GitHub issue edits remain out of scope; user merges into dev manually.
+## User intent / repository
 
-## Workspace and issue
+User requested reading backend/AGENTS.md, all backend/.ai/ and continuing #17.
+These files and the live GitHub issue were read; resumed implementation is complete
+against all original issue checklist items. Full grouped checklist/evidence is in CURRENT_TASK.md.
 
-- Repository: C:/Users/north/Documents/School/9/FruitMachine/backend.
-- Spring module: repository-root backend/; docs/api-contract at repository root.
-- Branch: feature/14-product-management-api, from freshly fetched origin/dev a029904.
-  User merged #12 through PR #15. Implementation e0f19fe is committed and pushed.
-  Branch tracks origin/feature/14-product-management-api; recheck live Git for current HEAD.
-- Issue: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/14,
-  [BE] Implement Product Management API.
-- Implementation complete locally, all 79 checklist items plus section 39 verified.
-  Full original grouped checklist and detailed evidence are in CURRENT_TASK.md.
+Repository: C:/Users/north/Documents/School/9/FruitMachine/backend
+Spring module: repository-root backend/; docs/ and api-contract/ are at root.
+Branch: feature/17-machine-management-api
+Branch base: 4c6212d056abd38bd71e63da1bae04a6b0f6b55a.
+User confirmed everything works and explicitly requested commit/push on 2026-10-10.
+Delivery commit subject: feat: implement machine management API (#17).
+Remote delivery branch: origin/feature/17-machine-management-api.
+Consult Git history/upstream status for the immutable commit ID and push confirmation.
+No PR/merge/issue edits authorized or performed. User handles merges manually.
 
-## Delivered behavior / changed files
+## Delivered behavior
 
-Five /api/v1/products operations: ADMIN reads/writes, STAFF reads only.
-Reuse Product/ProductStatus mappings; new repository/specifications/mapper/service/controller/
-strict create/update/status DTOs and safe response/page DTOs. DB pagination/status+literal
-name/SKU substring search, approved Spring sort with UUID tie-break; stable normalized SKU,
-positive exact BigDecimal NUMERIC(12,2), ACTIVE default, status lifecycle/no DELETE.
-Service/controller method RBAC and validation; HTTP role guards run before MVC parsing.
-Product row locks serialize profile/status writes, preserve unrelated fields and history.
-OpenApiConfig adds Products examples/headers; api-contract/api.yaml synchronized.
-New Product tests, old Auth/RBAC path expectations updated; README/docs/product-management.md/
-authorization/JWT docs and .ai architecture/project/task/handoff synchronized.
-Flyway, entity/enum, pom.xml, .env/.env.example and other apps/hardware unchanged.
-No dependencies/schema change; no batch/inventory/slot/order/payment/upload/IoT workflows.
+Five Machine identity/configuration/status APIs under /api/v1/machines.
+ADMIN reads/writes, STAFF reads. Existing JWT/RBAC/common wrappers/errors reused.
+POST explicitly INACTIVE, lastSeenAt null; stripped/uppercase unique immutable code.
+Required name/location, schema lengths, BigDecimal temperature -100..100/humidity 0..100,
+two decimals, strict min < max. PUT cannot alter code/status/lastSeenAt/timestamps.
+PATCH allows ACTIVE/INACTIVE/MAINTENANCE, same-status idempotent. No hard deletion.
+DB pagination/status/literal case-insensitive code/name/location search and approved sorts.
+Configuration/status row locks protect concurrent writes and preserve related histories.
+Legacy nullable location/lastSeenAt responses are safe. All timestamps use Instant/UTC.
+No schema/dependency/entity/enum/migration changes and no future slot/inventory/IoT workflows.
 
-## Verification and build limitation handled
+## Delivery contents
 
-- Final full mvn -q test: 237 tests, zero failures/errors/skips.
-- Final full mvn -q -f target/issue14-verification-pom.xml clean verify: exit 0,
-  same 237 tests; Java 21.0.10/PostgreSQL 18.6, Flyway V1–V8/Hibernate validate.
-- Normal clean verify cannot delete target/backend-0.0.1-SNAPSHOT.jar while user's existing
-  Java app holds it (observed PID 26924). Do not stop that app without user direction.
-  Ignored temporary verification POM copies unchanged dependencies/plugins and points
-  to original absolute sources/tests/resources, module working directory and separate
-  target/issue14-verification output. Actual repository pom.xml is unchanged.
-- New ProductManagementIntegrationTest 59 + documentation 1; all prior 177 tests pass.
-  DB SQL paging, UNIQUE race, concurrent status/profile writes, historical snapshot
-  preservation, strict input/decimal bounds, real JWT ADMIN/STAFF/anonymous access verified.
-- Full Product operation/schema/example/security/header/parameter contract checks, UI/
-  config/OpenAPI smoke, local reference resolution, existing production docs disablement pass.
-- Verification JAR includes business Product classes; no test/Rbac fixtures.
-- Browser smoke: actual new JAR localhost:64749 on disposable PostgreSQL; login ADMIN200,
-  all five Products operations, Authorize + POST201 + GET search/sort/page200.
-  Screenshot: backend/target/product-management-swagger.jpg (ignored, no secrets).
-  QA token/tab cleared/closed, QA Java stopped, --rm DB auto-removed.
-  User's original app remains running; developer database and .env untouched.
-- Reports: backend/target/issue14-verification/surefire-reports.
-  JAR: backend/target/issue14-verification/backend-0.0.1-SNAPSHOT.jar.
-  git diff --check passes; no unrelated scope changes.
+New machine controller/service/repository/mapper and five DTOs.
+Modified config/OpenApiConfig.java and security/SecurityConfig.java.
+New machine/MachineManagementIntegrationTest.java (59 cases) and
+machine/MachineManagementDocumentationTest.java (one full docs/contract check).
+AuthIntegrationTest/AuthorizationIntegrationTest enumerate the new paths.
+api-contract/api.yaml adds Machines tag, three paths/five operations and seven schemas.
+README.md, docs/machine-management.md, .ai/ARCHITECTURE.md/PROJECT.md/CURRENT_TASK.md/HANDOFF.md updated.
+Inherited uncommitted drafts were preserved/reviewed; stale Product wording corrected.
 
-## Local URLs and next authorized step
+## Verification
 
-With SERVER_PORT=8080, existing .env/PostgreSQL, API_DOCS_ENABLED=true and valid JWT_SECRET:
-Swagger http://localhost:8080/swagger-ui/index.html; OpenAPI http://localhost:8080/v3/api-docs.
-From module: mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
-See docs/product-management.md and frontend contract api-contract/api.yaml.
-User subsequently confirmed their manual retest of #14 passed.
+Java 21.0.10 / Maven 3.9.12; mvn clean verify BUILD SUCCESS.
+297 tests, 0 failures/errors/skipped. All Auth/User/Product and remaining regressions pass.
+PostgreSQL 18 Testcontainers apply/validate eight Flyway migrations, Hibernate validate
+and EntityMappingTest pass. No developer database or real configuration read/modified.
+Initial fixture error (missing loaded_at for slotted inventory) fixed; final suite passes.
+Expected UNIQUE-race/error-handler test log messages are not test failures.
 
-User's manual retest passed; commit/push for #14 is now authorized.
-Implementation e0f19fe was pushed to origin/feature/14-product-management-api, using
-the existing Credential Manager account via a command-local helper override; global
-Git configuration unchanged. This documentation follow-up records the delivery.
-Next: user handles PR/merge into dev manually. No PR/merge/issue edits performed.
-Future issue branches start from latest dev (feature/<issue>-<description> or fix/...).
-Keep backend-only scope, contract/Swagger synchronized and full source checklist at handoff.
-Payment/dispensing remains approved future design, not implemented in this issue.
+Contract fully compared to exposed OpenAPI: operations/parameters/schemas/constraints/
+headers/examples/security. Existing Auth/User/Product documentation tests also pass.
+Packaged JAR started separately against disposable QA PostgreSQL:
+Swagger HTML/CSS/JS/config/OpenAPI 200; five Machine operations present.
+Real login 200, create 201 (normalized code/INACTIVE/null lastSeenAt),
+filtered list/detail/configuration/status 200, anonymous list 401.
+QA URLs verified then stopped:
+http://127.0.0.1:53981/swagger-ui/index.html
+http://127.0.0.1:53981/v3/api-docs
+Only our QA PID 4140/container fvm-issue17-qa were stopped/removed; user apps untouched.
+No QA process/container remains.
+
+User manually rechecked the implementation and confirmed everything works on 2026-10-10;
+specific browser/Swagger interactions were not enumerated in that confirmation.
+Browser rendering/Swagger Try it out remains unverified by the agent: node_repl and cua_repl kernels
+exit during initialization because sandbox helper setup fails. HTTP/static asset checks
+and live REST requests do not prove UI interaction. Manual follow-up: launch local
+development Swagger, Authorize with an isolated token, Try GET /machines.
+No original source checklist item remains incomplete; this UI limitation is disclosed.
+
+Ignored evidence under backend/target/: issue17-verify.log, issue17-qa.stdout.log,
+issue17-qa.stderr.log, machine-management-openapi.json, surefire-reports/ and packaged JAR.
+git diff --check passes (LF/CRLF warnings only); no unrelated changes.
+
+## Tooling
+
+Default exec/node_repl/cua_repl still fail at sandbox setup. Escalated exec worked.
+Direct apply_patch failed on reparse-point paths. Use apply_patch for all edits through
+the discovered current executable with --codex-run-as-apply-patch in approved escalated
+PowerShell. Split large patches to avoid Windows command-line limits; do not assume
+an old launcher version exists after an app update. No global Git setting was changed.
+
+## Normal development URLs / next step
+
+Use existing .env/PostgreSQL, API_DOCS_ENABLED=true and valid JWT_SECRET.
+From backend module:
+mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'
+SERVER_PORT=8080:
+http://localhost:8080/swagger-ui/index.html
+http://localhost:8080/v3/api-docs
+Production documentation remains disabled.
+
+Commit/push authorized by the user's 2026-10-10 request after manual verification.
+The user handles subsequent review/merge manually.
+No merge, PR, issue closure or GitHub checkbox edits are authorized.

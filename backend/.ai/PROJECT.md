@@ -269,6 +269,10 @@ Current backend stack:
 - Product Management API (issue #14): ADMIN catalog writes, ADMIN/STAFF reads; DB paging,
   status/search filters, approved sorting, stable SKU, positive BigDecimal price and no deletion
 
+- Machine Management API (issue #17): ADMIN registration/configuration/status writes,
+  ADMIN/STAFF reads; DB paging/filter/search/sort, INACTIVE registration, stable unique
+  code, exact environmental thresholds, read-only lastSeenAt and no hard deletion.
+
 Planned integrations:
 
 - Per-feature business authorization policies (RBAC infrastructure exists; no refresh token)
