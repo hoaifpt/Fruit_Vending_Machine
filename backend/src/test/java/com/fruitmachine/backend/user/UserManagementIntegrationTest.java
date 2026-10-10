@@ -60,10 +60,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.account.password.min-length=12",
         "spring.jpa.properties.hibernate.query.fail_on_pagination_over_collection_fetch=true"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 @org.junit.jupiter.api.extension.ExtendWith(OutputCaptureExtension.class)
 class UserManagementIntegrationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String PASSWORD = "Test-only-staff-passphrase!";
     static final String KEY = newKey();
     static String newKey() {

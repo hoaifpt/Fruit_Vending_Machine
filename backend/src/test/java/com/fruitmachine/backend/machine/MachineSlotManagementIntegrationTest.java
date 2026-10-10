@@ -36,13 +36,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=",
         "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.fruitmachine.backend.machine.MachineSlotManagementIntegrationTest$SqlCapture"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class MachineSlotManagementIntegrationTest {
     public static class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
         static final List<String> QUERIES = new CopyOnWriteArrayList<>();
         public String inspect(String sql) { QUERIES.add(sql); return sql; }
     }
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String KEY = MachineManagementIntegrationTest.newKey();
     static final String PASSWORD = "Test-only-slot-passphrase!";
     @DynamicPropertySource

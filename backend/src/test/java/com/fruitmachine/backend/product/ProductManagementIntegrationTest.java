@@ -42,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true",
         "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.fruitmachine.backend.product.ProductManagementIntegrationTest$ProductSqlCapture"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class ProductManagementIntegrationTest {
     public static class ProductSqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
@@ -51,7 +52,7 @@ class ProductManagementIntegrationTest {
             return sql;
         }
     }
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String PASSWORD = "Test-only-product-passphrase!";
     static final String KEY = newKey();
     static String newKey() {

@@ -39,10 +39,11 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 
 @SpringBootTest(properties = "spring.config.import=")
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
 class InitialAdminBootstrapIntegrationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String PASSWORD = "Test-only-bootstrap-passphrase!";
     static final String EMAIL = "initial-admin@example.invalid";
     static final String KEY = key();

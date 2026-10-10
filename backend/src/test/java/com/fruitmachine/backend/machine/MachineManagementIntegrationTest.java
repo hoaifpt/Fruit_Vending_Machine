@@ -42,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=",
         "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.fruitmachine.backend.machine.MachineManagementIntegrationTest$SqlCapture"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class MachineManagementIntegrationTest {
     public static class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
@@ -51,7 +52,7 @@ class MachineManagementIntegrationTest {
             return sql;
         }
     }
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String PASSWORD = "Test-only-machine-passphrase!";
     static final String KEY = newKey();
     static String newKey() {

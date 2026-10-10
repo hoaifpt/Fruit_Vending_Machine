@@ -595,3 +595,15 @@ Slot summary derives occupancy, expiry, availability and sellability without sto
 Only forward-only V9 extends history with reason/status snapshots after real schema audit.
 Orders/reservations/payments/dispense/schedulers are future scope. API details and local
 Swagger setup: [inventory-management.md](../../docs/inventory-management.md).
+
+## 17. Core integration testing — Issue #24
+
+Test-only support/TestPostgres centralizes disposable PostgreSQL18 configuration for
+existing suites. AbstractCoreIntegrationTest provides profile test, dynamic DB/JWT and
+MockMvc; TestDataFactory establishes unique roots through existing HTTP controllers.
+Core tests cover cross-domain flow, actual SQL faults/rollback, observed overlapping
+transactions and DB constraints. Contexts/containers dispose after class; append-only
+history is isolated by unique fixtures rather than erased between methods. Existing
+feature tests remain regression coverage, all discovered by Surefire *Test in clean verify.
+CI workflow uses Java21/Docker and publishes reports even on failure. No production API,
+mapping/migration/dependency change. See ../../docs/core-integration-testing.md.

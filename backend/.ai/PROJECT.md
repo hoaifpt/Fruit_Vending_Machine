@@ -370,3 +370,14 @@ This confirms operator work; it does not command hardware. Each new item is assi
 one existing batch and slot. Real migration inspection required V9 nullable reason/status
 snapshots; per-item history shares a load operation UUID, with no aggregate quantity column.
 No order/payment/dispense/expiry scheduler is delivered. See docs/inventory-management.md.
+
+## 14. Core integration testing — Issue #24
+
+Reuse existing feature suites and add shared PostgreSQL18 factory/profile/HTTP fixtures,
+cross-domain management flow, real SQL-fault rollback, database constraint checks and
+overlapping inventory transaction races. Maven Surefire discovers all *Test classes in
+clean verify; GitHub Actions workflow uses Java21/Docker and retains test reports.
+No new business feature, dependency, API or migration. Remote CI now verified:442tests pass;
+a disposable probe fails exactly1intentional test, Maven/job failure and reports upload
+confirmed. Probe branch removed, all62issue checklist items checked. See
+docs/core-integration-testing.md and CURRENT_TASK.md for actual run links/evidence.

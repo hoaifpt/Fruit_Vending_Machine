@@ -23,9 +23,10 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 @SpringBootTest(properties = {"spring.config.import=", "API_DOCS_ENABLED=true"})
 @ActiveProfiles("prod")
 @AutoConfigureMockMvc
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class ProductionDocumentationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String KEY = key();
     static String key() {
         byte[] bytes = new byte[32];

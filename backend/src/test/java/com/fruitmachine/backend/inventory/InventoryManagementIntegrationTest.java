@@ -41,13 +41,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {"spring.config.import=", "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.fruitmachine.backend.inventory.InventoryManagementIntegrationTest$SqlCapture"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
+@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class InventoryManagementIntegrationTest {
     public static class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
         static final List<String> QUERIES = new CopyOnWriteArrayList<>();
         public String inspect(String sql) { QUERIES.add(sql); return sql; }
     }
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     static final String KEY = newKey(), PASSWORD = "Test-only-inventory-passphrase!", PATH = "/api/v1/inventory";
     static final Instant NOW = Instant.parse("2030-10-10T02:00:00Z");
     static String newKey() { byte[] bytes = new byte[32]; new java.security.SecureRandom().nextBytes(bytes); return Base64.getEncoder().encodeToString(bytes); }
