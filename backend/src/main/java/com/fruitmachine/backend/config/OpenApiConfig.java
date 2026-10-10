@@ -207,6 +207,84 @@ public class OpenApiConfig {
         });
     }
     @Bean
+    public OpenApiCustomizer machineDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/machines")) return;
+            var machine = new java.util.HashMap<String, Object>();
+            machine.put("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03");
+            machine.put("code", "FV-HCM-001");
+            machine.put("name", "Fruit Machine - Campus A");
+            machine.put("location", "Building A - Ground Floor");
+            machine.put("status", "INACTIVE");
+            machine.put("minTemperature", new java.math.BigDecimal("2.00"));
+            machine.put("maxTemperature", new java.math.BigDecimal("8.00"));
+            machine.put("minHumidity", new java.math.BigDecimal("40.00"));
+            machine.put("maxHumidity", new java.math.BigDecimal("80.00"));
+            machine.put("lastSeenAt", null);
+            machine.put("createdAt", "2026-10-10T00:00:00Z");
+            machine.put("updatedAt", "2026-10-10T00:00:00Z");
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) {
+                    var fields = new java.util.HashMap<String, Object>();
+                    if (id.equals("updateMachineStatus")) fields.put("status", "MAINTENANCE");
+                    else {
+                        fields.put("name", id.equals("updateMachine") ? "Updated Campus Machine" : "Fruit Machine - Campus A");
+                        fields.put("location", "Building A - Ground Floor");
+                        fields.put("minTemperature", new java.math.BigDecimal("2.00"));
+                        fields.put("maxTemperature", new java.math.BigDecimal("8.00"));
+                        fields.put("minHumidity", new java.math.BigDecimal("40.00"));
+                        fields.put("maxHumidity", new java.math.BigDecimal("80.00"));
+                        if (id.equals("createMachine")) fields.put("code", "FV-HCM-001");
+                    }
+                    operation.getRequestBody().getContent().get("application/json").setExample(fields);
+                }
+                operation.getResponses().forEach((code, response) -> {
+                    Object example;
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                        if (code.equals("201")) response.addHeaderObject("Location", new Header()
+                                .description("Relative URL of the created machine.").schema(new StringSchema()));
+                        var updated = new java.util.HashMap<String, Object>(machine);
+                        if (id.equals("updateMachineStatus")) updated.put("status", "MAINTENANCE");
+                        if (id.equals("updateMachine")) updated.put("name", "Updated Campus Machine");
+                        Object data = id.equals("listMachines") ? Map.of("content", List.of(machine), "page", 0, "size", 20,
+                                "totalElements", 1, "totalPages", 1) : updated;
+                        String message = switch (id) {
+                            case "listMachines" -> "Machines retrieved";
+                            case "createMachine" -> "Machine created";
+                            case "updateMachine" -> "Machine updated";
+                            case "updateMachineStatus" -> "Machine status updated";
+                            default -> "Machine retrieved";
+                        };
+                        example = Map.of("timestamp", "2026-10-10T00:00:00Z", "message", message, "data", data);
+                    } else {
+                        if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                        String error = switch (code) {
+                            case "400" -> "Bad Request";
+                            case "401" -> "Unauthorized";
+                            case "403" -> "Forbidden";
+                            case "404" -> "Not Found";
+                            case "409" -> "Conflict";
+                            default -> "Internal Server Error";
+                        };
+                        String message = switch (code) {
+                            case "400" -> "Request body is missing or malformed";
+                            case "401" -> "Authentication required or access token invalid";
+                            case "403" -> "Access denied";
+                            case "404" -> "Machine not found";
+                            case "409" -> "Machine code is already in use";
+                            default -> "An unexpected error occurred";
+                        };
+                        example = Map.of("timestamp", "2026-10-10T00:00:00Z", "status", Integer.parseInt(code),
+                                "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
     public OpenAPI backendOpenApi() {
         return new OpenAPI().info(new Info().title("Fruit Machine Backend API").version("v1")
                 .description("Management API. Login is public; other application endpoints require Bearer authentication. "
