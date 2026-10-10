@@ -2,7 +2,7 @@
 
 ## 1. Authority and status
 
-PostgreSQL 18; Flyway V1–V8 under `src/main/resources/db/migration/` (relative to
+PostgreSQL 18; Flyway V1–V9 under `src/main/resources/db/migration/` (relative to
 the backend module). These migrations define the current schema, not a proposed model.
 There are **19 business tables** plus `flyway_schema_history` (Flyway infrastructure,
 not a JPA business entity). Detailed constraints and ERD also appear in
@@ -11,7 +11,7 @@ not a JPA business entity). Detailed constraints and ERD also appear in
 
 Hibernate uses `ddl-auto=validate`, `generate-ddl=false`; SQL initialization is disabled.
 Validation is not a full audit of CHECK/index/trigger/nullability definitions.
-Never edit an applied migration. A genuine schema change needs a new V9+ migration.
+Never edit an applied migration. A genuine schema change needs a new V10+ migration.
 The package/convention alignment does not require any schema change.
 
 ## 2. Types and conventions
@@ -51,7 +51,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
 | dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at |
-| inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at |
+| inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
 | machine_events | id, machine_id, event_type, payload, created_at |
 | audit_logs | id, user_id, action, entity_type, entity_id, old_value, new_value, ip_address, created_at |
 
@@ -192,6 +192,24 @@ SQL/native/bulk updates bypass JPA auditing listeners and must explicitly mainta
 timestamps. State checks cover required timestamps, but services enforce transition semantics.
 
 Verify changes with Java 21, Maven and Docker: `mvn clean verify` from the backend module.
-Integration tests use PostgreSQL 18 Testcontainers, apply all eight migrations, run Flyway
+Integration tests use PostgreSQL 18 Testcontainers, apply all nine migrations, run Flyway
 validation and Hibernate validation, and check all 19 entity mappings. Never use update/create
 or edit historical migration files to make entity validation pass.
+
+## 10. Issue #22 schema audit and V9
+
+V3 and V6 were inspected before implementation: inventory_items has nullable slot_id,
+no machine_id; inventory_transactions originally has eight columns and one row per item.
+There was no quantity, batch_id, reason or status snapshot column. V7 indexes and the
+V6 MATCH FULL location FK/append-only trigger are reused. V9 adds nullable reason
+VARCHAR(500), status_before/status_after VARCHAR(24), nonblank reason and inventory
+vocabulary checks. Legacy rows remain NULL; no fabricated backfill or trigger bypass.
+LOAD creates N rows sharing a server reference_id; REMOVE records reason/actor/statuses.
+Batch is derived through inventory_item_id. V1–V8 remain unchanged.
+
+Loading locks Product -> Batch -> Machine -> Slot; all registrations, including removed
+items, count against batch quantity. Removal locks Slot -> Item, keeps the last slot,
+and permits AVAILABLE/EXPIRED only. Summary counts/eligibility/capacity share one SQL
+statement snapshot; expiry uses current server time without a scheduler. API loading
+always assigns a slot; legacy off-machine rows remain nullable/readable. See
+[inventory-management.md](../../docs/inventory-management.md).

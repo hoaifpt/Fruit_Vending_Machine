@@ -255,6 +255,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V6 | dispense_commands, inventory_transactions/trigger, machine_events, audit_logs |
 | V7 | query indexes và partial uniqueness |
 | V8 | ADMIN và STAFF, không user/password |
+| V9 | inventory_transactions: nullable reason/status_before/status_after; bảo toàn lịch sử cũ |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)
@@ -293,7 +294,7 @@ dev/migration; production tách migration owner và runtime user quyền tối t
 Flyway clean bị vô hiệu hóa. Dừng container bằng `docker compose --env-file .env -f backend/db/compose.yaml stop`;
 volume giữ dữ liệu. Không reset/xóa volume database đang dùng để sửa checksum.
 
-Migration mới dùng V9 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
+Migration mới dùng V10 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
 Flyway chạy trước ứng dụng. Sau này Maven/Spring Boot dùng flyway-core và module
 flyway-database-postgresql với phiên bản tương thích. Module JPA hiện có pom Java 21,
 Spring Boot 3.5.14 và Flyway 11.20.1 cùng phiên bản đã kiểm chứng bằng Docker.
@@ -318,7 +319,7 @@ docker compose --env-file .env -f backend/db/compose.yaml exec -T postgres sh -c
 docker compose --env-file .env -f backend/db/compose.yaml run --rm flyway migrate
 ```
 
-`constraints.sql` tạo fixture trong transaction rồi ROLLBACK: kiểm 8 migration, roles,
+`constraints.sql` tạo fixture trong transaction rồi ROLLBACK: kiểm 9 migration, roles,
 CHECK money/NaN/threshold/expiry/status, FK, uniqueness, quantity > 1 allocation,
 release/reallocation, snapshot giá, payment retries/namespace provider, webhook không order,
 command sai máy/slot, retry FAILED, chặn nhả trùng, chặn UPDATE/DELETE/TRUNCATE history,
@@ -401,3 +402,17 @@ Trên bảng nhỏ PostgreSQL có thể chọn sequential scan; không ép index
 - Audit actor nullable cho system; entity_type/entity_id rõ ràng. Không lưu password/token/secret
   vào audit/webhook; policy redaction và quyền đọc xác định trước tích hợp. Vô hiệu hóa qua status.
   Runtime role không có UPDATE/DELETE/TRUNCATE history.
+
+## 8. Inventory history upgrade V9 — Issue #22
+
+Kiểm tra V3/V6/V7 thực tế trước coding: inventory_transactions có tám cột, mỗi dòng
+gắn một inventory_item_id; không có quantity/batch_id/reason/status snapshot. V9 thêm
+reason VARCHAR(500), status_before/status_after VARCHAR(24), nullable cho dòng cũ;
+CHECK lý do không trắng và vocabulary inventory. Không backfill dữ liệu không biết.
+Trigger append-only và MATCH FULL FK vẫn nguyên; không sửa V1–V8. N hộp nạp tạo N
+dòng LOAD chung reference_id, REMOVE ghi actor/lý do/trạng thái và giữ vị trí cuối.
+
+InventoryHistoryMigrationTest tạo DB ở V8 với lịch sử cũ, nâng V9, kiểm dữ liệu cũ
+không đổi và UPDATE/DELETE/TRUNCATE vẫn bị chặn. Fresh-db integration tests áp dụng
+9 migrations rồi Flyway validate/Hibernate validate. Kết quả V1–V8 ở mục 6 là bằng
+chứng lịch sử ban đầu, không phải version hiện tại. Chi tiết API: inventory-management.md.

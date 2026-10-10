@@ -317,6 +317,11 @@ slot.quantity
 
 Inventory status must be traceable.
 
+Before implementing inventory/history workflows, inspect the actual applied Flyway
+migrations and list their columns, constraints, indexes and triggers. Do not assume
+`inventory_transactions` has quantity, batch, reason or status snapshot columns.
+Document any required forward-only migration before coding; preserve historical rows.
+
 Expired inventory must never be sold.
 
 ---
@@ -423,6 +428,20 @@ After implementation:
 8. Report remaining risks.
 
 An issue is NOT complete merely because the code compiles.
+
+### Mandatory Regression Testing
+
+Every software or runtime-environment change must be regression-tested so new changes
+do not break previously working features. This includes bug fixes, new features,
+performance optimizations, refactoring and dependency/environment upgrades.
+
+Follow `.ai/CODING_RULES.md` section 30: test affected existing behavior and shared
+flows, then run the full backend `mvn clean verify` on the final code/environment.
+Include contract, schema-upgrade, startup and runtime checks when affected. Fix
+regressions without weakening tests; report blocked/unverified checks honestly and
+do not claim verified completion. Record commands, environment and results at handoff.
+Guidance-only/documentation-only edits use content/diff verification unless they also
+change software behavior or runtime configuration.
 
 ### Issue Checklist Reporting
 

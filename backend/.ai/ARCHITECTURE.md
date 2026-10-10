@@ -583,3 +583,15 @@ The current architecture is intentionally a modular monolith.
 Do not prematurely split modules into services.
 
 Module boundaries should remain clean enough that extraction is possible later if actually required.
+
+## 16. Inventory Management — Issue #22
+
+inventory owns controller/dto/service/repository/mapper and reuses existing entities.
+All eight management operations require ADMIN or STAFF at HTTP and service boundaries.
+Load/remove and per-item immutable history commit atomically. Product/Batch/Machine/Slot
+locks serialize capacity, batch quantity and configuration changes; removal uses Slot/Item.
+Database specifications/page wrappers and to-one entity graphs avoid collection paging/N+1.
+Slot summary derives occupancy, expiry, availability and sellability without stock counters.
+Only forward-only V9 extends history with reason/status snapshots after real schema audit.
+Orders/reservations/payments/dispense/schedulers are future scope. API details and local
+Swagger setup: [inventory-management.md](../../docs/inventory-management.md).
