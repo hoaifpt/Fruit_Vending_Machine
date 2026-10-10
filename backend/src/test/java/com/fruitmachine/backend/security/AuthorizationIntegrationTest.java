@@ -311,7 +311,8 @@ class AuthorizationIntegrationTest {
                 .toIterable().containsExactlyInAnyOrder("/api/v1/auth/login", "/api/v1/users",
                         "/api/v1/users/{id}", "/api/v1/users/{id}/status",
                         "/api/v1/products", "/api/v1/products/{id}", "/api/v1/products/{id}/status",
-                        "/api/v1/machines", "/api/v1/machines/{id}", "/api/v1/machines/{id}/status");
+                        "/api/v1/machines", "/api/v1/machines/{id}", "/api/v1/machines/{id}/status",
+                        "/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}", "/api/v1/machines/{machineId}/slots/{slotId}/status");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());

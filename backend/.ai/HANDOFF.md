@@ -1,96 +1,107 @@
-# Chat handoff — Issue #17, 2026-10-10
+# Chat handoff — Issue #18, 2026-10-10
 
 ## User intent / repository
 
-User requested reading backend/AGENTS.md, all backend/.ai/ and continuing #17.
-These files and the live GitHub issue were read; resumed implementation is complete
-against all original issue checklist items. Full grouped checklist/evidence is in CURRENT_TASK.md.
+User manually merged #17 and requested proceeding with #18:
+https://github.com/hoaifpt/Fruit_Vending_Machine/issues/18
+Title: [BE] Implement Machine Slot Management.
+Issue body and backend guidance inspected; implementation is locally complete.
+Full original grouped checklist and evidence live in CURRENT_TASK.md.
 
 Repository: C:/Users/north/Documents/School/9/FruitMachine/backend
-Spring module: repository-root backend/; docs/ and api-contract/ are at root.
-Branch: feature/17-machine-management-api
-Branch base: 4c6212d056abd38bd71e63da1bae04a6b0f6b55a.
-User confirmed everything works and explicitly requested commit/push on 2026-10-10.
-Delivery commit subject: feat: implement machine management API (#17).
-Remote delivery branch: origin/feature/17-machine-management-api.
-Consult Git history/upstream status for the immutable commit ID and push confirmation.
+Spring module: repository-root backend/; docs/ and api-contract/ at root.
+Branch: feature/18-machine-slot-management
+Base: d60a43c801d89b23a051938879d5a72362f2a316
+origin/dev fetched 2026-10-10; PR #19 merged #17, e78fb6d is in ancestry.
+Working tree was clean before branch creation.
+User explicitly requested commit and push for #18 on 2026-10-10 after disclosure of
+the browser testing limitation. This handoff is included in the delivery commit
+feat: implement machine slot management (#18). Target remote branch:
+origin/feature/18-machine-slot-management. Verify delivery using git log/status
+and the matching remote ref; the commit cannot contain its own final hash.
 No PR/merge/issue edits authorized or performed. User handles merges manually.
 
-## Delivered behavior
+## Delivered behavior / decisions
 
-Five Machine identity/configuration/status APIs under /api/v1/machines.
-ADMIN reads/writes, STAFF reads. Existing JWT/RBAC/common wrappers/errors reused.
-POST explicitly INACTIVE, lastSeenAt null; stripped/uppercase unique immutable code.
-Required name/location, schema lengths, BigDecimal temperature -100..100/humidity 0..100,
-two decimals, strict min < max. PUT cannot alter code/status/lastSeenAt/timestamps.
-PATCH allows ACTIVE/INACTIVE/MAINTENANCE, same-status idempotent. No hard deletion.
-DB pagination/status/literal case-insensitive code/name/location search and approved sorts.
-Configuration/status row locks protect concurrent writes and preserve related histories.
-Legacy nullable location/lastSeenAt responses are safe. All timestamps use Instant/UTC.
-No schema/dependency/entity/enum/migration changes and no future slot/inventory/IoT workflows.
+Five machine-scoped Slot APIs. ADMIN reads/writes; STAFF reads, existing JWT/RBAC/errors.
+Existing MachineSlot/SlotStatus and Flyway V2 unchanged.
+Slot code strip/uppercase Locale.ROOT, nonblank/max32, immutable, unique per machine;
+different machines may reuse a code. New slot ACTIVE, any parent machine status accepted.
+Parent must exist. Detail/update/status queries scope both slotId and machineId, else 404.
+Capacity required positive 32-bit JSON integer token; no decimal/string truncation/coercion.
+Status exact string ACTIVE/INACTIVE/ERROR; numeric enum ordinals rejected by local DTO
+deserializers. No global JSON behavior change to unrelated features.
+Capacity/status row locks preserve concurrent fields; same-status requests idempotent.
+No hard DELETE (ADMIN 405); deactivation preserves inventory/dispense history.
+Slot ERROR does not alter machine status. Capacity is maximum storage, not stock;
+no inventory occupancy checks or hardcoded 4 slots/6 bowls/hardware naming policy.
+DB paging page0/size20/max100, status filter, approved sorts with UUID tie-break.
+DTO exposes seven fields/UTC Instant timestamps only. Mapper reads parent proxy ID;
+this also works on creation before the read-only machineId mirror is hydrated.
+No Product/Batch/Inventory/hardware/MQTT/payment/order/dispense workflows added.
 
-## Delivery contents
+## Delivery changes
 
-New machine controller/service/repository/mapper and five DTOs.
-Modified config/OpenApiConfig.java and security/SecurityConfig.java.
-New machine/MachineManagementIntegrationTest.java (59 cases) and
-machine/MachineManagementDocumentationTest.java (one full docs/contract check).
-AuthIntegrationTest/AuthorizationIntegrationTest enumerate the new paths.
-api-contract/api.yaml adds Machines tag, three paths/five operations and seven schemas.
-README.md, docs/machine-management.md, .ai/ARCHITECTURE.md/PROJECT.md/CURRENT_TASK.md/HANDOFF.md updated.
-Inherited uncommitted drafts were preserved/reviewed; stale Product wording corrected.
+New MachineSlotController; machine/dto/slot five DTOs + SlotRequestDeserializers;
+MachineSlotRepository, MachineSlotMapper, MachineSlotService.
+OpenApiConfig exact-path restriction for existing Machine customizer plus separate Slot
+examples/headers. Existing SecurityConfig nested-machine guards reused unchanged.
+New MachineSlotManagementIntegrationTest/DocumentationTest.
+AuthIntegrationTest/AuthorizationIntegrationTest path enumerations extended.
+api-contract/api.yaml adds Machine Slots tag, three paths/five operations/seven schemas,
+only additive changes; existing APIs preserved.
+README.md, docs/machine-slot-management.md and .ai/ARCHITECTURE.md/PROJECT.md/
+CURRENT_TASK.md/HANDOFF.md updated.
 
 ## Verification
 
 Java 21.0.10 / Maven 3.9.12; mvn clean verify BUILD SUCCESS.
-297 tests, 0 failures/errors/skipped. All Auth/User/Product and remaining regressions pass.
-PostgreSQL 18 Testcontainers apply/validate eight Flyway migrations, Hibernate validate
-and EntityMappingTest pass. No developer database or real configuration read/modified.
-Initial fixture error (missing loaded_at for slotted inventory) fixed; final suite passes.
-Expected UNIQUE-race/error-handler test log messages are not test failures.
+351 tests, 0 failures/errors/skipped (Slot: 53 integration + 1 docs).
+Existing Machine/Product/User/Auth/RBAC/bootstrap/entity tests pass.
+PostgreSQL 18 Testcontainers applied/validated V1-V8; Hibernate ddl-auto=validate
+initialized; EntityMappingTest passes. Migrations/entities/enums/pom unchanged.
+Tests cover full original checklist, strict JSON bounds/coercion, UNIQUE race, current
+JWT roles, scoped DB pages/filter/sort, concurrent updates and related history fixtures.
+Slot docs test compares complete operations/schemas/parameters/examples/responses/
+headers/security to versioned contract, resolves refs and independently checks limits.
+All prior feature documentation consistency tests pass.
 
-Contract fully compared to exposed OpenAPI: operations/parameters/schemas/constraints/
-headers/examples/security. Existing Auth/User/Product documentation tests also pass.
-Packaged JAR started separately against disposable QA PostgreSQL:
-Swagger HTML/CSS/JS/config/OpenAPI 200; five Machine operations present.
-Real login 200, create 201 (normalized code/INACTIVE/null lastSeenAt),
-filtered list/detail/configuration/status 200, anonymous list 401.
-QA URLs verified then stopped:
-http://127.0.0.1:53981/swagger-ui/index.html
-http://127.0.0.1:53981/v3/api-docs
-Only our QA PID 4140/container fvm-issue17-qa were stopped/removed; user apps untouched.
-No QA process/container remains.
+Packaged JAR QA on isolated disposable PostgreSQL 18 with .env import disabled:
+Swagger HTML/CSS/JS/config/OpenAPI 200 with five Slot operation IDs.
+Real login200, slot POST201 normalized/ACTIVE/correct parent, list/detail/PUT/PATCH200;
+cross-machine404, duplicate409, fractional capacity/ordinal status400;
+STAFF GET200/write403, anonymous401, DELETE405, parent remains INACTIVE after slot ERROR.
+Actual verified temporary URLs:
+http://127.0.0.1:55978/swagger-ui/index.html
+http://127.0.0.1:55978/v3/api-docs
+Only our QA PID 25736/container fvm-issue18-qa stopped/removed. No QA resources remain;
+user apps/database untouched. Temporary URLs are no longer live.
 
-User manually rechecked the implementation and confirmed everything works on 2026-10-10;
-specific browser/Swagger interactions were not enumerated in that confirmation.
-Browser rendering/Swagger Try it out remains unverified by the agent: node_repl and cua_repl kernels
-exit during initialization because sandbox helper setup fails. HTTP/static asset checks
-and live REST requests do not prove UI interaction. Manual follow-up: launch local
-development Swagger, Authorize with an isolated token, Try GET /machines.
-No original source checklist item remains incomplete; this UI limitation is disclosed.
+Browser rendering/Swagger Try it out unverified: cua_repl initialized twice and exited
+with trusted Node kernel errors; earlier node_repl had sandbox helper setup failures.
+HTTP/MockMvc/assets/live REST checks do not prove browser interaction.
+Manual follow-up: local Swagger, Authorize with isolated token, GET scoped slots.
+All original source checklist items complete; this separate UI tooling limitation disclosed.
 
-Ignored evidence under backend/target/: issue17-verify.log, issue17-qa.stdout.log,
-issue17-qa.stderr.log, machine-management-openapi.json, surefire-reports/ and packaged JAR.
-git diff --check passes (LF/CRLF warnings only); no unrelated changes.
+Ignored evidence in backend/target/: issue18-verify.log, issue18-qa.stdout.log,
+issue18-qa.stderr.log, machine-slot-management-openapi.json, surefire-reports/, packaged JAR.
+git diff --check passes (LF/CRLF warnings only); no unrelated edits.
 
-## Tooling
+## Tooling / next step
 
-Default exec/node_repl/cua_repl still fail at sandbox setup. Escalated exec worked.
-Direct apply_patch failed on reparse-point paths. Use apply_patch for all edits through
-the discovered current executable with --codex-run-as-apply-patch in approved escalated
-PowerShell. Split large patches to avoid Windows command-line limits; do not assume
-an old launcher version exists after an app update. No global Git setting was changed.
+Default sandbox exec/node tools had startup failures; approved escalated exec works.
+Direct apply_patch fails reparse-point paths. Use current discovered apply_patch executable
+with --codex-run-as-apply-patch via escalated PowerShell; split large Windows arguments.
+Do not assume launcher version after an app update. No global Git configuration changed.
 
-## Normal development URLs / next step
-
-Use existing .env/PostgreSQL, API_DOCS_ENABLED=true and valid JWT_SECRET.
+Normal local setup: existing .env/PostgreSQL, API_DOCS_ENABLED=true, valid JWT_SECRET.
 From backend module:
 mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'
-SERVER_PORT=8080:
+Port 8080:
 http://localhost:8080/swagger-ui/index.html
 http://localhost:8080/v3/api-docs
-Production documentation remains disabled.
+Production docs disabled.
 
-Commit/push authorized by the user's 2026-10-10 request after manual verification.
-The user handles subsequent review/merge manually.
-No merge, PR, issue closure or GitHub checkbox edits are authorized.
+Authorized delivery: commit and push the current #18 branch, then verify remote HEAD
+and a clean working tree. After delivery, the user reviews/merges into dev manually.
+No PR/merge/issue closure/GitHub checkbox edits implied.

@@ -273,6 +273,10 @@ Current backend stack:
   ADMIN/STAFF reads; DB paging/filter/search/sort, INACTIVE registration, stable unique
   code, exact environmental thresholds, read-only lastSeenAt and no hard deletion.
 
+- Machine Slot Management API (issue #18): machine-scoped positions/capacity/status,
+  ADMIN writes/ADMIN-STAFF reads, ACTIVE slots under any parent status, immutable
+  per-machine codes, DB paging/filter/sort and no inventory/hardware workflows.
+
 Planned integrations:
 
 - Per-feature business authorization policies (RBAC infrastructure exists; no refresh token)
