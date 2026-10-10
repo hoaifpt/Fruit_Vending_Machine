@@ -185,6 +185,22 @@ lock the row and preserve related history; no slots/inventory/telemetry workflow
 Swagger examples/headers and api-contract/api.yaml agree through Machine documentation tests.
 See ../../docs/machine-management.md.
 
+### machine slot management (issue #18)
+
+MachineSlotController -> MachineSlotService -> MachineSlotRepository uses existing
+MachineRepository for parent validation. Scoped nested lookups enforce both IDs.
+MachineSlot/SlotStatus and Flyway unchanged; normalized immutable per-machine code,
+positive Integer capacity, explicit ACTIVE registration and independent slot status.
+Strict feature DTO deserializers reject integer truncation and enum ordinal coercion
+without changing JSON behavior in other features. DB page/status/sort queries, UUID
+tie-break, slot row locks and explicit mapper preserve identity/concurrent changes/history.
+Parent UUID mapping works before the read-only FK mirror is hydrated on creation.
+Existing nested machine HTTP guards and feature method guards enforce ADMIN writes/
+ADMIN-STAFF reads. No stock/product/hardware workflow added.
+Machine Swagger customization is restricted to its three exact paths; Slot customization
+is separate. Contract/doc consistency tests preserve previous Machine operations.
+See ../../docs/machine-slot-management.md.
+
 ## 4. Layer Responsibilities
 
 

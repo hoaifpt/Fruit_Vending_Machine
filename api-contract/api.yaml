@@ -8,6 +8,8 @@ servers:
 tags:
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
+  - name: Machine Slots
+    description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: Products
@@ -15,6 +17,650 @@ tags:
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
+  "/api/v1/machines/{machineId}/slots/{slotId}":
+    "get":
+      "tags":
+        - "Machine Slots"
+      "summary": "Get a slot in the specified machine"
+      "description": "ADMIN or STAFF. Looks up both machineId and slotId; cross-machine access returns 404. Returns only slot fields and parent UUID, no nested entities or inventory."
+      "operationId": "getMachineSlot"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Owning machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "path"
+          "description": "Slot UUID belonging to the specified machine."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "403":
+          "description": "Authenticated account lacks required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "404":
+          "description": "Machine not found or slot not found in the specified machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "message": "Slot not found in specified machine"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "200":
+          "description": "Slot configuration"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineSlotResponse"
+              "example":
+                "message": "Machine slot retrieved"
+                "data":
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                  "capacity": 6
+                  "slotCode": "A1"
+                  "status": "ACTIVE"
+                "timestamp": "2026-10-10T00:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
+    "put":
+      "tags":
+        - "Machine Slots"
+      "summary": "Replace slot capacity"
+      "description": "ADMIN only. Capacity must be a positive 32-bit JSON integer token; fractional numbers and numeric strings are rejected. slotCode/machineId/status/id/timestamps and unknown fields are rejected. Cross-machine access is 404. Preserves related records. Capacity is not stock; current occupancy validation is deferred to Inventory Management."
+      "operationId": "updateMachineSlot"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Owning machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "path"
+          "description": "Slot UUID belonging to the specified machine."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateMachineSlotRequest"
+            "example":
+              "capacity": 8
+        "required": true
+      "responses":
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "403":
+          "description": "Authenticated account lacks required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "404":
+          "description": "Machine not found or slot not found in the specified machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "message": "Slot not found in specified machine"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}"
+        "200":
+          "description": "Updated slot capacity"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineSlotResponse"
+              "example":
+                "message": "Machine slot updated"
+                "data":
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                  "capacity": 8
+                  "slotCode": "A1"
+                  "status": "ACTIVE"
+                "timestamp": "2026-10-10T00:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{machineId}/slots":
+    "get":
+      "tags":
+        - "Machine Slots"
+      "summary": "List slots belonging to a machine"
+      "description": "ADMIN or STAFF. Parent must exist; all parent machine statuses allow configuration reads. Database pagination with optional ACTIVE/INACTIVE/ERROR filter. Default page 0, size 20; size 1 to 100. Default slotCode,asc with UUID ascending tie-break. Out-of-range pages are empty, missing parent is 404."
+      "operationId": "listMachineSlots"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Owning machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional ACTIVE, INACTIVE or ERROR slot status filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "ACTIVE"
+              - "INACTIVE"
+              - "ERROR"
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "One approved field: id, slotCode, capacity, status, createdAt, updatedAt; optional asc/desc (asc when omitted)."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "slotCode,asc"
+      "responses":
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "403":
+          "description": "Authenticated account lacks required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "404":
+          "description": "Machine not found or slot not found in the specified machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "message": "Slot not found in specified machine"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "200":
+          "description": "Paginated slots in the requested machine"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineSlotPageResponse"
+              "example":
+                "message": "Machine slots retrieved"
+                "data":
+                  "totalElements": 1
+                  "totalPages": 1
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "updatedAt": "2026-10-10T00:00:00Z"
+                      "capacity": 6
+                      "slotCode": "A1"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                      "createdAt": "2026-10-10T00:00:00Z"
+                      "status": "ACTIVE"
+                "timestamp": "2026-10-10T00:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
+    "post":
+      "tags":
+        - "Machine Slots"
+      "summary": "Configure a new machine slot"
+      "description": "ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. Accepts only slotCode (nonblank, stripped/uppercase, at most 32 characters) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). Code is immutable and unique per machine; another machine may reuse it. DB UNIQUE protects concurrent creates. No fixed slot count/capacity or inventory checks."
+      "operationId": "createMachineSlot"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Owning machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateMachineSlotRequest"
+            "example":
+              "capacity": 6
+              "slotCode": "A1"
+        "required": true
+      "responses":
+        "201":
+          "description": "ACTIVE slot created; Location points to the scoped slot"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+            "Location":
+              "description": "Relative machine-scoped URL of the created slot."
+              "schema":
+                "type": "string"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineSlotResponse"
+              "example":
+                "message": "Machine slot created"
+                "data":
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                  "capacity": 6
+                  "slotCode": "A1"
+                  "status": "ACTIVE"
+                "timestamp": "2026-10-10T00:00:00Z"
+        "409":
+          "description": "Slot code already exists in this machine or concurrent UNIQUE conflict"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 409
+                "message": "Slot code is already in use for this machine"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Conflict"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "403":
+          "description": "Authenticated account lacks required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "404":
+          "description": "Machine not found or slot not found in the specified machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "message": "Slot not found in specified machine"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{machineId}/slots/{slotId}/status":
+    "patch":
+      "tags":
+        - "Machine Slots"
+      "summary": "Change slot status"
+      "description": "ADMIN only. Accepts only status string ACTIVE, INACTIVE or ERROR; numeric ordinals are rejected. Cross-machine access is 404. Same-status requests are idempotent. Does not change parent machine status, capacity, identity or related history. No automatic hardware detection or hard deletion."
+      "operationId": "updateMachineSlotStatus"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Owning machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "path"
+          "description": "Slot UUID belonging to the specified machine."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateMachineSlotStatusRequest"
+            "example":
+              "status": "INACTIVE"
+        "required": true
+      "responses":
+        "400":
+          "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/status"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/status"
+        "403":
+          "description": "Authenticated account lacks required role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/status"
+        "404":
+          "description": "Machine not found or slot not found in the specified machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "message": "Slot not found in specified machine"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/status"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T00:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/status"
+        "200":
+          "description": "Slot with current status"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineSlotResponse"
+              "example":
+                "message": "Machine slot status updated"
+                "data":
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "updatedAt": "2026-10-10T00:00:00Z"
+                  "capacity": 6
+                  "slotCode": "A1"
+                  "status": "INACTIVE"
+                "timestamp": "2026-10-10T00:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
   "/api/v1/machines/{id}":
     "get":
       "tags":
@@ -1676,6 +2322,158 @@ components:
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
   schemas:
+    "UpdateMachineSlotRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Replace capacity only. Identity, parent, slot code, status and timestamps are rejected."
+      "properties":
+        "capacity":
+          "type": "integer"
+          "format": "int32"
+          "description": "Maximum physical capacity, not current stock. Positive 32-bit integer. Inventory occupancy checks are deferred to Inventory Management."
+          "example": 8
+          "exclusiveMinimum": 0
+          "maximum": 2147483647
+          "minimum": 1
+      "required":
+        - "capacity"
+    "ApiResponseMachineSlotResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MachineSlotResponse"
+    "MachineSlotResponse":
+      "type": "object"
+      "description": "Slot identity, parent UUID, capacity and status only; no nested entities or current stock."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "description": "Slot UUID."
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+          "description": "Immutable owning machine UUID."
+        "slotCode":
+          "type": "string"
+          "description": "Immutable code unique within the machine."
+          "example": "A1"
+        "capacity":
+          "type": "integer"
+          "format": "int32"
+          "description": "Maximum physical capacity, not inventory quantity."
+          "maximum": 2147483647
+          "minimum": 1
+        "status":
+          "type": "string"
+          "description": "Administrative slot status; independent of machine status."
+          "enum":
+            - "ACTIVE"
+            - "INACTIVE"
+            - "ERROR"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Creation instant, UTC."
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Modification instant, UTC."
+      "required":
+        - "capacity"
+        - "createdAt"
+        - "id"
+        - "machineId"
+        - "slotCode"
+        - "status"
+        - "updatedAt"
+    "CreateMachineSlotRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Configure a slot on an existing machine; initial status ACTIVE."
+      "properties":
+        "slotCode":
+          "type": "string"
+          "description": "Stable code within the parent machine; stripped and uppercased using Locale.ROOT. No hardware naming restriction."
+          "example": "A1"
+          "maxLength": 32
+          "minLength": 1
+        "capacity":
+          "type": "integer"
+          "format": "int32"
+          "description": "Maximum physical capacity, not current stock. Positive 32-bit integer."
+          "example": 6
+          "exclusiveMinimum": 0
+          "maximum": 2147483647
+          "minimum": 1
+      "required":
+        - "capacity"
+        - "slotCode"
+    "UpdateMachineSlotStatusRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Set slot status without changing parent machine status or deleting histories."
+      "properties":
+        "status":
+          "type": "string"
+          "description": "ACTIVE, INACTIVE or ERROR. ADMIN sets ERROR manually; no automatic hardware detection."
+          "enum":
+            - "ACTIVE"
+            - "INACTIVE"
+            - "ERROR"
+          "example": "INACTIVE"
+      "required":
+        - "status"
+    "ApiResponseMachineSlotPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MachineSlotPageResponse"
+    "MachineSlotPageResponse":
+      "type": "object"
+      "description": "Database-paginated slots belonging to one machine, optionally filtered by status."
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MachineSlotResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+          "minimum": 0
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+          "maximum": 100
+          "minimum": 1
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Total matching slots in the specified machine."
+          "minimum": 0
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Total pages."
+          "minimum": 0
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
     "UpdateMachineRequest":
       "type": "object"
       "additionalProperties": false

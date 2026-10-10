@@ -1,192 +1,168 @@
-# Issue #17 — Machine Management API
+# Issue #18 — Machine Slot Management
 
-Title: [BE] Implement Machine Management API
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/17
-Branch: feature/17-machine-management-api
-Branch base: 4c6212d056abd38bd71e63da1bae04a6b0f6b55a.
-Source reread via GitHub REST on 2026-10-10; original checklist below retained in full.
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/18
+Title: [BE] Implement Machine Slot Management
+Branch: feature/18-machine-slot-management
+Base: d60a43c801d89b23a051938879d5a72362f2a316 (origin/dev fetched 2026-10-10).
+User merged #17 in PR #19; e78fb6d is in dev ancestry. Working tree was clean.
+Implementation and #18 commit/push explicitly authorized by the user.
+No PR/merge/issue edits authorized; user handles merges manually.
 
-## Current status — implementation and source checklist verified locally
+## Scope and decisions
 
-User resumed implementation in this chat. Completed the five Machine master-data APIs,
-reviewed/corrected inherited drafts and Swagger wording, added PostgreSQL integration
-and full contract consistency tests. All original issue checklist items pass.
-User confirmed everything works and explicitly authorized commit/push on 2026-10-10.
-PR/merge/GitHub issue edits are not authorized or performed for #17.
-User handles merges manually. Source checklist completion is not Git delivery.
-
-## Scope / intended decisions
-
-Five API operations: GET list, GET detail, POST register, PUT configuration,
-PATCH status. ADMIN reads/writes, STAFF reads only; reuse current JWT/RBAC/error wrappers.
-Reuse existing Machine/MachineStatus mappings, not the conceptual issue entity example.
-API field names minTemperature/maxTemperature/minHumidity/maxHumidity map explicitly
-to existing temperatureMin/temperatureMax/humidityMin/humidityMax entity properties.
-UUID identity; Instant UTC timestamps follow project convention.
-Code stripped and uppercased using Locale.ROOT before validation, unique and immutable.
-New registrations explicitly set INACTIVE in service, lastSeenAt null/system-managed.
-Existing entity and database ACTIVE defaults are unchanged; API sets its own lifecycle.
-Required nonblank name/location; limits code 64, name 200, location 500. Database location
-is nullable: legacy response null is allowed; new/update requests require location.
-BigDecimal thresholds: temperature -100..100, humidity 0..100, at most two decimal
-places, reject rather than round; API requires strict min < max even though DB CHECK
-permits equality. Cross-field rule belongs in service.
-List: page 0, size 20, max 100; optional status and literal case-insensitive substring
-search on code/name/location; approved sort fields id/code/name/location/status/
-createdAt/updatedAt with UUID ascending tie-break. Maximum search length 200.
-Strict separate DTOs reject unknown/immutable/status/lastSeenAt fields.
-Profile/status writes lock the machine row to avoid lost cross-field updates.
-Administrative status ACTIVE/INACTIVE/MAINTENANCE is not online/offline connectivity.
-No hard DELETE; deactivate without modifying related history.
+Five nested slot APIs: list/detail/create/update capacity/update status.
+ADMIN reads/writes, STAFF reads; existing JWT/RBAC and common errors reused.
+Existing MachineSlot/SlotStatus entities and Flyway V2 reused unchanged.
+Slot code stripped/uppercase Locale.ROOT, nonblank, maximum 32 characters,
+unique per machine, immutable; no imposed hardware naming/slot-count policy.
+New slot ACTIVE even when parent INACTIVE/MAINTENANCE. Missing parent 404.
+Get/update/status lookups scope slotId to machineId; cross-machine access 404.
+Capacity required positive 32-bit JSON integer token; strings/decimal coercion rejected.
+Status requires an exact string, no enum ordinals. No hardware limits or inventory checks.
+Strict separate DTOs reject unknown/read-only/unrelated fields.
+List DB pagination page 0, size 20/max100; optional SlotStatus filter; approved sort
+id/slotCode/capacity/status/createdAt/updatedAt, default slotCode,asc; UUID tie-break.
+Capacity/status writes lock slot rows to preserve concurrent changes and history.
+Responses: id/machineId/slotCode/capacity/status/createdAt/updatedAt only, Instant UTC.
+No DELETE; INACTIVE preserves history. Slot ERROR does not change parent status.
 
 ## Database impact / non-goals
 
-No schema/dependency change. Applied Flyway V1–V8, Machine entity/enum and pom.xml
-unchanged. Hibernate remains ddl-auto=validate. Backend and root docs/contract only.
-No slots, inventory, batches, sensors, MQTT, ESP32/heartbeat, online/offline, automatic
-status, refrigeration/motor/GPIO, orders/payments, dispense, alerts/events or dashboard.
-No .env/real credentials read or edited; no developer database writes.
+No schema/dependency/migration/entity/enum change. Hibernate ddl-auto=validate remains.
+No Product/Batch/Inventory workflows, quantities, allocation/expiration, hardware,
+MQTT/sensors/heartbeat, motor/servo/GPIO, payment/orders/dispense or automatic ERROR.
+Backend implementation and root docs/api-contract only. No .env/developer DB changes.
 
-## Verification — 2026-10-10 (Asia/Saigon)
+## Verification and completion — 2026-10-10 (Asia/Saigon)
 
-- Java 21.0.10, Maven 3.9.12; mvn clean verify: BUILD SUCCESS.
-  297 tests, 0 failures, 0 errors, 0 skipped. Machine: 59 integration + 1 documentation.
-  Existing Auth/User/Product/RBAC/bootstrap/entity regression tests all passed.
-- All eight Flyway migrations applied and validated in isolated PostgreSQL 18 containers;
-  Hibernate ddl-auto=validate initialized successfully. EntityMappingTest also passed.
-  Applied migrations, Machine entity/enum and pom.xml remain unchanged.
-- Source checklist evidence: MachineManagementIntegrationTest covers creation/defaults/
-  normalized uniqueness + DB race, strict input/ranges/decimal precision, DB page/status/
-  literal search/sort, reads/null fields, configuration immutability, status lifecycle,
-  real JWT access/current DB roles, service guards, concurrent writes and related-history
-  snapshots. MachineManagementDocumentationTest compares full operation/schema/parameter/
-  response/header/example/security semantics and validates contract references.
-- Contract changed: repository-root api-contract/api.yaml only; adds Machines tag,
-  three paths/five operations and seven request/response/wrapper schemas, existing
-  Auth/User/Product contract preserved. Their documentation tests also passed.
-- Packaged JAR started independently on disposable PostgreSQL 18, no .env import:
-  Swagger UI HTML, CSS, bundle JS, standalone JS, initializer JS, swagger-config and
-  OpenAPI returned 200. All five documented Machine operation IDs appeared.
-  Real login 200; POST 201 with normalized code/INACTIVE/null lastSeenAt; filtered
-  list/detail/PUT/PATCH 200; anonymous list 401.
-- Actual temporary QA URLs verified:
-  http://127.0.0.1:53981/swagger-ui/index.html
-  http://127.0.0.1:53981/v3/api-docs
-  QA process/container were removed after checks; these temporary URLs are no longer live.
-- User manually rechecked the implementation and confirmed everything works on 2026-10-10.
-  Specific browser/Swagger interactions were not enumerated in that confirmation.
-- Browser rendering/Swagger Try it out not verified by the agent: both node_repl and cua_repl exited
-  during initialization with sandbox/helper setup failures. HTTP/MockMvc documentation
-  smoke checks and live authenticated REST checks passed; they do not prove browser
-  interaction. Next manual UI check: local dev Swagger, Authorize, GET /machines.
-  This is a disclosed tooling limitation; no original source checklist item is omitted.
-- Normal development setup: existing root .env/PostgreSQL, API_DOCS_ENABLED=true and valid
-  JWT_SECRET; from backend module run:
+Implementation complete against all original source checklist items below.
+User requested #18 commit/push on 2026-10-10 after disclosure of the browser testing
+limitation. Delivery commit: feat: implement machine slot management (#18), on
+feature/18-machine-slot-management. Verify final hash/publication with Git refs.
+No PR/merge/GitHub issue edits authorized or performed.
+
+- Java 21.0.10, Maven 3.9.12; mvn clean verify BUILD SUCCESS:
+  351 tests, 0 failures/errors/skipped. Slot: 53 integration + 1 documentation.
+  Existing Machine/Product/User/Auth/RBAC/bootstrap/entity tests all passed.
+- Isolated PostgreSQL 18 containers applied and validated Flyway V1-V8; Hibernate
+  ddl-auto=validate initialized successfully. EntityMappingTest passed.
+  Migrations, entities/enums and pom.xml unchanged; no developer DB/.env changes.
+- MachineSlotManagementIntegrationTest covers all original business/API/security
+  checklist groups plus strict JSON integer capacity and string status, schema bounds,
+  normalized per-machine uniqueness + DB race, provisioning under all parent statuses,
+  positive capacities without hardware limits, machine-scoped page/filter/sort,
+  missing/cross-machine IDs, safe DTO shape, service guards, current JWT roles,
+  concurrent capacity/status writes and related inventory/dispense fixture snapshots.
+- MachineSlotManagementDocumentationTest compares complete operations/parameters/
+  schemas/validation/responses/headers/examples/security with api-contract/api.yaml,
+  resolves references and independently validates DTO shape and limits.
+  Contract changes are additive: Machine Slots tag, three paths/five operations,
+  seven schemas. Existing Auth/User/Product/Machine docs consistency tests all pass.
+- Packaged JAR started on disposable PostgreSQL 18 and random localhost port with
+  environment import disabled. Swagger HTML/CSS/JS/config/OpenAPI 200; all five
+  slot operation IDs present. Real login 200, slot POST 201 (normalized code/ACTIVE/
+  correct parent UUID), list/detail/PUT/PATCH 200; cross-machine 404, duplicate 409,
+  fractional capacity/ordinal status 400; STAFF reads 200/writes 403; anonymous 401;
+  DELETE 405. Slot ERROR left parent INACTIVE.
+- Actual QA URLs verified:
+  http://127.0.0.1:55978/swagger-ui/index.html
+  http://127.0.0.1:55978/v3/api-docs
+  QA JAR PID 25736 and container fvm-issue18-qa cleaned up; URLs no longer live.
+- Browser rendering/Swagger Try it out not verified: cua_repl initialization failed
+  twice with trusted Node kernel exit. Earlier node_repl attempts had sandbox/helper startup failures.
+  HTTP/MockMvc/static-asset checks and live REST calls do not prove UI interaction.
+  Next manual UI step: local Swagger, Authorize, Try GET slots for a disposable machine.
+  No original source checklist item omitted; this tooling limitation is disclosed.
+- Normal local setup: existing .env/PostgreSQL, API_DOCS_ENABLED=true and JWT_SECRET;
+  from backend module:
   mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'
-  SERVER_PORT=8080 URLs:
-  http://localhost:8080/swagger-ui/index.html and http://localhost:8080/v3/api-docs
-  Production documentation remains disabled.
-- Logs/artifacts (ignored): backend/target/issue17-verify.log, issue17-qa.stdout.log,
-  issue17-qa.stderr.log, machine-management-openapi.json and surefire-reports/.
-- git diff --check passed; no unrelated changes or developer DB writes.
-  Default exec/apply_patch sandbox failures persisted; approved escalated exec and the
-  current apply_patch executable were used. No global Git configuration changed.
-
-## Git delivery
-
-Implementation locally verified; no original checklist items remain incomplete.
-Delivery includes implementation, tests, contract, docs and guidance only.
-User authorized commit/push after manual verification. Delivery commit subject:
-feat: implement machine management API (#17)
-Remote branch: origin/feature/17-machine-management-api.
-Use Git history/upstream status for the immutable delivery commit and push confirmation.
-No PR/merge/issue closure/checklist edit authorization is implied.
+  Port 8080 URLs: http://localhost:8080/swagger-ui/index.html and
+  http://localhost:8080/v3/api-docs. Production docs remain disabled.
+- Ignored evidence: backend/target/issue18-verify.log, issue18-qa.stdout.log,
+  issue18-qa.stderr.log, machine-slot-management-openapi.json and surefire-reports/.
+- git diff --check passed; only current issue files changed. Current explicit user
+  request authorizes commit/push for #18; verify clean tree and matching remote HEAD
+  after delivery. Browser rendering/Try it out remains unverified.
 
 ## Source checklist — complete, evidence above
 
 # Testing
 
-## 35. Create Machine Tests
+## Create Slot
 
 Verify:
 
-- [x] ADMIN can create machine
-- [x] New machine defaults to `INACTIVE`
-- [x] Machine code is stored correctly
-- [x] Machine code normalization works if adopted
-- [x] Duplicate code returns `409`
-- [x] Blank code returns `400`
-- [x] Blank name returns `400`
-- [x] Invalid temperature range returns `400`
-- [x] Invalid humidity range returns `400`
-- [x] STAFF cannot create machine
+- [x] ADMIN can create slot
+- [x] Parent Machine must exist
+- [x] New slot receives expected initial status
+- [x] Capacity must be > 0
+- [x] Duplicate slot code in same Machine returns `409`
+- [x] Same slot code in different Machines is allowed
+- [x] STAFF cannot create slot
 - [x] Unauthenticated request receives `401`
 
 ---
 
-# 36. List Machine Tests
+## List Slots
 
 Verify:
 
-- [x] ADMIN can list machines
-- [x] STAFF can list machines
-- [x] Pagination works
-- [x] Status filtering works
-- [x] Search works if implemented
-- [x] Unauthenticated request receives `401`
+- [x] ADMIN can list slots
+- [x] STAFF can list slots
+- [x] Only slots belonging to requested Machine are returned
+- [x] Missing Machine returns `404`
+- [x] Status filtering works if implemented
+- [x] Pagination works if implemented
 
 ---
 
-# 37. Get Machine Tests
+## Get Slot
 
 Verify:
 
-- [x] ADMIN can retrieve machine
-- [x] STAFF can retrieve machine
-- [x] Missing machine returns `404`
-- [x] `lastSeenAt` can safely be null
-- [x] Unauthenticated request receives `401`
+- [x] ADMIN can retrieve slot
+- [x] STAFF can retrieve slot
+- [x] Missing slot returns `404`
+- [x] Slot belonging to another Machine returns `404`
+- [x] Machine relationship does not cause recursive serialization
 
 ---
 
-# 38. Update Machine Tests
+## Update Slot
 
 Verify:
 
-- [x] ADMIN can update name
-- [x] ADMIN can update location
-- [x] ADMIN can update environmental thresholds
-- [x] Machine code remains unchanged
-- [x] Status cannot be modified through general update
-- [x] `lastSeenAt` cannot be modified
-- [x] Invalid threshold configuration returns `400`
-- [x] Missing machine returns `404`
+- [x] ADMIN can update capacity
+- [x] Capacity must remain > 0
+- [x] slotCode remains unchanged
+- [x] machineId remains unchanged
+- [x] status cannot be changed through general update
 - [x] STAFF receives `403`
+- [x] Missing slot returns `404`
 
 ---
 
-# 39. Status Tests
+## Status
 
 Verify:
 
-- [x] ADMIN can change INACTIVE → ACTIVE
-- [x] ADMIN can change ACTIVE → MAINTENANCE
-- [x] ADMIN can change MAINTENANCE → ACTIVE
-- [x] ADMIN can change ACTIVE → INACTIVE
-- [x] STAFF cannot change status
+- [x] ADMIN can set ACTIVE
+- [x] ADMIN can set INACTIVE
+- [x] ADMIN can set ERROR
+- [x] STAFF cannot change slot status
 - [x] Invalid status returns `400`
-- [x] Missing machine returns `404`
+- [x] Changing slot status does not automatically modify Machine status
 
 ---
 
-# 40. Security Integration Tests
+## Security Integration
 
 Verify:
 
 ```text
 ADMIN
   ↓
-POST /api/v1/machines
+POST /machines/{id}/slots
   ↓
 Allowed
 ```
@@ -194,7 +170,7 @@ Allowed
 ```text
 STAFF
   ↓
-POST /api/v1/machines
+POST /machines/{id}/slots
   ↓
 403
 ```
@@ -202,7 +178,7 @@ POST /api/v1/machines
 ```text
 STAFF
   ↓
-GET /api/v1/machines
+GET /machines/{id}/slots
   ↓
 Allowed
 ```
@@ -210,24 +186,22 @@ Allowed
 ```text
 No JWT
   ↓
-GET /api/v1/machines
+GET /machines/{id}/slots
   ↓
 401
 ```
 
 ---
 
-# 41. Persistence / Regression Tests
+## Regression
 
 Verify:
 
-- [x] Machine persists correctly
-- [x] MachineStatus persists as expected
-- [x] Threshold decimal precision is preserved
-- [x] Unique machine code constraint works
-- [x] Existing Product/User/Auth tests continue to pass
+- [x] Existing Machine Management tests pass
+- [x] Existing Product tests pass
+- [x] Existing User/Auth tests pass
 - [x] Flyway validation passes
-- [x] Hibernate schema validation passes
+- [x] Hibernate `ddl-auto=validate` passes
 - [x] Application starts successfully
 
 ---
@@ -236,39 +210,37 @@ Verify:
 
 The issue is complete when:
 
-- [x] Machine entity maps correctly to the existing `machines` table
-- [x] MachineRepository is implemented
-- [x] MachineService is implemented
-- [x] MachineController is implemented
-- [x] `GET /api/v1/machines` works
-- [x] `GET /api/v1/machines/{id}` works
-- [x] `POST /api/v1/machines` works
-- [x] `PUT /api/v1/machines/{id}` works
-- [x] `PATCH /api/v1/machines/{id}/status` works
-- [x] Machine list supports pagination
-- [x] Status filtering works
-- [x] Machine code is unique
-- [x] Machine code is immutable after creation
-- [x] New machines default to `INACTIVE`
-- [x] Environmental threshold validation works
-- [x] `lastSeenAt` is read-only
+- [x] MachineSlot maps correctly to `machine_slots`
+- [x] MachineSlot belongs to exactly one Machine
+- [x] MachineSlotRepository is implemented
+- [x] MachineSlotService is implemented
+- [x] MachineSlotController is implemented
+- [x] `GET /api/v1/machines/{machineId}/slots` works
+- [x] `GET /api/v1/machines/{machineId}/slots/{slotId}` works
+- [x] `POST /api/v1/machines/{machineId}/slots` works
+- [x] `PUT /api/v1/machines/{machineId}/slots/{slotId}` works
+- [x] `PATCH /api/v1/machines/{machineId}/slots/{slotId}/status` works
+- [x] Slot code is unique within a Machine
+- [x] Same slot code may exist in different Machines
+- [x] Slot code is immutable
+- [x] Capacity must be greater than zero
+- [x] Capacity is not treated as current stock
 - [x] ADMIN can read/write
 - [x] STAFF can read
 - [x] STAFF cannot write
 - [x] Unauthenticated requests receive `401`
-- [x] Unauthorized writes receive `403`
-- [x] Missing machine returns `404`
-- [x] Duplicate machine code returns `409`
-- [x] Machines are deactivated instead of hard-deleted
-- [x] No slot logic is implemented
-- [x] No inventory logic is implemented
-- [x] No MQTT/IoT logic is implemented
+- [x] Invalid parent Machine returns `404`
+- [x] Cross-machine slot access returns `404`
+- [x] Duplicate slot returns `409`
+- [x] Slots are disabled rather than hard-deleted
+- [x] No Product/Batch/Inventory responsibilities are added to MachineSlot
+- [x] No hardware/MQTT/dispense logic is implemented
 - [x] Existing RBAC is reused
 - [x] Existing common error handling is reused
 - [x] Tests pass
 - [x] Application starts successfully
 - [x] Flyway validation passes
-- [x] Hibernate `ddl-auto=validate` passes
-- [x] Existing applied migrations remain unchanged
+- [x] Hibernate validation passes
+- [x] Existing migrations remain unchanged
 
 ---

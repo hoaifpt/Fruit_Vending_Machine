@@ -209,7 +209,7 @@ public class OpenApiConfig {
     @Bean
     public OpenApiCustomizer machineDocumentation() {
         return api -> api.getPaths().forEach((name, path) -> {
-            if (!name.startsWith("/api/v1/machines")) return;
+            if (!java.util.Set.of("/api/v1/machines", "/api/v1/machines/{id}", "/api/v1/machines/{id}/status").contains(name)) return;
             var machine = new java.util.HashMap<String, Object>();
             machine.put("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03");
             machine.put("code", "FV-HCM-001");
@@ -274,6 +274,68 @@ public class OpenApiConfig {
                             case "403" -> "Access denied";
                             case "404" -> "Machine not found";
                             case "409" -> "Machine code is already in use";
+                            default -> "An unexpected error occurred";
+                        };
+                        example = Map.of("timestamp", "2026-10-10T00:00:00Z", "status", Integer.parseInt(code),
+                                "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
+    public OpenApiCustomizer machineSlotDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/machines/") || !name.contains("/slots")) return;
+            var slot = Map.of("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                    "machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", "slotCode", "A1", "capacity", 6, "status", "ACTIVE",
+                    "createdAt", "2026-10-10T00:00:00Z", "updatedAt", "2026-10-10T00:00:00Z");
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) {
+                    Object request = switch (id) {
+                        case "createMachineSlot" -> Map.of("slotCode", "A1", "capacity", 6);
+                        case "updateMachineSlot" -> Map.of("capacity", 8);
+                        default -> Map.of("status", "INACTIVE");
+                    };
+                    operation.getRequestBody().getContent().get("application/json").setExample(request);
+                }
+                operation.getResponses().forEach((code, response) -> {
+                    Object example;
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                        if (code.equals("201")) response.addHeaderObject("Location", new Header()
+                                .description("Relative machine-scoped URL of the created slot.").schema(new StringSchema()));
+                        var updated = new java.util.HashMap<String, Object>(slot);
+                        if (id.equals("updateMachineSlot")) updated.put("capacity", 8);
+                        if (id.equals("updateMachineSlotStatus")) updated.put("status", "INACTIVE");
+                        Object data = id.equals("listMachineSlots") ? Map.of("content", List.of(slot), "page", 0, "size", 20,
+                                "totalElements", 1, "totalPages", 1) : updated;
+                        String message = switch (id) {
+                            case "listMachineSlots" -> "Machine slots retrieved";
+                            case "createMachineSlot" -> "Machine slot created";
+                            case "updateMachineSlot" -> "Machine slot updated";
+                            case "updateMachineSlotStatus" -> "Machine slot status updated";
+                            default -> "Machine slot retrieved";
+                        };
+                        example = Map.of("timestamp", "2026-10-10T00:00:00Z", "message", message, "data", data);
+                    } else {
+                        if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                        String error = switch (code) {
+                            case "400" -> "Bad Request";
+                            case "401" -> "Unauthorized";
+                            case "403" -> "Forbidden";
+                            case "404" -> "Not Found";
+                            case "409" -> "Conflict";
+                            default -> "Internal Server Error";
+                        };
+                        String message = switch (code) {
+                            case "400" -> "Request body is missing or malformed";
+                            case "401" -> "Authentication required or access token invalid";
+                            case "403" -> "Access denied";
+                            case "404" -> "Slot not found in specified machine";
+                            case "409" -> "Slot code is already in use for this machine";
                             default -> "An unexpected error occurred";
                         };
                         example = Map.of("timestamp", "2026-10-10T00:00:00Z", "status", Integer.parseInt(code),
