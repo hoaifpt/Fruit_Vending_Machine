@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.*;
 
 @Testcontainers
 class InventoryHistoryMigrationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
+    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
     @Test void v8HistorySurvivesForwardUpgradeWithoutFabricatedDetailsOrLostAppendOnlyProtection() {
         var datasource=new DriverManagerDataSource(POSTGRES.getJdbcUrl(),POSTGRES.getUsername(),POSTGRES.getPassword());
         var jdbc=new JdbcTemplate(datasource);

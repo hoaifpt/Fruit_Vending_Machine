@@ -124,3 +124,10 @@ Backend hỗ trợ nạp/lấy từng hộp, tra cứu và thống kê tồn kho
 ADMIN/STAFF. Kiểm tra schema thực tế trước triển khai cho thấy lịch sử chưa có lý do
 và trạng thái trước/sau; V9 bổ sung ba cột nullable, giữ nguyên V1–V8 và dữ liệu cũ.
 Xem [API, quy tắc tồn kho và cách kiểm thử Swagger](docs/inventory-management.md).
+
+## Core integration tests — Issue #24
+
+Chạy `mvn clean verify` trong module backend/ với Java21, Maven và Docker. Tests dùng
+PostgreSQL18 Testcontainers riêng, kiểm toàn bộ M1 management, Flyway/JPA/JWT/RBAC và
+atomicity/concurrency của inventory. [Hướng dẫn testing/CI](docs/core-integration-testing.md)
+mô tả hạ tầng dùng chung, isolation, reports và GitHub Actions backend workflow.
