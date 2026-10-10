@@ -12,11 +12,384 @@ tags:
     description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: Product Batches
+    description: Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.
   - name: Products
     description: Management catalog. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
+  "/api/v1/product-batches/{id}":
+    "get":
+      "tags":
+        - "Product Batches"
+      "summary": "Get product batch details"
+      "description": "ADMIN or STAFF. Immutable record including expired batches or INACTIVE products. Current product SKU/name and nullable legacy creator UUID only; no recursive entities or security data."
+      "operationId": "getProductBatch"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Product batch UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Batch traceability details"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseProductBatchResponse"
+              "example":
+                "message": "Product batch retrieved"
+                "data":
+                  "createdBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                  "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  "manufacturedAt": "2026-10-10T01:00:00Z"
+                  "createdAt": "2026-10-10T02:00:00Z"
+                  "batchCode": "MANGO-20261010-01"
+                  "quantity": 20
+                  "productSku": "MANGO-BOX-001"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                  "productName": "Mango Fruit Box"
+                  "expiresAt": "2026-10-12T01:00:00Z"
+                "timestamp": "2026-10-10T02:00:00Z"
+        "404":
+          "description": "Product batch not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches/{id}"
+                "status": 404
+                "message": "Product batch not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+        "400":
+          "description": "Invalid parameters, request validation or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches/{id}"
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches/{id}"
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches/{id}"
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches/{id}"
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/product-batches":
+    "get":
+      "tags":
+        - "Product Batches"
+      "summary": "List product batches"
+      "description": "ADMIN or STAFF. Database pagination, default page 0/size 20, maximum 100. Optional exact product UUID filter; unknown product filter returns an empty page. Default createdAt,desc with UUID ascending tie-break. Includes expired batches and batches of INACTIVE products; no expiration filter or stock calculation. Current product SKU/name included."
+      "operationId": "listProductBatches"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Optional product UUID filter; no matches means empty page."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "One approved field: id, batchCode, manufacturedAt, expiresAt, quantity, createdAt; optional asc/desc, asc when omitted."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "createdAt,desc"
+      "responses":
+        "400":
+          "description": "Invalid parameters, request validation or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+        "200":
+          "description": "Paginated traceability records"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseProductBatchPageResponse"
+              "example":
+                "message": "Product batches retrieved"
+                "data":
+                  "totalElements": 1
+                  "totalPages": 1
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "createdBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      "manufacturedAt": "2026-10-10T01:00:00Z"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "batchCode": "MANGO-20261010-01"
+                      "quantity": 20
+                      "productSku": "MANGO-BOX-001"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "productName": "Mango Fruit Box"
+                      "expiresAt": "2026-10-12T01:00:00Z"
+                "timestamp": "2026-10-10T02:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
+    "post":
+      "tags":
+        - "Product Batches"
+      "summary": "Register immutable product batch"
+      "description": "ADMIN or STAFF. Client supplies globally unique code; stripped and uppercased. Product must exist and be ACTIVE. Expiration must be strictly after preparation and current server time; offset timestamps become UTC at microsecond precision. Quantity is a positive 32-bit JSON integer token, not stock. Creator is taken from current authenticated user. Only batchCode/productId/manufacturedAt/expiresAt/quantity are accepted; creator, identity, inventory and location fields are rejected. No inventory or related entity changes. Database uniqueness protects concurrent creates."
+      "operationId": "createProductBatch"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateProductBatchRequest"
+            "example":
+              "batchCode": "MANGO-20261010-01"
+              "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+              "manufacturedAt": "2026-10-10T01:00:00Z"
+              "quantity": 20
+              "expiresAt": "2026-10-12T01:00:00Z"
+        "required": true
+      "responses":
+        "201":
+          "description": "Batch registered; Location points to immutable detail"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+            "Location":
+              "description": "Relative URL of the created batch."
+              "schema":
+                "type": "string"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseProductBatchResponse"
+              "example":
+                "message": "Product batch created"
+                "data":
+                  "createdBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                  "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  "manufacturedAt": "2026-10-10T01:00:00Z"
+                  "createdAt": "2026-10-10T02:00:00Z"
+                  "batchCode": "MANGO-20261010-01"
+                  "quantity": 20
+                  "productSku": "MANGO-BOX-001"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                  "productName": "Mango Fruit Box"
+                  "expiresAt": "2026-10-12T01:00:00Z"
+                "timestamp": "2026-10-10T02:00:00Z"
+        "404":
+          "description": "Referenced product not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 404
+                "message": "Product not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+        "409":
+          "description": "Duplicate code, INACTIVE product or concurrent database conflict"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 409
+                "message": "Batch code is already in use"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Conflict"
+        "400":
+          "description": "Invalid parameters, request validation or malformed/unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 400
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 401
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 403
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "path": "/api/v1/product-batches"
+                "status": 500
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+      "security":
+        -
+          "bearerAuth": []
   "/api/v1/machines/{machineId}/slots/{slotId}":
     "get":
       "tags":
@@ -2322,6 +2695,120 @@ components:
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
   schemas:
+    "ApiResponseProductBatchPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/ProductBatchPageResponse"
+    "ApiResponseProductBatchResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/ProductBatchResponse"
+    "ProductBatchPageResponse":
+      "type": "object"
+      "description": "Database page of batch DTOs; out-of-range pages have empty content."
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ProductBatchResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "ProductBatchResponse":
+      "type": "object"
+      "description": "Immutable batch traceability; product SKU/name are current catalog values. UTC timestamps; no entity collections or stock counters."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "batchCode":
+          "type": "string"
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "productSku":
+          "type": "string"
+        "productName":
+          "type": "string"
+        "manufacturedAt":
+          "type": "string"
+          "format": "date-time"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+          "description": "Original declared quantity, never current available stock."
+        "createdBy":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Creator UUID, set from authenticated user for new batches; null for legacy rows without a creator."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+    "CreateProductBatchRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Create immutable traceability batch. Creator and creation time are server-controlled; no inventory is created."
+      "properties":
+        "batchCode":
+          "type": "string"
+          "description": "Globally unique, immutable code, stripped and uppercased with Locale.ROOT."
+          "example": "MANGO-20261010-01"
+          "maxLength": 64
+          "minLength": 1
+        "productId":
+          "type": "string"
+          "format": "uuid"
+          "description": "Existing ACTIVE product UUID."
+        "manufacturedAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Preparation time, ISO-8601 string with Z or explicit offset; normalized to UTC, truncated to database microseconds."
+          "example": "2026-10-10T01:00:00Z"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Expiration instant, strictly after preparation and current server time. Same offset/precision rules as manufacturedAt."
+          "example": "2026-10-12T01:00:00Z"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+          "description": "Original declared units, not current stock. JSON integer token only, 1 through 2147483647."
+          "example": 20
+          "exclusiveMinimum": 0
+          "maximum": 2147483647
+          "minimum": 1
+      "required":
+        - "batchCode"
+        - "expiresAt"
+        - "manufacturedAt"
+        - "productId"
+        - "quantity"
     "UpdateMachineSlotRequest":
       "type": "object"
       "additionalProperties": false
