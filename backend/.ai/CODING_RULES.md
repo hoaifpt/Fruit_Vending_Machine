@@ -681,6 +681,34 @@ Test behavior, not implementation details.
 
 Do not disable failing tests merely to make CI pass.
 
+### Mandatory Regression Testing
+
+After any change to software behavior or its runtime environment, run regression tests
+to ensure previously working features still work. This applies to bug fixes, new
+features, performance optimizations, refactoring, dependency upgrades and changes to
+Java, Spring Boot, PostgreSQL, configuration or infrastructure.
+
+- Identify affected existing features and shared dependencies before testing. Cover
+  existing happy paths, validation, error handling, authorization and data integrity,
+  not only the new or changed behavior.
+- Run focused tests during development, then the full backend suite with
+  `mvn clean verify` from the backend module before declaring the change complete.
+  Rerun the affected checks and full suite if subsequent software changes invalidate
+  their results. Do not report results from an earlier code/environment version as current.
+- Add a regression test for a fixed bug when practical; it should reproduce the
+  original failure and verify the corrected behavior without weakening existing tests.
+- For API changes, verify existing contracts and relevant integration flows. For schema
+  changes, verify Flyway/Hibernate and upgrade compatibility with existing data. For
+  performance or environment changes, also verify startup and affected runtime flows;
+  performance improvement alone does not prove behavioral compatibility.
+- Use isolated test data and PostgreSQL-compatible tests; never alter real data for QA.
+- Investigate and fix regressions before completion. Do not skip, disable or weaken
+  tests to hide failures. If verification is blocked, report the reason, affected
+  features and checks still needed; do not claim they passed or the change is verified.
+- At handoff, report commands, tested code/environment, results and any unverified
+  behavior. Guidance-only or documentation-only edits that cannot affect software
+  behavior require content/diff checks, not an unnecessary application test rerun.
+
 ---
 
 ## 31. PostgreSQL Testing
@@ -750,6 +778,7 @@ Before declaring work complete:
 
 - [ ] Code compiles
 - [ ] Relevant tests pass
+- [ ] Regression tests pass for previously working features on the final code/environment
 - [ ] Acceptance criteria pass
 - [ ] Flyway validation passes when relevant
 - [ ] Hibernate validation passes when relevant

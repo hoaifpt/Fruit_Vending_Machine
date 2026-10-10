@@ -1,6 +1,6 @@
 # Entity JPA theo schema Flyway
 
-SQL V1–V8 là nguồn schema. Không sửa migration để phù hợp entity và không thêm bảng/cột ngoài
+SQL V1–V9 là nguồn schema. Không sửa migration để phù hợp entity và không thêm bảng/cột ngoài
 migration. Entity nằm trong `com.fruitmachine.backend.<feature>.entity`, enum trong
 `com.fruitmachine.backend.<feature>.enums`; các superclass dùng chung nằm ở `common.entity`.
 User/Role thuộc user; ProductBatch thuộc product; MachineEvent thuộc machine;
@@ -50,7 +50,7 @@ SQL migrations và bộ kiểm thử SQL vẫn là nguồn kiểm chứng cho c�
 | payments | Payment | order, nhiều attempts |
 | payment_webhook_logs | PaymentWebhookLog | không FK order/payment; orderCode chỉ là scalar |
 | dispense_commands | DispenseCommand | UUID orderId/machineId/slotId/inventoryItemId ghi FK kép; navigation read-only |
-| inventory_transactions | InventoryTransaction | inventoryItem, performedBy nullable; UUID machineId/slotId ghi snapshot; slot navigation read-only |
+| inventory_transactions | InventoryTransaction | inventoryItem, performedBy nullable; UUID machineId/slotId ghi snapshot; slot navigation read-only; V9 reason/statusBefore/statusAfter nullable |
 | machine_events | MachineEvent | machine |
 | audit_logs | AuditLog | user nullable; entityId là UUID đa hình, không association |
 
@@ -152,7 +152,7 @@ JVM timezone UTC tránh JDBC gửi timezone alias Asia/Saigon không được se
 hibernate.jdbc.time_zone chỉ điều khiển JDBC binding, không thay múi giờ JVM lúc handshake.
 
 `EntityMappingTest` dùng PostgreSQL 18 Testcontainers riêng, không dùng credentials hoặc dữ
-liệu development. Flyway áp dụng V1–V8, rồi Hibernate validate. Các integration tests đã đạt:
+liệu development. Flyway áp dụng V1–V9, rồi Hibernate validate. Các integration tests đã đạt:
 
 1. 19 entity khớp 19 bảng nghiệp vụ, toàn bộ column mappings được đối chiếu với database.
 2. Persist/reload mọi entity, membership khóa kép, composite navigation, lazy collections,
@@ -164,4 +164,5 @@ liệu development. Flyway áp dụng V1–V8, rồi Hibernate validate. Các in
    và Flyway validation hoạt động; /actuator/env và /actuator/configprops không truy cập được.
 
 Docker cần chạy để test; không fallback sang H2 và không bỏ qua test khi thiếu Docker.
-Testcontainers tự dọn container test sau khi chạy. Migration V1–V8 không thay đổi trong bước này.
+Testcontainers tự dọn container test sau khi chạy. V1–V8 giữ nguyên; Issue #22 thêm V9
+cho reason/statusBefore/statusAfter của InventoryTransaction, không đổi 19 bảng/entity.

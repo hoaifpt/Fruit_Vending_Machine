@@ -287,7 +287,8 @@ public class OpenApiConfig {
     @Bean
     public OpenApiCustomizer machineSlotDocumentation() {
         return api -> api.getPaths().forEach((name, path) -> {
-            if (!name.startsWith("/api/v1/machines/") || !name.contains("/slots")) return;
+            if (!List.of("/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}",
+                    "/api/v1/machines/{machineId}/slots/{slotId}/status").contains(name)) return;
             var slot = Map.of("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                     "machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", "slotCode", "A1", "capacity", 6, "status", "ACTIVE",
                     "createdAt", "2026-10-10T00:00:00Z", "updatedAt", "2026-10-10T00:00:00Z");
@@ -384,6 +385,59 @@ public class OpenApiConfig {
                             case "409" -> "Batch code is already in use"; default -> "An unexpected error occurred";
                         };
                         example = Map.of("timestamp", "2026-10-10T02:00:00Z", "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
+    public OpenApiCustomizer inventoryDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/inventory") && !name.endsWith("/inventory") && !name.endsWith("/inventory/summary")) return;
+            String itemId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06", batchId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05";
+            String machineId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", slotId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04";
+            String operationId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07", timestamp = "2026-10-10T02:00:00Z";
+            var item = Map.ofEntries(Map.entry("id", itemId), Map.entry("batchId", batchId), Map.entry("batchCode", "MANGO-20261010-01"),
+                    Map.entry("productId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"), Map.entry("productName", "Mango Fruit Box"),
+                    Map.entry("machineId", machineId), Map.entry("slotId", slotId), Map.entry("slotCode", "A1"), Map.entry("status", "AVAILABLE"),
+                    Map.entry("expiresAt", "2026-10-12T01:00:00Z"), Map.entry("expired", false), Map.entry("loadedAt", timestamp), Map.entry("createdAt", timestamp), Map.entry("updatedAt", timestamp));
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) operation.getRequestBody().getContent().get("application/json").setExample(
+                        id.equals("loadInventory") ? Map.of("batchId", batchId, "slotId", slotId, "quantity", 1) : Map.of("reason", "Expired fruit removed during maintenance"));
+                operation.getResponses().forEach((code, response) -> {
+                    Object example;
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                        Object data;
+                        if (id.equals("loadInventory")) data = Map.of("operationId", operationId, "quantity", 1, "items", List.of(item));
+                        else if (id.equals("removeInventory")) { var removed = new java.util.HashMap<String, Object>(item); removed.put("status", "REMOVED"); removed.put("removedAt", timestamp); data = removed; }
+                        else if (id.equals("getSlotInventorySummary")) data = Map.of("machineId", machineId, "slotId", slotId, "capacity", 6,
+                                "occupiedCount", 1, "availableCount", 1, "expiredCount", 0, "reservedCount", 0, "sellableCount", 1, "remainingCapacity", 5, "asOf", timestamp);
+                        else if (id.equals("getInventory")) data = item;
+                        else {
+                            Object entry = item;
+                            if (id.equals("listInventoryTransactions")) entry = Map.ofEntries(Map.entry("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a08"),
+                                    Map.entry("inventoryItemId", itemId), Map.entry("batchId", batchId), Map.entry("batchCode", "MANGO-20261010-01"), Map.entry("machineId", machineId),
+                                    Map.entry("slotId", slotId), Map.entry("type", "LOAD"), Map.entry("referenceId", operationId), Map.entry("statusAfter", "AVAILABLE"),
+                                    Map.entry("performedBy", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"), Map.entry("createdAt", timestamp));
+                            data = Map.of("content", List.of(entry), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1);
+                        }
+                        String message = switch (id) {
+                            case "loadInventory" -> "Inventory loaded"; case "removeInventory" -> "Inventory removed";
+                            case "getInventory" -> "Inventory item retrieved"; case "listMachineInventory" -> "Machine inventory retrieved";
+                            case "listSlotInventory" -> "Slot inventory retrieved"; case "getSlotInventorySummary" -> "Inventory summary retrieved";
+                            case "listInventoryTransactions" -> "Inventory transactions retrieved"; default -> "Inventory retrieved";
+                        };
+                        example = Map.of("timestamp", timestamp, "message", message, "data", data);
+                    } else {
+                        if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                        String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; case "404" -> "Not Found"; case "409" -> "Conflict"; default -> "Internal Server Error"; };
+                        String message = switch (code) { case "400" -> "Request body is missing or malformed"; case "401" -> "Authentication required or access token invalid";
+                            case "403" -> "Access denied"; case "404" -> "Inventory item not found"; case "409" -> "Slot capacity exceeded"; default -> "An unexpected error occurred"; };
+                        if (code.equals("409") && id.equals("removeInventory")) message = "Only AVAILABLE or EXPIRED items may be removed; other states require reconciliation";
+                        example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
                     }
                     response.getContent().get("application/json").setExample(example);
                 });

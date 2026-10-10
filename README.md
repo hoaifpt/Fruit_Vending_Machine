@@ -117,3 +117,10 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 4. Không commit file môi trường, mật khẩu, token hay khóa của cổng thanh toán.
 
 Các hướng dẫn chạy, biến môi trường và quy ước code sẽ được bổ sung khi từng module bắt đầu được triển khai.
+
+## Inventory Management — Issue #22
+
+Backend hỗ trợ nạp/lấy từng hộp, tra cứu và thống kê tồn kho, lịch sử append-only cho
+ADMIN/STAFF. Kiểm tra schema thực tế trước triển khai cho thấy lịch sử chưa có lý do
+và trạng thái trước/sau; V9 bổ sung ba cột nullable, giữ nguyên V1–V8 và dữ liệu cũ.
+Xem [API, quy tắc tồn kho và cách kiểm thử Swagger](docs/inventory-management.md).

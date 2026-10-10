@@ -26,8 +26,8 @@ DECLARE
     command UUID; price_snapshot NUMERIC;
     test_suffix TEXT := gen_random_uuid()::TEXT;
 BEGIN
-    IF (SELECT count(*) FROM flyway_schema_history WHERE success AND version IN ('1','2','3','4','5','6','7','8')) <> 8 THEN
-        RAISE EXCEPTION 'Expected all eight successful Flyway migrations';
+    IF (SELECT count(*) FROM flyway_schema_history WHERE success AND version IN ('1','2','3','4','5','6','7','8','9')) <> 9 THEN
+        RAISE EXCEPTION 'Expected all nine successful Flyway migrations';
     END IF;
     IF (SELECT count(*) FROM roles WHERE name IN ('ADMIN', 'STAFF')) <> 2 THEN
         RAISE EXCEPTION 'Missing initial roles';

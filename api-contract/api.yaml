@@ -8,6 +8,8 @@ servers:
 tags:
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
+  - name: Inventory
+    description: Management of individual physical boxes. ACTIVE ADMIN/STAFF read/load/remove confirmed stock. No order/payment/reservation/dispense workflows.
   - name: Machine Slots
     description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
@@ -19,6 +21,1180 @@ tags:
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
+  "/api/v1/inventory/transactions":
+    "get":
+      "tags":
+        - "Inventory"
+      "summary": "List append-only per-item inventory history"
+      "description": "ADMIN or STAFF. DB pagination page0/size20/max100, createdAt,desc with UUID tie-break; optional exact filters. N loaded boxes produce N LOAD rows sharing referenceId. Snapshot location/actor/status/reason returned, nullable for legacy rows; each row represents one box. No history mutation endpoints."
+      "operationId": "listInventoryTransactions"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "inventoryItemId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "machineId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "referenceId"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "type"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "LOAD"
+              - "RESERVE"
+              - "SALE"
+              - "EXPIRE"
+              - "REMOVE"
+              - "RETURN"
+              - "ADJUSTMENT"
+      "responses":
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/inventory/transactions"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/inventory/transactions"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/inventory/transactions"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/inventory/transactions"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/inventory/transactions"
+                "status": 500
+        "200":
+          "description": "Inventory history page"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryTransactionPageResponse"
+              "example":
+                "data":
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "inventoryItemId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a08"
+                      "batchCode": "MANGO-20261010-01"
+                      "type": "LOAD"
+                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "referenceId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07"
+                      "statusAfter": "AVAILABLE"
+                      "performedBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "totalElements": 1
+                  "totalPages": 1
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory transactions retrieved"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/inventory/{id}":
+    "get":
+      "tags":
+        - "Inventory"
+      "summary": "Get physical item details"
+      "description": "ADMIN or STAFF. Safe item/batch/product/location DTO, including historical SOLD/REMOVED and legacy off-machine items. UTC expiry and derived expired flag; no recursive entities or credentials."
+      "operationId": "getInventory"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Inventory item UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/inventory/{id}"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/inventory/{id}"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/inventory/{id}"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/inventory/{id}"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/inventory/{id}"
+                "status": 500
+        "200":
+          "description": "Inventory item details"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryItemResponse"
+              "example":
+                "data":
+                  "expiresAt": "2026-10-12T01:00:00Z"
+                  "productName": "Mango Fruit Box"
+                  "updatedAt": "2026-10-10T02:00:00Z"
+                  "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                  "createdAt": "2026-10-10T02:00:00Z"
+                  "status": "AVAILABLE"
+                  "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "slotCode": "A1"
+                  "loadedAt": "2026-10-10T02:00:00Z"
+                  "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "batchCode": "MANGO-20261010-01"
+                  "expired": false
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory item retrieved"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/inventory":
+    "get":
+      "tags":
+        - "Inventory"
+      "summary": "List/filter physical inventory"
+      "description": "ADMIN or STAFF. Combined exact machine/slot/batch/status filters and optional batch-time expired filter (all statuses). Unknown filter IDs produce empty pages. Database pagination page0/size20/max100 with to-one graph, no collection paging. One approved sort id/status/loadedAt/createdAt/updatedAt, default createdAt,desc plus UUID ascending tie-break. Legacy off-machine rows supported."
+      "operationId": "listInventory"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size 1..100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine UUID filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "query"
+          "description": "Slot UUID filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "batchId"
+          "in": "query"
+          "description": "Batch UUID filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Exact stored inventory status."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "AVAILABLE"
+              - "RESERVED"
+              - "SOLD"
+              - "EXPIRED"
+              - "REMOVED"
+              - "DISPENSE_FAILED"
+        -
+          "name": "expired"
+          "in": "query"
+          "description": "Derived batch expiry <= now when true, > now when false; does not change status."
+          "required": false
+          "schema":
+            "type": "boolean"
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "One approved field id/status/loadedAt/createdAt/updatedAt, optional asc/desc; asc when omitted."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "createdAt,desc"
+      "responses":
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/inventory"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/inventory"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/inventory"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/inventory"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/inventory"
+                "status": 500
+        "200":
+          "description": "Database page of safe item DTOs"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryPageResponse"
+              "example":
+                "data":
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "expiresAt": "2026-10-12T01:00:00Z"
+                      "productName": "Mango Fruit Box"
+                      "updatedAt": "2026-10-10T02:00:00Z"
+                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "status": "AVAILABLE"
+                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                      "slotCode": "A1"
+                      "loadedAt": "2026-10-10T02:00:00Z"
+                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "batchCode": "MANGO-20261010-01"
+                      "expired": false
+                  "totalElements": 1
+                  "totalPages": 1
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory retrieved"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{machineId}/inventory":
+    "get":
+      "tags":
+        - "Inventory"
+      "summary": "List inventory in a machine"
+      "description": "ADMIN or STAFF. Existing machine required. Database page scoped through item slot FK to machine, including retained historical locations. Default createdAt,desc with UUID tie-break."
+      "operationId": "listMachineInventory"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "page"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "status"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "AVAILABLE"
+              - "RESERVED"
+              - "SOLD"
+              - "EXPIRED"
+              - "REMOVED"
+              - "DISPENSE_FAILED"
+        -
+          "name": "expired"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "boolean"
+      "responses":
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/inventory"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/inventory"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/inventory"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/inventory"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/inventory"
+                "status": 500
+        "200":
+          "description": "Machine-scoped inventory page"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryPageResponse"
+              "example":
+                "data":
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "expiresAt": "2026-10-12T01:00:00Z"
+                      "productName": "Mango Fruit Box"
+                      "updatedAt": "2026-10-10T02:00:00Z"
+                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "status": "AVAILABLE"
+                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                      "slotCode": "A1"
+                      "loadedAt": "2026-10-10T02:00:00Z"
+                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "batchCode": "MANGO-20261010-01"
+                      "expired": false
+                  "totalElements": 1
+                  "totalPages": 1
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Machine inventory retrieved"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary":
+    "get":
+      "tags":
+        - "Inventory"
+      "summary": "Get physical/available/sellable slot counts"
+      "description": "ADMIN or STAFF. Scoped machine/slot validation. DB aggregates at asOf, no stock counters: occupied includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED; available requires AVAILABLE+unexpired; sellable additionally ACTIVE product/machine/slot. ExpiredCount includes physically present boxes with past batch expiry or EXPIRED status. Remaining capacity=max(0,capacity-occupied)."
+      "operationId": "getSlotInventorySummary"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary"
+                "status": 500
+        "200":
+          "description": "Derived slot stock summary"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventorySummaryResponse"
+              "example":
+                "data":
+                  "capacity": 6
+                  "reservedCount": 0
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "expiredCount": 0
+                  "remainingCapacity": 5
+                  "occupiedCount": 1
+                  "availableCount": 1
+                  "asOf": "2026-10-10T02:00:00Z"
+                  "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "sellableCount": 1
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory summary retrieved"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{machineId}/slots/{slotId}/inventory":
+    "get":
+      "tags":
+        - "Inventory"
+      "summary": "List inventory in a scoped slot"
+      "description": "ADMIN or STAFF. Machine must exist and slot must belong to it; cross-machine slot returns404. Database page including retained historical locations. Default createdAt,desc with UUID tie-break."
+      "operationId": "listSlotInventory"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "page"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "status"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "AVAILABLE"
+              - "RESERVED"
+              - "SOLD"
+              - "EXPIRED"
+              - "REMOVED"
+              - "DISPENSE_FAILED"
+        -
+          "name": "expired"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "boolean"
+      "responses":
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/slots/{slotId}/inventory"
+                "status": 500
+        "200":
+          "description": "Scoped slot inventory page"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryPageResponse"
+              "example":
+                "data":
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "expiresAt": "2026-10-12T01:00:00Z"
+                      "productName": "Mango Fruit Box"
+                      "updatedAt": "2026-10-10T02:00:00Z"
+                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "status": "AVAILABLE"
+                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                      "slotCode": "A1"
+                      "loadedAt": "2026-10-10T02:00:00Z"
+                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "batchCode": "MANGO-20261010-01"
+                      "expired": false
+                  "totalElements": 1
+                  "totalPages": 1
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Slot inventory retrieved"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/inventory/load":
+    "post":
+      "tags":
+        - "Inventory"
+      "summary": "Record physically confirmed stock loading"
+      "description": "ADMIN or STAFF. Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. Physical occupancy includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED. Total registered batch items include all statuses. Lock order Product/Batch/Machine/Slot serializes state and count checks. Quantity 1..1000 per bounded bulk request, strict JSON integer. Actor is current principal. Operation UUID groups per-item history using reference_id; not an idempotency key. Retries may register more boxes if limits permit. No hardware action."
+      "operationId": "loadInventory"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/LoadInventoryRequest"
+            "example":
+              "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+              "quantity": 1
+              "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+        "required": true
+      "responses":
+        "201":
+          "description": "N boxes and N per-item history rows registered"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryLoadResponse"
+              "example":
+                "data":
+                  "operationId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07"
+                  "quantity": 1
+                  "items":
+                    -
+                      "expiresAt": "2026-10-12T01:00:00Z"
+                      "productName": "Mango Fruit Box"
+                      "updatedAt": "2026-10-10T02:00:00Z"
+                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "status": "AVAILABLE"
+                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                      "slotCode": "A1"
+                      "loadedAt": "2026-10-10T02:00:00Z"
+                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "batchCode": "MANGO-20261010-01"
+                      "expired": false
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory loaded"
+        "409":
+          "description": "Ineligible product/batch/machine/slot, capacity/batch quantity exceeded or database conflict"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Slot capacity exceeded"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Conflict"
+                "path": "/api/v1/inventory/load"
+                "status": 409
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/inventory/load"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/inventory/load"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/inventory/load"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/inventory/load"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/inventory/load"
+                "status": 500
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/inventory/{id}/remove":
+    "post":
+      "tags":
+        - "Inventory"
+      "summary": "Record confirmed physical removal"
+      "description": "ADMIN or STAFF. AVAILABLE/EXPIRED -> REMOVED only, with removedAt. Reject RESERVED/SOLD/REMOVED/DISPENSE_FAILED; failed dispense requires a separate reconciliation flow. Locks Slot then Item, preserves last location and original batch quantity. One atomic REMOVE history row stores actor, reason and before/after status snapshots. No deletion or arbitrary status changes."
+      "operationId": "removeInventory"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Inventory item UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/RemoveInventoryRequest"
+            "example":
+              "reason": "Expired fruit removed during maintenance"
+        "required": true
+      "responses":
+        "200":
+          "description": "Item retained as REMOVED"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseInventoryItemResponse"
+              "example":
+                "data":
+                  "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                  "batchCode": "MANGO-20261010-01"
+                  "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                  "expiresAt": "2026-10-12T01:00:00Z"
+                  "productName": "Mango Fruit Box"
+                  "createdAt": "2026-10-10T02:00:00Z"
+                  "loadedAt": "2026-10-10T02:00:00Z"
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "expired": false
+                  "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                  "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                  "removedAt": "2026-10-10T02:00:00Z"
+                  "updatedAt": "2026-10-10T02:00:00Z"
+                  "status": "REMOVED"
+                  "slotCode": "A1"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory removed"
+        "409":
+          "description": "Invalid transition or database conflict"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Only AVAILABLE or EXPIRED items may be removed; other states require reconciliation"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Conflict"
+                "path": "/api/v1/inventory/{id}/remove"
+                "status": 409
+        "400":
+          "description": "Invalid parameters, malformed/unknown JSON or validation failure"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request body is missing or malformed"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/inventory/{id}/remove"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/inventory/{id}/remove"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/inventory/{id}/remove"
+                "status": 403
+        "404":
+          "description": "Requested item, batch, machine or scoped slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Inventory item not found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/inventory/{id}/remove"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/inventory/{id}/remove"
+                "status": 500
+      "security":
+        -
+          "bearerAuth": []
   "/api/v1/product-batches/{id}":
     "get":
       "tags":
@@ -2695,6 +3871,289 @@ components:
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
   schemas:
+    "InventoryTransactionResponse":
+      "type": "object"
+      "description": "Append-only per-item history. Location snapshots, actor UUID, grouping reference, reason/status snapshots; legacy fields may be null. Each row represents one box; no aggregate quantity column."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "inventoryItemId":
+          "type": "string"
+          "format": "uuid"
+        "batchId":
+          "type": "string"
+          "format": "uuid"
+        "batchCode":
+          "type": "string"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "type":
+          "type": "string"
+          "enum":
+            - "LOAD"
+            - "RESERVE"
+            - "SALE"
+            - "EXPIRE"
+            - "REMOVE"
+            - "RETURN"
+            - "ADJUSTMENT"
+        "referenceId":
+          "type": "string"
+          "format": "uuid"
+        "performedBy":
+          "type": "string"
+          "format": "uuid"
+        "reason":
+          "type": "string"
+        "statusBefore":
+          "type": "string"
+          "enum":
+            - "AVAILABLE"
+            - "RESERVED"
+            - "SOLD"
+            - "EXPIRED"
+            - "REMOVED"
+            - "DISPENSE_FAILED"
+        "statusAfter":
+          "type": "string"
+          "enum":
+            - "AVAILABLE"
+            - "RESERVED"
+            - "SOLD"
+            - "EXPIRED"
+            - "REMOVED"
+            - "DISPENSE_FAILED"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+    "InventoryTransactionPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/InventoryTransactionResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "ApiResponseInventoryTransactionPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/InventoryTransactionPageResponse"
+    "InventorySummaryResponse":
+      "type": "object"
+      "description": "DB counts at asOf: occupied AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED; available AVAILABLE+unexpired; sellable additionally ACTIVE product/machine/slot; expiredCount counts physically present expired boxes. Remaining capacity clamped at zero for legacy overcapacity."
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "capacity":
+          "type": "integer"
+          "format": "int32"
+        "occupiedCount":
+          "type": "integer"
+          "format": "int64"
+        "availableCount":
+          "type": "integer"
+          "format": "int64"
+        "expiredCount":
+          "type": "integer"
+          "format": "int64"
+        "reservedCount":
+          "type": "integer"
+          "format": "int64"
+        "sellableCount":
+          "type": "integer"
+          "format": "int64"
+        "remainingCapacity":
+          "type": "integer"
+          "format": "int64"
+        "asOf":
+          "type": "string"
+          "format": "date-time"
+    "ApiResponseInventorySummaryResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/InventorySummaryResponse"
+    "InventoryPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/InventoryItemResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "ApiResponseInventoryPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/InventoryPageResponse"
+    "InventoryLoadResponse":
+      "type": "object"
+      "description": "One server-generated operationId shared as reference_id by the N per-item LOAD history rows; not an idempotency key."
+      "properties":
+        "operationId":
+          "type": "string"
+          "format": "uuid"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/InventoryItemResponse"
+    "ApiResponseInventoryLoadResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/InventoryLoadResponse"
+    "LoadInventoryRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Registers physically loaded and confirmed boxes. No hardware action. Creator comes from JWT; unknown fields rejected."
+      "properties":
+        "batchId":
+          "type": "string"
+          "format": "uuid"
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+          "description": "JSON integer token, 1..1000 per request; bounded bulk operation, independent of hardware capacity."
+          "example": 4
+          "exclusiveMinimum": 0
+          "maximum": 1000
+          "minimum": 1
+      "required":
+        - "batchId"
+        - "quantity"
+        - "slotId"
+    "InventoryItemResponse":
+      "type": "object"
+      "description": "One physical box; nullable location for legacy off-machine rows. Expired is derived from batch expiry at request time, independent of stored status."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "batchId":
+          "type": "string"
+          "format": "uuid"
+        "batchCode":
+          "type": "string"
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "productName":
+          "type": "string"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "slotCode":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "AVAILABLE"
+            - "RESERVED"
+            - "SOLD"
+            - "EXPIRED"
+            - "REMOVED"
+            - "DISPENSE_FAILED"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+        "expired":
+          "type": "boolean"
+        "loadedAt":
+          "type": "string"
+          "format": "date-time"
+        "removedAt":
+          "type": "string"
+          "format": "date-time"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+    "ApiResponseInventoryItemResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/InventoryItemResponse"
+    "RemoveInventoryRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Confirms physical removal; reason is stored on append-only per-item history. Actor is server-controlled."
+      "properties":
+        "reason":
+          "type": "string"
+          "description": "Nonblank reason, stripped, maximum 500 characters."
+          "example": "Expired fruit removed during maintenance"
+          "maxLength": 500
+          "minLength": 1
+      "required":
+        - "reason"
     "ApiResponseProductBatchPageResponse":
       "type": "object"
       "properties":

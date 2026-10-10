@@ -61,6 +61,7 @@ public class SecurityConfig {
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines", "/api/v1/machines/**").hasAnyRole("ADMIN", "STAFF");
                     authorize.requestMatchers("/api/v1/machines", "/api/v1/machines/**").hasRole("ADMIN");
                     authorize.requestMatchers("/api/v1/product-batches", "/api/v1/product-batches/**").hasAnyRole("ADMIN", "STAFF");
+                    authorize.requestMatchers("/api/v1/inventory", "/api/v1/inventory/**").hasAnyRole("ADMIN", "STAFF");
                     authorize.anyRequest().authenticated();
                 })
                 .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class);

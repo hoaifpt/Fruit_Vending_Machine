@@ -1,6 +1,7 @@
 package com.fruitmachine.backend.inventory.entity;
 
 import com.fruitmachine.backend.inventory.enums.InventoryTransactionType;
+import com.fruitmachine.backend.inventory.enums.InventoryStatus;
 import com.fruitmachine.backend.machine.entity.Machine;
 import com.fruitmachine.backend.machine.entity.MachineSlot;
 import com.fruitmachine.backend.user.entity.User;
@@ -9,7 +10,6 @@ import com.fruitmachine.backend.common.entity.UuidEntity;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
-import lombok.AccessLevel;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -63,6 +63,19 @@ public class InventoryTransaction extends UuidEntity {
 
     @Column(name = "reference_id")
     private UUID referenceId;
+
+    @Column(name = "reason", length = 500)
+    private String reason;
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "status_before", length = 24)
+    private InventoryStatus statusBefore;
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "status_after", length = 24)
+    private InventoryStatus statusAfter;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "performed_by")

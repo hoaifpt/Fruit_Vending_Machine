@@ -15,6 +15,11 @@ public interface MachineSlotRepository extends JpaRepository<MachineSlot, UUID> 
     Page<MachineSlot> findByMachineId(UUID machineId, Pageable pageable);
     Page<MachineSlot> findByMachineIdAndStatus(UUID machineId, SlotStatus status, Pageable pageable);
     Optional<MachineSlot> findByIdAndMachineId(UUID id, UUID machineId);
+    @Query("select s.machineId from MachineSlot s where s.id = :id")
+    Optional<UUID> findMachineIdById(@Param("id") UUID id);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from MachineSlot s where s.id = :id")
+    Optional<MachineSlot> findForUpdateById(@Param("id") UUID id);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from MachineSlot s where s.id = :id and s.machineId = :machineId")

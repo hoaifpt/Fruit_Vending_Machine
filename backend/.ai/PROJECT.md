@@ -362,3 +362,11 @@ Target scope:
 - Core integration tests
 
 IoT, payment and dispensing are later milestones.
+
+## 13. Delivered inventory scope — Issue #22
+
+ADMIN/STAFF can load physical boxes, query items/slot summary/history and confirm removal.
+This confirms operator work; it does not command hardware. Each new item is assigned to
+one existing batch and slot. Real migration inspection required V9 nullable reason/status
+snapshots; per-item history shares a load operation UUID, with no aggregate quantity column.
+No order/payment/dispense/expiry scheduler is delivered. See docs/inventory-management.md.
