@@ -2,14 +2,17 @@
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
 Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/24, [BE] Add core backend integration tests.
-Branch feature/24-core-backend-integration-tests, HEAD/basefe68a47f716ea5f82a3fb88ea16bcd04d3018fcb.
+Branch feature/24-core-backend-integration-tests, basefe68a47f716ea5f82a3fb88ea16bcd04d3018fcb.
+Implementation f0794800542657ab54896013781ecd028466ef25 committed/pushed;
+this documentation snapshot records completed CI evidence. Resolve HEAD/upstream via Git.
 Fetched dev merged#22 viaPR#25; 8e9aac6 ancestor verified; initial tree clean.
-#22 committed/pushed8e9aac6 and merged by user. #24 implementation authorized only:
-no #24 commit/push/PR/merge/GitHub issue checkbox edits authorized or performed.
+#22 committed/pushed8e9aac6 and merged by user. User explicitly authorized #24 commit/
+push, successful CI verification, temporary intentionally failing test branch and cleanup,
+and local checklist/handoff updates. No PR/merge/GitHub issue edits authorized/performed.
 
-Local implementation and verification complete;4 source checklist items pending actual
-GitHub Actions execution/failure evidence. Do not declare whole issue/M1 complete until
-remote requirements verified. User may request commit/push later, triggering new workflow.
+Implementation/local/remote verification complete: all62source checklist items checked.
+Successful run442tests, probe run443tests/exactly1intentional failure; artifacts parsed.
+Temporary branch removed locally/remotely after SHA check. No probe on delivery branch.
 
 Scope:
 - support/TestPostgres factory reused by20 existing database suites; no test bodies or
@@ -38,29 +41,28 @@ Verification:
   batch-race method1pass. Java21.0.10/Maven3.9.12/PostgreSQL18.6 Docker.
 - actionlint1.7.12 PASS. Initial targeted-run test assumption failures returned
   Maven exit1; datasource metadata/RESTRICT SQLSTATE assertions corrected without
-  production changes. Actual remote job behavior remains unverified.
+  production changes. Actual remote job behavior now verified, see evidence below.
 - Factory/context cleanup are the only edits to existing tests, audited against HEAD.
 - Flyway/Hibernate/entity/startup/feature/docs contracts/security regression all pass.
 - Container snapshots before/after full verify empty, and after repeat/individual empty;
   no .env/developer DB/hardware changed. git diff --check pass.
-- Exact62 source checklist texts/order match live GitHub issue. CURRENT_TASK58x/4unchecked.
-  Pending: Tests run in GitHub Actions; Test failures fail the pipeline; Integration tests
-  run in GitHub Actions; Failed tests cause CI failure. Workflow configured/linted, but
-  needs publishing and remote run/failure evidence. No GitHub issue checklist edits.
+- Exact62 source checklist texts/order match live GitHub issue. CURRENT_TASK62x/0unchecked.
+- Success run38043959910:442tests,0failure/error/skip, build/job/run success,
+  backend-test-reports artifact11667480945. Probe run38043998076:443tests,1intentional
+  CiFailurePropagationProbeTest failure,0error/skip, Maven exit1 and build/job/run failure;
+  reports artifact11666676394 still uploaded successfully. Downloaded XML/logs confirm
+  all existing442tests pass on both runs. No GitHub issue checklist edits.
 
 Ignored evidence under backend/target/: issue24-verify.log, issue24-targeted-fixed.log,
 issue24-repeat-random.log, issue24-individual.log, issue24-actionlint.log, container
 snapshots and surefire-reports/. Reruns overwrite their own reports; full442total in log.
 
-Next: await user Git delivery instruction or follow-up. Do not auto push/createPR/merge
-or touch real data. Existing Swagger/API contract unchanged; documentation regression
-passes. Local Swagger8080/swagger-ui/index.html, OpenAPI8080/v3/api-docs when enabled;
-module mvn spring-boot:run uses existing launcher behavior. No new UI QA required by24.
+Remote evidence:
+https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043959910
+https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043998076
+Ignored backend/target/issue24-ci-evidence.json and success/failure ZIP reports/logs.
 
-## Authorized Git/CI verification follow-up
-
-User now explicitly authorized commit/push, observing successful CI, a temporary
-branch with one intentionally failing test to prove CI failure propagation, cleanup
-of that temporary branch, and local checklist/handoff updates with run links.
-No PR/merge/GitHub issue checkbox edits authorized. Four CI items remain pending
-until actual run/job/artifact evidence is verified.
+Next: await user manual merge/new instruction after current Git delivery. Do not create
+PR/merge/edit issue checkboxes without explicit authorization. No production data touched.
+Existing Swagger/API contract unchanged and regression verified. Local Swagger8080/
+swagger-ui/index.html, OpenAPI8080/v3/api-docs when enabled. No new UI QA required by24.

@@ -377,6 +377,7 @@ Reuse existing feature suites and add shared PostgreSQL18 factory/profile/HTTP f
 cross-domain management flow, real SQL-fault rollback, database constraint checks and
 overlapping inventory transaction races. Maven Surefire discovers all *Test classes in
 clean verify; GitHub Actions workflow uses Java21/Docker and retains test reports.
-No new business feature, dependency, API or migration. Remote CI execution remains
-unverified until user-authorized Git delivery; do not declare M1 complete from local
-tests alone. See docs/core-integration-testing.md and CURRENT_TASK.md for evidence.
+No new business feature, dependency, API or migration. Remote CI now verified:442tests pass;
+a disposable probe fails exactly1intentional test, Maven/job failure and reports upload
+confirmed. Probe branch removed, all62issue checklist items checked. See
+docs/core-integration-testing.md and CURRENT_TASK.md for actual run links/evidence.

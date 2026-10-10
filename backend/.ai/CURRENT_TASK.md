@@ -4,7 +4,8 @@ Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/24
 Branch: feature/24-core-backend-integration-tests
 Base: fe68a47f716ea5f82a3fb88ea16bcd04d3018fcb
 Latest fetched dev includes #22 via PR#25; 8e9aac6 ancestor verified, initial tree clean.
-Implementation authorized; no #24 commit/push/PR/merge or GitHub issue edits authorized.
+Implementation, commit/push, remote CI verification and temporary probe branch cleanup
+authorized by user. No PR/merge/GitHub issue edits authorized.
 
 ## Scope and audit
 
@@ -41,16 +42,24 @@ CI workflow verifies Docker, Java21, full Maven lifecycle and always uploads rep
 - actionlint1.7.12 PASS for GitHub Actions syntax/semantics. Verified official Actions SHAs
   pinned. Workflow Java21/Ubuntu24.04/Docker/Maven full suite, always-upload Surefire reports,
   no skip/continue-on-error/production credentials. Initial failing targeted test returned
-  Maven exit1, verifying local failure propagation; no remote CI execution claim.
+  Maven exit1, verifying local failure propagation; remote evidence also verified below.
 - No production source/API/contract/pom change. All9 applied migrations byte-equivalent
   after newline normalization. No .env/developer DB or hardware/external service access.
 - git diff --check pass. Exact62 original checklist items/text/order checked against live
-  issue;58 verified,4 remote-CI items remain unchecked. No GitHub issue edits.
-- Remaining four CI items require actual GitHub execution and failed-job behavior evidence.
-  They are blocked only on publishing/running the workflow; current implementation request
-  does not authorize #24 commit/push/PR/merge. User can request Git delivery, then inspect
-  workflow run status/reports (and failure behavior if a failed test occurs).
-- Branch feature/24-core-backend-integration-tests, HEAD/basefe68a47; uncommitted changes.
+  issue;62 verified, none unchecked after remote CI verification. No GitHub issue edits.
+- GitHub Actions success run38043959910 on f079480:442tests,0failure/error/skip,
+  BUILD SUCCESS, successful job and backend-test-reports artifact11667480945.
+- Temporary failure run38043998076 on ff107f4:443tests, exactly1failure in
+  CiFailurePropagationProbeTest,0error/skip, Maven exit1, build step/job/run failure.
+  Artifact11666676394 uploaded successfully despite failure. Both ZIPs/XML and logs
+  downloaded and parsed; existing442tests also pass in the failing run.
+- Temporary feature/24-ci-failure-probe-f079480 branch SHA checked unchanged and removed
+  locally/remotely. Intentional failing test never entered delivery branch. Runs/artifacts
+  retained as evidence; no PR/merge/GitHub issue checkbox edits.
+- Branch feature/24-core-backend-integration-tests, basefe68a47. Implementation commit
+  f0794800542657ab54896013781ecd028466ef25 pushed and verified by GitHub CI.
+  This docs-only follow-up snapshot records final evidence; resolve current HEAD via Git.
+- All62 original checklist items verified; no incomplete item remains.
 
 Evidence under backend/target/ (ignored): issue24-verify.log, issue24-targeted-fixed.log,
 issue24-repeat-random.log, issue24-individual.log, issue24-actionlint.log,
@@ -117,8 +126,8 @@ CI workflow: ../../.github/workflows/backend-tests.yml.
 ## CI
 
 - [x] Tests run through Maven.
-- [ ] Tests run in GitHub Actions.
-- [ ] Test failures fail the pipeline.
+- [x] Tests run in GitHub Actions.
+- [x] Test failures fail the pipeline.
 - [x] Test reports are generated.
 - [x] No external production services are required.
 
@@ -147,18 +156,19 @@ The issue is complete when:
 - [x] Test data is isolated and repeatable.
 - [x] Tests do not depend on execution order.
 - [x] Integration tests can run through Maven.
-- [ ] Integration tests run in GitHub Actions.
-- [ ] Failed tests cause CI failure.
+- [x] Integration tests run in GitHub Actions.
+- [x] Failed tests cause CI failure.
 - [x] No production database or external hardware is required.
 - [x] No unrelated business features are introduced.
 - [x] Existing Flyway migrations remain unchanged.
 
 ---
 
-## Authorized Git/CI verification follow-up
+## Remote CI evidence
 
-User now explicitly authorized commit/push, observing successful CI, a temporary
-branch with one intentionally failing test to prove CI failure propagation, cleanup
-of that temporary branch, and local checklist/handoff updates with run links.
-No PR/merge/GitHub issue checkbox edits authorized. Four CI items remain pending
-until actual run/job/artifact evidence is verified.
+Successful full suite: https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043959910
+Intentional failing probe: https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043998076
+
+Ignored evidence: issue24-ci-evidence.json, issue24-ci-success-reports.zip,
+issue24-ci-success-logs.zip, issue24-ci-failure-probe-reports.zip and
+issue24-ci-failure-probe-logs.zip under backend/target/. No production credentials.

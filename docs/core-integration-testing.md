@@ -97,19 +97,23 @@ Actions chính thức được pin SHA, token chỉ contents:read, không dùng 
 Không continue-on-error hoặc maven.test.failure.ignore; build step fail làm job fail.
 Unit/integration chạy cùng lifecycle, không bị loại khỏi CI. Reports retention14 ngày.
 
-Workflow đã lint local bằng actionlint. Chạy local không chứng minh GitHub runner đã pass:
-workflow phải được commit/push rồi xem run kết thúc và artifact reports trên GitHub.
-Issue #24 chưa được phép publish nhánh; các mục yêu cầu chạy thực tế trên GitHub giữ
-unchecked cho đến có bằng chứng remote. Không tự tạo PR, merge hoặc sửa issue checkboxes.
+Workflow đã lint local bằng actionlint1.7.12 và được kiểm chứng thực tế trên GitHub.
+Không continue-on-error: Maven failure làm build step, job và run failure. Reports vẫn
+upload khi build fail. Test probe chỉ nằm trên nhánh tạm đã được dọn, không vào nhánh bàn giao.
 
 ## Verification status
 
-Local verification hoàn tất: full clean verify442 tests, không failure/error/skip;
-11 core tests pass, lặp lại với thứ tự class/method ngẫu nhiên11 pass, chạy riêng một
-batch race1 pass. PostgreSQL18 containers được dọn; actionlint1.7.12 pass. Tất cả
-production/API/migrations/dependencies giữ nguyên, assertions của20 suites cũ không đổi.
+Local full clean verify442tests pass, không failure/error/skip. Core suite11tests pass,
+lặp lại với thứ tự class/method ngẫu nhiên11pass, chạy riêng batch race1pass. Containers
+được dọn; production/API/migrations/dependencies và assertions cũ giữ nguyên.
 
-Maven failure propagation đã được quan sát ở lượt test đầu (exit1), sau sửa assertions
-đúng với datasource và RESTRICT thì pass. Workflow được cấu hình fail theo Maven và
-upload reports luôn; chạy và failure behavior trên GitHub vẫn chưa xác minh. Có4 mục
-remote CI chưa check, ghi rõ trong CURRENT_TASK.md. Chưa commit/push/PR/merge #24.
+- [Successful GitHub run](https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043959910):442tests pass,0failure/error/skip,
+  backend-test-reports artifact có đủ XML reports.
+- [Intentional failure probe](https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043998076):443tests, đúng1failure tại
+  CiFailurePropagationProbeTest,0error/skip; Maven exit1, build/job/run failure. Artifact
+  reports vẫn upload. Toàn bộ442tests thực vẫn pass.
+
+Đã tải và parse cả hai artifacts/logs. Nhánh probe feature/24-ci-failure-probe-f079480
+được kiểm SHA rồi xóa local/remote; run links giữ lại để truy vết. CURRENT_TASK62/62checked.
+Implementation commit f079480 đã push; đây là documentation follow-up ghi bằng chứng.
+Không tạo PR, merge hoặc sửa GitHub issue checkboxes.
