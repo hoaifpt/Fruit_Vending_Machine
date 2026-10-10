@@ -201,6 +201,17 @@ Machine Swagger customization is restricted to its three exact paths; Slot custo
 is separate. Contract/doc consistency tests preserve previous Machine operations.
 See ../../docs/machine-slot-management.md.
 
+### product batch management (issue #21)
+
+product.batch controller/service/repository/DTO/mapper layers reuse product.entity.ProductBatch
+and existing Product/User mappings. No relocation/schema change. ADMIN/STAFF create/read,
+strict creator-free request, current AuthenticatedUser creator, normalized immutable code,
+positive declared quantity and Clock-based future expiry checks on microsecond UTC instants.
+Existing Product PESSIMISTIC_WRITE query serializes active-product checks with deactivation.
+Repository fetches only to-one product for database pages/detail, avoiding collection
+paging/N+1; approved sorts plus UUID tie-break. No update/delete/inventory/stock workflows.
+Separate Swagger customizer and api-contract consistency tests; see ../../docs/product-batch-management.md.
+
 ## 4. Layer Responsibilities
 
 

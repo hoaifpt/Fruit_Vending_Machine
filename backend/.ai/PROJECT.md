@@ -277,6 +277,10 @@ Current backend stack:
   ADMIN writes/ADMIN-STAFF reads, ACTIVE slots under any parent status, immutable
   per-machine codes, DB paging/filter/sort and no inventory/hardware workflows.
 
+- Product Batch Management API (issue #21): ADMIN/STAFF create/read immutable batch
+  traceability, authenticated creator, active product, declared quantity and UTC expiry,
+  DB pages/product filter; no stock/inventory generation or editing/deletion.
+
 Planned integrations:
 
 - Per-feature business authorization policies (RBAC infrastructure exists; no refresh token)

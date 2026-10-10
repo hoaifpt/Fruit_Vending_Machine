@@ -347,6 +347,50 @@ public class OpenApiConfig {
         });
     }
     @Bean
+    public OpenApiCustomizer productBatchDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.equals("/api/v1/product-batches") && !name.equals("/api/v1/product-batches/{id}")) return;
+            var batch = Map.of("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05", "batchCode", "MANGO-20261010-01",
+                    "productId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02", "productSku", "MANGO-BOX-001", "productName", "Mango Fruit Box",
+                    "manufacturedAt", "2026-10-10T01:00:00Z", "expiresAt", "2026-10-12T01:00:00Z", "quantity", 20,
+                    "createdBy", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01", "createdAt", "2026-10-10T02:00:00Z");
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) operation.getRequestBody().getContent().get("application/json")
+                        .setExample(Map.of("batchCode", batch.get("batchCode"), "productId", batch.get("productId"),
+                                "manufacturedAt", batch.get("manufacturedAt"), "expiresAt", batch.get("expiresAt"), "quantity", 20));
+                operation.getResponses().forEach((code, response) -> {
+                    Object example;
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                        if (code.equals("201")) response.addHeaderObject("Location", new Header().description("Relative URL of the created batch.").schema(new StringSchema()));
+                        Object data = id.equals("listProductBatches") ? Map.of("content", List.of(batch), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1) : batch;
+                        String message = switch (id) {
+                            case "createProductBatch" -> "Product batch created";
+                            case "listProductBatches" -> "Product batches retrieved";
+                            default -> "Product batch retrieved";
+                        };
+                        example = Map.of("timestamp", "2026-10-10T02:00:00Z", "message", message, "data", data);
+                    } else {
+                        if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                        String error = switch (code) {
+                            case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden";
+                            case "404" -> "Not Found"; case "409" -> "Conflict"; default -> "Internal Server Error";
+                        };
+                        String message = switch (code) {
+                            case "400" -> "Request body is missing or malformed";
+                            case "401" -> "Authentication required or access token invalid"; case "403" -> "Access denied";
+                            case "404" -> id.equals("createProductBatch") ? "Product not found" : "Product batch not found";
+                            case "409" -> "Batch code is already in use"; default -> "An unexpected error occurred";
+                        };
+                        example = Map.of("timestamp", "2026-10-10T02:00:00Z", "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
     public OpenAPI backendOpenApi() {
         return new OpenAPI().info(new Info().title("Fruit Machine Backend API").version("v1")
                 .description("Management API. Login is public; other application endpoints require Bearer authentication. "
