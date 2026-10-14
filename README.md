@@ -26,9 +26,9 @@ Kiosk (Electron + React) ── Serial/USB ──> ESP32 ──> Motor, cảm bi
 2. Kiosk gọi **backend** tạo giao dịch và nhận dữ liệu QR.
 3. Cổng thanh toán gửi webhook xác nhận thanh toán về backend.
 4. Backend thông báo trạng thái thanh toán cho kiosk.
-5. Kiosk gửi lệnh nhả sản phẩm tới **ESP32** qua Serial/USB.
-6. ESP32 điều khiển động cơ, đọc cảm biến xác nhận hàng đã rơi và trả kết quả.
-7. Kiosk báo kết quả nhả hàng lên backend; backend cập nhật giao dịch và tồn kho.
+5. Backend gửi lệnh nhả sản phẩm tới **ESP32** qua MQTT.
+6. Firmware nhận lệnh tại topic `fruit-vending/{machineId}/command`, điều khiển servo, rồi gửi trạng thái qua `fruit-vending/{machineId}/status`.
+7. Backend cập nhật giao dịch và tồn kho theo trạng thái nhả hàng; kiosk hiển thị kết quả.
 
 Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồng bộ giao dịch khi mất điện/mất mạng.
 

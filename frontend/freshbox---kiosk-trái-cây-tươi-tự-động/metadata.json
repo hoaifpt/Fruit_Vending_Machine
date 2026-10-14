@@ -1,0 +1,6 @@
+{
+  "name": "FreshBox - Kiosk Trái Cây Tươi Tự Động",
+  "description": "Hệ thống Kiosk trái cây tươi cắt sẵn, nước ép nguyên chất tiệt trùng UV-C khép kín và duy trì nhiệt độ chuẩn 4°C 24/7.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
