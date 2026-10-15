@@ -13,6 +13,7 @@ import com.fruitmachine.backend.order.entity.OrderItemAllocation;
 import com.fruitmachine.backend.order.enums.AllocationStatus;
 import com.fruitmachine.backend.order.enums.OrderStatus;
 import com.fruitmachine.backend.order.repository.OrderItemAllocationRepository;
+import com.fruitmachine.backend.payment.service.PaymentService;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -33,6 +34,7 @@ public class OrderReservationService {
     private final InventoryItemRepository items;
     private final InventoryTransactionRepository history;
     private final OrderItemAllocationRepository allocations;
+    private final PaymentService payments;
 
     /** FEFO bowls locked with SKIP LOCKED; fewer than requested means the whole order must fail. */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
@@ -62,6 +64,8 @@ public class OrderReservationService {
         // created_at comes from the database clock; never let clock skew violate cancelled_at >= created_at.
         order.setStatus(OrderStatus.CANCELLED);
         order.setCancelledAt(notBefore(now, order.getCreatedAt()));
+        // Lock order: Order (held by the caller), then Payment, then InventoryItem.
+        payments.expirePendingPayments(order);
         for (OrderItemAllocation allocation : allocations.findByOrderIdAndStatus(order.getId(), AllocationStatus.RESERVED)) {
             InventoryItem bowl = items.findForUpdateById(allocation.getInventoryItem().getId())
                     .orElseThrow(() -> new IllegalStateException("Allocated inventory item is missing"));

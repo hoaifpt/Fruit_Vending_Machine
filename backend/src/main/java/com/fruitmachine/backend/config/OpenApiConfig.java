@@ -454,6 +454,7 @@ public class OpenApiConfig {
         order.put("machineId", "9b1e0000-0000-4000-8000-000000000001"); order.put("status", "PENDING_PAYMENT");
         order.put("items", List.of(line)); order.put("subtotal", 70000.00); order.put("totalAmount", 70000.00);
         order.put("createdAt", timestamp); order.put("expiresAt", "2026-10-15T04:05:00Z"); order.put("cancelledAt", null);
+        order.put("currentPayment", null);
         var cancelled = new java.util.LinkedHashMap<>(order);
         cancelled.put("status", "CANCELLED"); cancelled.put("cancelledAt", "2026-10-15T04:01:00Z");
         var issued = Map.of("credentialId", "4f6c0000-0000-4000-8000-000000000001", "machineId", "9b1e0000-0000-4000-8000-000000000001",
@@ -485,9 +486,14 @@ public class OpenApiConfig {
         detail.put("status", "CANCELLED"); detail.put("subtotal", 70000.00); detail.put("totalAmount", 70000.00);
         detail.put("createdAt", timestamp); detail.put("expiresAt", "2026-10-15T04:05:00Z"); detail.put("paidAt", null);
         detail.put("completedAt", null); detail.put("cancelledAt", "2026-10-15T04:01:00Z"); detail.put("items", List.of(detailLine));
+        var paymentSummary = new java.util.LinkedHashMap<String, Object>();
+        paymentSummary.put("id", "5d6e0000-0000-4000-8000-000000000001"); paymentSummary.put("provider", "MOCK"); paymentSummary.put("status", "EXPIRED");
+        paymentSummary.put("amount", 70000.00); paymentSummary.put("createdAt", "2026-10-15T04:00:05Z"); paymentSummary.put("paidAt", null);
+        paymentSummary.put("expiredAt", "2026-10-15T04:05:00Z");
+        detail.put("payments", List.of(paymentSummary));
         return api -> api.getPaths().forEach((name, path) -> {
             boolean mine = name.startsWith("/api/v1/kiosk") || name.startsWith("/api/v1/orders") || name.contains("/kiosk-credentials");
-            if (!mine) return;
+            if (!mine || name.endsWith("/payments")) return;
             path.readOperations().forEach(operation -> {
                 String id = operation.getOperationId();
                 if (operation.getRequestBody() != null) {
@@ -521,6 +527,52 @@ public class OpenApiConfig {
                         String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; case "404" -> "Not Found"; case "409" -> "Conflict"; default -> "Internal Server Error"; };
                         String message = switch (code) { case "400" -> "Request validation failed"; case "401" -> "Authentication required or access token invalid";
                             case "403" -> "Access denied"; case "404" -> "Order not found"; case "409" -> "Insufficient sellable quantity for a requested product"; default -> "An unexpected error occurred"; };
+                        example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
+    public OpenApiCustomizer paymentExamples() {
+        String timestamp = "2026-10-15T04:00:00Z";
+        var kioskPayment = new java.util.LinkedHashMap<String, Object>();
+        kioskPayment.put("paymentId", "5d6e0000-0000-4000-8000-000000000001"); kioskPayment.put("orderId", "e0f1a2b3-0000-4000-8000-000000000001");
+        kioskPayment.put("provider", "MOCK"); kioskPayment.put("status", "PENDING"); kioskPayment.put("amount", 70000.00);
+        kioskPayment.put("qrCode", "MOCK-QR|MOCK-8F3KQ2AB|70000.00"); kioskPayment.put("expiresAt", "2026-10-15T04:05:00Z");
+        var item = new java.util.LinkedHashMap<String, Object>();
+        item.put("id", "5d6e0000-0000-4000-8000-000000000001"); item.put("orderId", "e0f1a2b3-0000-4000-8000-000000000001");
+        item.put("orderCode", "ORD-20261015-7K3QF9XA"); item.put("machineCode", "FV-HCM-001"); item.put("provider", "MOCK"); item.put("status", "PENDING");
+        item.put("amount", 70000.00); item.put("paymentReference", "MOCK-8F3KQ2AB"); item.put("transactionId", null);
+        item.put("createdAt", "2026-10-15T04:00:05Z"); item.put("paidAt", null); item.put("expiredAt", "2026-10-15T04:05:00Z");
+        var detail = new java.util.LinkedHashMap<String, Object>(item);
+        detail.put("qrCode", "MOCK-QR|MOCK-8F3KQ2AB|70000.00");
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/payments") && !name.endsWith("/payments")) return;
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                operation.getResponses().forEach((code, response) -> {
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    }
+                    if (code.equals("401")) {
+                        response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    }
+                    if (response.getContent() == null || response.getContent().get("application/json") == null) return;
+                    Object example;
+                    if (code.startsWith("2")) {
+                        Object data = switch (id) {
+                            case "createKioskPayment" -> kioskPayment;
+                            case "listPayments" -> Map.of("content", List.of(item), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1);
+                            default -> detail;
+                        };
+                        example = Map.of("timestamp", timestamp, "message", "Success", "data", data);
+                    } else {
+                        String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; case "404" -> "Not Found"; case "409" -> "Conflict"; case "502" -> "Bad Gateway"; default -> "Internal Server Error"; };
+                        String message = switch (code) { case "400" -> "Request validation failed"; case "401" -> "Authentication required or access token invalid";
+                            case "403" -> "Access denied"; case "404" -> "Payment not found"; case "409" -> "Maximum payment attempts reached for this order";
+                            case "502" -> "Payment provider is currently unavailable"; default -> "An unexpected error occurred"; };
                         example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
                     }
                     response.getContent().get("application/json").setExample(example);

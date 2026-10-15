@@ -628,3 +628,16 @@ OrderExpiryScheduler (trigger only, `app.order.expiry-sweep.enabled`) and OrderC
 Typed `app.order.*` properties fail startup when invalid. Only PENDING_PAYMENT and CANCELLED are
 produced; payment, QR, webhooks, PAID and dispensing remain future issues. See
 [order-management.md](../../docs/order-management.md).
+
+## 19. Payment service — Issue #29
+
+`payment.gateway.PaymentGateway` is the only provider boundary (provider code, new reference, create payment); webhook
+verification is added by the webhook issue. `PaymentGatewayRegistry` resolves the single gateway named by
+`app.payment.provider` and refuses an unknown code or MOCK under the prod profile. `MockPaymentGateway` never calls a network
+and never marks anything paid. `PaymentService` orchestrates attempt creation without a transaction and calls the transactional
+steps of `PaymentAttemptTransactions` through the Spring proxy; the provider call runs on its own thread with `provider-timeout`
+and is refused if an ambient transaction exists. `PaymentService.expirePendingPayments` is called by the order release workflow
+(kiosk cancel and expiry sweep) after the order lock, giving the order Order -> Payment -> InventoryItem. `KioskPaymentController`
+creates or reuses an attempt; `PaymentController` is ADMIN read-only; kiosk polling (`currentPayment`) and order details
+(`payments[]`) extend the #27 DTOs. `PaymentProviderException` maps to a generic 502 in GlobalExceptionHandler. Payment SUCCESS,
+Order PAID, webhooks and real providers remain future issues. See [payment-service.md](../../docs/payment-service.md).

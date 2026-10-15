@@ -22,6 +22,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 
 @SpringBootTest(properties = {"spring.config.import=", "API_DOCS_ENABLED=true"})
 @ActiveProfiles("prod")
+@org.springframework.context.annotation.Import(com.fruitmachine.backend.support.TestPaymentGatewayConfig.class)
 @AutoConfigureMockMvc
 @org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
@@ -39,6 +40,8 @@ class ProductionDocumentationTest {
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("security.jwt.secret", () -> KEY);
+        // MOCK is rejected by the prod profile, so production-like tests need a non-mock provider.
+        registry.add("app.payment.provider", () -> "TESTPAY");
         registry.add("app.bootstrap.admin.email", () -> "bootstrap-prod@example.invalid");
         registry.add("app.bootstrap.admin.password", () -> "Test-only-bootstrap-passphrase!");
     }

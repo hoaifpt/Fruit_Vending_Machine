@@ -1,19 +1,18 @@
-# Chat handoff - Issue #27, 2026-10-15
+# Chat handoff - Issue #29, 2026-10-15
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/27, [BE] Implement Order Management.
-Branch feature/27-order-management from origin/dev a3ee8f6 (includes #24 via PR#26).
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/29, [BE] Implement Payment Service.
+Branch feature/29-payment-service from origin/dev de4457a (includes #27 via PR#28).
 Git delivery: NOTHING committed or pushed; no PR, merge or GitHub issue edit. All changes are in the working tree.
 
-Delivered: V10 kiosk_credentials, V11 orders.expires_at; kiosk X-Kiosk-Key auth filter and ADMIN credential
-issue/list/revoke; kiosk me/catalog; order create with FEFO SKIP LOCKED reservation, kiosk read/cancel, scheduled
-expiry sweep (app.order.*); ADMIN/STAFF read-only order list/detail; OpenAPI examples, api-contract/api.yaml,
-docs/order-management.md, .ai/DATABASE|ARCHITECTURE|PROJECT. Only PENDING_PAYMENT -> CANCELLED is produced.
+Delivered: V12 unique (provider, payment_reference); PaymentGateway abstraction, registry (single provider, unknown/prod+MOCK fail startup),
+MockPaymentGateway; kiosk POST /api/v1/kiosk/orders/{orderId}/payments (3 steps, no transaction during the provider call, reuse, max attempts,
+502 on provider failure); pending payments EXPIRED on order cancel/expiry (Order -> Payment -> InventoryItem); currentPayment in kiosk order polling;
+payments[] in order details; ADMIN GET /api/v1/payments and /{id}; OpenAPI examples, api-contract/api.yaml, docs/payment-service.md, .ai docs.
+No payment SUCCESS, Order PAID, webhook, real provider or refund exists.
 
-Verification: clean verify 483 tests, 0 failures, BUILD SUCCESS (JDK 21.0.10, PostgreSQL 18 Testcontainers).
-All 97 CURRENT_TASK checklist items checked. Not done: manual Swagger Try-it-out, bootRun against a dev database.
-Environment: use JAVA_HOME=C:/Program Files/Java/jdk-21.0.10 (JDK 25 default breaks Lombok); Docker Desktop must run.
+Verification: clean verify 516 tests, 0 failures, BUILD SUCCESS (JDK 21.0.10, PostgreSQL 18 Testcontainers). All 66 CURRENT_TASK items checked.
+Not done: manual Swagger Try-it-out, bootRun against a developer database.
+Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...` (IDE may overwrite target/classes).
 
-Decision (user): GET /api/v1/orders keeps itemCount = number of order lines and adds totalQuantity = total bowls.
-Next authorized step: await user review; commit/push/PR only on explicit request. Payment issues (#14-#16 in the issue text)
-build on Order -> Payment -> InventoryItem lock order documented in DATABASE.md section 11.
+Next authorized step: await user review; commit/push/PR only on explicit request.

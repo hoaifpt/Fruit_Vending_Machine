@@ -52,6 +52,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return error(HttpStatus.CONFLICT, "Conflict", ex.getMessage(), Map.of(), request);
     }
 
+    @ExceptionHandler(com.fruitmachine.backend.payment.gateway.PaymentProviderException.class)
+    public ResponseEntity<Object> handleProvider(com.fruitmachine.backend.payment.gateway.PaymentProviderException ex, WebRequest request) {
+        // Provider details stay in the server log; clients only learn that the provider is unavailable.
+        return error(HttpStatus.BAD_GATEWAY, "Bad Gateway", "Payment provider is currently unavailable", Map.of(), request);
+    }
+
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Object> handleDataConflict(DataIntegrityViolationException ex, WebRequest request) {
         // Never expose SQL, constraint contents or rejected values to clients.

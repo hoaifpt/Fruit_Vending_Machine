@@ -4,6 +4,8 @@ import com.fruitmachine.backend.order.dto.*;
 import com.fruitmachine.backend.order.entity.Order;
 import com.fruitmachine.backend.order.entity.OrderItem;
 import com.fruitmachine.backend.order.entity.OrderItemAllocation;
+import com.fruitmachine.backend.payment.dto.KioskPaymentResponse;
+import com.fruitmachine.backend.payment.dto.PaymentSummaryResponse;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -15,13 +17,13 @@ public class OrderMapper {
     private static final Comparator<OrderItem> LINE_ORDER =
             Comparator.comparing((OrderItem item) -> item.getProduct().getSku()).thenComparing(OrderItem::getId);
 
-    public KioskOrderResponse kiosk(Order order) {
+    public KioskOrderResponse kiosk(Order order, KioskPaymentResponse currentPayment) {
         List<KioskOrderItemResponse> lines = order.getItems().stream().sorted(LINE_ORDER)
                 .map(item -> new KioskOrderItemResponse(item.getProduct().getId(), item.getProduct().getSku(), item.getProduct().getName(),
                         item.getQuantity(), item.getUnitPrice(), item.getTotalPrice()))
                 .toList();
         return new KioskOrderResponse(order.getId(), order.getOrderCode(), order.getMachine().getId(), order.getStatus(), lines,
-                order.getSubtotal(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt());
+                order.getSubtotal(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt(), currentPayment);
     }
 
     public OrderSummaryResponse summary(Order order, long lines, long bowls) {
@@ -29,7 +31,7 @@ public class OrderMapper {
                 order.getStatus(), lines, bowls, order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt());
     }
 
-    public OrderDetailResponse detail(Order order, Map<UUID, List<OrderItemAllocation>> allocations) {
+    public OrderDetailResponse detail(Order order, Map<UUID, List<OrderItemAllocation>> allocations, List<PaymentSummaryResponse> payments) {
         List<OrderItemDetailResponse> lines = order.getItems().stream().sorted(LINE_ORDER)
                 .map(item -> new OrderItemDetailResponse(item.getId(), item.getProduct().getId(), item.getProduct().getSku(),
                         item.getProduct().getName(), item.getQuantity(), item.getUnitPrice(), item.getTotalPrice(),
@@ -37,7 +39,7 @@ public class OrderMapper {
                 .toList();
         return new OrderDetailResponse(order.getId(), order.getOrderCode(), order.getMachine().getId(), order.getMachine().getCode(),
                 order.getStatus(), order.getSubtotal(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(),
-                order.getPaidAt(), order.getCompletedAt(), order.getCancelledAt(), lines);
+                order.getPaidAt(), order.getCompletedAt(), order.getCancelledAt(), lines, payments);
     }
 
     private OrderAllocationResponse allocation(OrderItemAllocation allocation) {

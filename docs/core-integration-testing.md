@@ -42,7 +42,7 @@ không bị DELETE/TRUNCATE để cleanup giữa methods; container riêng đư�
 | Suite mới | Hành vi kiểm tra |
 | --- | --- |
 | CoreManagementFlowIntegrationTest | Tạo STAFF/login, Product/Machine/Slot/Batch, load với cả ADMIN/STAFF, xác minh FK/actor/history/summary/filters/removal qua API và DB; deactivation/expiry, RBAC và safe DTO/errors |
-| CoreDatabaseIntegrationTest | Flyway validate/migrate lại không đổi schema, 11 migrations/21 tables (V10/V11 thêm bởi issue #27), URL DB thật, unique/FK/CHECK/RESTRICT và append-only history |
+| CoreDatabaseIntegrationTest | Flyway validate/migrate lại không đổi schema, 12 migrations/21 tables (V10/V11 thêm bởi issue #27, V12 bởi issue #29), URL DB thật, unique/FK/CHECK/RESTRICT và append-only history |
 | InventoryDatabaseRollbackIntegrationTest | Lỗi SQL thật ở history insert thứ hai trả409/500; toàn bộ load4 rollback, client không thấy SQL nội bộ; bỏ fault rồi load lại thành công |
 | InventoryConcurrentRequestsIntegrationTest | Capacity6 có4 hộp và batch20 có18 đăng ký: hai load2 chồng lấp, chỉ một201/một409, final6/final20 cùng history đúng |
 

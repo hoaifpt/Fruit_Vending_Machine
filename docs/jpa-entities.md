@@ -152,7 +152,7 @@ JVM timezone UTC tránh JDBC gửi timezone alias Asia/Saigon không được se
 hibernate.jdbc.time_zone chỉ điều khiển JDBC binding, không thay múi giờ JVM lúc handshake.
 
 `EntityMappingTest` dùng PostgreSQL 18 Testcontainers riêng, không dùng credentials hoặc dữ
-liệu development. Flyway áp dụng V1–V11, rồi Hibernate validate. Các integration tests đã đạt:
+liệu development. Flyway áp dụng V1–V12, rồi Hibernate validate. Các integration tests đã đạt:
 
 1. 20 entity khớp 20 bảng nghiệp vụ, toàn bộ column mappings được đối chiếu với database.
 2. Persist/reload mọi entity, membership khóa kép, composite navigation, lazy collections,
