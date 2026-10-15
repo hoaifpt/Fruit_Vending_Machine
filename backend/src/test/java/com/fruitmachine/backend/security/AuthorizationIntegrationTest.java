@@ -316,7 +316,9 @@ class AuthorizationIntegrationTest {
                         "/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}", "/api/v1/machines/{machineId}/slots/{slotId}/status",
                 "/api/v1/product-batches", "/api/v1/product-batches/{id}",
                 "/api/v1/inventory", "/api/v1/inventory/{id}", "/api/v1/inventory/load", "/api/v1/inventory/{id}/remove", "/api/v1/inventory/transactions",
-                "/api/v1/machines/{machineId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary");
+                "/api/v1/machines/{machineId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary", "/api/v1/machines/{machineId}/kiosk-credentials", "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke",
+                "/api/v1/kiosk/me", "/api/v1/kiosk/catalog", "/api/v1/kiosk/orders", "/api/v1/kiosk/orders/{orderId}",
+                "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());

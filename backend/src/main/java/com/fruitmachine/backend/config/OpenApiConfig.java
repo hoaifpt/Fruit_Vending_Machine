@@ -445,12 +445,99 @@ public class OpenApiConfig {
         });
     }
     @Bean
+    public OpenApiCustomizer orderManagementExamples() {
+        String timestamp = "2026-10-15T04:00:00Z";
+        var line = Map.of("productId", "1c2d3e4f-0000-4000-8000-000000000001", "sku", "BOWL-MIX", "productName", "Mixed Fruit Bowl",
+                "quantity", 2, "unitPrice", 35000.00, "totalPrice", 70000.00);
+        var order = new java.util.LinkedHashMap<String, Object>();
+        order.put("id", "e0f1a2b3-0000-4000-8000-000000000001"); order.put("orderCode", "ORD-20261015-7K3QF9XA");
+        order.put("machineId", "9b1e0000-0000-4000-8000-000000000001"); order.put("status", "PENDING_PAYMENT");
+        order.put("items", List.of(line)); order.put("subtotal", 70000.00); order.put("totalAmount", 70000.00);
+        order.put("createdAt", timestamp); order.put("expiresAt", "2026-10-15T04:05:00Z"); order.put("cancelledAt", null);
+        var cancelled = new java.util.LinkedHashMap<>(order);
+        cancelled.put("status", "CANCELLED"); cancelled.put("cancelledAt", "2026-10-15T04:01:00Z");
+        var issued = Map.of("credentialId", "4f6c0000-0000-4000-8000-000000000001", "machineId", "9b1e0000-0000-4000-8000-000000000001",
+                "keyPrefix", "a1b2c3d4e5f6", "apiKey", "fvk_a1b2c3d4e5f6_<shown-once>", "status", "ACTIVE", "createdAt", timestamp);
+        var metadata = new java.util.LinkedHashMap<String, Object>();
+        metadata.put("credentialId", "4f6c0000-0000-4000-8000-000000000001"); metadata.put("keyPrefix", "a1b2c3d4e5f6");
+        metadata.put("status", "REVOKED"); metadata.put("createdAt", timestamp); metadata.put("createdBy", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01");
+        metadata.put("revokedAt", "2026-10-15T05:00:00Z"); metadata.put("revokedBy", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01");
+        var catalog = Map.of("machineId", "9b1e0000-0000-4000-8000-000000000001", "machineCode", "FV-HCM-001", "acceptingOrders", true,
+                "maxTotalQuantity", 5, "products", List.of(Map.of("productId", "1c2d3e4f-0000-4000-8000-000000000001", "sku", "BOWL-MIX",
+                        "name", "Mixed Fruit Bowl", "description", "Seasonal mixed fruit", "price", 35000.00,
+                        "imageUrl", "https://example.com/mix.png", "availableQuantity", 3)));
+        var identity = Map.of("machineId", "9b1e0000-0000-4000-8000-000000000001", "machineCode", "FV-HCM-001",
+                "machineName", "Fruit Machine - Campus A", "machineStatus", "ACTIVE");
+        var summary = new java.util.LinkedHashMap<String, Object>();
+        summary.put("id", "e0f1a2b3-0000-4000-8000-000000000001"); summary.put("orderCode", "ORD-20261015-7K3QF9XA");
+        summary.put("machineId", "9b1e0000-0000-4000-8000-000000000001"); summary.put("machineCode", "FV-HCM-001");
+        summary.put("status", "PENDING_PAYMENT"); summary.put("itemCount", 1); summary.put("totalQuantity", 2); summary.put("totalAmount", 70000.00);
+        summary.put("createdAt", timestamp); summary.put("expiresAt", "2026-10-15T04:05:00Z"); summary.put("cancelledAt", null);
+        var allocation = new java.util.LinkedHashMap<String, Object>();
+        allocation.put("id", "a110c000-0000-4000-8000-000000000001"); allocation.put("inventoryItemId", "1e000000-0000-4000-8000-000000000001");
+        allocation.put("slotCode", "A1"); allocation.put("batchCode", "B20261014-01"); allocation.put("batchExpiresAt", "2026-10-17T00:00:00Z");
+        allocation.put("status", "RELEASED"); allocation.put("releasedAt", "2026-10-15T04:01:00Z");
+        var detailLine = new java.util.LinkedHashMap<String, Object>(line);
+        detailLine.put("id", "01100000-0000-4000-8000-000000000001"); detailLine.put("allocations", List.of(allocation));
+        var detail = new java.util.LinkedHashMap<String, Object>();
+        detail.put("id", "e0f1a2b3-0000-4000-8000-000000000001"); detail.put("orderCode", "ORD-20261015-7K3QF9XA");
+        detail.put("machineId", "9b1e0000-0000-4000-8000-000000000001"); detail.put("machineCode", "FV-HCM-001");
+        detail.put("status", "CANCELLED"); detail.put("subtotal", 70000.00); detail.put("totalAmount", 70000.00);
+        detail.put("createdAt", timestamp); detail.put("expiresAt", "2026-10-15T04:05:00Z"); detail.put("paidAt", null);
+        detail.put("completedAt", null); detail.put("cancelledAt", "2026-10-15T04:01:00Z"); detail.put("items", List.of(detailLine));
+        return api -> api.getPaths().forEach((name, path) -> {
+            boolean mine = name.startsWith("/api/v1/kiosk") || name.startsWith("/api/v1/orders") || name.contains("/kiosk-credentials");
+            if (!mine) return;
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) {
+                    operation.getRequestBody().getContent().get("application/json").setExample(
+                            Map.of("items", List.of(Map.of("productId", "1c2d3e4f-0000-4000-8000-000000000001", "quantity", 2),
+                                    Map.of("productId", "7a8b0000-0000-4000-8000-000000000002", "quantity", 1))));
+                }
+                operation.getResponses().forEach((code, response) -> {
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    }
+                    if (code.equals("401")) {
+                        response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    }
+                    if (response.getContent() == null || response.getContent().get("application/json") == null) return;
+                    Object example;
+                    if (code.startsWith("2")) {
+                        Object data = switch (id) {
+                            case "issueKioskCredential" -> issued;
+                            case "listKioskCredentials" -> List.of(metadata);
+                            case "revokeKioskCredential" -> metadata;
+                            case "getKioskIdentity" -> identity;
+                            case "getKioskCatalog" -> catalog;
+                            case "createKioskOrder", "getKioskOrder" -> order;
+                            case "cancelKioskOrder" -> cancelled;
+                            case "listOrders" -> Map.of("content", List.of(summary), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1);
+                            default -> detail;
+                        };
+                        example = Map.of("timestamp", timestamp, "message", "Success", "data", data);
+                    } else {
+                        String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; case "404" -> "Not Found"; case "409" -> "Conflict"; default -> "Internal Server Error"; };
+                        String message = switch (code) { case "400" -> "Request validation failed"; case "401" -> "Authentication required or access token invalid";
+                            case "403" -> "Access denied"; case "404" -> "Order not found"; case "409" -> "Insufficient sellable quantity for a requested product"; default -> "An unexpected error occurred"; };
+                        example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
     public OpenAPI backendOpenApi() {
         return new OpenAPI().info(new Info().title("Fruit Machine Backend API").version("v1")
                 .description("Management API. Login is public; other application endpoints require Bearer authentication. "
                         + "ADMIN/STAFF roles are independent. User Management requires ADMIN and creates STAFF accounts. No refresh tokens."))
                 .components(new Components().addSecuritySchemes("bearerAuth", new SecurityScheme()
                         .type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")
-                        .description("Paste the access token only (without the Bearer prefix).")));
+                        .description("Paste the access token only (without the Bearer prefix)."))
+                        .addSecuritySchemes("kioskKey", new SecurityScheme()
+                        .type(SecurityScheme.Type.APIKEY).in(SecurityScheme.In.HEADER).name("X-Kiosk-Key")
+                        .description("Machine-bound kiosk key (fvk_<prefix>_<secret>) issued by an ADMIN. Not a user JWT.")));
     }
 }

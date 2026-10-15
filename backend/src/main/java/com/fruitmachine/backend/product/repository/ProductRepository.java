@@ -16,4 +16,9 @@ public interface ProductRepository extends JpaRepository<Product, UUID>, JpaSpec
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from Product p where p.id = :id")
     Optional<Product> findForUpdateById(@Param("id") UUID id);
+
+    /** Shared lock: serializes with deactivation (PESSIMISTIC_WRITE) without blocking other orders. */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select p from Product p where p.id = :id")
+    Optional<Product> findForShareById(@Param("id") UUID id);
 }

@@ -1,174 +1,180 @@
-# Issue #24 — Core Backend Integration Tests
+# Issue #27 — [BE] Implement Order Management
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/24
-Branch: feature/24-core-backend-integration-tests
-Base: fe68a47f716ea5f82a3fb88ea16bcd04d3018fcb
-Latest fetched dev includes #22 via PR#25; 8e9aac6 ancestor verified, initial tree clean.
-Implementation, commit/push, remote CI verification and temporary probe branch cleanup
-authorized by user. No PR/merge/GitHub issue edits authorized.
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/27
+Branch: feature/27-order-management (from origin/dev a3ee8f6, includes #24 via PR#26)
+Authorized: implementation and local verification. Commit/push only on request;
+no PR/merge/GitHub issue edits.
 
-## Scope and audit
+## Scope
+Kiosk machine-bound API key auth (X-Kiosk-Key, SHA-256 hash, one ACTIVE per machine),
+ADMIN credential issue/list/revoke, kiosk me/catalog, order create with FEFO atomic
+reservation (FOR UPDATE SKIP LOCKED), kiosk read/cancel, scheduled expiry sweep,
+ADMIN/STAFF order list/detail. Only PENDING_PAYMENT -> CANCELLED is produced.
 
-Reuse 431 existing tests and real PostgreSQL18/Testcontainers/Flyway/Hibernate/JWT/security.
-Inspected V3/V6/V9: per-item history, nullable V9 snapshots, append-only trigger SQLSTATE55000,
-RESTRICT item/history FK, no schema defect identified. No migration/API/business change needed.
-Add shared TestPostgres factory, reusable core base/profile/HTTP fixture factory, complete
-cross-domain tests, real PostgreSQL fault rollback, observed overlapping transaction races,
-constraint/Flyway tests and backend GitHub Actions. Reuse current Surefire *Test naming.
-No new dependency or future workflow; no .env/developer database changes.
-Per-class disposable containers; per-test unique fixtures preserve append-only history;
-no outer test transaction masking real commits/rollback. Fault-injection triggers scoped to
-unique batches are removed in finally; no production trigger disabled.
-CI workflow verifies Docker, Java21, full Maven lifecycle and always uploads reports.
+## Non-goals
+Payments, QR, webhooks, PAID/DISPENSING/COMPLETED, dispense commands, MQTT, refunds,
+expiration monitoring, idempotency keys, rate limiting, manual status changes, hard deletes,
+kiosk/frontend/firmware changes, refresh tokens.
 
-## Verification — final local results, 2026-10-10
+## Database impact
+NEW V10 kiosk_credentials (+ partial unique ACTIVE index); NEW V11 orders.expires_at
+(+ CHECK, + partial pending index). V1-V9 unchanged.
 
-- mvn --batch-mode --no-transfer-progress clean verify: 442 tests, zero failures/errors/
-  skips, BUILD SUCCESS. Includes all previous431 feature/auth/security/schema/docs tests
-  plus11 new core tests; real PostgreSQL18, Java21.0.10, Maven3.9.12.
-- Targeted four new classes:11 pass. Repeat with random Surefire class order and JUnit
-  method order:11 pass. Individual batch-race method:1 pass. No order dependency observed.
-- Concurrency observes both independent transactions waiting in pg_stat_activity before
-  release; exact capacity6/occupied4 and batch20/registered18 scenarios end6/end20.
-- SQL-fault trigger rejects second history insert with23514/XX000:409/500 sanitized,
-  zero partial items/events, recovery load commits after fault removed. No mock repository.
-- Flyway validate/migrate-again, 9 migrations/20 total tables and actual JDBC metadata
-  confirm isolated Testcontainers database. SQL unique/FK/CHECK/RESTRICT/append-only
-  guards verified. All19 entities and startup HTTP checks pass existing EntityMappingTest.
-- TestPostgres factory reused by20 existing suites. After-class context cleanup added to
- 17 existing Spring database suites; their original assertions/bodies compared with HEAD
-  and unchanged. New base uses the same cleanup. Testcontainers snapshots before/after
-  full verify empty; after random/individual runs also no leftover containers.
-- actionlint1.7.12 PASS for GitHub Actions syntax/semantics. Verified official Actions SHAs
-  pinned. Workflow Java21/Ubuntu24.04/Docker/Maven full suite, always-upload Surefire reports,
-  no skip/continue-on-error/production credentials. Initial failing targeted test returned
-  Maven exit1, verifying local failure propagation; remote evidence also verified below.
-- No production source/API/contract/pom change. All9 applied migrations byte-equivalent
-  after newline normalization. No .env/developer DB or hardware/external service access.
-- git diff --check pass. Exact62 original checklist items/text/order checked against live
-  issue;62 verified, none unchecked after remote CI verification. No GitHub issue edits.
-- GitHub Actions success run38043959910 on f079480:442tests,0failure/error/skip,
-  BUILD SUCCESS, successful job and backend-test-reports artifact11667480945.
-- Temporary failure run38043998076 on ff107f4:443tests, exactly1failure in
-  CiFailurePropagationProbeTest,0error/skip, Maven exit1, build step/job/run failure.
-  Artifact11666676394 uploaded successfully despite failure. Both ZIPs/XML and logs
-  downloaded and parsed; existing442tests also pass in the failing run.
-- Temporary feature/24-ci-failure-probe-f079480 branch SHA checked unchanged and removed
-  locally/remotely. Intentional failing test never entered delivery branch. Runs/artifacts
-  retained as evidence; no PR/merge/GitHub issue checkbox edits.
-- Branch feature/24-core-backend-integration-tests, basefe68a47. Implementation commit
-  f0794800542657ab54896013781ecd028466ef25 pushed and verified by GitHub CI.
-  This docs-only follow-up snapshot records final evidence; resolve current HEAD via Git.
-- All62 original checklist items verified; no incomplete item remains.
+## Status and verification (2026-10-15)
+Implemented and locally verified; nothing committed, pushed, PR-ed or merged.
+- `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, Maven 3.9.12, PostgreSQL 18.6
+  Testcontainers): 483 tests, 0 failures/errors/skips, BUILD SUCCESS, on the final code.
+  Log: backend/target/issue27-verify.log (ignored).
+- Follow-up on the same branch: order list adds totalQuantity (itemCount stays = order lines); release/revoke timestamps
+  are never earlier than the row created_at (database clock skew guard). Re-verified: clean verify 483 tests, 0 failures.
+- Note: an IDE auto-compiling into target/classes can break Maven runs (ECJ without Lombok); always run `clean`.
+- New classes: KioskCredentialIntegrationTest(7), KioskCatalogIntegrationTest(3), OrderCreationIntegrationTest(8),
+  OrderCancelExpiryIntegrationTest(6), OrderManagementReadIntegrationTest(3), OrderConcurrencyIntegrationTest(6),
+  OrderSchemaIntegrationTest(4), OrderExpirySchedulerIntegrationTest(1), OrderPropertiesTest(2),
+  OrderManagementDocumentationTest(1). Existing tests changed only for new counts (11 migrations, 20 entities,
+  21 tables, 3 migrations in the V8 upgrade test, exact OpenAPI path lists); no assertion weakened.
+- V1-V9 checksums asserted unchanged. Contract: api-contract/api.yaml synchronized (9 paths, 22 schemas, kioskKey
+  scheme, 4 tags) and compared with the exposed OpenAPI by OrderManagementDocumentationTest.
+- Limits: Swagger UI is verified by automated load/OpenAPI tests only; no manual Try-it-out and no `spring-boot:run`
+  against a developer database. "Application starts" is evidenced by Spring contexts booting on all suites,
+  including one with the real scheduler enabled. Run Maven with JDK 21 (default JAVA_HOME here is JDK 25,
+  which Lombok cannot compile with).
+- Design notes: order list itemCount = number of order lines, totalQuantity = total bowls; slot rows are not locked during reservation
+  (slot ACTIVE is in the candidate predicate); an order carrying both JWT and kiosk key gets 401.
 
-Evidence under backend/target/ (ignored): issue24-verify.log, issue24-targeted-fixed.log,
-issue24-repeat-random.log, issue24-individual.log, issue24-actionlint.log,
-issue24-containers-before.log, issue24-containers-after-verify.log,
-issue24-containers-after-final.log, surefire-reports/. Targeted reruns can overwrite their
-own Surefire reports; full-suite totals are retained in issue24-verify.log.
-Coverage/setup: ../../docs/core-integration-testing.md. New tests: integration/ four classes;
-shared support/ four classes and src/test/resources/application-test.yml.
-CI workflow: ../../.github/workflows/backend-tests.yml.
+# Testing
 
-# 28. Testing Checklist
+## 30. Migration / Mapping Tests
 
-## Environment
+- [x] V10/V11 apply on a clean PostgreSQL 18 database
+- [x] Flyway validation passes
+- [x] Hibernate `ddl-auto=validate` passes
+- [x] `EntityMappingTest` covers `KioskCredential` and `Order.expiresAt`
+- [x] Partial unique index rejects two ACTIVE credentials for one machine
+- [x] `ck_orders_expires_at` rejects `expires_at <= created_at`
+- [x] V1–V9 remain unchanged
 
-- [x] PostgreSQL Testcontainer starts successfully.
-- [x] Spring Boot test context loads.
-- [x] Flyway migrations run successfully.
-- [x] Hibernate schema validation passes.
-- [x] Test database is isolated.
-- [x] Test data cleanup works.
+## 31. Kiosk Credential Tests
 
-## Authentication
+- [x] ADMIN can issue credential; plaintext key returned once
+- [x] Only SHA-256 hash and prefix are stored
+- [x] Issuing again revokes the previous ACTIVE credential
+- [x] Old key returns `401` after rotation
+- [x] ADMIN can list metadata; no hash/secret in response
+- [x] ADMIN can revoke; revoke is idempotent
+- [x] Revoked key returns `401`
+- [x] Credential of another machine returns `404`
+- [x] Missing machine returns `404`
+- [x] STAFF receives `403` on all credential APIs (including GET)
+- [x] Unauthenticated receives `401`
 
-- [x] Valid login succeeds.
-- [x] Invalid credentials fail.
-- [x] Inactive users cannot authenticate.
-- [x] Locked users cannot authenticate.
-- [x] Missing JWT returns 401.
-- [x] Invalid JWT returns 401.
-- [x] Expired JWT returns 401.
+## 32. Kiosk Authentication Tests
 
-## Authorization
+- [x] Valid key authenticates as own machine (`/kiosk/me`)
+- [x] Missing / malformed / unknown-prefix / wrong-secret key returns `401`
+- [x] User JWT on `/api/v1/kiosk/**` returns `403`
+- [x] Kiosk key on management APIs returns `401`
+- [x] Kiosk of INACTIVE/MAINTENANCE machine can authenticate
+- [x] Key never appears in logs (log capture assertion)
 
-- [x] ADMIN permissions work.
-- [x] STAFF permissions work.
-- [x] ADMIN-only endpoints reject STAFF.
-- [x] Unauthenticated requests are rejected.
-- [x] Authorization rules match existing business requirements.
+## 33. Catalog Tests
 
-## Core Management
+- [x] Lists only products with sellable bowls of own machine
+- [x] Excludes expired / expiring-before-hold-deadline batches
+- [x] Excludes INACTIVE product / slot
+- [x] Excludes RESERVED / SOLD / REMOVED / stockroom items
+- [x] Does not include other machines' inventory
+- [x] Machine not ACTIVE → `acceptingOrders=false`, empty list
+- [x] No slot/item/batch identifiers in response
 
-- [x] User Management integration tests pass.
-- [x] Product Management integration tests pass.
-- [x] Machine Management integration tests pass.
-- [x] Machine Slot integration tests pass.
-- [x] Product Batch integration tests pass.
-- [x] Inventory integration tests pass.
+## 34. Create Order Tests
 
-## Database
+- [x] Creates `PENDING_PAYMENT` order with `expiresAt = now + ttl`
+- [x] Prices are snapshotted from product; totals correct
+- [x] Reserves exactly the requested quantity per product
+- [x] FEFO: earliest-expiring batch reserved first
+- [x] Items become `RESERVED` with `reserved_at`
+- [x] One `RESERVED` allocation per item
+- [x] One `RESERVE` inventory transaction per item with correct snapshot
+- [x] Insufficient quantity → `409`, nothing reserved/created (all-or-nothing)
+- [x] Unknown product → `404`; inactive product → `409`
+- [x] Machine not ACTIVE → `409`
+- [x] Duplicate productId / empty items / quantity 0 / fractional / over max → `400`
+- [x] Unknown fields (e.g. `price`, `machineId`, `status`) → `400`
+- [x] Later product price change does not alter existing order
+- [x] Order code format and uniqueness
 
-- [x] Unique constraints are enforced.
-- [x] Foreign keys are enforced.
-- [x] CHECK constraints are enforced.
-- [x] Transactions roll back correctly.
-- [x] No partial inventory loading occurs.
+## 35. Concurrency Tests (real PostgreSQL)
 
-## Concurrency
+- [x] Two concurrent orders for the last bowl → exactly one `201`, one `409`
+- [x] Concurrent orders for N bowls never over-reserve
+- [x] Order vs concurrent inventory removal of the same bowl → consistent final state
+- [x] Order vs concurrent product deactivation → no order with INACTIVE product reserved after deactivation commit
+- [x] Cancel vs expiry sweep on the same order → released exactly once
 
-- [x] Concurrent loading cannot exceed slot capacity.
-- [x] Concurrent loading cannot exceed batch quantity.
-- [x] Tests use real PostgreSQL transactions.
-- [x] Tests are repeatable.
+## 36. Cancel / Expiry Tests
 
-## CI
+- [x] Kiosk cancel `PENDING_PAYMENT` → `CANCELLED`, `cancelled_at` set
+- [x] Cancel is idempotent for `CANCELLED`
+- [x] Cancel other machine's order → `404`
+- [x] Allocations → `RELEASED` with `released_at`
+- [x] Items → `AVAILABLE`, `reserved_at` cleared
+- [x] One `RETURN` transaction per item with correct reason
+- [x] Sweep expires only `PENDING_PAYMENT` orders past `expires_at` (fixed `Clock`)
+- [x] Sweep ignores not-yet-expired orders
+- [x] Sweep continues when one order fails
+- [x] Released bowl is sellable again (if batch not expired)
 
-- [x] Tests run through Maven.
-- [x] Tests run in GitHub Actions.
-- [x] Test failures fail the pipeline.
-- [x] Test reports are generated.
-- [x] No external production services are required.
+## 37. Management Read Tests
+
+- [x] ADMIN and STAFF can list orders
+- [x] Pagination, status/machine/date/search filters and approved sorts work
+- [x] Details include items, price snapshots and allocations
+- [x] Missing order → `404`
+- [x] Kiosk key on `/api/v1/orders` → `401`
+- [x] No write method exists on `/api/v1/orders/**`
+
+## 38. Documentation / Regression Tests
+
+- [x] Swagger UI loads and shows new tags and both security schemes
+- [x] `api-contract/api.yaml` matches exposed OpenAPI (documentation test)
+- [x] All existing tests pass (`mvn clean verify`)
+- [x] Existing inventory load/remove/summary behavior unchanged
+- [x] Application starts successfully
 
 ---
 
-# 30. Acceptance Criteria
+---
+
+# Acceptance Criteria
 
 The issue is complete when:
 
-- [x] Core integration test infrastructure is implemented.
-- [x] PostgreSQL Testcontainers is configured.
-- [x] Integration tests use real PostgreSQL.
-- [x] Flyway migrations execute in tests.
-- [x] Hibernate schema validation passes.
-- [x] Authentication integration tests are implemented.
-- [x] ADMIN/STAFF authorization tests are implemented.
-- [x] User Management integration tests are implemented.
-- [x] Product Management integration tests are implemented.
-- [x] Machine Management integration tests are implemented.
-- [x] Machine Slot integration tests are implemented.
-- [x] Product Batch integration tests are implemented.
-- [x] Inventory Management integration tests are implemented.
-- [x] Database constraints are verified.
-- [x] Inventory transaction rollback is verified.
-- [x] Inventory concurrency behavior is verified.
-- [x] Test data is isolated and repeatable.
-- [x] Tests do not depend on execution order.
-- [x] Integration tests can run through Maven.
-- [x] Integration tests run in GitHub Actions.
-- [x] Failed tests cause CI failure.
-- [x] No production database or external hardware is required.
-- [x] No unrelated business features are introduced.
-- [x] Existing Flyway migrations remain unchanged.
+- [x] V10 `kiosk_credentials` migration added and applied
+- [x] V11 `orders.expires_at` migration added and applied
+- [x] `KioskCredential` entity mapped; `Order.expiresAt` mapped
+- [x] Kiosk credential issue/rotate, list, revoke APIs work (ADMIN only)
+- [x] Plaintext kiosk key is shown once and never stored
+- [x] Kiosk authentication filter works on `/api/v1/kiosk/**` only
+- [x] Kiosk machine is derived from credential, never from request
+- [x] `GET /api/v1/kiosk/me` works
+- [x] `GET /api/v1/kiosk/catalog` returns only sellable products of own machine
+- [x] `POST /api/v1/kiosk/orders` creates `PENDING_PAYMENT` order with server-side prices
+- [x] Reservation is atomic, all-or-nothing, FEFO, concurrency-safe
+- [x] Reserved bowls never expire before `expiresAt`
+- [x] RESERVE / RETURN inventory history recorded
+- [x] `GET /api/v1/kiosk/orders/{orderId}` works, scoped to own machine
+- [x] `POST /api/v1/kiosk/orders/{orderId}/cancel` works and is idempotent
+- [x] Expired reservations are released automatically
+- [x] `GET /api/v1/orders` and `GET /api/v1/orders/{id}` work for ADMIN/STAFF
+- [x] No client can set order status, price or machine
+- [x] Only `PENDING_PAYMENT` and `CANCELLED` are produced
+- [x] Existing RBAC and common error handling reused
+- [x] Swagger/OpenAPI and `api-contract/api.yaml` updated and consistent
+- [x] `.ai/` docs and `docs/order-management.md` updated
+- [x] Tests pass (`mvn clean verify`)
+- [x] Flyway validation passes
+- [x] Hibernate `ddl-auto=validate` passes
+- [x] Existing applied migrations remain unchanged
 
 ---
-
-## Remote CI evidence
-
-Successful full suite: https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043959910
-Intentional failing probe: https://github.com/hoaifpt/Fruit_Vending_Machine/actions/runs/38043998076
-
-Ignored evidence: issue24-ci-evidence.json, issue24-ci-success-reports.zip,
-issue24-ci-success-logs.zip, issue24-ci-failure-probe-reports.zip and
-issue24-ci-failure-probe-logs.zip under backend/target/. No production credentials.

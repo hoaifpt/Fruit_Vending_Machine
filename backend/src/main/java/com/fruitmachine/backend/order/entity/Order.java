@@ -55,6 +55,9 @@ public class Order extends CreatedEntity {
     @Column(name = "cancelled_at", columnDefinition = "timestamptz")
     private Instant cancelledAt;
 
+    @Column(name = "expires_at", columnDefinition = "timestamptz")
+    private Instant expiresAt;
+
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)
     private Set<OrderItem> items = new HashSet<>();

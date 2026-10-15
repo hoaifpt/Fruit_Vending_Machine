@@ -2,16 +2,16 @@
 
 ## 1. Authority and status
 
-PostgreSQL 18; Flyway V1–V9 under `src/main/resources/db/migration/` (relative to
+PostgreSQL 18; Flyway V1–V11 under `src/main/resources/db/migration/` (relative to
 the backend module). These migrations define the current schema, not a proposed model.
-There are **19 business tables** plus `flyway_schema_history` (Flyway infrastructure,
+There are **20 business tables** (V10 adds `kiosk_credentials`) plus `flyway_schema_history` (Flyway infrastructure,
 not a JPA business entity). Detailed constraints and ERD also appear in
 [database-migration.md](../../docs/database-migration.md); mappings are described in
 [jpa-entities.md](../../docs/jpa-entities.md). SQL remains authoritative.
 
 Hibernate uses `ddl-auto=validate`, `generate-ddl=false`; SQL initialization is disabled.
 Validation is not a full audit of CHECK/index/trigger/nullability definitions.
-Never edit an applied migration. A genuine schema change needs a new V10+ migration.
+Never edit an applied migration. A genuine schema change needs a new V12+ migration.
 The package/convention alignment does not require any schema change.
 
 ## 2. Types and conventions
@@ -45,7 +45,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | inventory_items | id, batch_id, slot_id, status, loaded_at, reserved_at, sold_at, removed_at, created_at, updated_at |
 | sensor_readings | id, machine_id, temperature, humidity, recorded_at |
 | alerts | id, machine_id, type, severity, title, message, status, triggered_at, resolved_at, resolved_by, created_at, updated_at |
-| orders | id, order_code, machine_id, status, subtotal, total_amount, created_at, paid_at, completed_at, cancelled_at |
+| orders | id, order_code, machine_id, status, subtotal, total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
 | order_items | id, order_id, product_id, quantity, unit_price, total_price, created_at |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
@@ -53,6 +53,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
 | machine_events | id, machine_id, event_type, payload, created_at |
+| kiosk_credentials | id, machine_id, key_prefix, secret_hash, status, created_by, created_at, revoked_by, revoked_at |
 | audit_logs | id, user_id, action, entity_type, entity_id, old_value, new_value, ip_address, created_at |
 
 ## 4. Relationships and integrity
@@ -192,8 +193,8 @@ SQL/native/bulk updates bypass JPA auditing listeners and must explicitly mainta
 timestamps. State checks cover required timestamps, but services enforce transition semantics.
 
 Verify changes with Java 21, Maven and Docker: `mvn clean verify` from the backend module.
-Integration tests use PostgreSQL 18 Testcontainers, apply all nine migrations, run Flyway
-validation and Hibernate validation, and check all 19 entity mappings. Never use update/create
+Integration tests use PostgreSQL 18 Testcontainers, apply all eleven migrations, run Flyway
+validation and Hibernate validation, and check all 20 entity mappings. Never use update/create
 or edit historical migration files to make entity validation pass.
 
 ## 10. Issue #22 schema audit and V9
@@ -213,3 +214,30 @@ and permits AVAILABLE/EXPIRED only. Summary counts/eligibility/capacity share on
 statement snapshot; expiry uses current server time without a scheduler. API loading
 always assigns a slot; legacy off-machine rows remain nullable/readable. See
 [inventory-management.md](../../docs/inventory-management.md).
+
+## 11. Issue #27 — kiosk credentials, order expiry and reservation (V10, V11)
+
+V5/V7 were inspected first: orders, order_items (unit_price snapshot, ck_order_items_total),
+order_item_allocations (live partial unique index on RESERVED/DISPENSED) and the V6/V9
+inventory_transactions rules are reused unchanged; there was no reservation deadline column.
+
+- **V10 kiosk_credentials**: machine-bound API credential, not a user. Only `key_prefix`
+  (12 chars [a-z0-9], UNIQUE) and `secret_hash` (lowercase hex SHA-256 of a 256-bit random secret,
+  CHECK `^[0-9a-f]{64}$`) are stored; the plaintext `fvk_<prefix>_<secret>` is returned once. Status
+  ACTIVE/REVOKED with a revocation consistency CHECK. Partial UNIQUE `uq_kiosk_credentials_active_machine`
+  allows one ACTIVE credential per machine; revoked rows are kept as history. FKs are RESTRICT.
+- **V11 orders.expires_at**: nullable TIMESTAMPTZ, `ck_orders_expires_at` (expires_at > created_at) and
+  partial index `ix_orders_pending_expiry` on PENDING_PAYMENT. The service always sets it.
+- **Lock order for order workflows**: create = Product (FOR SHARE, sorted by id) -> Machine (FOR SHARE)
+  -> candidate InventoryItems (FOR UPDATE SKIP LOCKED, FEFO). Cancel/expiry = Order (FOR UPDATE) ->
+  InventoryItems sorted by id. Inventory loading (Product/Batch/Machine/Slot) and removal (Slot/Item)
+  keep their order; shared locks serialize with their exclusive product/machine writes without
+  blocking other orders. Slot rows are not locked: slot ACTIVE is part of the candidate predicate.
+  Later payment issues extend the order as Order -> Payment -> InventoryItem.
+- **History usage**: reservation appends one `RESERVE` row per bowl (reference_id = order id,
+  performed_by NULL because a kiosk is not a user, snapshot machine/slot, AVAILABLE -> RESERVED).
+  Reservation release (kiosk cancel or expiry sweep) appends one `RETURN` row per bowl
+  (RESERVED -> AVAILABLE, reason ORDER_CANCELLED or RESERVATION_EXPIRED). Rows are never updated.
+- A bowl is reservable only if its batch expires after the order deadline (`expires_at`), so it
+  cannot expire while unpaid. A released bowl of an expired batch becomes AVAILABLE but stays
+  unsellable (expiry is checked, not scheduled).

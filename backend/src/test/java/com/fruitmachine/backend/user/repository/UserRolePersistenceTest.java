@@ -246,9 +246,9 @@ class UserRolePersistenceTest {
     void validatesAllAppliedMigrationsAndExistingEntityMappings() {
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Long.class))
-                .isEqualTo(9);
+                .isEqualTo(11);
         assertThat(entityManagerFactory.getProperties()).containsEntry("hibernate.hbm2ddl.auto", "validate");
-        assertThat(entityManagerFactory.getMetamodel().getEntities()).hasSize(19);
+        assertThat(entityManagerFactory.getMetamodel().getEntities()).hasSize(20);
     }
 
     private UserRole assign(User user, Role role) {

@@ -607,3 +607,24 @@ history is isolated by unique fixtures rather than erased between methods. Exist
 feature tests remain regression coverage, all discovered by Surefire *Test in clean verify.
 CI workflow uses Java21/Docker and publishes reports even on failure. No production API,
 mapping/migration/dependency change. See ../../docs/core-integration-testing.md.
+
+## 18. Order management and kiosk authentication — Issue #27
+
+Kiosks authenticate with a machine-bound key in the dedicated `X-Kiosk-Key` header, never with a
+user JWT and never through a fake user/role. `security.kiosk.KioskAuthenticationFilter` runs only for
+`/api/v1/kiosk/**` after the JWT filter, calls `KioskCredentialService.authenticate` (prefix lookup,
+SHA-256 digest, constant-time compare, ACTIVE only) and sets an `AuthenticatedKiosk` principal with
+ROLE_KIOSK; every failure is a uniform 401 and the machine always comes from the credential.
+SecurityConfig registers `/api/v1/kiosk/**` -> KIOSK and `/api/v1/machines/*/kiosk-credentials/**` ->
+ADMIN before the broader machine rules, `GET /api/v1/orders/**` -> ADMIN/STAFF and denies every
+other orders method. User JWT on kiosk paths is 403; kiosk key on management paths is 401.
+
+`machine.kiosk` owns credential entity/repository/service/controllers (ADMIN issue/rotate, list,
+revoke) and kiosk identity. `inventory` owns the catalog (one grouped query). `order` owns
+OrderController (read-only management), KioskOrderController, OrderService (create/read/cancel/list),
+OrderReservationService (FEFO SKIP LOCKED selection, RESERVE and RETURN side effects),
+OrderExpiryService (own transaction per order, lock-then-recheck, injected Clock),
+OrderExpiryScheduler (trigger only, `app.order.expiry-sweep.enabled`) and OrderCodeGenerator.
+Typed `app.order.*` properties fail startup when invalid. Only PENDING_PAYMENT and CANCELLED are
+produced; payment, QR, webhooks, PAID and dispensing remain future issues. See
+[order-management.md](../../docs/order-management.md).

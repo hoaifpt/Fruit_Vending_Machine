@@ -16,3 +16,9 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+app:
+  order:
+    expiry-sweep:
+      # The sweep is invoked directly by tests with a controlled clock.
+      enabled: false

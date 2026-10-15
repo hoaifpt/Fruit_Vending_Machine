@@ -16,4 +16,9 @@ public interface MachineRepository extends JpaRepository<Machine, UUID>, JpaSpec
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from Machine m where m.id = :id")
     Optional<Machine> findForUpdateById(@Param("id") UUID id);
+
+    /** Shared lock: serializes with status/configuration writes (PESSIMISTIC_WRITE) without blocking other orders. */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select m from Machine m where m.id = :id")
+    Optional<Machine> findForShareById(@Param("id") UUID id);
 }

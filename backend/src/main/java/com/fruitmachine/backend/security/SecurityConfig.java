@@ -1,8 +1,10 @@
 package com.fruitmachine.backend.security;
 
+import com.fruitmachine.backend.machine.kiosk.service.KioskCredentialService;
 import com.fruitmachine.backend.security.jwt.JwtAuthenticationFilter;
 import com.fruitmachine.backend.security.jwt.JwtProperties;
 import com.fruitmachine.backend.security.jwt.JwtService;
+import com.fruitmachine.backend.security.kiosk.KioskAuthenticationFilter;
 import com.fruitmachine.backend.security.user.CustomUserDetailsService;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,7 +41,7 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService tokens,
-            CustomUserDetailsService users, SecurityErrorHandler errors,
+            CustomUserDetailsService users, KioskCredentialService kioskCredentials, SecurityErrorHandler errors,
             @Value("${springdoc.api-docs.enabled:false}") boolean docsEnabled) throws Exception {
         http.csrf(csrf -> csrf.disable()) // Header-only bearer authentication; no cookie/session credentials.
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -56,6 +58,11 @@ public class SecurityConfig {
                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll();
                     }
                     authorize.requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN");
+                    // Kiosks are machine credentials, not users; kiosk and credential rules precede the broader machine rules.
+                    authorize.requestMatchers("/api/v1/kiosk", "/api/v1/kiosk/**").hasRole("KIOSK");
+                    authorize.requestMatchers("/api/v1/machines/*/kiosk-credentials", "/api/v1/machines/*/kiosk-credentials/**").hasRole("ADMIN");
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/orders", "/api/v1/orders/**").hasAnyRole("ADMIN", "STAFF");
+                    authorize.requestMatchers("/api/v1/orders", "/api/v1/orders/**").denyAll();
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/products", "/api/v1/products/**").hasAnyRole("ADMIN", "STAFF");
                     authorize.requestMatchers("/api/v1/products", "/api/v1/products/**").hasRole("ADMIN");
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines", "/api/v1/machines/**").hasAnyRole("ADMIN", "STAFF");
@@ -64,7 +71,8 @@ public class SecurityConfig {
                     authorize.requestMatchers("/api/v1/inventory", "/api/v1/inventory/**").hasAnyRole("ADMIN", "STAFF");
                     authorize.anyRequest().authenticated();
                 })
-                .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(new KioskAuthenticationFilter(kioskCredentials, errors), JwtAuthenticationFilter.class);
         return http.build();
     }
 }
