@@ -107,10 +107,10 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(9);
+                .isEqualTo(11);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
-        assertThat(entities).hasSize(19);
+        assertThat(entities).hasSize(20);
         Set<String> tables = jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -129,7 +129,7 @@ class EntityMappingTest {
                 Map.entry("alerts", "alert"), Map.entry("orders", "order"), Map.entry("order_items", "order"),
                 Map.entry("order_item_allocations", "order"), Map.entry("payments", "payment"),
                 Map.entry("payment_webhook_logs", "payment"), Map.entry("dispense_commands", "dispense"),
-                Map.entry("audit_logs", "audit"));
+                Map.entry("audit_logs", "audit"), Map.entry("kiosk_credentials", "machine.kiosk"));
         for (var entity : entities) {
             String table = entity.getJavaType().getAnnotation(Table.class).name();
             assertThat(entity.getJavaType().getPackageName()).as("Feature owner of %s", table)
@@ -215,7 +215,17 @@ class EntityMappingTest {
         order.setMachine(machine);
         order.setSubtotal(new BigDecimal("70000.00"));
         order.setTotalAmount(new BigDecimal("70000.00"));
+        Instant orderExpiry = Instant.now().plusSeconds(300).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        order.setExpiresAt(orderExpiry);
         entityManager.persist(order);
+        com.fruitmachine.backend.machine.kiosk.entity.KioskCredential credential = new com.fruitmachine.backend.machine.kiosk.entity.KioskCredential();
+        credential.setMachine(machine);
+        credential.setKeyPrefix("entitytest01");
+        credential.setSecretHash("c".repeat(64));
+        credential.setCreatedBy(user);
+        entityManager.persist(credential);
+        entityManager.flush();
+        UUID credentialId = credential.getId();
         OrderItem line = new OrderItem();
         line.setOrder(order);
         line.setProduct(product);
@@ -295,6 +305,14 @@ class EntityMappingTest {
         assertThat(loaded.getStatus()).isEqualTo(DispenseStatus.PENDING);
         assertThat(entityManager.find(UserRole.class, membershipId).getRole().getName()).isEqualTo("ADMIN");
         assertThat(entityManager.find(User.class, user.getId()).getRoleMemberships()).hasSize(1);
+        var reloadedCredential = entityManager.find(com.fruitmachine.backend.machine.kiosk.entity.KioskCredential.class, credentialId);
+        assertThat(reloadedCredential.getMachine().getId()).isEqualTo(machine.getId());
+        assertThat(reloadedCredential.getMachineId()).isEqualTo(machine.getId());
+        assertThat(reloadedCredential.getStatus()).isEqualTo(com.fruitmachine.backend.machine.kiosk.enums.KioskCredentialStatus.ACTIVE);
+        assertThat(reloadedCredential.getCreatedAt()).isNotNull();
+        assertThat(reloadedCredential.getCreatedBy().getId()).isEqualTo(user.getId());
+        assertThat(reloadedCredential.getRevokedAt()).isNull();
+        assertThat(entityManager.find(Order.class, order.getId()).getExpiresAt()).isEqualTo(orderExpiry);
         assertThat(entityManager.find(Order.class, order.getId()).getItems()).hasSize(1);
         assertThat(entityManager.find(Order.class, order.getId()).getPayments()).hasSize(2);
         assertThat(entityManager.find(OrderItem.class, line.getId()).getAllocations()).hasSize(1);

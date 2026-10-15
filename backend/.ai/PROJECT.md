@@ -381,3 +381,12 @@ No new business feature, dependency, API or migration. Remote CI now verified:44
 a disposable probe fails exactly1intentional test, Maven/job failure and reports upload
 confirmed. Probe branch removed, all62issue checklist items checked. See
 docs/core-integration-testing.md and CURRENT_TASK.md for actual run links/evidence.
+
+## 15. Order management scope — Issue #27
+
+Machine-bound kiosk API keys (ADMIN issue/rotate/revoke, SHA-256 digest only, one ACTIVE per machine),
+kiosk identity and sellable catalog, kiosk order creation with atomic FEFO bowl reservation and
+server-side price snapshot, kiosk read/cancel, automatic expiry sweep and read-only ADMIN/STAFF order
+list/detail. Migrations V10 (kiosk_credentials) and V11 (orders.expires_at). Orders only move
+PENDING_PAYMENT -> CANCELLED; payment, QR, webhooks, PAID/DISPENSING/COMPLETED, dispense commands
+and MQTT are later issues. See docs/order-management.md and CURRENT_TASK.md for evidence.

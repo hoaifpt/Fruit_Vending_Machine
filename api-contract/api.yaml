@@ -10,10 +10,18 @@ tags:
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
   - name: Inventory
     description: Management of individual physical boxes. ACTIVE ADMIN/STAFF read/load/remove confirmed stock. No order/payment/reservation/dispense workflows.
+  - name: Kiosk
+    description: "Kiosk-facing APIs authenticated with the machine-bound X-Kiosk-Key header (not a user JWT). The machine is always derived from the credential."
+  - name: Kiosk Credentials
+    description: "ADMIN-only management of machine-bound kiosk API keys. The plaintext key is shown once, only its SHA-256 digest is stored. STAFF cannot read credential metadata."
+  - name: Kiosk Orders
+    description: "Kiosk order creation with atomic bowl reservation, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; no payment, QR or dispensing."
   - name: Machine Slots
     description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: Orders
+    description: "Read-only order management for ADMIN and STAFF. There is no write, delete or status endpoint; order status is produced only by backend workflows."
   - name: Product Batches
     description: Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.
   - name: Products
@@ -3863,6 +3871,1107 @@ paths:
       security:
         -
           bearerAuth: []
+  "/api/v1/machines/{machineId}/kiosk-credentials":
+    "get":
+      "tags":
+        - "Kiosk Credentials"
+      "summary": "List kiosk credential metadata of a machine"
+      "description": "ADMIN only. Metadata history, newest first: credentialId, keyPrefix, status, createdAt/By, revokedAt/By. Never returns keys, secrets or hashes."
+      "operationId": "listKioskCredentials"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 401
+        "403":
+          "description": "Authenticated account is not ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 403
+        "404":
+          "description": "Machine or machine-scoped credential not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 500
+        "200":
+          "description": "Credential metadata"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseListKioskCredentialResponse"
+              "example":
+                "data":
+                  -
+                    "credentialId": "4f6c0000-0000-4000-8000-000000000001"
+                    "keyPrefix": "a1b2c3d4e5f6"
+                    "status": "REVOKED"
+                    "createdAt": "2026-10-15T04:00:00Z"
+                    "createdBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                    "revokedAt": "2026-10-15T05:00:00Z"
+                    "revokedBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+      "security":
+        -
+          "bearerAuth": []
+    "post":
+      "tags":
+        - "Kiosk Credentials"
+      "summary": "Issue (rotate) the kiosk credential of a machine"
+      "description": "ADMIN only. No request body. In one transaction under the machine row lock: revokes the current ACTIVE credential, if any, and creates a new one. The previous key stops working immediately. The plaintext apiKey is returned once and never again."
+      "operationId": "issueKioskCredential"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 401
+        "403":
+          "description": "Authenticated account is not ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 403
+        "404":
+          "description": "Machine or machine-scoped credential not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials"
+                "status": 500
+        "201":
+          "description": "Credential issued; plaintext key included once"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseIssuedKioskCredentialResponse"
+              "example":
+                "data":
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "status": "ACTIVE"
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "keyPrefix": "a1b2c3d4e5f6"
+                  "apiKey": "fvk_a1b2c3d4e5f6_<shown-once>"
+                  "credentialId": "4f6c0000-0000-4000-8000-000000000001"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke":
+    "post":
+      "tags":
+        - "Kiosk Credentials"
+      "summary": "Revoke a kiosk credential"
+      "description": "ADMIN only. ACTIVE becomes REVOKED. Revoking an already REVOKED credential returns 200 unchanged (idempotent). A credential of another machine returns 404. Rows are retained as history."
+      "operationId": "revokeKioskCredential"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "credentialId"
+          "in": "path"
+          "description": "Credential UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke"
+                "status": 401
+        "403":
+          "description": "Authenticated account is not ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke"
+                "status": 403
+        "404":
+          "description": "Machine or machine-scoped credential not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke"
+                "status": 404
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke"
+                "status": 500
+        "200":
+          "description": "Credential is REVOKED"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskCredentialResponse"
+              "example":
+                "data":
+                  "credentialId": "4f6c0000-0000-4000-8000-000000000001"
+                  "keyPrefix": "a1b2c3d4e5f6"
+                  "status": "REVOKED"
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "createdBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                  "revokedAt": "2026-10-15T05:00:00Z"
+                  "revokedBy": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a01"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/kiosk/me":
+    "get":
+      "tags":
+        - "Kiosk"
+      "summary": "Identify the machine of the current kiosk key"
+      "description": "KIOSK only. Lets the kiosk team verify a configured key. Works for INACTIVE or MAINTENANCE machines too; machine status is a business rule of catalog/order use cases."
+      "operationId": "getKioskIdentity"
+      "responses":
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/kiosk/me"
+                "status": 401
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/kiosk/me"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/kiosk/me"
+                "status": 500
+        "200":
+          "description": "Machine bound to the key"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskIdentityResponse"
+              "example":
+                "data":
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "machineName": "Fruit Machine - Campus A"
+                  "machineCode": "FV-HCM-001"
+                  "machineStatus": "ACTIVE"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+      "security":
+        -
+          "kioskKey": []
+  "/api/v1/kiosk/catalog":
+    "get":
+      "tags":
+        - "Kiosk"
+      "summary": "List sellable products of the kiosk machine"
+      "description": "KIOSK only. Products with at least one sellable bowl: AVAILABLE, loaded in an ACTIVE slot of this machine, batch expiring after the reservation hold deadline, ACTIVE product. A machine that is not ACTIVE returns acceptingOrders=false and no products. availableQuantity is a snapshot, not a reservation. No slot, item or batch identifiers are exposed."
+      "operationId": "getKioskCatalog"
+      "responses":
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/kiosk/catalog"
+                "status": 401
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/kiosk/catalog"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/kiosk/catalog"
+                "status": 500
+        "200":
+          "description": "Sellable catalog"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskCatalogResponse"
+              "example":
+                "data":
+                  "products":
+                    -
+                      "sku": "BOWL-MIX"
+                      "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                      "imageUrl": "https://example.com/mix.png"
+                      "availableQuantity": 3
+                      "price": 35000.0
+                      "name": "Mixed Fruit Bowl"
+                      "description": "Seasonal mixed fruit"
+                  "acceptingOrders": true
+                  "machineCode": "FV-HCM-001"
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "maxTotalQuantity": 5
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+      "security":
+        -
+          "kioskKey": []
+  "/api/v1/kiosk/orders":
+    "post":
+      "tags":
+        - "Kiosk Orders"
+      "summary": "Create an order and reserve bowls"
+      "description": "KIOSK only. All-or-nothing in one transaction: locks products and the machine (shared), selects FEFO bowls of this machine with SKIP LOCKED whose batch outlives the hold deadline, snapshots server-side prices, creates a PENDING_PAYMENT order with expiresAt = now + reservation TTL and reserves the bowls with RESERVE history. Machine, prices and status are never accepted from the client."
+      "operationId": "createKioskOrder"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateOrderRequest"
+            "example":
+              "items":
+                -
+                  "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                  "quantity": 2
+                -
+                  "productId": "7a8b0000-0000-4000-8000-000000000002"
+                  "quantity": 1
+        "required": true
+      "responses":
+        "201":
+          "description": "Order created and bowls reserved"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskOrderResponse"
+              "example":
+                "data":
+                  "id": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "orderCode": "ORD-20261015-7K3QF9XA"
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "status": "PENDING_PAYMENT"
+                  "items":
+                    -
+                      "unitPrice": 35000.0
+                      "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                      "productName": "Mixed Fruit Bowl"
+                      "totalPrice": 70000.0
+                      "sku": "BOWL-MIX"
+                      "quantity": 2
+                  "subtotal": 70000.0
+                  "totalAmount": 70000.0
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                  "cancelledAt": null
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+        "400":
+          "description": "Validation failure: empty/duplicate lines, quantity < 1 or fractional, total above maximum, unknown fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request validation failed"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/kiosk/orders"
+                "status": 400
+        "404":
+          "description": "Unknown product"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/kiosk/orders"
+                "status": 404
+        "409":
+          "description": "Inactive product, machine not ACTIVE or insufficient sellable quantity; nothing reserved"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Insufficient sellable quantity for a requested product"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Conflict"
+                "path": "/api/v1/kiosk/orders"
+                "status": 409
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/kiosk/orders"
+                "status": 401
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/kiosk/orders"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/kiosk/orders"
+                "status": 500
+      "security":
+        -
+          "kioskKey": []
+  "/api/v1/kiosk/orders/{orderId}":
+    "get":
+      "tags":
+        - "Kiosk Orders"
+      "summary": "Get an order of this machine"
+      "description": "KIOSK only. Returns the stored status and expiresAt; reads never write, so an overdue PENDING_PAYMENT order stays PENDING_PAYMENT until the sweep runs. Another machine's order returns 404."
+      "operationId": "getKioskOrder"
+      "parameters":
+        -
+          "name": "orderId"
+          "in": "path"
+          "description": "Order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Order of this machine"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskOrderResponse"
+              "example":
+                "data":
+                  "id": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "orderCode": "ORD-20261015-7K3QF9XA"
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "status": "PENDING_PAYMENT"
+                  "items":
+                    -
+                      "unitPrice": 35000.0
+                      "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                      "productName": "Mixed Fruit Bowl"
+                      "totalPrice": 70000.0
+                      "sku": "BOWL-MIX"
+                      "quantity": 2
+                  "subtotal": 70000.0
+                  "totalAmount": 70000.0
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                  "cancelledAt": null
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+        "404":
+          "description": "Missing order or order of another machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/kiosk/orders/{orderId}"
+                "status": 404
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/kiosk/orders/{orderId}"
+                "status": 401
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/kiosk/orders/{orderId}"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/kiosk/orders/{orderId}"
+                "status": 500
+      "security":
+        -
+          "kioskKey": []
+  "/api/v1/kiosk/orders/{orderId}/cancel":
+    "post":
+      "tags":
+        - "Kiosk Orders"
+      "summary": "Cancel a pending order and release its bowls"
+      "description": "KIOSK only. PENDING_PAYMENT becomes CANCELLED and every RESERVED bowl returns to AVAILABLE with RETURN history (reason ORDER_CANCELLED). Cancelling a CANCELLED order returns 200 unchanged. Other states return 409; another machine's order returns 404."
+      "operationId": "cancelKioskOrder"
+      "parameters":
+        -
+          "name": "orderId"
+          "in": "path"
+          "description": "Order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Order is CANCELLED"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskOrderResponse"
+              "example":
+                "data":
+                  "id": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "orderCode": "ORD-20261015-7K3QF9XA"
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "status": "CANCELLED"
+                  "items":
+                    -
+                      "unitPrice": 35000.0
+                      "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                      "productName": "Mixed Fruit Bowl"
+                      "totalPrice": 70000.0
+                      "sku": "BOWL-MIX"
+                      "quantity": 2
+                  "subtotal": 70000.0
+                  "totalAmount": 70000.0
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                  "cancelledAt": "2026-10-15T04:01:00Z"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+        "404":
+          "description": "Missing order or order of another machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/kiosk/orders/{orderId}/cancel"
+                "status": 404
+        "409":
+          "description": "Order is not PENDING_PAYMENT or CANCELLED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Insufficient sellable quantity for a requested product"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Conflict"
+                "path": "/api/v1/kiosk/orders/{orderId}/cancel"
+                "status": 409
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/kiosk/orders/{orderId}/cancel"
+                "status": 401
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/kiosk/orders/{orderId}/cancel"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/kiosk/orders/{orderId}/cancel"
+                "status": 500
+      "security":
+        -
+          "kioskKey": []
+  "/api/v1/orders":
+    "get":
+      "tags":
+        - "Orders"
+      "summary": "List and filter orders"
+      "description": "ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode). Approved sorts createdAt (default desc), totalAmount, orderCode, each with a UUID tie-break."
+      "operationId": "listOrders"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size 1..100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Exact stored order status."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "PENDING_PAYMENT"
+              - "PAID"
+              - "DISPENSING"
+              - "COMPLETED"
+              - "CANCELLED"
+              - "PAYMENT_FAILED"
+              - "DISPENSE_FAILED"
+              - "REFUNDED"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine UUID filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "createdFrom"
+          "in": "query"
+          "description": "ISO-8601 instant, inclusive lower bound of createdAt."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "createdTo"
+          "in": "query"
+          "description": "ISO-8601 instant, exclusive upper bound of createdAt."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "search"
+          "in": "query"
+          "description": "Literal case-insensitive substring of orderCode."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "One of createdAt, totalAmount, orderCode with optional asc/desc."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "createdAt,desc"
+      "responses":
+        "400":
+          "description": "Invalid parameters"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request validation failed"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/orders"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/orders"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/orders"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/orders"
+                "status": 500
+        "200":
+          "description": "Database page of order summaries"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseOrderPageResponse"
+              "example":
+                "data":
+                  "totalPages": 1
+                  "page": 0
+                  "size": 20
+                  "content":
+                    -
+                      "id": "e0f1a2b3-0000-4000-8000-000000000001"
+                      "orderCode": "ORD-20261015-7K3QF9XA"
+                      "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                      "machineCode": "FV-HCM-001"
+                      "status": "PENDING_PAYMENT"
+                      "itemCount": 1
+                      "totalAmount": 70000.0
+                      "createdAt": "2026-10-15T04:00:00Z"
+                      "expiresAt": "2026-10-15T04:05:00Z"
+                      "cancelledAt": null
+                  "totalElements": 1
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/orders/{id}":
+    "get":
+      "tags":
+        - "Orders"
+      "summary": "Get order details"
+      "description": "ADMIN or STAFF. Items with immutable price snapshots and the physical-bowl allocations of each line (slot code, batch code and expiry, status)."
+      "operationId": "getOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Order details"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseOrderDetailResponse"
+              "example":
+                "data":
+                  "id": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "orderCode": "ORD-20261015-7K3QF9XA"
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "machineCode": "FV-HCM-001"
+                  "status": "CANCELLED"
+                  "subtotal": 70000.0
+                  "totalAmount": 70000.0
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                  "paidAt": null
+                  "completedAt": null
+                  "cancelledAt": "2026-10-15T04:01:00Z"
+                  "items":
+                    -
+                      "unitPrice": 35000.0
+                      "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                      "productName": "Mixed Fruit Bowl"
+                      "totalPrice": 70000.0
+                      "sku": "BOWL-MIX"
+                      "quantity": 2
+                      "id": "01100000-0000-4000-8000-000000000001"
+                      "allocations":
+                        -
+                          "id": "a110c000-0000-4000-8000-000000000001"
+                          "inventoryItemId": "1e000000-0000-4000-8000-000000000001"
+                          "slotCode": "A1"
+                          "batchCode": "B20261014-01"
+                          "batchExpiresAt": "2026-10-17T00:00:00Z"
+                          "status": "RELEASED"
+                          "releasedAt": "2026-10-15T04:01:00Z"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+        "404":
+          "description": "Order not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Order not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/orders/{id}"
+                "status": 404
+        "400":
+          "description": "Invalid parameters"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Request validation failed"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Bad Request"
+                "path": "/api/v1/orders/{id}"
+                "status": 400
+        "401":
+          "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/orders/{id}"
+                "status": 401
+        "403":
+          "description": "Authenticated account lacks ADMIN/STAFF role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/orders/{id}"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/orders/{id}"
+                "status": 500
+      "security":
+        -
+          "bearerAuth": []
 components:
   securitySchemes:
     bearerAuth:
@@ -3870,6 +4979,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Paste the access token only (without the Bearer prefix).
+    kioskKey:
+      "type": "apiKey"
+      "description": "Machine-bound kiosk key (fvk_<prefix>_<secret>) issued by an ADMIN. Not a user JWT."
+      "name": "X-Kiosk-Key"
+      "in": "header"
   schemas:
     "InventoryTransactionResponse":
       "type": "object"
@@ -5023,3 +6137,437 @@ components:
           type: object
           description: Optional field-to-validation-message map; omitted when empty. No rejected values.
           additionalProperties: {type: string}
+    "ApiResponseListKioskCredentialResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/KioskCredentialResponse"
+    "KioskCredentialResponse":
+      "type": "object"
+      "description": "Credential metadata. Never contains the key, its secret or its hash."
+      "properties":
+        "credentialId":
+          "type": "string"
+          "format": "uuid"
+        "keyPrefix":
+          "type": "string"
+          "example": "a1b2c3d4e5f6"
+        "status":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "REVOKED"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "createdBy":
+          "type": "string"
+          "format": "uuid"
+        "revokedAt":
+          "type": "string"
+          "format": "date-time"
+        "revokedBy":
+          "type": "string"
+          "format": "uuid"
+    "ApiResponseIssuedKioskCredentialResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/IssuedKioskCredentialResponse"
+    "IssuedKioskCredentialResponse":
+      "type": "object"
+      "description": "Newly issued kiosk credential. The plaintext apiKey is shown exactly once and never returned again."
+      "properties":
+        "credentialId":
+          "type": "string"
+          "format": "uuid"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "keyPrefix":
+          "type": "string"
+          "description": "Non-secret lookup prefix, safe to display."
+          "example": "a1b2c3d4e5f6"
+        "apiKey":
+          "type": "string"
+          "description": "Plaintext key for the X-Kiosk-Key header; shown once. Fake example only."
+          "example": "fvk_a1b2c3d4e5f6_<shown-once>"
+        "status":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "REVOKED"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+    "ApiResponseKioskCredentialResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/KioskCredentialResponse"
+    "ApiResponseKioskIdentityResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/KioskIdentityResponse"
+    "KioskIdentityResponse":
+      "type": "object"
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "machineName":
+          "type": "string"
+        "machineStatus":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "INACTIVE"
+            - "MAINTENANCE"
+    "ApiResponseKioskCatalogResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/KioskCatalogResponse"
+    "KioskCatalogResponse":
+      "type": "object"
+      "description": "Sellable products of the kiosk's own machine. No slot, inventory item or batch identifiers are exposed."
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "acceptingOrders":
+          "type": "boolean"
+          "description": "false when the machine is not ACTIVE; products is then empty."
+        "maxTotalQuantity":
+          "type": "integer"
+          "format": "int32"
+        "products":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/KioskCatalogProductResponse"
+    "KioskCatalogProductResponse":
+      "type": "object"
+      "properties":
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "sku":
+          "type": "string"
+        "name":
+          "type": "string"
+        "description":
+          "type": "string"
+        "price":
+          "type": "number"
+        "imageUrl":
+          "type": "string"
+        "availableQuantity":
+          "type": "integer"
+          "format": "int64"
+          "description": "Snapshot of sellable bowls on this machine, NOT a reservation."
+    "CreateOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Kiosk order. The machine comes from the kiosk credential and prices from the database; machineId, price, status, orderCode and slot/inventory ids are rejected as unknown fields."
+      "properties":
+        "items":
+          "type": "array"
+          "description": "1..10 lines with distinct productId."
+          "items":
+            "$ref": "#/components/schemas/CreateOrderItemRequest"
+          "maxItems": 10
+          "minItems": 1
+      "required":
+        - "items"
+    "CreateOrderItemRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "One product line. The backend chooses the physical bowls; unknown fields are rejected."
+      "properties":
+        "productId":
+          "type": "string"
+          "format": "uuid"
+          "description": "Product UUID from the kiosk catalog; distinct across lines."
+          "example": "1c2d3e4f-0000-4000-8000-000000000001"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+          "description": "JSON integer >= 1. The sum over all lines may not exceed the configured maximum."
+          "example": 2
+          "minimum": 1
+      "required":
+        - "productId"
+        - "quantity"
+    "ApiResponseKioskOrderResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/KioskOrderResponse"
+    "KioskOrderResponse":
+      "type": "object"
+      "description": "Order as seen by the owning kiosk. A PENDING_PAYMENT order past expiresAt may be returned until the sweep runs; use expiresAt for the countdown."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "orderCode":
+          "type": "string"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING_PAYMENT"
+            - "PAID"
+            - "DISPENSING"
+            - "COMPLETED"
+            - "CANCELLED"
+            - "PAYMENT_FAILED"
+            - "DISPENSE_FAILED"
+            - "REFUNDED"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/KioskOrderItemResponse"
+        "subtotal":
+          "type": "number"
+        "totalAmount":
+          "type": "number"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+        "cancelledAt":
+          "type": "string"
+          "format": "date-time"
+    "KioskOrderItemResponse":
+      "type": "object"
+      "properties":
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "sku":
+          "type": "string"
+        "productName":
+          "type": "string"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+        "unitPrice":
+          "type": "number"
+        "totalPrice":
+          "type": "number"
+    "ApiResponseOrderPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/OrderPageResponse"
+    "OrderPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/OrderSummaryResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "OrderSummaryResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "orderCode":
+          "type": "string"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING_PAYMENT"
+            - "PAID"
+            - "DISPENSING"
+            - "COMPLETED"
+            - "CANCELLED"
+            - "PAYMENT_FAILED"
+            - "DISPENSE_FAILED"
+            - "REFUNDED"
+        "itemCount":
+          "type": "integer"
+          "format": "int64"
+          "description": "Number of order lines (distinct products), not the bowl quantity."
+        "totalAmount":
+          "type": "number"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+        "cancelledAt":
+          "type": "string"
+          "format": "date-time"
+    "ApiResponseOrderDetailResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/OrderDetailResponse"
+    "OrderDetailResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "orderCode":
+          "type": "string"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING_PAYMENT"
+            - "PAID"
+            - "DISPENSING"
+            - "COMPLETED"
+            - "CANCELLED"
+            - "PAYMENT_FAILED"
+            - "DISPENSE_FAILED"
+            - "REFUNDED"
+        "subtotal":
+          "type": "number"
+        "totalAmount":
+          "type": "number"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+        "paidAt":
+          "type": "string"
+          "format": "date-time"
+        "completedAt":
+          "type": "string"
+          "format": "date-time"
+        "cancelledAt":
+          "type": "string"
+          "format": "date-time"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/OrderItemDetailResponse"
+    "OrderItemDetailResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "sku":
+          "type": "string"
+        "productName":
+          "type": "string"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+        "unitPrice":
+          "type": "number"
+        "totalPrice":
+          "type": "number"
+        "allocations":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/OrderAllocationResponse"
+    "OrderAllocationResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "inventoryItemId":
+          "type": "string"
+          "format": "uuid"
+        "slotCode":
+          "type": "string"
+        "batchCode":
+          "type": "string"
+        "batchExpiresAt":
+          "type": "string"
+          "format": "date-time"
+        "status":
+          "type": "string"
+          "enum":
+            - "RESERVED"
+            - "DISPENSED"
+            - "RELEASED"
+        "releasedAt":
+          "type": "string"
+          "format": "date-time"

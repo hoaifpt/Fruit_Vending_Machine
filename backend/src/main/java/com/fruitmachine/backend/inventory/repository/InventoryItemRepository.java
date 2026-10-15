@@ -20,6 +20,41 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
     Optional<InventoryItem> findForUpdateById(@Param("id") UUID id);
     @Query("select i.slotId from InventoryItem i where i.id = :id")
     UUID findSlotIdById(@Param("id") UUID id);
+    interface CatalogRow {
+        UUID getProductId(); String getSku(); String getName(); String getDescription();
+        java.math.BigDecimal getPrice(); String getImageUrl(); Long getAvailableQuantity();
+    }
+    /** Single grouped aggregate of sellable bowls per product; nothing is counted in Java. */
+    @Query("""
+        select p.id as productId, p.sku as sku, p.name as name, p.description as description, p.price as price,
+               p.imageUrl as imageUrl, count(i) as availableQuantity
+        from InventoryItem i join i.batch b join b.product p join i.slot s
+        where s.machine.id = :machineId and s.status = :slotStatus and i.status = :itemStatus
+          and p.status = :productStatus and b.expiresAt > :holdDeadline
+        group by p.id, p.sku, p.name, p.description, p.price, p.imageUrl
+        order by p.name, p.id
+        """)
+    List<CatalogRow> findCatalog(@Param("machineId") UUID machineId, @Param("holdDeadline") Instant holdDeadline,
+            @Param("slotStatus") com.fruitmachine.backend.machine.enums.SlotStatus slotStatus,
+            @Param("itemStatus") InventoryStatus itemStatus, @Param("productStatus") ProductStatus productStatus);
+
+    /**
+     * FEFO reservation candidates for one product on one machine. SKIP LOCKED means concurrent orders never
+     * wait for or share a bowl; the batch must outlive the hold deadline so a bowl cannot expire while unpaid.
+     */
+    @Query(value = """
+        select i.* from inventory_items i
+        join product_batches b on b.id = i.batch_id
+        join machine_slots s on s.id = i.slot_id
+        where b.product_id = :productId and s.machine_id = :machineId and s.status = 'ACTIVE'
+          and i.status = 'AVAILABLE' and b.expires_at > :holdDeadline
+        order by b.expires_at, i.loaded_at, i.id
+        limit :quantity
+        for update of i skip locked
+        """, nativeQuery = true)
+    List<InventoryItem> findReservationCandidates(@Param("machineId") UUID machineId, @Param("productId") UUID productId,
+            @Param("holdDeadline") Instant holdDeadline, @Param("quantity") int quantity);
+
     long countByBatchId(UUID batchId);
     long countBySlotIdAndStatusIn(UUID slotId, Collection<InventoryStatus> statuses);
 

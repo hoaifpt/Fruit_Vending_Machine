@@ -152,9 +152,9 @@ JVM timezone UTC tránh JDBC gửi timezone alias Asia/Saigon không được se
 hibernate.jdbc.time_zone chỉ điều khiển JDBC binding, không thay múi giờ JVM lúc handshake.
 
 `EntityMappingTest` dùng PostgreSQL 18 Testcontainers riêng, không dùng credentials hoặc dữ
-liệu development. Flyway áp dụng V1–V9, rồi Hibernate validate. Các integration tests đã đạt:
+liệu development. Flyway áp dụng V1–V11, rồi Hibernate validate. Các integration tests đã đạt:
 
-1. 19 entity khớp 19 bảng nghiệp vụ, toàn bộ column mappings được đối chiếu với database.
+1. 20 entity khớp 20 bảng nghiệp vụ, toàn bộ column mappings được đối chiếu với database.
 2. Persist/reload mọi entity, membership khóa kép, composite navigation, lazy collections,
    optional relations, UUID/identity, sensor event time, money snapshot, nhiều payment attempts,
    JSONB/TEXT, timestamps và immutable inventory history.
@@ -166,3 +166,8 @@ liệu development. Flyway áp dụng V1–V9, rồi Hibernate validate. Các in
 Docker cần chạy để test; không fallback sang H2 và không bỏ qua test khi thiếu Docker.
 Testcontainers tự dọn container test sau khi chạy. V1–V8 giữ nguyên; Issue #22 thêm V9
 cho reason/statusBefore/statusAfter của InventoryTransaction, không đổi 19 bảng/entity.
+
+## Cập nhật issue #27
+
+`kiosk_credentials` (V10) được map bởi `machine.kiosk.entity.KioskCredential` (extends `CreatedEntity`, `EnumType.STRING`
+cho `KioskCredentialStatus`) và `orders.expires_at` (V11) bởi `Order.expiresAt` (`Instant`). Tổng số 20 entity / 20 bảng nghiệp vụ.

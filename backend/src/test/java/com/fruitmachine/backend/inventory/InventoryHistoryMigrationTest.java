@@ -24,7 +24,7 @@ class InventoryHistoryMigrationTest {
         jdbc.update("INSERT INTO inventory_items(id,batch_id,slot_id,loaded_at) VALUES (?,?,?,now())",item,batch,slot);
         jdbc.update("INSERT INTO inventory_transactions(id,inventory_item_id,machine_id,slot_id,type) VALUES (?,?,?,?,'LOAD')",history,item,machine,slot);
         var before=jdbc.queryForMap("SELECT id,inventory_item_id,machine_id,slot_id,type,reference_id,performed_by,created_at FROM inventory_transactions WHERE id=?",history);
-        var flyway=Flyway.configure().dataSource(datasource).load(); assertThat(flyway.migrate().migrationsExecuted).isEqualTo(1);
+        var flyway=Flyway.configure().dataSource(datasource).load(); assertThat(flyway.migrate().migrationsExecuted).isEqualTo(3);
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertThat(jdbc.queryForMap("SELECT id,inventory_item_id,machine_id,slot_id,type,reference_id,performed_by,created_at FROM inventory_transactions WHERE id=?",history)).isEqualTo(before);
         var after=jdbc.queryForMap("SELECT reason,status_before,status_after FROM inventory_transactions WHERE id=?",history);
