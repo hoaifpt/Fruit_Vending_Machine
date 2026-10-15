@@ -54,6 +54,12 @@ app:
   account:
     password:
       min-length: ${PASSWORD_MIN_LENGTH:12}
+  payment:
+    provider: ${PAYMENT_PROVIDER:MOCK}
+    attempt-ttl: ${PAYMENT_ATTEMPT_TTL:PT5M}
+    min-remaining-hold: ${PAYMENT_MIN_REMAINING_HOLD:PT30S}
+    max-attempts-per-order: ${PAYMENT_MAX_ATTEMPTS_PER_ORDER:5}
+    provider-timeout: ${PAYMENT_PROVIDER_TIMEOUT:PT10S}
   order:
     reservation-ttl: ${ORDER_RESERVATION_TTL:PT5M}
     max-total-quantity: ${ORDER_MAX_TOTAL_QUANTITY:5}

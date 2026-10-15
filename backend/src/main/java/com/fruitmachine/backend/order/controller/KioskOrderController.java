@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping(produces = "application/json")
 @PreAuthorize("hasRole('KIOSK')")
 @SecurityRequirement(name = "kioskKey")
-@Tag(name = "Kiosk Orders", description = "Kiosk order creation with atomic bowl reservation, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; no payment, QR or dispensing.")
+@Tag(name = "Kiosk Orders", description = "Kiosk order creation with atomic bowl reservation, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; payment attempts are in Kiosk Payments and there is no dispensing.")
 @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Authenticated as a user, not a kiosk", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),

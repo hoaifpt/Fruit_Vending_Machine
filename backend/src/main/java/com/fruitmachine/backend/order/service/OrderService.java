@@ -15,6 +15,9 @@ import com.fruitmachine.backend.order.mapper.OrderMapper;
 import com.fruitmachine.backend.order.repository.OrderItemAllocationRepository;
 import com.fruitmachine.backend.order.repository.OrderItemRepository;
 import com.fruitmachine.backend.order.repository.OrderRepository;
+import com.fruitmachine.backend.payment.dto.KioskPaymentResponse;
+import com.fruitmachine.backend.payment.mapper.PaymentMapper;
+import com.fruitmachine.backend.payment.repository.PaymentRepository;
 import com.fruitmachine.backend.product.entity.Product;
 import com.fruitmachine.backend.product.enums.ProductStatus;
 import com.fruitmachine.backend.product.repository.ProductRepository;
@@ -61,6 +64,8 @@ public class OrderService {
     private final OrderReservationService reservations;
     private final OrderCodeGenerator codes;
     private final OrderMapper mapper;
+    private final PaymentRepository paymentRepository;
+    private final PaymentMapper paymentMapper;
     private final OrderProperties properties;
     private final Clock clock;
 
@@ -122,14 +127,15 @@ public class OrderService {
             reservations.reserve(order, item, selected.get(item.getProduct().getId()), now);
         }
         orders.flush();
-        return mapper.kiosk(order);
+        return mapper.kiosk(order, null);
     }
 
     @Transactional(readOnly = true)
     @PreAuthorize("hasRole('KIOSK')")
     public KioskOrderResponse getKioskOrder(AuthenticatedKiosk kiosk, UUID orderId) {
         // Other machine and missing are indistinguishable by design.
-        return mapper.kiosk(orders.findWithItemsByIdAndMachineId(orderId, kiosk.machineId()).orElseThrow(OrderService::missing));
+        var order = orders.findWithItemsByIdAndMachineId(orderId, kiosk.machineId()).orElseThrow(OrderService::missing);
+        return mapper.kiosk(order, currentPayment(order));
     }
 
     @Transactional
@@ -142,7 +148,7 @@ public class OrderService {
         } else if (order.getStatus() != OrderStatus.CANCELLED) {
             throw new ConflictException("Only PENDING_PAYMENT orders can be cancelled");
         }
-        return mapper.kiosk(order);
+        return mapper.kiosk(order, currentPayment(order));
     }
 
     @Transactional(readOnly = true)
@@ -178,7 +184,12 @@ public class OrderService {
         Order order = orders.findWithDetailsById(id).orElseThrow(OrderService::missing);
         Map<UUID, List<OrderItemAllocation>> byLine = allocations.findDetailsByOrderId(id).stream()
                 .collect(Collectors.groupingBy(a -> a.getOrderItem().getId()));
-        return mapper.detail(order, byLine);
+        var payments = paymentRepository.findByOrderIdOrderByCreatedAtAscIdAsc(id).stream().map(paymentMapper::summary).toList();
+        return mapper.detail(order, byLine, payments);
+    }
+
+    private KioskPaymentResponse currentPayment(Order order) {
+        return paymentRepository.findTopByOrderIdOrderByCreatedAtDescIdDesc(order.getId()).map(paymentMapper::kiosk).orElse(null);
     }
 
     private void validateLines(List<CreateOrderItemRequest> lines) {

@@ -2,7 +2,7 @@
 
 ## 1. Authority and status
 
-PostgreSQL 18; Flyway V1–V11 under `src/main/resources/db/migration/` (relative to
+PostgreSQL 18; Flyway V1–V12 under `src/main/resources/db/migration/` (relative to
 the backend module). These migrations define the current schema, not a proposed model.
 There are **20 business tables** (V10 adds `kiosk_credentials`) plus `flyway_schema_history` (Flyway infrastructure,
 not a JPA business entity). Detailed constraints and ERD also appear in
@@ -11,7 +11,7 @@ not a JPA business entity). Detailed constraints and ERD also appear in
 
 Hibernate uses `ddl-auto=validate`, `generate-ddl=false`; SQL initialization is disabled.
 Validation is not a full audit of CHECK/index/trigger/nullability definitions.
-Never edit an applied migration. A genuine schema change needs a new V12+ migration.
+Never edit an applied migration. A genuine schema change needs a new V13+ migration.
 The package/convention alignment does not require any schema change.
 
 ## 2. Types and conventions
@@ -193,7 +193,7 @@ SQL/native/bulk updates bypass JPA auditing listeners and must explicitly mainta
 timestamps. State checks cover required timestamps, but services enforce transition semantics.
 
 Verify changes with Java 21, Maven and Docker: `mvn clean verify` from the backend module.
-Integration tests use PostgreSQL 18 Testcontainers, apply all eleven migrations, run Flyway
+Integration tests use PostgreSQL 18 Testcontainers, apply all twelve migrations, run Flyway
 validation and Hibernate validation, and check all 20 entity mappings. Never use update/create
 or edit historical migration files to make entity validation pass.
 
@@ -241,3 +241,21 @@ inventory_transactions rules are reused unchanged; there was no reservation dead
 - A bowl is reservable only if its batch expires after the order deadline (`expires_at`), so it
   cannot expire while unpaid. A released bowl of an expired batch becomes AVAILABLE but stays
   unsellable (expiry is checked, not scheduled).
+
+## 12. Issue #29 — payment attempts (V12)
+
+V5 payments, V7 indexes, V10 and V11 were inspected first. `payments` has no `updated_at` (not added) and
+`payment_reference` had no uniqueness guarantee. **V12** adds `uq_payments_provider_reference`: UNIQUE
+(provider, payment_reference) WHERE payment_reference IS NOT NULL, so a webhook can resolve an attempt by our reference;
+namespaces are per provider. Creation fails if existing rows violate it; nothing is rewritten. No entity mapping change.
+
+- **Attempt rules**: amount = order.total_amount; expired_at = min(order.expires_at, now + attempt-ttl) (> created_at by CHECK);
+  PENDING with qr_code is the only reusable state, PENDING without qr_code means creation in flight; at most
+  `app.payment.max-attempts-per-order` rows per order. Allowed transitions here: PENDING -> FAILED/EXPIRED only
+  (centralized in PaymentTransitions). SUCCESS/REFUNDED, transaction_id and paid_at stay untouched until the webhook issue.
+- **No transaction during the provider call**: step 1 (lock Order, lock its payments, insert PENDING) and step 3 (lock Order,
+  lock the payment, record QR or FAILED) are separate transactions; the gateway call in between has none.
+- **Lock order for order-state workflows (extends section 11)**: Order -> Payment -> InventoryItem. Order cancel and the
+  expiry sweep lock the order, expire its PENDING payments, then release the bowls. Attempt creation locks Order then Payment.
+  The payments of one order are always locked in id order.
+- A cancelled or expired order never keeps a PENDING payment; there is no CANCELLED payment status (EXPIRED = the QR is no longer valid).

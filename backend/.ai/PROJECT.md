@@ -390,3 +390,11 @@ server-side price snapshot, kiosk read/cancel, automatic expiry sweep and read-o
 list/detail. Migrations V10 (kiosk_credentials) and V11 (orders.expires_at). Orders only move
 PENDING_PAYMENT -> CANCELLED; payment, QR, webhooks, PAID/DISPENSING/COMPLETED, dispense commands
 and MQTT are later issues. See docs/order-management.md and CURRENT_TASK.md for evidence.
+
+## 16. Payment service scope — Issue #29
+
+Provider-independent payment attempts: PaymentGateway abstraction with one configured gateway (MOCK for development/tests only),
+kiosk create-or-reuse QR attempt (no transaction during the provider call, amount from the order, deadline never after the
+reservation), PENDING -> FAILED/EXPIRED only, pending attempts expired when an order is cancelled or expires, `currentPayment`
+in kiosk order polling, payment summaries in order details, ADMIN payment list/detail, V12 unique (provider, payment_reference).
+No real provider, webhook, payment SUCCESS, Order PAID, refund or dispensing. See docs/payment-service.md and CURRENT_TASK.md.

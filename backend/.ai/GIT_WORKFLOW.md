@@ -5,8 +5,10 @@
 ## User-controlled delivery
 
 Commit and push only when the user asks. The user performs merges into `dev` manually;
-requests to finish an issue or commit/push do not authorize merge, PR creation, issue
-closure or GitHub checklist edits. A new explicit request is required for those actions.
+requests to finish an issue or commit/push do not authorize merge, PR creation or issue
+closure; a new explicit request is required for those actions. The AI may tick the
+checkboxes of the assigned issue for items it completed and verified, following AGENTS.md
+section 14 ("Ticking GitHub issue checkboxes"); it never edits anything else in the issue.
 Inspect the working tree first and preserve pending work before any branch switch.
 
 ## 1. Main Branches

@@ -377,8 +377,10 @@ Do not work directly on dev.
 
 Read .ai/GIT_WORKFLOW.md before Git delivery actions. Commit/push only when requested;
 an implementation request does not automatically authorize them. The user merges into
-dev manually: a commit/push request never authorizes merge, PR creation, issue closure
-or GitHub checklist edits. Only a new explicit request can authorize those actions.
+dev manually: a commit/push request never authorizes merge, PR creation or issue closure.
+Only a new explicit request can authorize those actions. Ticking the checklist items of the
+assigned GitHub issue is permitted without a separate request, under the rules in section 14
+(Issue Checklist Reporting).
 
 ---
 
@@ -470,8 +472,24 @@ Example handoff item:
 - [ ] Deployment verification — missing target environment access; user must provide it.
 ```
 
-This reporting rule does NOT authorize editing GitHub issue checkboxes, closing issues,
-creating PRs or merging branches. Perform those actions only when the user requests them.
+### Ticking GitHub issue checkboxes
+
+The agent may tick (`[x]`) the checkboxes of the assigned GitHub issue for items it has
+completed AND verified under this section; no separate user request is needed.
+
+- Tick only items marked `[x]` in `.ai/CURRENT_TASK.md` with supporting evidence (tests,
+  code, build result). Never tick an unverified, blocked, partial or not-applicable-by-assumption item;
+  leave it `[ ]` and say why in the handoff.
+- Edit only the checkbox markers of the assigned issue's own body: never change item text,
+  order, headings or other content, never touch other issues, and never untick items the
+  user or a reviewer ticked.
+- Do this after the work is verified (normally after the full `mvn clean verify`), keep the
+  issue body otherwise identical, and report exactly which items were ticked. If the GitHub
+  tooling is unavailable or unauthenticated, do not work around it with other credentials;
+  disclose the limitation and list the items to tick instead.
+- This rule does NOT authorize closing issues, creating PRs, merging branches, changing
+  labels/milestones/assignees or commenting on behalf of the user. Perform those actions only
+  when the user requests them.
 
 ---
 
