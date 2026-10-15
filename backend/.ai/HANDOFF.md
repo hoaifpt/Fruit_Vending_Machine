@@ -14,6 +14,6 @@ Verification: clean verify 483 tests, 0 failures, BUILD SUCCESS (JDK 21.0.10, Po
 All 97 CURRENT_TASK checklist items checked. Not done: manual Swagger Try-it-out, bootRun against a dev database.
 Environment: use JAVA_HOME=C:/Program Files/Java/jdk-21.0.10 (JDK 25 default breaks Lombok); Docker Desktop must run.
 
-Open decision: itemCount in GET /api/v1/orders is the number of order lines, not total bowls.
+Decision (user): GET /api/v1/orders keeps itemCount = number of order lines and adds totalQuantity = total bowls.
 Next authorized step: await user review; commit/push/PR only on explicit request. Payment issues (#14-#16 in the issue text)
 build on Order -> Payment -> InventoryItem lock order documented in DATABASE.md section 11.

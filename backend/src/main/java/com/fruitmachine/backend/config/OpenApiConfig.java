@@ -471,7 +471,7 @@ public class OpenApiConfig {
         var summary = new java.util.LinkedHashMap<String, Object>();
         summary.put("id", "e0f1a2b3-0000-4000-8000-000000000001"); summary.put("orderCode", "ORD-20261015-7K3QF9XA");
         summary.put("machineId", "9b1e0000-0000-4000-8000-000000000001"); summary.put("machineCode", "FV-HCM-001");
-        summary.put("status", "PENDING_PAYMENT"); summary.put("itemCount", 1); summary.put("totalAmount", 70000.00);
+        summary.put("status", "PENDING_PAYMENT"); summary.put("itemCount", 1); summary.put("totalQuantity", 2); summary.put("totalAmount", 70000.00);
         summary.put("createdAt", timestamp); summary.put("expiresAt", "2026-10-15T04:05:00Z"); summary.put("cancelledAt", null);
         var allocation = new java.util.LinkedHashMap<String, Object>();
         allocation.put("id", "a110c000-0000-4000-8000-000000000001"); allocation.put("inventoryItemId", "1e000000-0000-4000-8000-000000000001");

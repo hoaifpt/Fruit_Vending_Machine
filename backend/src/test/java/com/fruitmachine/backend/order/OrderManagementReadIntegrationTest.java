@@ -43,6 +43,13 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
         var second = fixtures.api("GET", "/api/v1/orders?machineId=" + shop.machineId() + "&size=2&page=1", null, staff.token(), 200);
         assertThat(second.path("content")).hasSize(1);
         assertThat(second.path("content").get(0).path("itemCount").asLong()).isEqualTo(1);
+        assertThat(second.path("content").get(0).path("totalQuantity").asLong()).isEqualTo(1);
+        // Newest first: 3 bowls of one product, then 2+1 bowls of two products, then 1 bowl.
+        var firstPage = fixtures.api("GET", "/api/v1/orders?machineId=" + shop.machineId() + "&size=2&page=0", null, admin.token(), 200);
+        assertThat(firstPage.path("content").get(0).path("itemCount").asLong()).isEqualTo(1);
+        assertThat(firstPage.path("content").get(0).path("totalQuantity").asLong()).isEqualTo(3);
+        assertThat(firstPage.path("content").get(1).path("itemCount").asLong()).isEqualTo(2);
+        assertThat(firstPage.path("content").get(1).path("totalQuantity").asLong()).isEqualTo(3);
 
         var cancelled = fixtures.api("GET", "/api/v1/orders?status=CANCELLED&machineId=" + shop.machineId(), null, admin.token(), 200);
         assertThat(cancelled.path("content")).hasSize(1);

@@ -13,9 +13,11 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, UUID> {
         UUID getOrderId();
 
         Long getLines();
+
+        Long getBowls();
     }
 
     /** One grouped query for a page of orders; avoids a collection fetch or N+1. */
-    @Query("select oi.order.id as orderId, count(oi) as lines from OrderItem oi where oi.order.id in :orderIds group by oi.order.id")
+    @Query("select oi.order.id as orderId, count(oi) as lines, sum(oi.quantity) as bowls from OrderItem oi where oi.order.id in :orderIds group by oi.order.id")
     List<LineCount> countLines(@Param("orderIds") Collection<UUID> orderIds);
 }

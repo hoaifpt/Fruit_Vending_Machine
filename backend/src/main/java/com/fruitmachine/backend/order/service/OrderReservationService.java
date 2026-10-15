@@ -59,20 +59,25 @@ public class OrderReservationService {
     /** PENDING_PAYMENT to CANCELLED, returning every RESERVED bowl to AVAILABLE with RETURN history. */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     public void release(Order order, String reason, Instant now) {
+        // created_at comes from the database clock; never let clock skew violate cancelled_at >= created_at.
         order.setStatus(OrderStatus.CANCELLED);
-        order.setCancelledAt(now);
+        order.setCancelledAt(notBefore(now, order.getCreatedAt()));
         for (OrderItemAllocation allocation : allocations.findByOrderIdAndStatus(order.getId(), AllocationStatus.RESERVED)) {
             InventoryItem bowl = items.findForUpdateById(allocation.getInventoryItem().getId())
                     .orElseThrow(() -> new IllegalStateException("Allocated inventory item is missing"));
             if (bowl.getStatus() != InventoryStatus.RESERVED) throw new IllegalStateException("Allocated inventory item is not RESERVED");
             allocation.setStatus(AllocationStatus.RELEASED);
-            allocation.setReleasedAt(now);
+            allocation.setReleasedAt(notBefore(now, allocation.getCreatedAt()));
             bowl.setStatus(InventoryStatus.AVAILABLE);
             bowl.setReservedAt(null);
             append(bowl, order, InventoryTransactionType.RETURN, reason, InventoryStatus.RESERVED, InventoryStatus.AVAILABLE);
         }
         items.flush();
         history.flush();
+    }
+
+    private static Instant notBefore(Instant candidate, Instant floor) {
+        return floor != null && candidate.isBefore(floor) ? floor : candidate;
     }
 
     private void append(InventoryItem bowl, Order order, InventoryTransactionType type, String reason,

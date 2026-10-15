@@ -25,6 +25,9 @@ Implemented and locally verified; nothing committed, pushed, PR-ed or merged.
 - `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, Maven 3.9.12, PostgreSQL 18.6
   Testcontainers): 483 tests, 0 failures/errors/skips, BUILD SUCCESS, on the final code.
   Log: backend/target/issue27-verify.log (ignored).
+- Follow-up on the same branch: order list adds totalQuantity (itemCount stays = order lines); release/revoke timestamps
+  are never earlier than the row created_at (database clock skew guard). Re-verified: clean verify 483 tests, 0 failures.
+- Note: an IDE auto-compiling into target/classes can break Maven runs (ECJ without Lombok); always run `clean`.
 - New classes: KioskCredentialIntegrationTest(7), KioskCatalogIntegrationTest(3), OrderCreationIntegrationTest(8),
   OrderCancelExpiryIntegrationTest(6), OrderManagementReadIntegrationTest(3), OrderConcurrencyIntegrationTest(6),
   OrderSchemaIntegrationTest(4), OrderExpirySchedulerIntegrationTest(1), OrderPropertiesTest(2),
@@ -36,7 +39,7 @@ Implemented and locally verified; nothing committed, pushed, PR-ed or merged.
   against a developer database. "Application starts" is evidenced by Spring contexts booting on all suites,
   including one with the real scheduler enabled. Run Maven with JDK 21 (default JAVA_HOME here is JDK 25,
   which Lombok cannot compile with).
-- Design notes: itemCount in order lists = number of order lines; slot rows are not locked during reservation
+- Design notes: order list itemCount = number of order lines, totalQuantity = total bowls; slot rows are not locked during reservation
   (slot ACTIVE is in the candidate predicate); an order carrying both JWT and kiosk key gets 401.
 
 # Testing

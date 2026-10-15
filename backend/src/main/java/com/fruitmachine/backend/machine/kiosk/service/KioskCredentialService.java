@@ -115,7 +115,8 @@ public class KioskCredentialService {
 
     private void markRevoked(KioskCredential credential, Instant now, User actor) {
         credential.setStatus(KioskCredentialStatus.REVOKED);
-        credential.setRevokedAt(now);
+        // created_at comes from the database clock; never let clock skew violate revoked_at >= created_at.
+        credential.setRevokedAt(credential.getCreatedAt() != null && now.isBefore(credential.getCreatedAt()) ? credential.getCreatedAt() : now);
         credential.setRevokedBy(actor);
     }
 

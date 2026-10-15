@@ -44,7 +44,7 @@ sai secret đều trả `401` giống nhau. Máy `INACTIVE`/`MAINTENANCE` vẫn 
 | POST | `/api/v1/machines/{machineId}/kiosk-credentials` | ADMIN, cấp/xoay key (201, key trả một lần) |
 | GET | `/api/v1/machines/{machineId}/kiosk-credentials` | ADMIN, metadata, không bao giờ trả key/hash |
 | POST | `/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke` | ADMIN, idempotent, máy khác -> 404 |
-| GET | `/api/v1/orders`, `/api/v1/orders/{id}` | ADMIN, STAFF (không có API ghi/xóa/đổi trạng thái) |
+| GET | `/api/v1/orders`, `/api/v1/orders/{id}` | ADMIN, STAFF (không có API ghi/xóa/đổi trạng thái); danh sách có `itemCount` = số dòng sản phẩm và `totalQuantity` = tổng số bát |
 | GET | `/api/v1/kiosk/me` | KIOSK |
 | GET | `/api/v1/kiosk/catalog` | KIOSK |
 | POST | `/api/v1/kiosk/orders` | KIOSK, tạo đơn và giữ chỗ |

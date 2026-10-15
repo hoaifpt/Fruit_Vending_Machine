@@ -4832,6 +4832,7 @@ paths:
                       "machineCode": "FV-HCM-001"
                       "status": "PENDING_PAYMENT"
                       "itemCount": 1
+                      "totalQuantity": 2
                       "totalAmount": 70000.0
                       "createdAt": "2026-10-15T04:00:00Z"
                       "expiresAt": "2026-10-15T04:05:00Z"
@@ -6454,6 +6455,10 @@ components:
           "type": "integer"
           "format": "int64"
           "description": "Number of order lines (distinct products), not the bowl quantity."
+        "totalQuantity":
+          "type": "integer"
+          "format": "int64"
+          "description": "Total number of bowls ordered (sum of line quantities)."
         "totalAmount":
           "type": "number"
         "createdAt":

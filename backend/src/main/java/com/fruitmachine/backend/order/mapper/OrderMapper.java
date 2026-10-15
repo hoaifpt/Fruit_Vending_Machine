@@ -24,9 +24,9 @@ public class OrderMapper {
                 order.getSubtotal(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt());
     }
 
-    public OrderSummaryResponse summary(Order order, long lines) {
+    public OrderSummaryResponse summary(Order order, long lines, long bowls) {
         return new OrderSummaryResponse(order.getId(), order.getOrderCode(), order.getMachine().getId(), order.getMachine().getCode(),
-                order.getStatus(), lines, order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt());
+                order.getStatus(), lines, bowls, order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt());
     }
 
     public OrderDetailResponse detail(Order order, Map<UUID, List<OrderItemAllocation>> allocations) {

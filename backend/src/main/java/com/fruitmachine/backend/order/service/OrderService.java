@@ -162,10 +162,13 @@ public class OrderService {
             return cb.and(predicates.toArray(Predicate[]::new));
         };
         var result = orders.findAll(filter, pageRequest(page, size, sort));
-        Map<UUID, Long> lines = result.isEmpty() ? Map.of()
+        Map<UUID, OrderItemRepository.LineCount> counts = result.isEmpty() ? Map.of()
                 : orderItems.countLines(result.getContent().stream().map(Order::getId).toList()).stream()
-                        .collect(Collectors.toMap(c -> c.getOrderId(), c -> c.getLines()));
-        var content = result.getContent().stream().map(order -> mapper.summary(order, lines.getOrDefault(order.getId(), 0L))).toList();
+                        .collect(Collectors.toMap(OrderItemRepository.LineCount::getOrderId, Function.identity()));
+        var content = result.getContent().stream().map(order -> {
+            var count = counts.get(order.getId());
+            return mapper.summary(order, count == null ? 0L : count.getLines(), count == null ? 0L : count.getBowls());
+        }).toList();
         return new OrderPageResponse(content, page, size, result.getTotalElements(), result.getTotalPages());
     }
 
