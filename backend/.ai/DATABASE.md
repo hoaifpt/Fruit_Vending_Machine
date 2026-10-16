@@ -259,3 +259,11 @@ namespaces are per provider. Creation fails if existing rows violate it; nothing
   expiry sweep lock the order, expire its PENDING payments, then release the bowls. Attempt creation locks Order then Payment.
   The payments of one order are always locked in id order.
 - A cancelled or expired order never keeps a PENDING payment; there is no CANCELLED payment status (EXPIRED = the QR is no longer valid).
+
+## 13. Issue #31 — payOS provider (no schema change)
+
+No migration. payOS reuses `payments.provider = PAYOS`, `payments.payment_reference` = payOS orderCode (15 digits, decimal text),
+`payments.qr_code` = VietQR payload and `payments.expired_at` (also sent to payOS as expiredAt). `uq_payments_provider_reference` (V12) is the
+final uniqueness guard; step 1 of attempt creation pre-checks the reference and regenerates it up to 3 times. `checkoutUrl` and `paymentLinkId`
+are not stored. `transaction_id` stays NULL until the webhook issue fills it from the webhook reference. The lock order Order -> Payment -> InventoryItem is unchanged;
+provider-side cancellation of an expired attempt happens after the committing transaction, never while locks are held.

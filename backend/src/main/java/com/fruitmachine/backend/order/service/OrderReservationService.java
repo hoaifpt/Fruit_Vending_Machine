@@ -65,7 +65,7 @@ public class OrderReservationService {
         order.setStatus(OrderStatus.CANCELLED);
         order.setCancelledAt(notBefore(now, order.getCreatedAt()));
         // Lock order: Order (held by the caller), then Payment, then InventoryItem.
-        payments.expirePendingPayments(order);
+        payments.expirePendingPayments(order, reason);
         for (OrderItemAllocation allocation : allocations.findByOrderIdAndStatus(order.getId(), AllocationStatus.RESERVED)) {
             InventoryItem bowl = items.findForUpdateById(allocation.getInventoryItem().getId())
                     .orElseThrow(() -> new IllegalStateException("Allocated inventory item is missing"));

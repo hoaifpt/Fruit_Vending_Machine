@@ -398,3 +398,10 @@ kiosk create-or-reuse QR attempt (no transaction during the provider call, amoun
 reservation), PENDING -> FAILED/EXPIRED only, pending attempts expired when an order is cancelled or expires, `currentPayment`
 in kiosk order polling, payment summaries in order details, ADMIN payment list/detail, V12 unique (provider, payment_reference).
 No real provider, webhook, payment SUCCESS, Order PAID, refund or dispensing. See docs/payment-service.md and CURRENT_TASK.md.
+
+## 17. QR payment provider scope — Issue #31
+
+payOS adapter behind PaymentGateway selected by PAYMENT_PROVIDER=PAYOS (MOCK stays the default): VietQR attempt creation with an HMAC-SHA256 signed request, integer-VND
+amount rule (409 for fractional amounts), orderCode as payment_reference, best-effort link cancellation after commit, and webhook signature verifier/parser components.
+No webhook endpoint, payment SUCCESS, Order PAID, refund, reconciliation, schema change or new dependency. The manual real-payOS checks stay open until payOS access exists.
+See docs/payment-provider.md and CURRENT_TASK.md.

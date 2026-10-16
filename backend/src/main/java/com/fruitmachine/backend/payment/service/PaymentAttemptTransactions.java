@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,6 +54,7 @@ public class PaymentAttemptTransactions {
     private final PaymentProperties properties;
     private final PaymentMapper mapper;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
     /** STEP 1. Validates the order, expires stale attempts, and either reuses a live attempt or inserts a new PENDING one. */
     @Transactional
@@ -67,6 +69,8 @@ public class PaymentAttemptTransactions {
         for (Payment attempt : attempts) {
             if (attempt.getStatus() == PaymentStatus.PENDING && attempt.getExpiredAt() != null && !attempt.getExpiredAt().isAfter(now)) {
                 PaymentTransitions.apply(attempt, PaymentStatus.EXPIRED);
+                // The attempt is replaced below; its provider link is cancelled only after this transaction commits.
+                events.publishEvent(new PaymentExpiredEvent(attempt.getProvider(), attempt.getPaymentReference(), PaymentService.REASON_ATTEMPT_EXPIRED));
             }
         }
         for (Payment attempt : attempts) {
@@ -75,6 +79,8 @@ public class PaymentAttemptTransactions {
             throw new ConflictException("A payment attempt is already being created; retry shortly");
         }
         if (attempts.size() >= properties.maxAttemptsPerOrder()) throw new ConflictException("Maximum payment attempts reached for this order");
+        // Money is never rounded: an amount the provider cannot charge exactly is rejected before any attempt exists.
+        if (!gateway.supportsAmount(order.getTotalAmount())) throw new ConflictException("The order amount cannot be charged by the payment provider");
 
         var payment = new Payment();
         payment.setOrder(order);

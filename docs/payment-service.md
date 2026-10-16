@@ -59,7 +59,7 @@ Luồng nhả chỗ của #27 (`OrderReservationService.release`) giờ sau khi 
 ## Gateway và cấu hình
 
 `PaymentService -> PaymentGateway` (`MockPaymentGateway` ở issue này; `PayOsPaymentGateway` ở issue sau). Đúng một gateway hoạt động theo `app.payment.provider`
-(`PaymentGatewayRegistry`); provider lạ hoặc `MOCK` ở profile `prod` làm ứng dụng không khởi động. `MOCK` chỉ để dev/test: `provider()=MOCK`,
+(`PaymentGatewayRegistry`); provider lạ hoặc `MOCK` ở profile `prod` làm ứng dụng không khởi động. Provider payOS thật được mô tả ở [payment-provider.md](payment-provider.md). `MOCK` chỉ để dev/test: `provider()=MOCK`,
 `newPaymentReference()="MOCK-"+8 ký tự`, QR `MOCK-QR|<reference>|<amount>`, không gọi mạng và không bao giờ đánh dấu đã trả.
 
 | Biến | Mặc định | Ý nghĩa |

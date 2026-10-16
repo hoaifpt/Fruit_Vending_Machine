@@ -4491,147 +4491,6 @@ paths:
       "security":
         -
           "bearerAuth": []
-  "/api/v1/kiosk/orders/{orderId}/payments":
-    "post":
-      "tags":
-        - "Kiosk Payments"
-      "summary": "Create or reuse a payment attempt (QR) for an order"
-      "description": "KIOSK only, no request body. The amount is always the order total. A live PENDING attempt with a QR is reused (200); otherwise a new attempt is created (201): step 1 validates and inserts in a transaction, step 2 calls the configured provider with no transaction open, step 3 records the result. The attempt deadline is min(order expiresAt, now + attempt TTL), so a QR never outlives the reservation. Poll GET /api/v1/kiosk/orders/{orderId} every 2-3 seconds for status. Provider failure or timeout marks the attempt FAILED and returns 502; the order is unchanged."
-      "operationId": "createKioskPayment"
-      "parameters":
-        -
-          "name": "orderId"
-          "in": "path"
-          "description": "Order UUID of this machine."
-          "required": true
-          "schema":
-            "type": "string"
-            "format": "uuid"
-      "responses":
-        "201":
-          "description": "New attempt created with a QR"
-          "headers":
-            "Cache-Control":
-              "schema":
-                "type": "string"
-                "const": "no-store"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiResponseKioskPaymentResponse"
-              "example":
-                "timestamp": "2026-10-15T04:00:00Z"
-                "data":
-                  "paymentId": "5d6e0000-0000-4000-8000-000000000001"
-                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001"
-                  "provider": "MOCK"
-                  "status": "PENDING"
-                  "amount": 70000.0
-                  "qrCode": "MOCK-QR|MOCK-8F3KQ2AB|70000.00"
-                  "expiresAt": "2026-10-15T04:05:00Z"
-                "message": "Success"
-        "200":
-          "description": "Existing live attempt reused"
-          "headers":
-            "Cache-Control":
-              "schema":
-                "type": "string"
-                "const": "no-store"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiResponseKioskPaymentResponse"
-              "example":
-                "timestamp": "2026-10-15T04:00:00Z"
-                "data":
-                  "paymentId": "5d6e0000-0000-4000-8000-000000000001"
-                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001"
-                  "provider": "MOCK"
-                  "status": "PENDING"
-                  "amount": 70000.0
-                  "qrCode": "MOCK-QR|MOCK-8F3KQ2AB|70000.00"
-                  "expiresAt": "2026-10-15T04:05:00Z"
-                "message": "Success"
-        "404":
-          "description": "Missing order or order of another machine"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 404
-                "path": "/api/v1/kiosk/orders/{orderId}/payments"
-                "error": "Not Found"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Payment not found"
-        "409":
-          "description": "Order not PENDING_PAYMENT, hold almost expired, attempt creation in flight, maximum attempts reached or order cancelled during the provider call"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 409
-                "path": "/api/v1/kiosk/orders/{orderId}/payments"
-                "error": "Conflict"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Maximum payment attempts reached for this order"
-        "502":
-          "description": "Payment provider failed or timed out; the attempt is FAILED"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 502
-                "path": "/api/v1/kiosk/orders/{orderId}/payments"
-                "error": "Bad Gateway"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Payment provider is currently unavailable"
-        "401":
-          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
-          "headers":
-            "WWW-Authenticate":
-              "schema":
-                "type": "string"
-                "const": "Bearer"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 401
-                "path": "/api/v1/kiosk/orders/{orderId}/payments"
-                "error": "Unauthorized"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Authentication required or access token invalid"
-        "403":
-          "description": "Authenticated as a user, not a kiosk"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 403
-                "path": "/api/v1/kiosk/orders/{orderId}/payments"
-                "error": "Forbidden"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Access denied"
-        "500":
-          "description": "Unexpected server error; no internal details"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 500
-                "path": "/api/v1/kiosk/orders/{orderId}/payments"
-                "error": "Internal Server Error"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "An unexpected error occurred"
-      "security":
-        -
-          "kioskKey": []
   "/api/v1/payments":
     "get":
       "tags":
@@ -5422,6 +5281,147 @@ paths:
       "security":
         -
           "bearerAuth": []
+  "/api/v1/kiosk/orders/{orderId}/payments":
+    "post":
+      "tags":
+        - "Kiosk Payments"
+      "summary": "Create or reuse a payment attempt (QR) for an order"
+      "description": "KIOSK only, no request body. The amount is always the order total. A live PENDING attempt with a QR is reused (200); otherwise a new attempt is created (201): step 1 validates and inserts in a transaction, step 2 calls the configured provider with no transaction open, step 3 records the result. The attempt deadline is min(order expiresAt, now + attempt TTL), so a QR never outlives the reservation. Poll GET /api/v1/kiosk/orders/{orderId} every 2-3 seconds for status. Provider failure or timeout marks the attempt FAILED and returns 502; the order is unchanged. With provider PAYOS the qrCode is a VietQR payload and only whole-VND amounts are accepted: a fractional order amount (for example 35000.50) is never rounded and returns 409 before any attempt is created."
+      "operationId": "createKioskPayment"
+      "parameters":
+        -
+          "name": "orderId"
+          "in": "path"
+          "description": "Order UUID of this machine."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "201":
+          "description": "New attempt created with a QR"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskPaymentResponse"
+              "example":
+                "data":
+                  "paymentId": "5d6e0000-0000-4000-8000-000000000001"
+                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "provider": "MOCK"
+                  "status": "PENDING"
+                  "amount": 70000.0
+                  "qrCode": "MOCK-QR|MOCK-8F3KQ2AB|70000.00"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+        "200":
+          "description": "Existing live attempt reused"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseKioskPaymentResponse"
+              "example":
+                "data":
+                  "paymentId": "5d6e0000-0000-4000-8000-000000000001"
+                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "provider": "MOCK"
+                  "status": "PENDING"
+                  "amount": 70000.0
+                  "qrCode": "MOCK-QR|MOCK-8F3KQ2AB|70000.00"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Success"
+        "404":
+          "description": "Missing order or order of another machine"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Payment not found"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Not Found"
+                "path": "/api/v1/kiosk/orders/{orderId}/payments"
+                "status": 404
+        "409":
+          "description": "Order not PENDING_PAYMENT, hold almost expired, attempt creation in flight, maximum attempts reached, order amount not chargeable by the provider (for example non-integer VND for PAYOS) or order cancelled during the provider call"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Maximum payment attempts reached for this order"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Conflict"
+                "path": "/api/v1/kiosk/orders/{orderId}/payments"
+                "status": 409
+        "502":
+          "description": "Payment provider failed or timed out; the attempt is FAILED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Payment provider is currently unavailable"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Bad Gateway"
+                "path": "/api/v1/kiosk/orders/{orderId}/payments"
+                "status": 502
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Authentication required or access token invalid"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Unauthorized"
+                "path": "/api/v1/kiosk/orders/{orderId}/payments"
+                "status": 401
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "Access denied"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Forbidden"
+                "path": "/api/v1/kiosk/orders/{orderId}/payments"
+                "status": 403
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "message": "An unexpected error occurred"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "error": "Internal Server Error"
+                "path": "/api/v1/kiosk/orders/{orderId}/payments"
+                "status": 500
+      "security":
+        -
+          "kioskKey": []
 components:
   securitySchemes:
     bearerAuth:
@@ -6819,49 +6819,6 @@ components:
         "cancelledAt":
           "type": "string"
           "format": "date-time"
-    "ApiResponseKioskPaymentResponse":
-      "type": "object"
-      "properties":
-        "timestamp":
-          "type": "string"
-          "format": "date-time"
-        "message":
-          "type": "string"
-        "data":
-          "$ref": "#/components/schemas/KioskPaymentResponse"
-    "KioskPaymentResponse":
-      "type": "object"
-      "description": "Payment attempt as seen by the owning kiosk. The amount always equals the order total; success is never reported here."
-      "properties":
-        "paymentId":
-          "type": "string"
-          "format": "uuid"
-        "orderId":
-          "type": "string"
-          "format": "uuid"
-        "provider":
-          "type": "string"
-          "description": "Active provider code, for example MOCK."
-          "example": "MOCK"
-        "status":
-          "type": "string"
-          "enum":
-            - "PENDING"
-            - "SUCCESS"
-            - "FAILED"
-            - "EXPIRED"
-            - "REFUNDED"
-        "amount":
-          "type": "number"
-        "qrCode":
-          "type":
-            - "string"
-            - "null"
-          "description": "QR payload to display. Present only while the attempt is PENDING, null otherwise."
-        "expiresAt":
-          "type": "string"
-          "format": "date-time"
-          "description": "Attempt deadline, never later than the order reservation deadline."
     "ApiResponsePaymentPageResponse":
       "type": "object"
       "properties":
@@ -7221,3 +7178,46 @@ components:
         "expiredAt":
           "type": "string"
           "format": "date-time"
+    "ApiResponseKioskPaymentResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/KioskPaymentResponse"
+    "KioskPaymentResponse":
+      "type": "object"
+      "description": "Payment attempt as seen by the owning kiosk. The amount always equals the order total; success is never reported here."
+      "properties":
+        "paymentId":
+          "type": "string"
+          "format": "uuid"
+        "orderId":
+          "type": "string"
+          "format": "uuid"
+        "provider":
+          "type": "string"
+          "description": "Active provider code, for example MOCK."
+          "example": "MOCK"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING"
+            - "SUCCESS"
+            - "FAILED"
+            - "EXPIRED"
+            - "REFUNDED"
+        "amount":
+          "type": "number"
+        "qrCode":
+          "type":
+            - "string"
+            - "null"
+          "description": "QR payload to display (a VietQR payload when the provider is PAYOS). Present only while the attempt is PENDING, null otherwise."
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Attempt deadline, never later than the order reservation deadline."

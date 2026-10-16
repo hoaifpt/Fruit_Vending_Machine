@@ -211,6 +211,36 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
     }
 
     @Test
+    void anAmountTheProviderCannotChargeExactlyIsRejectedBeforeAnyAttemptIsInserted() throws Exception {
+        gateway.wholeAmountsOnly(true);
+        UUID machine = fixtures.machine(admin.token());
+        UUID slot = createSlot(machine, "F1", 10), product = createProduct("Fractional bowl", "35000.50");
+        load(fixtures.batch(product, 3, staff.token()), slot, 3);
+        String key = issueKey(machine);
+        var fractional = new PlacedOrder(new Shop(machine, slot, product, key),
+                UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(line(product, 1)), 201).path("id").asText()), "x");
+        var error = pay(fractional, 409);
+        assertThat(error.path("message").asText()).contains("cannot be charged");
+        assertThat(count("SELECT count(*) FROM payments WHERE order_id=?", fractional.orderId())).isZero();
+        assertThat(gateway.calls()).isZero();
+        // The same provider accepts a whole amount, and the default (MOCK-like) rule accepts fractions.
+        pay(placeOrder(1), 201);
+        gateway.wholeAmountsOnly(false);
+        pay(fractional, 201);
+    }
+
+    @Test
+    void aCollidingReferenceIsRegeneratedInsteadOfFailing() throws Exception {
+        var other = placeOrder(1);
+        jdbc.update("INSERT INTO payments(order_id, provider, payment_reference, amount, status, expired_at) VALUES (?, 'TESTPAY', 'TEST-DUPLICATE', 1, 'FAILED', now() + interval '1 minute')", other.orderId());
+        var order = placeOrder(1);
+        gateway.queueReferences("TEST-DUPLICATE", "TEST-DUPLICATE", "TEST-FRESH-1");
+        pay(order, 201);
+        assertThat(jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, order.orderId())).isEqualTo("TEST-FRESH-1");
+        assertThat(count("SELECT count(*) FROM payments WHERE provider='TESTPAY' AND payment_reference='TEST-DUPLICATE'")).isEqualTo(1);
+    }
+
+    @Test
     void amountAndOtherValuesFromTheClientAreIgnored() throws Exception {
         var order = placeOrder(1);
         var created = kioskJson("POST", order.payments(), order.shop().key(), Map.of("amount", 1, "provider", "MOCK", "status", "SUCCESS"), 201).path("data");

@@ -641,3 +641,14 @@ and is refused if an ambient transaction exists. `PaymentService.expirePendingPa
 creates or reuses an attempt; `PaymentController` is ADMIN read-only; kiosk polling (`currentPayment`) and order details
 (`payments[]`) extend the #27 DTOs. `PaymentProviderException` maps to a generic 502 in GlobalExceptionHandler. Payment SUCCESS,
 Order PAID, webhooks and real providers remain future issues. See [payment-service.md](../../docs/payment-service.md).
+
+## 20. payOS provider adapter — Issue #31
+
+`PayOsPaymentGateway` implements `PaymentGateway` in `payment.gateway.payos` and is the only place that knows payOS. The interface gained
+`supportsAmount` (integer VND only for payOS; checked in attempt step 1, unsupported amounts return 409 before any attempt exists),
+`cancelPayment` (default no-op) and `validateConfiguration` (called by `PaymentGatewayRegistry` for the active gateway only, so MOCK needs no payOS secrets and
+a PAYOS start with missing values fails naming properties, never values). `PayOsClient` uses Spring `RestClient` with per-call timeouts, never logs bodies and maps every failure to a
+sanitized `PaymentProviderException`. `PayOsSignature` holds the HMAC-SHA256 helpers; `PayOsWebhookVerifier` and `PayOsWebhookParser` are provider components without an endpoint.
+`PaymentService.expirePendingPayments` and attempt replacement publish `PaymentExpiredEvent`; `PaymentCancellations` (`@TransactionalEventListener(AFTER_COMMIT)`)
+calls the active gateway only for attempts of that provider, swallows failures with a WARN naming the reference, and is also called directly when attempt creation finds its attempt superseded.
+No business service references payOS classes. See [payment-provider.md](../../docs/payment-provider.md).

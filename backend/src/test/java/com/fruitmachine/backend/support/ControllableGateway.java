@@ -22,9 +22,12 @@ public final class ControllableGateway implements PaymentGateway {
     private final AtomicInteger calls = new AtomicInteger();
     private final List<Long> idleInTransactionDuringCall = new CopyOnWriteArrayList<>();
     private final List<ProviderPaymentRequest> requests = new CopyOnWriteArrayList<>();
+    private final List<String[]> cancels = new CopyOnWriteArrayList<>();
+    private final java.util.Deque<String> queuedReferences = new java.util.concurrent.ConcurrentLinkedDeque<>();
     private volatile Mode mode = Mode.SUCCESS;
     private volatile Runnable duringCall = () -> { };
     private volatile Instant providerExpiresAt;
+    private volatile boolean wholeAmountsOnly;
 
     public ControllableGateway(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
@@ -37,12 +40,21 @@ public final class ControllableGateway implements PaymentGateway {
         calls.set(0);
         idleInTransactionDuringCall.clear();
         requests.clear();
+        cancels.clear();
+        queuedReferences.clear();
+        wholeAmountsOnly = false;
     }
 
     public void mode(Mode mode) { this.mode = mode; }
     public void duringCall(Runnable hook) { this.duringCall = hook; }
     public void providerExpiresAt(Instant instant) { this.providerExpiresAt = instant; }
     public int calls() { return calls.get(); }
+    /** Cancellations received as {reference, reason}. */
+    public List<String[]> cancels() { return cancels; }
+    /** The next newPaymentReference() calls return these values first. */
+    public void queueReferences(String... references) { queuedReferences.addAll(List.of(references)); }
+    /** Makes supportsAmount reject amounts with a fractional part, like payOS. */
+    public void wholeAmountsOnly(boolean enabled) { this.wholeAmountsOnly = enabled; }
     public List<Long> idleInTransactionDuringCall() { return idleInTransactionDuringCall; }
     public List<ProviderPaymentRequest> requests() { return requests; }
 
@@ -53,7 +65,19 @@ public final class ControllableGateway implements PaymentGateway {
 
     @Override
     public String newPaymentReference() {
+        String queued = queuedReferences.pollFirst();
+        if (queued != null) return queued;
         return "TEST-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
+    }
+
+    @Override
+    public boolean supportsAmount(java.math.BigDecimal amount) {
+        return amount.signum() > 0 && (!wholeAmountsOnly || amount.stripTrailingZeros().scale() <= 0);
+    }
+
+    @Override
+    public void cancelPayment(String paymentReference, String reason) {
+        cancels.add(new String[]{paymentReference, reason});
     }
 
     @Override

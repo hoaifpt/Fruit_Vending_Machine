@@ -16,6 +16,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
+    @org.springframework.beans.factory.annotation.Autowired com.fruitmachine.backend.payment.service.PaymentService paymentService;
+    @org.springframework.beans.factory.annotation.Autowired com.fruitmachine.backend.order.repository.OrderRepository orders;
+    @org.springframework.beans.factory.annotation.Autowired org.springframework.transaction.support.TransactionTemplate transactions;
+
     @Test
     void kioskCancelExpiresPendingAttemptsAndReleasesInventory() throws Exception {
         var order = placeOrder(2);
@@ -90,6 +94,77 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
         var cancelled = kioskData("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
         assertThat(cancelled.path("currentPayment").path("status").asText()).isEqualTo("EXPIRED");
         assertThat(cancelled.path("currentPayment").path("qrCode").isNull()).isTrue();
+    }
+
+    @Test
+    void cancelledAttemptsInvalidateTheProviderLinkOnlyAfterCommitWithTheMatchingReason() throws Exception {
+        var cancelled = placeOrder(1);
+        pay(cancelled, 201);
+        String cancelledRef = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, cancelled.orderId());
+        assertThat(gateway.cancels()).isEmpty();
+        kioskJson("POST", "/api/v1/kiosk/orders/" + cancelled.orderId() + "/cancel", cancelled.shop().key(), null, 200);
+        assertThat(gateway.cancels()).hasSize(1);
+        assertThat(gateway.cancels().get(0)).containsExactly(cancelledRef, "ORDER_CANCELLED");
+        // Idempotent cancel does not call the provider again.
+        kioskJson("POST", "/api/v1/kiosk/orders/" + cancelled.orderId() + "/cancel", cancelled.shop().key(), null, 200);
+        assertThat(gateway.cancels()).hasSize(1);
+
+        gateway.reset();
+        var swept = placeOrder(1);
+        pay(swept, 201);
+        String sweptRef = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, swept.orderId());
+        clock.advance(Duration.ofMinutes(6));
+        assertThat(expiry.sweep()).isGreaterThanOrEqualTo(1);
+        assertThat(gateway.cancels()).anySatisfy(c -> assertThat(c).containsExactly(sweptRef, "RESERVATION_EXPIRED"));
+    }
+
+    @Test
+    void replacingAnExpiredAttemptInvalidatesTheOldLinkWithAttemptExpired() throws Exception {
+        var order = placeOrder(1);
+        pay(order, 201);
+        String first = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, order.orderId());
+        clock.advance(Duration.ofMinutes(2).plusSeconds(1));
+        pay(order, 201);
+        assertThat(gateway.cancels()).hasSize(1);
+        assertThat(gateway.cancels().get(0)).containsExactly(first, "ATTEMPT_EXPIRED");
+    }
+
+    @Test
+    void aRolledBackExpiryDoesNotInvalidateAnything() throws Exception {
+        var order = placeOrder(1);
+        pay(order, 201);
+        transactions.executeWithoutResult(status -> {
+            var entity = orders.findForUpdateById(order.orderId()).orElseThrow();
+            paymentService.expirePendingPayments(entity, "ORDER_CANCELLED");
+            status.setRollbackOnly();
+        });
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, order.orderId())).isEqualTo("PENDING");
+        assertThat(gateway.cancels()).isEmpty();
+    }
+
+    @Test
+    void attemptsOfAnotherProviderAreNeverCancelledThroughTheActiveGateway() throws Exception {
+        var order = placeOrder(1);
+        jdbc.update("INSERT INTO payments(order_id, provider, payment_reference, amount, status, expired_at) VALUES (?, 'MOCK', 'MOCK-OLD', 1, 'PENDING', now() + interval '1 minute')", order.orderId());
+        kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
+        assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE payment_reference='MOCK-OLD'", String.class)).isEqualTo("EXPIRED");
+        assertThat(gateway.cancels()).isEmpty();
+    }
+
+    @Test
+    void aLinkCreatedWhileTheOrderWasCancelledIsInvalidatedToo() throws Exception {
+        var order = placeOrder(1);
+        gateway.duringCall(() -> {
+            try {
+                kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
+            } catch (Exception ex) {
+                throw new IllegalStateException(ex);
+            }
+        });
+        pay(order, 409);
+        String reference = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, order.orderId());
+        // The cancel found the attempt PENDING (no link yet) and the superseded path cancels the link created right afterwards.
+        assertThat(gateway.cancels()).hasSize(2).allSatisfy(c -> assertThat(c).containsExactly(reference, "ORDER_CANCELLED"));
     }
 
     @Test
