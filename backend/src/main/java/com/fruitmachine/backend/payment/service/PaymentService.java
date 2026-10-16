@@ -31,6 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -47,6 +48,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Slf4j
 @Service
 public class PaymentService {
+    public static final String REASON_ATTEMPT_EXPIRED = "ATTEMPT_EXPIRED";
     private static final Set<String> SORT_FIELDS = Set.of("createdAt", "amount", "paidAt");
 
     private final PaymentAttemptTransactions attempts;
@@ -54,15 +56,20 @@ public class PaymentService {
     private final PaymentRepository payments;
     private final PaymentMapper mapper;
     private final PaymentProperties properties;
+    private final PaymentCancellations cancellations;
+    private final ApplicationEventPublisher events;
     private final ExecutorService providerCalls = Executors.newVirtualThreadPerTaskExecutor();
 
     public PaymentService(PaymentAttemptTransactions attempts, PaymentGatewayRegistry gateways, PaymentRepository payments,
-            PaymentMapper mapper, PaymentProperties properties) {
+            PaymentMapper mapper, PaymentProperties properties, PaymentCancellations cancellations,
+            ApplicationEventPublisher events) {
         this.attempts = attempts;
         this.gateways = gateways;
         this.payments = payments;
         this.mapper = mapper;
         this.properties = properties;
+        this.cancellations = cancellations;
+        this.events = events;
     }
 
     /** Result of attempt creation: created is false when a live attempt was reused. */
@@ -89,16 +96,22 @@ public class PaymentService {
         var completion = attempts.complete(created.orderId(), created.paymentId(), result);
         return switch (completion.outcome()) {
             case CREATED -> new AttemptResult(completion.payment(), true);
-            case SUPERSEDED -> throw new ConflictException("Order is no longer awaiting payment; the attempt was not kept");
+            case SUPERSEDED -> {
+                // The order was cancelled while the provider call was in flight: its cancel found no link to invalidate yet,
+                // so the link the provider just created is cancelled now (outside any transaction, best effort).
+                cancellations.cancelBestEffort(gateway.provider(), created.request().paymentReference(), "ORDER_CANCELLED");
+                throw new ConflictException("Order is no longer awaiting payment; the attempt was not kept");
+            }
             case PROVIDER_FAILED -> throw new PaymentProviderException("Payment provider could not create the payment");
         };
     }
 
     /** Called by the order release workflow after it locked the order: PENDING attempts become EXPIRED. */
     @Transactional(propagation = Propagation.MANDATORY)
-    public void expirePendingPayments(Order order) {
+    public void expirePendingPayments(Order order, String reason) {
         for (Payment pending : payments.findForUpdateByOrderIdAndStatus(order.getId(), PaymentStatus.PENDING)) {
             PaymentTransitions.apply(pending, PaymentStatus.EXPIRED);
+            events.publishEvent(new PaymentExpiredEvent(pending.getProvider(), pending.getPaymentReference(), reason));
         }
         payments.flush();
     }

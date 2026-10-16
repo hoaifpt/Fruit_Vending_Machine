@@ -8,7 +8,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
-/** Resolves the single configured gateway; an unknown provider or MOCK in prod stops the application. */
+/** Resolves the single configured gateway; an unknown provider, MOCK in prod or incomplete provider configuration stops the application. */
 @Component
 @EnableConfigurationProperties(PaymentProperties.class)
 public class PaymentGatewayRegistry {
@@ -22,6 +22,8 @@ public class PaymentGatewayRegistry {
         if (MockPaymentGateway.PROVIDER.equals(code) && environment.acceptsProfiles(Profiles.of("prod"))) {
             throw new IllegalStateException("app.payment.provider=MOCK is for local development and tests only and is not allowed in the prod profile");
         }
+        // Only the active provider must be fully configured; inactive gateways stay inert (MOCK needs no payOS secrets).
+        active.validateConfiguration();
     }
 
     public PaymentGateway active() {

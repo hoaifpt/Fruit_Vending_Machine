@@ -60,6 +60,17 @@ app:
     min-remaining-hold: ${PAYMENT_MIN_REMAINING_HOLD:PT30S}
     max-attempts-per-order: ${PAYMENT_MAX_ATTEMPTS_PER_ORDER:5}
     provider-timeout: ${PAYMENT_PROVIDER_TIMEOUT:PT10S}
+    # Required only when PAYMENT_PROVIDER=PAYOS; no credential has a default value.
+    payos:
+      base-url: ${PAYOS_BASE_URL:https://api-merchant.payos.vn}
+      client-id: ${PAYOS_CLIENT_ID:}
+      api-key: ${PAYOS_API_KEY:}
+      checksum-key: ${PAYOS_CHECKSUM_KEY:}
+      return-url: ${PAYOS_RETURN_URL:}
+      cancel-url: ${PAYOS_CANCEL_URL:}
+      description-prefix: ${PAYOS_DESCRIPTION_PREFIX:FV}
+      description-max-length: ${PAYOS_DESCRIPTION_MAX_LENGTH:9}
+      cancel-timeout: ${PAYOS_CANCEL_TIMEOUT:PT3S}
   order:
     reservation-ttl: ${ORDER_RESERVATION_TTL:PT5M}
     max-total-quantity: ${ORDER_MAX_TOTAL_QUANTITY:5}

@@ -13,6 +13,6 @@ public record KioskPaymentResponse(
         @Schema(description = "Active provider code, for example MOCK.", example = "MOCK") String provider,
         PaymentStatus status,
         BigDecimal amount,
-        @Schema(description = "QR payload to display. Present only while the attempt is PENDING, null otherwise.", nullable = true) String qrCode,
+        @Schema(description = "QR payload to display (a VietQR payload when the provider is PAYOS). Present only while the attempt is PENDING, null otherwise.", nullable = true) String qrCode,
         @Schema(description = "Attempt deadline, never later than the order reservation deadline.") Instant expiresAt) {
 }
