@@ -1,10 +1,12 @@
 package com.fruitmachine.backend.payment.gateway;
 
 import java.math.BigDecimal;
+import java.util.Map;
+import org.springframework.http.HttpHeaders;
 
 /**
  * Provider-independent payment boundary. Provider specifics (reference rules, QR format, credentials) stay
- * behind this interface. Webhook verification is added by the webhook issue, not here.
+ * behind this interface, including webhook verification.
  */
 public interface PaymentGateway {
     /** Uppercase provider code stored in payments.provider, for example MOCK or PAYOS. */
@@ -26,6 +28,19 @@ public interface PaymentGateway {
      * transaction that expired it committed. Must not throw for provider failures; the backend state stays authoritative.
      */
     default void cancelPayment(String paymentReference, String reason) {
+    }
+
+    /**
+     * Verifies a webhook from the exact raw body and the received headers. Must never throw for bad input and never trust any part of
+     * the request before the provider signature checks out. Providers without webhook support keep this default: nothing is verified.
+     */
+    default WebhookVerificationResult verifyWebhook(String rawBody, HttpHeaders headers) {
+        return WebhookVerificationResult.rejected(null, null);
+    }
+
+    /** Acknowledgement body for an accepted webhook; providers retry on non-2xx, so the shape is provider specific. */
+    default Object webhookAcknowledgement() {
+        return Map.of("success", true);
     }
 
     /** Called once at startup for the active gateway; throws IllegalStateException (never including secret values). */

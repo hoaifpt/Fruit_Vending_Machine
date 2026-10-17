@@ -5,6 +5,7 @@ import com.fruitmachine.backend.common.exception.ConflictException;
 import com.fruitmachine.backend.common.exception.ResourceNotFoundException;
 import com.fruitmachine.backend.config.properties.PaymentProperties;
 import com.fruitmachine.backend.order.entity.Order;
+import com.fruitmachine.backend.order.enums.OrderStatus;
 import com.fruitmachine.backend.payment.dto.KioskPaymentResponse;
 import com.fruitmachine.backend.payment.dto.PaymentDetailResponse;
 import com.fruitmachine.backend.payment.dto.PaymentPageResponse;
@@ -99,7 +100,10 @@ public class PaymentService {
             case SUPERSEDED -> {
                 // The order was cancelled while the provider call was in flight: its cancel found no link to invalidate yet,
                 // so the link the provider just created is cancelled now (outside any transaction, best effort).
-                cancellations.cancelBestEffort(gateway.provider(), created.request().paymentReference(), "ORDER_CANCELLED");
+                // A link that was paid meanwhile (SUCCESS) is not cancelled.
+                if (completion.finalStatus() == PaymentStatus.EXPIRED) {
+                    cancellations.cancelBestEffort(gateway.provider(), created.request().paymentReference(), "ORDER_CANCELLED");
+                }
                 throw new ConflictException("Order is no longer awaiting payment; the attempt was not kept");
             }
             case PROVIDER_FAILED -> throw new PaymentProviderException("Payment provider could not create the payment");
@@ -119,7 +123,7 @@ public class PaymentService {
     @Transactional(readOnly = true)
     @PreAuthorize("hasRole('ADMIN')")
     public PaymentPageResponse listPayments(int page, int size, PaymentStatus status, String provider, UUID orderId, UUID machineId,
-            Instant createdFrom, Instant createdTo, String sort) {
+            Instant createdFrom, Instant createdTo, Boolean requiresAttention, String sort) {
         Specification<Payment> filter = (root, query, cb) -> {
             var predicates = new ArrayList<Predicate>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
@@ -128,6 +132,16 @@ public class PaymentService {
             if (machineId != null) predicates.add(cb.equal(root.get("order").get("machine").get("id"), machineId));
             if (createdFrom != null) predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), createdFrom));
             if (createdTo != null) predicates.add(cb.lessThan(root.get("createdAt"), createdTo));
+            if (Boolean.TRUE.equals(requiresAttention)) {
+                // Derived, no column: a SUCCESS payment whose order was CANCELLED (late payment) or that shares its order with
+                // another SUCCESS payment (duplicate payment). Amount mismatches leave the payment unchanged and are found in audit_logs.
+                var other = query.subquery(Long.class);
+                var sibling = other.from(Payment.class);
+                other.select(cb.literal(1L)).where(cb.equal(sibling.get("order"), root.get("order")),
+                        cb.equal(sibling.get("status"), PaymentStatus.SUCCESS), cb.notEqual(sibling.get("id"), root.get("id")));
+                predicates.add(cb.equal(root.get("status"), PaymentStatus.SUCCESS));
+                predicates.add(cb.or(cb.equal(root.get("order").get("status"), OrderStatus.CANCELLED), cb.exists(other)));
+            }
             return cb.and(predicates.toArray(Predicate[]::new));
         };
         var result = payments.findAll(filter, pageRequest(page, size, sort));

@@ -581,6 +581,60 @@ public class OpenApiConfig {
         });
     }
     @Bean
+    public OpenApiCustomizer paymentWebhookExamples() {
+        String timestamp = "2026-10-16T04:00:00Z";
+        var data = new java.util.LinkedHashMap<String, Object>();
+        data.put("orderCode", 261016040005123L); data.put("amount", 105000); data.put("description", "FV7K3QF9X");
+        data.put("accountNumber", "0000000000"); data.put("reference", "FT00000000000"); data.put("transactionDateTime", "2026-10-16 11:02:13");
+        data.put("currency", "VND"); data.put("paymentLinkId", "fake-link-id"); data.put("code", "00"); data.put("desc", "success");
+        data.put("counterAccountBankId", ""); data.put("counterAccountBankName", ""); data.put("counterAccountName", "");
+        data.put("counterAccountNumber", ""); data.put("virtualAccountName", ""); data.put("virtualAccountNumber", "");
+        var webhook = new java.util.LinkedHashMap<String, Object>();
+        webhook.put("code", "00"); webhook.put("desc", "success"); webhook.put("success", true); webhook.put("data", data);
+        webhook.put("signature", "<hex-hmac-sha256-of-data>");
+        var summary = new java.util.LinkedHashMap<String, Object>();
+        summary.put("id", "7a1c0000-0000-4000-8000-000000000001"); summary.put("provider", "PAYOS"); summary.put("eventType", "PAYMENT_SUCCESS");
+        summary.put("reference", "261016040005123"); summary.put("verified", true); summary.put("receivedAt", timestamp);
+        var detail = new java.util.LinkedHashMap<String, Object>(summary);
+        detail.put("rawPayload", webhook); detail.put("rawBody", null);
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/webhooks/payments") && !name.startsWith("/api/v1/payment-webhook-logs")) return;
+            path.readOperations().forEach(operation -> {
+                String id = operation.getOperationId();
+                if (operation.getRequestBody() != null) {
+                    operation.getRequestBody().getContent().get("application/json").setExample(webhook);
+                }
+                operation.getResponses().forEach((code, response) -> {
+                    if (code.startsWith("2")) {
+                        response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    }
+                    if (code.equals("401") && !id.equals("receivePaymentWebhook")) {
+                        response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    }
+                    if (response.getContent() == null || response.getContent().get("application/json") == null) return;
+                    Object example;
+                    if (code.startsWith("2")) {
+                        example = switch (id) {
+                            case "receivePaymentWebhook" -> Map.of("success", true);
+                            case "listPaymentWebhookLogs" -> Map.of("timestamp", timestamp, "message", "Success", "data",
+                                    Map.of("content", List.of(summary), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1));
+                            default -> Map.of("timestamp", timestamp, "message", "Success", "data", detail);
+                        };
+                    } else {
+                        String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; case "404" -> "Not Found";
+                            case "413" -> "Payload Too Large"; case "415" -> "Unsupported Media Type"; default -> "Internal Server Error"; };
+                        String message = switch (code) { case "400" -> "Request validation failed";
+                            case "401" -> id.equals("receivePaymentWebhook") ? "Webhook could not be verified" : "Authentication required or access token invalid";
+                            case "403" -> "Access denied"; case "404" -> "Payment provider not found"; case "413" -> "Webhook body is too large";
+                            case "415" -> "Unsupported Media Type"; default -> "An unexpected error occurred"; };
+                        example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                    }
+                    response.getContent().get("application/json").setExample(example);
+                });
+            });
+        });
+    }
+    @Bean
     public OpenAPI backendOpenApi() {
         return new OpenAPI().info(new Info().title("Fruit Machine Backend API").version("v1")
                 .description("Management API. Login is public; other application endpoints require Bearer authentication. "

@@ -6,11 +6,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The only legal payment transitions of this issue. PENDING to SUCCESS (verified webhook) and
- * SUCCESS to REFUNDED belong to later issues and are deliberately absent.
+ * The only legal payment transitions. PENDING can fail or expire from the attempt lifecycle; SUCCESS is applied exclusively by the
+ * verified webhook flow. SUCCESS to REFUNDED belongs to a later issue and is deliberately absent.
  */
 final class PaymentTransitions {
-    private static final Map<PaymentStatus, Set<PaymentStatus>> ALLOWED = Map.of(PaymentStatus.PENDING, Set.of(PaymentStatus.FAILED, PaymentStatus.EXPIRED));
+    // SUCCESS is reachable from every non-terminal state because the money really arrived, even for a FAILED or EXPIRED attempt.
+    // Only the verified webhook flow applies it; REFUNDED stays out of reach until the refund issue.
+    private static final Map<PaymentStatus, Set<PaymentStatus>> ALLOWED = Map.of(
+            PaymentStatus.PENDING, Set.of(PaymentStatus.FAILED, PaymentStatus.EXPIRED, PaymentStatus.SUCCESS),
+            PaymentStatus.FAILED, Set.of(PaymentStatus.SUCCESS),
+            PaymentStatus.EXPIRED, Set.of(PaymentStatus.SUCCESS));
 
     private PaymentTransitions() {
     }

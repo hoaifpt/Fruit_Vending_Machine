@@ -18,7 +18,12 @@ public final class ControllableGateway implements PaymentGateway {
 
     public enum Mode { SUCCESS, FAIL, BLANK_QR, TIMEOUT }
 
+    /** Signing secret of the test webhook scheme, which is the MOCK scheme (X-Mock-Signature over the raw body). */
+    public static final String WEBHOOK_SECRET = "test-only-webhook-secret";
+
     private final JdbcTemplate jdbc;
+    private final com.fruitmachine.backend.payment.gateway.mock.MockPaymentGateway webhookScheme =
+            new com.fruitmachine.backend.payment.gateway.mock.MockPaymentGateway(new com.fruitmachine.backend.payment.gateway.mock.MockPaymentProperties(WEBHOOK_SECRET));
     private final AtomicInteger calls = new AtomicInteger();
     private final List<Long> idleInTransactionDuringCall = new CopyOnWriteArrayList<>();
     private final List<ProviderPaymentRequest> requests = new CopyOnWriteArrayList<>();
@@ -68,6 +73,11 @@ public final class ControllableGateway implements PaymentGateway {
         String queued = queuedReferences.pollFirst();
         if (queued != null) return queued;
         return "TEST-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase();
+    }
+
+    @Override
+    public com.fruitmachine.backend.payment.gateway.WebhookVerificationResult verifyWebhook(String rawBody, org.springframework.http.HttpHeaders headers) {
+        return webhookScheme.verifyWebhook(rawBody, headers);
     }
 
     @Override

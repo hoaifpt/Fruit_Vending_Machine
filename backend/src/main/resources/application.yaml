@@ -3,7 +3,8 @@ spring:
     name: fruit-machine-backend
   # Supports running Maven from the module or from the repository root.
   config:
-    import: "optional:file:../.env[.properties],optional:file:.env[.properties]"
+    # APP_DOTENV_IMPORT lets tests disable the developer .env (see pom.xml surefire); unset in normal runs.
+    import: "${APP_DOTENV_IMPORT:optional:file:../.env[.properties],optional:file:.env[.properties]}"
   datasource:
     url: jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5433}/${DB_NAME:fruit_machine}
     username: ${DB_USER:fruit_machine}
@@ -60,6 +61,9 @@ app:
     min-remaining-hold: ${PAYMENT_MIN_REMAINING_HOLD:PT30S}
     max-attempts-per-order: ${PAYMENT_MAX_ATTEMPTS_PER_ORDER:5}
     provider-timeout: ${PAYMENT_PROVIDER_TIMEOUT:PT10S}
+    mock:
+      # HMAC secret that signs MOCK webhooks (development/tests only). Blank means every MOCK webhook fails verification.
+      webhook-secret: ${PAYMENT_MOCK_WEBHOOK_SECRET:}
     # Required only when PAYMENT_PROVIDER=PAYOS; no credential has a default value.
     payos:
       base-url: ${PAYOS_BASE_URL:https://api-merchant.payos.vn}

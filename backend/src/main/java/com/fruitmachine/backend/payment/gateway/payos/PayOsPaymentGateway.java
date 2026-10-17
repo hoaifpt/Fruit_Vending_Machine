@@ -2,10 +2,13 @@ package com.fruitmachine.backend.payment.gateway.payos;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fruitmachine.backend.config.properties.PaymentProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fruitmachine.backend.payment.gateway.PaymentGateway;
 import com.fruitmachine.backend.payment.gateway.PaymentProviderException;
 import com.fruitmachine.backend.payment.gateway.ProviderPaymentRequest;
 import com.fruitmachine.backend.payment.gateway.ProviderPaymentResult;
+import com.fruitmachine.backend.payment.gateway.VerifiedPaymentEvent;
+import com.fruitmachine.backend.payment.gateway.WebhookVerificationResult;
 import com.fruitmachine.backend.payment.gateway.payos.dto.PayOsCreateRequest;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -15,7 +18,9 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 
 /**
@@ -35,11 +40,22 @@ public class PayOsPaymentGateway implements PaymentGateway {
     private final PayOsProperties properties;
     private final Clock clock;
     private final PayOsClient client;
+    private final PayOsWebhookVerifier verifier;
+    private final PayOsWebhookParser parser;
 
-    public PayOsPaymentGateway(PayOsProperties properties, PaymentProperties payment, Clock clock, ObjectMapper mapper) {
+    @Autowired
+    public PayOsPaymentGateway(PayOsProperties properties, PaymentProperties payment, Clock clock, ObjectMapper mapper,
+            PayOsWebhookVerifier verifier, PayOsWebhookParser parser) {
         this.properties = properties;
         this.clock = clock;
         this.client = new PayOsClient(properties, payment.providerTimeout(), mapper);
+        this.verifier = verifier;
+        this.parser = parser;
+    }
+
+    /** Convenience for tests: verifier and parser built from the same properties. */
+    public PayOsPaymentGateway(PayOsProperties properties, PaymentProperties payment, Clock clock, ObjectMapper mapper) {
+        this(properties, payment, clock, mapper, new PayOsWebhookVerifier(properties), new PayOsWebhookParser());
     }
 
     @Override
@@ -90,6 +106,38 @@ public class PayOsPaymentGateway implements PaymentGateway {
             // Best effort: the backend EXPIRED state is authoritative. Only the orderCode is logged.
             log.warn("payOS link cancellation failed for orderCode {}: {}", paymentReference, ex.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * Delegates to the payOS verifier and parser. A body that is not authentic or cannot be parsed is rejected; an authentic
+     * body yields SUCCESS (code 00 at both levels) or FAILED. The orderCode hint is read leniently from the untrusted body for the log only.
+     */
+    @Override
+    public WebhookVerificationResult verifyWebhook(String rawBody, HttpHeaders headers) {
+        String hint = null;
+        String signature = null;
+        try {
+            JsonNode root = rawBody == null ? null : PayOsWebhookVerifier.RAW.readTree(rawBody);
+            if (root != null && root.isObject()) {
+                JsonNode order = root.path("data").path("orderCode");
+                hint = order.isIntegralNumber() ? order.bigIntegerValue().toString() : order.isTextual() ? order.asText() : null;
+                signature = root.path("signature").isTextual() ? root.path("signature").asText() : null;
+            }
+        } catch (Exception ex) {
+            // Unparsable bodies are simply unverified; nothing about them is trusted.
+        }
+        if (!verifier.verify(rawBody)) return WebhookVerificationResult.rejected(hint, signature);
+        PayOsWebhookEvent parsed;
+        try {
+            parsed = parser.parse(rawBody);
+        } catch (PayOsWebhookException ex) {
+            return WebhookVerificationResult.rejected(hint, signature);
+        }
+        VerifiedPaymentEvent.Type type = parsed.success() ? VerifiedPaymentEvent.Type.SUCCESS : VerifiedPaymentEvent.Type.FAILED;
+        String eventType = parsed.success() ? "PAYMENT_SUCCESS" : "PAYMENT_FAILED";
+        boolean actionable = !parsed.success() || (parsed.transactionId() != null && !parsed.transactionId().isBlank());
+        return new WebhookVerificationResult(true, eventType, parsed.paymentReference(), signature,
+                actionable ? new VerifiedPaymentEvent(type, parsed.paymentReference(), parsed.transactionId(), parsed.amount()) : null);
     }
 
     /** prefix + leading part of the order code random suffix, ASCII letters/digits only, never customer data. */

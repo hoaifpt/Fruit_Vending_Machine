@@ -27,7 +27,8 @@ class PayOsConfigurationTest {
     }
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(Support.class, PaymentGatewayRegistry.class, MockPaymentGateway.class, PayOsPaymentGateway.class);
+            .withUserConfiguration(Support.class, PaymentGatewayRegistry.class, MockPaymentGateway.class, PayOsPaymentGateway.class,
+                    com.fruitmachine.backend.payment.gateway.payos.PayOsWebhookVerifier.class, com.fruitmachine.backend.payment.gateway.payos.PayOsWebhookParser.class);
 
     private static final String[] COMPLETE = {"app.payment.payos.client-id=unit-client", "app.payment.payos.api-key=" + SECRET_KEY,
             "app.payment.payos.checksum-key=" + SECRET_CHECKSUM, "app.payment.payos.return-url=https://shop.example.invalid/return",

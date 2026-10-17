@@ -62,9 +62,12 @@ class PayOsSignatureTest {
     @Test
     void comparisonUsesTheConstantTimeJdkPrimitiveInsteadOfStringEquality() throws Exception {
         // The source is part of the contract here: String.equals leaks the position of the first mismatch.
-        String source = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/com/fruitmachine/backend/payment/gateway/payos/PayOsSignature.java"));
-        assertThat(source).contains("MessageDigest.isEqual");
-        assertThat(source).doesNotContain(".equals(signature").doesNotContain("expected.equals(");
+        String shared = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/com/fruitmachine/backend/payment/gateway/HmacSha256.java"));
+        assertThat(shared).contains("MessageDigest.isEqual");
+        assertThat(shared).doesNotContain(".equals(signature").doesNotContain("expected.equals(");
+        // payOS delegates to the shared helper rather than comparing on its own.
+        String payos = java.nio.file.Files.readString(java.nio.file.Path.of("src/main/java/com/fruitmachine/backend/payment/gateway/payos/PayOsSignature.java"));
+        assertThat(payos).contains("HmacSha256.constantTimeEquals").doesNotContain(".equals(signature").doesNotContain("expected.equals(");
     }
 
     static final String SAMPLE_DATA = """

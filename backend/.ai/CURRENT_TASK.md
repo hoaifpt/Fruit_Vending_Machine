@@ -1,120 +1,123 @@
-# Issue #31 — [BE] Integrate QR Payment Provider (payOS)
+# Issue #33 — [BE] Implement Payment Webhook Handling
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/31
-Branch: feature/31-payos-qr-provider (from origin/dev 818ba49, includes #29 via PR#30)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/33
+Branch: feature/33-payment-webhook-handling (from origin/dev b8345b5, includes #31 via PR#32)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking the
 GitHub checkboxes of this issue is allowed after verification (AGENTS.md section 14).
-Note: the issue text refers to #14 (payment service) and #16 (webhook); in this repository those are #29 and a later issue.
+Note: the issue text refers to #13/#14/#15; in this repository those are #27/#29/#31.
 
 ## Scope
-payOS adapter behind PaymentGateway: PayOsPaymentGateway (create link, best-effort cancel), PayOsProperties
-(app.payment.payos.*, secrets masked in toString, validated only when PAYMENT_PROVIDER=PAYOS), PayOsSignature (HMAC-SHA256),
-PayOsClient (Spring RestClient, no new dependency), integer VND amount check (supportsAmount, 409 before any attempt),
-payOS orderCode as payment_reference (15 digits), description rules, after-commit cancel of expired attempts, and the
-webhook signature verifier/parser components (no endpoint). MOCK stays the default. docs/payment-provider.md.
+Public `POST /api/v1/webhooks/payments/{provider}` (signature-based trust only): raw body read exactly (64 KB / JSON limits), every
+attempt persisted in its own transaction (payment_webhook_logs), provider-neutral verification through a new
+`PaymentGateway.verifyWebhook` (MOCK with HMAC secret, PAYOS via the #31 verifier/parser), idempotent processing
+(lock Order -> Payment): the ONLY path producing payment SUCCESS and order PAID, anomalies (late, duplicate, amount mismatch,
+transaction conflict) recorded in audit_logs and never auto-resolved, FAILED handling, ADMIN webhook-log read APIs,
+`requiresAttention` payment filter, kiosk polling shows PAID.
 
 ## Non-goals
-Webhook endpoint, payment SUCCESS, order PAID, late/duplicate payment handling, polling/reconciliation, refunds, payouts,
-e-invoice fields, storing checkoutUrl/paymentLinkId, confirm-webhook endpoint, other providers, kiosk UI, new dependencies,
-schema change, new endpoint.
+Dispense commands, inventory SOLD, DISPENSING/COMPLETED, refunds, reconciliation polling, replay endpoint, PAID timeout, alerts,
+processing-status columns, rate limiting/IP allowlist, push to kiosk, frontend.
 
 ## Database / API impact
-No schema change (V1-V12 untouched) and no new endpoint. Swagger/api-contract text only: qrCode is a VietQR payload for PAYOS,
-409 documented for an unsupported amount.
+No schema change expected (V1-V12 untouched). New endpoints: the webhook, payment-webhook-logs list/detail, and the
+`requiresAttention` filter on GET /api/v1/payments.
 
-## Verification facts
-payOS docs (https://payos.vn/docs/api/, read 2026-10-15) confirm: create signature
-`amount=..&cancelUrl=..&description=..&orderCode=..&returnUrl=..` HMAC_SHA256 with the checksum key, expiredAt Unix Int32,
-cancel `POST /v2/payment-requests/{id}/cancel {cancellationReason}`, webhook body `{code,desc,success,data{...},signature}`.
-The docs page does not state the webhook canonicalization; it follows the issue text and must be confirmed against a real webhook.
-
-## Status and verification (2026-10-15)
-Implemented and locally verified; nothing committed or pushed (see HANDOFF.md).
-- `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, Maven 3.9.12, PostgreSQL 18.6 Testcontainers):
-  566 tests, 0 failures/errors/skips, BUILD SUCCESS on the final code. Log: backend/target/issue31-verify.log (ignored).
-- New classes: PayOsSignatureTest(6), PayOsWebhookTest(9), PayOsGatewayTest(11, loopback StubPayOsServer), PayOsIntegrationTest(11, PAYMENT_PROVIDER=PAYOS,
-  real PostgreSQL), PayOsConfigurationTest(6); added to the #29 suites: cancel wiring (5), unsupported amount, reference collision.
-  No automated test contacts the real payOS; no new dependency (pom unchanged); no migration.
-- NOT verified (left unchecked): section 21, the four manual items that need a real payOS merchant account, a public webhook URL and a
-  banking-app transfer. Webhook canonicalization follows the issue text and the docs sample; it is unconfirmed against a real captured webhook.
+## Status and verification (2026-10-16)
+Implemented and locally verified; see HANDOFF.md for Git delivery status.
+- `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, Maven 3.9.12, PostgreSQL 18.6 Testcontainers): 620 tests, 0 failures/errors/skips,
+  BUILD SUCCESS on the final code. Zero mentions of api-merchant.payos.vn in the run. Log: backend/target/issue33-verify.log (ignored).
+- New classes: PaymentWebhookEndpointIntegrationTest(12), PaymentWebhookProcessingIntegrationTest(18), PaymentWebhookRaceIntegrationTest(4, real parallel transactions),
+  PaymentWebhookRollbackIntegrationTest(1), PaymentWebhookLogManagementIntegrationTest(4), MockWebhookSchemeTest(6), MockWebhookIntegrationTest(1),
+  PayOsWebhookIntegrationTest(5, payOS-signed fixtures), PaymentWebhookDocumentationTest(1), DotenvIsolationTest(2). No migration, no dependency (pom.xml only gained a Surefire system property).
+- NOT verified (left unchecked): section 26, the three manual items that need a real payOS merchant account, a public HTTPS webhook URL and a real payment.
+  The payOS webhook signature canonicalization is implemented from the issue text and the docs sample and is still unconfirmed against a captured real webhook.
+- Test isolation fix found during this issue: the developer .env (real provider and credentials) was being imported into test contexts, so one default-provider test
+  created payment attempts through the real payOS (twice, unpaid, auto-expiring links of 70,000 VND). application.yaml now reads `${APP_DOTENV_IMPORT:...}`, Surefire sets it to a missing file,
+  AbstractCoreIntegrationTest defaults app.payment.provider=MOCK and DotenvIsolationTest guards it. CODING_RULES section 36 records the rule.
+- Design notes: requiresAttention follows the issue text literally (a duplicate lists both SUCCESS payments; the one with the later paid_at is the refund candidate); amount mismatch also applies to FAILED events that carry an amount;
+  PaymentGateway.verifyWebhook has a safe default that verifies nothing; a 401 is returned both for failed verification and for a signed but unparsable body.
 - Run Maven with JDK 21 and `clean` (an IDE auto-compiling into target/classes can break runs).
 
 # Testing
 
-No automated test may call the real payOS API.
+## 17. Endpoint / Verification Tests
 
-## 14. Signature Tests
+- [x] Valid MOCK signature → processed, `200`
+- [x] Invalid / missing signature → `401`, no state change
+- [x] Malformed JSON → `401`, logged with `raw_payload = NULL`
+- [x] Unknown / inactive provider path → `404`
+- [x] Body > 64 KB → `413`
+- [x] Non-JSON content type → `415`
+- [x] Body is verified from exact raw bytes (whitespace-sensitive test)
+- [x] payOS-signed payload (fixture signed in test with test key) → processed via `PayOsWebhookVerifier`
 
-- [x] Create-signature string uses alphabetical key order and exact raw values
-- [x] HMAC-SHA256 produces lowercase hex (checked against an RFC 4231 test vector for the HMAC helper)
-- [x] Webhook verification succeeds for a correctly signed payload
-- [x] Webhook verification fails for altered amount / orderCode / reference
-- [x] Webhook verification fails for wrong checksum key
-- [x] Null and empty values are canonicalized as documented
-- [x] Malformed JSON / missing `data` / missing `signature` → verification fails without exception leak
-- [x] Constant-time comparison is used
+## 18. Logging Tests
 
-## 15. Parser Tests
+- [x] Every attempt (valid, invalid, malformed, unknown reference) creates exactly one log row
+- [x] Log row survives when business processing rolls back
+- [x] `is_verified` reflects verification result
+- [x] `order_code` holds the provider reference hint (≤ 64 chars)
+- [x] Signature and raw body never appear in application logs (log capture)
 
-- [x] `orderCode` → `paymentReference` decimal text
-- [x] `reference` → `transactionId`
-- [x] Integer `amount` → `BigDecimal` scale 2
-- [x] `transactionDateTime` parsed as Asia/Ho_Chi_Minh → correct UTC `Instant`
-- [x] `success` is true only when both top-level and data `code` are `"00"`
+## 19. Success Processing Tests
 
-## 16. Gateway Tests (stubbed HTTP, e.g. `MockRestServiceServer`)
+- [x] PENDING payment + PENDING_PAYMENT order → payment `SUCCESS` (txn id, paid_at), order `PAID` (paid_at)
+- [x] Other PENDING attempts of the order → `EXPIRED`
+- [x] Inventory items and allocations remain `RESERVED`
+- [x] No dispense command, no `SOLD`, no `DISPENSED`
+- [x] Order past `expires_at` but still PENDING_PAYMENT → `PAID`
+- [x] Kiosk polling shows `PAID` and payment `SUCCESS`
+- [x] Expiry sweep after PAID does not touch the order
 
-- [x] Create sends correct path, headers, body and signature
-- [x] `expiredAt` equals attempt deadline in epoch seconds
-- [x] Description respects max length and charset
-- [x] `code = "00"` with `qrCode` → result returned
-- [x] `code != "00"` → `PaymentProviderException`
-- [x] HTTP 4xx/5xx → `PaymentProviderException`
-- [x] Timeout → `PaymentProviderException`
-- [x] Exception messages contain no secrets or response body
-- [x] Cancel sends correct path and reason
-- [x] Cancel failure/timeout is swallowed with WARN log
+## 20. Idempotency Tests
 
-## 17. Amount / Reference Tests
+- [x] Same webhook delivered twice → second is no-op, `200`, one SUCCESS only
+- [x] Same webhook delivered concurrently (parallel requests) → exactly one state change
+- [x] Transaction id reused for a different payment → `TRANSACTION_CONFLICT`, no change
+- [x] SUCCESS payment receiving a different transaction id → `TRANSACTION_CONFLICT`
 
-- [x] `35000.00` supported; `35000.50` rejected → `409`, no attempt created
-- [x] Zero / negative rejected
-- [x] Generated reference is 15 digits, positive, ≤ 2^53−1
-- [x] Reference collision triggers regeneration (unique index)
+## 21. Anomaly Tests
 
-## 18. Integration Tests (MOCK HTTP server, real PostgreSQL)
+- [x] Amount mismatch → payment unchanged, `PAYMENT_AMOUNT_MISMATCH` audit row, `200`
+- [x] Payment for CANCELLED order → payment `SUCCESS`, order stays `CANCELLED`, no re-reservation, `PAYMENT_LATE` audit row
+- [x] Second successful attempt on PAID order → payment `SUCCESS`, order unchanged, `PAYMENT_DUPLICATE` audit row
+- [x] EXPIRED / FAILED payment receiving SUCCESS → `SUCCESS`
+- [x] Unknown reference → `200`, log only, no audit row
+- [x] `requiresAttention=true` returns late and duplicate payments only
 
-- [x] With `PAYMENT_PROVIDER=PAYOS` and stubbed payOS, kiosk payment flow (#14) stores `PAYOS` attempt with QR
-- [x] Provider failure → attempt `FAILED`, `502`, order unchanged
-- [x] Kiosk cancel → attempt `EXPIRED`, then payOS cancel called after commit
-- [x] Cancel is not called when the transaction rolls back
-- [x] Expiry sweep triggers payOS cancel after commit
+## 22. FAILED Event Tests
 
-## 19. Configuration Tests
+- [x] PENDING → FAILED, order unchanged
+- [x] FAILED event on SUCCESS payment → ignored
 
-- [x] `PAYOS` with missing client id / api key / checksum key / URLs → startup fails, no secret in message
-- [x] `MOCK` starts without payOS properties
-- [x] Properties `toString()` does not reveal secrets
+## 23. Race Tests (real PostgreSQL)
 
-## 20. Log Safety Tests
+- [x] Webhook vs expiry sweep on the same order → exactly one of {PAID, CANCELLED+LATE_PAYMENT}
+- [x] Webhook vs kiosk cancel → consistent result, inventory never both released and PAID
+- [x] Webhook vs #14 attempt creation step 3 → no lost update
 
-- [x] API key, checksum key and signatures never appear in captured logs
+## 24. Management API Tests
 
-## 21. Manual Verification (real payOS, not CI)
+- [x] ADMIN can list webhook logs with pagination and filters
+- [x] ADMIN can view detail with raw payload/body
+- [x] Signature never returned
+- [x] STAFF → `403`; unauthenticated → `401`; kiosk key → `401`
 
-- [ ] Register payOS payment channel and webhook URL (via tunnel)
-- [ ] Create a real attempt with a small amount (e.g. 2,000 VND) and scan QR with a banking app
-- [ ] Received webhook payload passes `PayOsWebhookVerifier` (captured offline; endpoint arrives in #16)
-- [ ] Cancelled link can no longer be paid on payOS checkout
+## 25. Documentation / Regression Tests
+
+- [x] Swagger UI shows webhook and webhook-log operations with correct security
+- [x] `api-contract/api.yaml` matches exposed OpenAPI
+- [x] All existing tests pass (`mvn clean verify`)
+- [x] #13/#14/#15 behavior unchanged except documented extensions
+- [x] Application starts with MOCK and with PAYOS (stubbed)
+
+## 26. Manual Verification (real payOS, not CI)
+
+- [ ] Register webhook URL via tunnel; payOS confirm-webhook succeeds (`200`)
+- [ ] Real small payment → order `PAID`, kiosk polling shows `PAID`
+- [ ] Re-delivery from payOS (if triggerable) is a no-op
 
 Leave manual items unchecked if real payOS access is not available, and state the reason at handoff.
-
-## 22. Regression
-
-- [x] All existing tests pass (`mvn clean verify`)
-- [x] MOCK flow from #14 unchanged
-- [x] Swagger / api-contract consistency tests pass
-- [x] Application starts with `MOCK` and with `PAYOS` (stubbed)
 
 ---
 
@@ -124,24 +127,30 @@ Leave manual items unchecked if real payOS access is not available, and state th
 
 The issue is complete when:
 
-- [x] `PayOsPaymentGateway` implements `PaymentGateway`
-- [x] payOS selected with `PAYMENT_PROVIDER=PAYOS`; `MOCK` remains default
-- [x] Missing payOS configuration fails startup safely
-- [x] Payment reference is a unique payOS-compatible integer
-- [x] Non-integer VND amounts rejected with `409` before any attempt
-- [x] Description respects payOS limits and contains no customer data
-- [x] Create request signed with HMAC-SHA256 checksum key
-- [x] payOS QR returned to kiosk through existing #14 flow
-- [x] Provider errors/timeouts map to attempt `FAILED` / `502`
-- [x] payOS link cancelled best-effort after commit when attempt expires
-- [x] Webhook signature verifier and parser implemented and unit-tested
-- [x] No business service depends on payOS classes
-- [x] No real payOS call in automated tests
-- [x] No secrets in logs, errors, docs or Git
-- [x] No new dependency added
-- [x] No schema change
-- [x] Documentation (`docs/payment-provider.md`, `.ai/`, Swagger, api-contract) updated
+- [x] `POST /api/v1/webhooks/payments/{provider}` implemented for the active provider
+- [x] Raw body read exactly; size/content-type limits enforced
+- [x] Every webhook attempt persisted in its own transaction
+- [x] Signature verified via `PaymentGateway` (MOCK and PAYOS)
+- [x] Unverified requests never change payment/order state
+- [x] Payment resolved by `(provider, payment_reference)`
+- [x] Amount validated with `BigDecimal.compareTo`
+- [x] Payment `SUCCESS` and order `PAID` produced only by verified webhook
+- [x] Other pending attempts expired on PAID
+- [x] Duplicate deliveries are idempotent (sequential and concurrent)
+- [x] Late, duplicate, mismatched and conflicting payments recorded as anomalies
+- [x] No re-reservation for late payments; no automatic refund
+- [x] Response policy (§5) implemented
+- [x] Lock order `Order → Payment → InventoryItem` respected
+- [x] Webhook log list/detail APIs work (ADMIN only, no signature exposure)
+- [x] `requiresAttention` filter works
+- [x] No dispense / SOLD / DISPENSED side effects
+- [x] No secrets, signatures or raw bodies in application logs
+- [x] Existing RBAC and common error handling reused
+- [x] Swagger/OpenAPI and `api-contract/api.yaml` updated and consistent
+- [x] `.ai/` docs and `docs/payment-webhook.md` updated
 - [x] Tests pass (`mvn clean verify`)
-- [x] Application starts successfully
+- [x] Flyway validation passes
+- [x] Hibernate `ddl-auto=validate` passes
+- [x] Existing applied migrations remain unchanged
 
 ---

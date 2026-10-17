@@ -267,3 +267,17 @@ No migration. payOS reuses `payments.provider = PAYOS`, `payments.payment_refere
 final uniqueness guard; step 1 of attempt creation pre-checks the reference and regenerates it up to 3 times. `checkoutUrl` and `paymentLinkId`
 are not stored. `transaction_id` stays NULL until the webhook issue fills it from the webhook reference. The lock order Order -> Payment -> InventoryItem is unchanged;
 provider-side cancellation of an expired attempt happens after the committing transaction, never while locks are held.
+
+## 14. Issue #33 — payment webhook handling (no schema change)
+
+V5, V6, V7, V11 and V12 and the AuditLog mapping were inspected; nothing is added. Column usage:
+
+- `payment_webhook_logs`: one row per webhook attempt that reaches verification, written in its own transaction BEFORE business processing.
+  `raw_body` is the exact received text (NUL replaced by U+FFFD because PostgreSQL text cannot store it), `raw_payload` the parsed JSON or NULL,
+  `signature` as received, `is_verified` the verification result, `event_type` PAYMENT_SUCCESS / PAYMENT_FAILED / UNKNOWN, and `order_code` the **untrusted PROVIDER
+  reference hint** (for payOS the orderCode, at most 64 characters, otherwise NULL). It is not `orders.order_code`. There is no FK, no processing status and a row is neither an idempotency guard nor evidence of payment.
+- `payments`: SUCCESS sets `transaction_id` and `paid_at` (server clock, never below `created_at`); allowed transitions are now PENDING to FAILED/EXPIRED/SUCCESS and FAILED/EXPIRED to SUCCESS. `uq_payments_provider_transaction` is the final guard against a transaction id reused by another payment.
+- `orders`: PENDING_PAYMENT to PAID with `paid_at`; allocations and inventory stay RESERVED (no SOLD, no DISPENSED, no dispense command).
+- `audit_logs`: one row per anomaly, `user_id` NULL, `entity_type` Payment, `entity_id` the payment id, actions PAYMENT_LATE, PAYMENT_DUPLICATE, PAYMENT_AMOUNT_MISMATCH, PAYMENT_TRANSACTION_CONFLICT; `old_value` and `new_value` carry statuses, transactionId, amountReceived and amountExpected.
+- **Lock order** is unchanged: Order, then Payment, then InventoryItem. The webhook locks the Order and then the Payment (found by an ids-only lookup so no stale copy is loaded first). Provider calls never happen inside the transaction; links of attempts expired by PAID are cancelled after commit.
+- Known limitation: PAID orders keep their bowls RESERVED until the dispense flow exists; there is no PAID timeout in this milestone.

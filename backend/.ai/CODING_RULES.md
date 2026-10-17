@@ -787,3 +787,9 @@ Before declaring work complete:
 - [ ] No secrets were committed
 - [ ] Important errors are handled
 - [ ] Changed code follows project architecture
+
+## 36. Test isolation from the developer environment
+
+Automated tests must never read the developer `.env` (it may select a real payment provider with real credentials) and must never contact a real external service.
+`pom.xml` sets `APP_DOTENV_IMPORT` for Surefire so `spring.config.import` skips `.env`, `AbstractCoreIntegrationTest` defaults `app.payment.provider=MOCK`, and `DotenvIsolationTest` guards this.
+Run tests through Maven; a test started from an IDE without that property still gets the MOCK default from the base class. A suite that needs another provider sets it explicitly (TESTPAY, or PAYOS against the loopback stub).
