@@ -55,8 +55,9 @@ public class PaymentController {
             @RequestParam(required = false) @Parameter(description = "Machine UUID filter, resolved through the order.") UUID machineId,
             @RequestParam(required = false) @Parameter(description = "ISO-8601 instant, inclusive lower bound of createdAt.") Instant createdFrom,
             @RequestParam(required = false) @Parameter(description = "ISO-8601 instant, exclusive upper bound of createdAt.") Instant createdTo,
+            @RequestParam(required = false) @Parameter(description = "true returns SUCCESS payments that need human review: the order was CANCELLED (late payment) or another SUCCESS payment exists for the same order (duplicate payment, both are listed and the later one is the refund candidate). Amount mismatches leave the payment unchanged, so they are found through the webhook logs and audit_logs.") Boolean requiresAttention,
             @RequestParam(defaultValue = "createdAt,desc") @Parameter(description = "One of createdAt, amount, paidAt with optional asc/desc.") String sort) {
-        return ok("Payments retrieved", payments.listPayments(page, size, status, provider, orderId, machineId, createdFrom, createdTo, sort));
+        return ok("Payments retrieved", payments.listPayments(page, size, status, provider, orderId, machineId, createdFrom, createdTo, requiresAttention, sort));
     }
 
     @GetMapping("/api/v1/payments/{id}")

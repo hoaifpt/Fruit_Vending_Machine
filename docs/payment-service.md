@@ -2,8 +2,8 @@
 
 Phạm vi: tầng thanh toán độc lập nhà cung cấp. Kiosk tạo hoặc dùng lại một **payment attempt** (QR) cho đơn `PENDING_PAYMENT`
 của chính máy mình; ADMIN xem danh sách/chi tiết payment; đơn bị hủy hoặc hết hạn thì attempt đang chờ chuyển `EXPIRED`.
-**Không** có provider thật (PayOS/MoMo/VNPay), webhook, `PENDING -> SUCCESS`, `Order -> PAID`, hoàn tiền hay dispense.
-Không client nào (kiosk, frontend, ADMIN, ESP32) đánh dấu được payment thành công; chỉ webhook đã xác thực của issue sau mới làm được.
+Issue #29 **không** có provider thật (đã thêm ở #31), webhook và `PENDING -> SUCCESS`/`Order -> PAID` (đã thêm ở #33), hoàn tiền hay dispense.
+Không client nào (kiosk, frontend, ADMIN, ESP32) đánh dấu được payment thành công; chỉ webhook đã xác thực mới làm được (issue #33, xem [payment-webhook.md](payment-webhook.md)).
 Hợp đồng frontend: [`api-contract/api.yaml`](../api-contract/api.yaml).
 
 ## Chạy local và Swagger
@@ -23,7 +23,7 @@ Hợp đồng frontend: [`api-contract/api.yaml`](../api-contract/api.yaml).
 | GET | `/api/v1/payments/{id}` | ADMIN, kèm `qrCode` (danh sách không có `qrCode`) |
 | GET | `/api/v1/orders/{id}` | ADMIN, STAFF, có thêm `payments[]` (tóm tắt, không có `qrCode`/`paymentReference`/`transactionId`) |
 
-Không có `PATCH /payments/{id}/status`, `POST /payments/{id}/success` hay `DELETE`. Đường dẫn webhook của issue sau nằm ngoài `/api/v1/payments/**`
+Không có `PATCH /payments/{id}/status`, `POST /payments/{id}/success` hay `DELETE`. Đường dẫn webhook (issue #33) nằm ngoài `/api/v1/payments/**`
 (`POST /api/v1/webhooks/payments/{provider}`) để matcher ADMIN không chồng lên webhook công khai. STAFF vào `/api/v1/payments/**` bị 403, kiosk key bị 401,
 user JWT trên endpoint kiosk bị 403. **Kiosk nên poll `GET /api/v1/kiosk/orders/{orderId}` mỗi 2-3 giây.** Đọc đơn không ghi dữ liệu.
 
@@ -47,8 +47,8 @@ PENDING -> FAILED   (provider lỗi/timeout)
 PENDING -> EXPIRED  (hết hạn attempt, hoặc đơn bị hủy/hết hạn)
 ```
 
-`PENDING -> SUCCESS` và `SUCCESS -> REFUNDED` thuộc issue sau. `FAILED/EXPIRED` không đổi trạng thái đơn; đơn vẫn `PENDING_PAYMENT` cho đến khi
-bị hủy/hết hạn (hoặc được thanh toán ở issue sau) và kiosk có thể tạo attempt mới khi đơn còn thanh toán được. Không có trạng thái `CANCELLED` của payment và
+`PENDING/FAILED/EXPIRED -> SUCCESS` chỉ do webhook đã xác thực (issue #33, xem payment-webhook.md); `SUCCESS -> REFUNDED` thuộc issue sau. `FAILED/EXPIRED` không đổi trạng thái đơn; đơn vẫn `PENDING_PAYMENT` cho đến khi
+bị hủy/hết hạn (hoặc được thanh toán qua webhook, issue #33) và kiosk có thể tạo attempt mới khi đơn còn thanh toán được. Không có trạng thái `CANCELLED` của payment và
 trạng thái đơn `PAYMENT_FAILED` chưa được dùng. Khi attempt không còn `PENDING`, `qrCode` trong response kiosk là `null`. Chuyển trạng thái tập trung ở `PaymentTransitions`.
 
 ## Hủy và hết hạn đơn
@@ -74,7 +74,7 @@ Giá trị không hợp lệ làm ứng dụng dừng khi khởi động. Không
 
 ## Database (V12)
 
-`uq_payments_provider_reference`: UNIQUE `(provider, payment_reference)` khi `payment_reference IS NOT NULL`, để webhook sau này tìm attempt theo reference của ta.
+`uq_payments_provider_reference`: UNIQUE `(provider, payment_reference)` khi `payment_reference IS NOT NULL`, để webhook tìm attempt theo reference của ta.
 Tạo thất bại ồn ào nếu dữ liệu cũ vi phạm (không sửa/xóa dữ liệu). `payments` không có `updated_at` và không thêm. V1-V11 không đổi.
 
 ## Kiểm thử

@@ -30,6 +30,18 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID>, JpaSpec
     @Query("select p from Payment p where p.id = :id and p.order.id = :orderId")
     Optional<Payment> findForUpdateByIdAndOrderId(@Param("id") UUID id, @Param("orderId") UUID orderId);
 
+    interface Identity {
+        UUID getPaymentId();
+
+        UUID getOrderId();
+    }
+
+    /** Ids only, so no stale entity is loaded before the Order and Payment locks are taken. */
+    @Query("select p.id as paymentId, p.order.id as orderId from Payment p where p.provider = :provider and p.paymentReference = :reference")
+    Optional<Identity> findIdentity(@Param("provider") String provider, @Param("reference") String reference);
+
+    boolean existsByProviderAndTransactionIdAndIdNot(String provider, String transactionId, UUID id);
+
     Optional<Payment> findTopByOrderIdOrderByCreatedAtDescIdDesc(UUID orderId);
 
     List<Payment> findByOrderIdOrderByCreatedAtAscIdAsc(UUID orderId);

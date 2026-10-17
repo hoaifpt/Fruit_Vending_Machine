@@ -18,7 +18,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-@SpringBootTest(properties = "spring.config.import=")
+// MOCK is the default provider for every integration test, whatever the developer environment selects; suites pick another one explicitly.
+@SpringBootTest(properties = {"spring.config.import=", "app.payment.provider=MOCK"})
 @ActiveProfiles("test")
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @Testcontainers

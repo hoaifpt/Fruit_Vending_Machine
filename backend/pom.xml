@@ -110,6 +110,8 @@
                 <configuration>
                     <systemPropertyVariables>
                         <user.timezone>UTC</user.timezone>
+                        <!-- Tests must never read the developer .env (it may select a real payment provider with real credentials). -->
+                        <APP_DOTENV_IMPORT>optional:file:./target/no-dotenv/.env[.properties]</APP_DOTENV_IMPORT>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

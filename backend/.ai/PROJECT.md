@@ -405,3 +405,10 @@ payOS adapter behind PaymentGateway selected by PAYMENT_PROVIDER=PAYOS (MOCK sta
 amount rule (409 for fractional amounts), orderCode as payment_reference, best-effort link cancellation after commit, and webhook signature verifier/parser components.
 No webhook endpoint, payment SUCCESS, Order PAID, refund, reconciliation, schema change or new dependency. The manual real-payOS checks stay open until payOS access exists.
 See docs/payment-provider.md and CURRENT_TASK.md.
+
+## 18. Payment webhook scope — Issue #33
+
+Verified provider webhooks (payOS and the development MOCK) are the only source of payment SUCCESS and order PAID. Every attempt is logged, processing is idempotent and race-safe,
+late, duplicate, mismatched and conflicting payments are recorded for ADMIN review and never auto-resolved, ADMIN can read webhook logs and filter payments that require attention, and the kiosk sees PAID by polling.
+No dispense command, inventory SOLD, DISPENSING/COMPLETED, refund, reconciliation, replay or alert exists; PAID orders keep their bowls RESERVED. Real payOS webhook verification stays a manual check.
+See docs/payment-webhook.md and CURRENT_TASK.md.

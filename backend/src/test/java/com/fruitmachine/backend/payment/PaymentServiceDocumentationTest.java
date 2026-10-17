@@ -91,9 +91,11 @@ class PaymentServiceDocumentationTest {
                 .containsExactlyInAnyOrder("id", "provider", "status", "amount", "createdAt", "paidAt", "expiredAt");
         assertThat(actual.at("/components/schemas/KioskOrderResponse/properties").has("currentPayment")).isTrue();
         assertThat(actual.at("/components/schemas/OrderDetailResponse/properties").has("payments")).isTrue();
-        // No payment write, status or success operation and no webhook path is exposed.
-        assertThat(actual.path("paths").fieldNames()).toIterable().noneMatch(path -> path.contains("webhook")
-                || (path.startsWith("/api/v1/payments") && (path.contains("status") || path.contains("success"))));
+        // No payment write, status or success operation; the only webhook paths are the provider endpoint and the ADMIN read-only logs.
+        assertThat(actual.path("paths").fieldNames()).toIterable()
+                .noneMatch(path -> path.startsWith("/api/v1/payments") && (path.contains("status") || path.contains("success") || path.contains("mark-paid")));
+        assertThat(actual.path("paths").fieldNames()).toIterable().filteredOn(path -> path.contains("webhook"))
+                .containsExactlyInAnyOrder("/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}");
         assertThat(body).doesNotContain(KEY, "passwordHash", "secretHash", "/test-only/");
     }
 

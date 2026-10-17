@@ -60,9 +60,9 @@ rollback thì không gọi. Có `cancel-timeout`, thất bại chỉ ghi WARN (c
 link vừa tạo cũng được hủy ngay khi bước 3 phát hiện attempt đã bị thay thế. Hủy chỉ giảm rủi ro, **không** đảm bảo không có chuyển khoản muộn; xử lý thanh toán muộn thuộc issue webhook.
 Attempt của provider khác (ví dụ `MOCK` trước khi đổi cấu hình) không bao giờ bị hủy qua gateway đang hoạt động.
 
-## Webhook: chỉ có component
+## Webhook: verifier/parser (đã nối vào endpoint ở issue #33)
 
-`PayOsWebhookVerifier.verify(rawBody)` và `PayOsWebhookParser.parse(rawBody)` đã có và có unit test, chưa được nối vào endpoint nào (việc của issue webhook, sẽ thêm phương thức xác thực trung lập provider vào `PaymentGateway`).
+`PayOsWebhookVerifier.verify(rawBody)` và `PayOsWebhookParser.parse(rawBody)` có unit test và được `PayOsPaymentGateway.verifyWebhook` dùng cho endpoint `POST /api/v1/webhooks/payments/payos` (xem [payment-webhook.md](payment-webhook.md)).
 
 Chuẩn hóa dữ liệu để ký: lấy đối tượng `data` từ **chuỗi JSON thô nhận được**, sắp khóa theo thứ tự chữ cái, nối `key=value` bằng `&`; `null`/thiếu/`"null"`/`"undefined"` -> chuỗi rỗng; số -> số thập phân nguyên văn (giữ `12.50`);
 chuỗi -> nguyên văn; object/array -> JSON gọn với khóa sắp xếp. Chữ ký kỳ vọng là hex chữ thường của HMAC-SHA256 với checksum key, so sánh bằng `MessageDigest.isEqual` (hằng thời gian). JSON lỗi, thiếu `data`/`signature` hoặc

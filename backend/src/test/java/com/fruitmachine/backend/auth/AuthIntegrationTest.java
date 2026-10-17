@@ -233,7 +233,8 @@ class AuthIntegrationTest {
                 "/api/v1/inventory", "/api/v1/inventory/{id}", "/api/v1/inventory/load", "/api/v1/inventory/{id}/remove", "/api/v1/inventory/transactions",
                 "/api/v1/machines/{machineId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary", "/api/v1/machines/{machineId}/kiosk-credentials", "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke",
                 "/api/v1/kiosk/me", "/api/v1/kiosk/catalog", "/api/v1/kiosk/orders", "/api/v1/kiosk/orders/{orderId}",
-                "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/kiosk/orders/{orderId}/payments", "/api/v1/payments", "/api/v1/payments/{id}");
+                "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/kiosk/orders/{orderId}/payments", "/api/v1/payments", "/api/v1/payments/{id}",
+                "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

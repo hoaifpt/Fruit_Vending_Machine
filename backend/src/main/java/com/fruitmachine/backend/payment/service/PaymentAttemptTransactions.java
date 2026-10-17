@@ -46,7 +46,7 @@ public class PaymentAttemptTransactions {
 
     public enum Outcome { CREATED, SUPERSEDED, PROVIDER_FAILED }
 
-    public record Completion(Outcome outcome, KioskPaymentResponse payment) {
+    public record Completion(Outcome outcome, KioskPaymentResponse payment, PaymentStatus finalStatus) {
     }
 
     private final OrderRepository orders;
@@ -102,14 +102,14 @@ public class PaymentAttemptTransactions {
     public Completion complete(UUID orderId, UUID paymentId, ProviderPaymentResult result) {
         orders.findForUpdateById(orderId).orElseThrow(() -> new ResourceNotFoundException("Order not found"));
         var payment = payments.findForUpdateByIdAndOrderId(paymentId, orderId).orElseThrow(() -> new ResourceNotFoundException("Payment not found"));
-        if (payment.getStatus() != PaymentStatus.PENDING) return new Completion(Outcome.SUPERSEDED, null);
+        if (payment.getStatus() != PaymentStatus.PENDING) return new Completion(Outcome.SUPERSEDED, null, payment.getStatus());
         Instant now = now();
         boolean usable = result != null && result.qrCode() != null && !result.qrCode().isBlank()
                 && (result.providerExpiresAt() == null || result.providerExpiresAt().isAfter(now));
         if (!usable) {
             PaymentTransitions.apply(payment, PaymentStatus.FAILED);
             payments.flush();
-            return new Completion(Outcome.PROVIDER_FAILED, null);
+            return new Completion(Outcome.PROVIDER_FAILED, null, PaymentStatus.FAILED);
         }
         payment.setQrCode(result.qrCode());
         // PostgreSQL stores microseconds; truncate so the response equals what is persisted.
@@ -118,7 +118,7 @@ public class PaymentAttemptTransactions {
             payment.setExpiredAt(providerDeadline);
         }
         payments.flush();
-        return new Completion(Outcome.CREATED, mapper.kiosk(payment));
+        return new Completion(Outcome.CREATED, mapper.kiosk(payment), PaymentStatus.PENDING);
     }
 
     private String newReference(PaymentGateway gateway) {

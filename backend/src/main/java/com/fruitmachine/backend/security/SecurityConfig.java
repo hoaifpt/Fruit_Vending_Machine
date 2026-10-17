@@ -61,6 +61,9 @@ public class SecurityConfig {
                     // Kiosks are machine credentials, not users; kiosk and credential rules precede the broader machine rules.
                     authorize.requestMatchers("/api/v1/kiosk", "/api/v1/kiosk/**").hasRole("KIOSK");
                     authorize.requestMatchers("/api/v1/machines/*/kiosk-credentials", "/api/v1/machines/*/kiosk-credentials/**").hasRole("ADMIN");
+                    // Providers call the webhook without any credential; its signature check is the only trust, and only this exact path is open.
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/webhooks/payments/*").permitAll();
+                    authorize.requestMatchers("/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/**").hasRole("ADMIN");
                     authorize.requestMatchers("/api/v1/payments", "/api/v1/payments/**").hasRole("ADMIN");
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/orders", "/api/v1/orders/**").hasAnyRole("ADMIN", "STAFF");
                     authorize.requestMatchers("/api/v1/orders", "/api/v1/orders/**").denyAll();

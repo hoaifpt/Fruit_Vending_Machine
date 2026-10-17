@@ -1,19 +1,12 @@
 package com.fruitmachine.backend.payment.gateway.payos;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fruitmachine.backend.payment.gateway.HmacSha256;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.nio.charset.StandardCharsets;
-import java.security.InvalidKeyException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
-import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 /** Pure HMAC-SHA256 helpers for payOS: create-request signature and webhook data canonicalization. */
 public final class PayOsSignature {
@@ -22,13 +15,7 @@ public final class PayOsSignature {
 
     /** Lowercase hex HMAC-SHA256 of data under the checksum key (UTF-8). */
     public static String hmacSha256Hex(String key, String data) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(data.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException | InvalidKeyException ex) {
-            throw new IllegalStateException("HMAC-SHA256 is unavailable or the key is unusable");
-        }
+        return HmacSha256.hex(key, data);
     }
 
     /** Keys in alphabetical order with raw (not URL-encoded) values, joined by &. */
@@ -88,8 +75,6 @@ public final class PayOsSignature {
 
     /** Constant-time comparison of two hex signatures (case-insensitive). */
     public static boolean constantTimeEquals(String expected, String actual) {
-        if (expected == null || actual == null) return false;
-        return MessageDigest.isEqual(expected.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8),
-                actual.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
+        return HmacSha256.constantTimeEquals(expected, actual);
     }
 }

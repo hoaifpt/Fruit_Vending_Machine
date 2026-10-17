@@ -652,3 +652,13 @@ sanitized `PaymentProviderException`. `PayOsSignature` holds the HMAC-SHA256 hel
 `PaymentService.expirePendingPayments` and attempt replacement publish `PaymentExpiredEvent`; `PaymentCancellations` (`@TransactionalEventListener(AFTER_COMMIT)`)
 calls the active gateway only for attempts of that provider, swallows failures with a WARN naming the reference, and is also called directly when attempt creation finds its attempt superseded.
 No business service references payOS classes. See [payment-provider.md](../../docs/payment-provider.md).
+
+## 21. Payment webhook handling — Issue #33
+
+`PaymentGateway.verifyWebhook(rawBody, headers)` returns a `WebhookVerificationResult` (verified flag, event type, untrusted reference hint and signature for the log, and a `VerifiedPaymentEvent` only when verified and actionable);
+`webhookAcknowledgement()` supplies the provider body. PAYOS delegates to `PayOsWebhookVerifier` and `PayOsWebhookParser`; MOCK verifies `X-Mock-Signature` (HMAC-SHA256 of the raw body under
+`app.payment.mock.webhook-secret`, blank secret never verifies). `PaymentWebhookController` is the only public endpoint (`POST /api/v1/webhooks/payments/{provider}`, permitAll for exactly that path), reads the
+raw body (64 KB, JSON only) and maps results; `PaymentWebhookService` orchestrates verify, log, process without a transaction of its own; `PaymentWebhookLogWriter` persists the attempt with REQUIRES_NEW;
+`PaymentConfirmationService` is the single place that produces payment SUCCESS and order PAID (one transaction, Order then Payment locks, idempotent, amounts compared with compareTo);
+`PaymentAnomalyRecorder` writes audit_logs rows (joins the transaction, or its own for a rolled-back unique violation); `PaymentWebhookLogService` and `PaymentWebhookLogController` are the ADMIN read APIs
+and `requiresAttention` is a derived filter on payments. Business services never reference provider classes. Tests never read the developer .env (see CODING_RULES). See [payment-webhook.md](../../docs/payment-webhook.md).

@@ -24,6 +24,10 @@ tags:
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: Orders
     description: "Read-only order management for ADMIN and STAFF. There is no write, delete or status endpoint; order status is produced only by backend workflows."
+  - name: Payment Webhook Logs
+    description: "Read-only evidence of every provider webhook attempt for ADMIN. No replay, no delete, and the signature is never returned."
+  - name: Payment Webhooks
+    description: "Provider-to-server payment notifications. Public endpoint authenticated only by the provider signature; no JWT and no kiosk key. This is the only path that can produce payment SUCCESS and order PAID."
   - name: Payments
     description: "Read-only payment management for ADMIN. There is no write, delete or status endpoint; no client can mark a payment successful."
   - name: Product Batches
@@ -4491,185 +4495,6 @@ paths:
       "security":
         -
           "bearerAuth": []
-  "/api/v1/payments":
-    "get":
-      "tags":
-        - "Payments"
-      "summary": "List and filter payment attempts"
-      "description": "ADMIN only. Database pagination page0/size20/max100. Filters combine: status, provider (normalized to uppercase), orderId, machineId (through the order), createdFrom (inclusive), createdTo (exclusive). Approved sorts createdAt (default desc), amount, paidAt, each with a UUID tie-break. Items never include the QR payload."
-      "operationId": "listPayments"
-      "parameters":
-        -
-          "name": "page"
-          "in": "query"
-          "description": "Zero-based page."
-          "required": false
-          "schema":
-            "type": "integer"
-            "format": "int32"
-            "default": 0
-            "minimum": 0
-        -
-          "name": "size"
-          "in": "query"
-          "description": "Page size 1..100."
-          "required": false
-          "schema":
-            "type": "integer"
-            "format": "int32"
-            "default": 20
-            "maximum": 100
-            "minimum": 1
-        -
-          "name": "status"
-          "in": "query"
-          "description": "Exact stored payment status."
-          "required": false
-          "schema":
-            "type": "string"
-            "enum":
-              - "PENDING"
-              - "SUCCESS"
-              - "FAILED"
-              - "EXPIRED"
-              - "REFUNDED"
-        -
-          "name": "provider"
-          "in": "query"
-          "description": "Provider code, case-insensitive, for example MOCK."
-          "required": false
-          "schema":
-            "type": "string"
-        -
-          "name": "orderId"
-          "in": "query"
-          "description": "Order UUID filter."
-          "required": false
-          "schema":
-            "type": "string"
-            "format": "uuid"
-        -
-          "name": "machineId"
-          "in": "query"
-          "description": "Machine UUID filter, resolved through the order."
-          "required": false
-          "schema":
-            "type": "string"
-            "format": "uuid"
-        -
-          "name": "createdFrom"
-          "in": "query"
-          "description": "ISO-8601 instant, inclusive lower bound of createdAt."
-          "required": false
-          "schema":
-            "type": "string"
-            "format": "date-time"
-        -
-          "name": "createdTo"
-          "in": "query"
-          "description": "ISO-8601 instant, exclusive upper bound of createdAt."
-          "required": false
-          "schema":
-            "type": "string"
-            "format": "date-time"
-        -
-          "name": "sort"
-          "in": "query"
-          "description": "One of createdAt, amount, paidAt with optional asc/desc."
-          "required": false
-          "schema":
-            "type": "string"
-            "default": "createdAt,desc"
-      "responses":
-        "400":
-          "description": "Invalid parameters"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 400
-                "path": "/api/v1/payments"
-                "error": "Bad Request"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Request validation failed"
-        "401":
-          "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
-          "headers":
-            "WWW-Authenticate":
-              "schema":
-                "type": "string"
-                "const": "Bearer"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 401
-                "path": "/api/v1/payments"
-                "error": "Unauthorized"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Authentication required or access token invalid"
-        "403":
-          "description": "Authenticated account is not ADMIN"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 403
-                "path": "/api/v1/payments"
-                "error": "Forbidden"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "Access denied"
-        "500":
-          "description": "Unexpected server error; no internal details"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiErrorResponse"
-              "example":
-                "status": 500
-                "path": "/api/v1/payments"
-                "error": "Internal Server Error"
-                "timestamp": "2026-10-15T04:00:00Z"
-                "message": "An unexpected error occurred"
-        "200":
-          "description": "Database page of payment summaries"
-          "headers":
-            "Cache-Control":
-              "schema":
-                "type": "string"
-                "const": "no-store"
-          "content":
-            "application/json":
-              "schema":
-                "$ref": "#/components/schemas/ApiResponsePaymentPageResponse"
-              "example":
-                "timestamp": "2026-10-15T04:00:00Z"
-                "data":
-                  "totalElements": 1
-                  "content":
-                    -
-                      "id": "5d6e0000-0000-4000-8000-000000000001"
-                      "orderId": "e0f1a2b3-0000-4000-8000-000000000001"
-                      "orderCode": "ORD-20261015-7K3QF9XA"
-                      "machineCode": "FV-HCM-001"
-                      "provider": "MOCK"
-                      "status": "PENDING"
-                      "amount": 70000.0
-                      "paymentReference": "MOCK-8F3KQ2AB"
-                      "transactionId": null
-                      "createdAt": "2026-10-15T04:00:05Z"
-                      "paidAt": null
-                      "expiredAt": "2026-10-15T04:05:00Z"
-                  "size": 20
-                  "page": 0
-                  "totalPages": 1
-                "message": "Success"
-      "security":
-        -
-          "bearerAuth": []
   "/api/v1/payments/{id}":
     "get":
       "tags":
@@ -5422,6 +5247,600 @@ paths:
       "security":
         -
           "kioskKey": []
+  "/api/v1/webhooks/payments/{provider}":
+    "post":
+      "tags":
+        - "Payment Webhooks"
+      "summary": "Receive a payment provider webhook"
+      "description": "Public; trusted only after the provider signature is verified (payOS: the signature field of the body; MOCK, development only: X-Mock-Signature = hex HMAC-SHA256 of the exact raw body). The path provider must be the active provider (payos or mock, case-insensitive). The body must be JSON and at most 64 KB. Every attempt that reaches verification is stored in payment_webhook_logs. A verified event is processed idempotently under the Order then Payment locks: SUCCESS makes the payment SUCCESS and a PENDING_PAYMENT order PAID. Late, duplicate, amount-mismatched and conflicting payments are recorded for ADMIN review and never auto-resolved. Response policy: 200 for verified requests (processed, duplicate, unknown reference or anomaly, since retries cannot fix them); 401 when verification fails or the body is malformed; 404 unknown provider; 413 body too large; 415 not JSON; 500 on unexpected errors so the provider retries."
+      "operationId": "receivePaymentWebhook"
+      "parameters":
+        -
+          "name": "provider"
+          "in": "path"
+          "description": "Provider code, case-insensitive."
+          "required": true
+          "schema":
+            "type": "string"
+          "example": "payos"
+      "requestBody":
+        "description": "Provider JSON payload exactly as sent; documentation examples use fake values and signatures shown as hex placeholders."
+        "content":
+          "application/json":
+            "schema":
+              "type": "object"
+              "additionalProperties": true
+            "example":
+              "code": "00"
+              "desc": "success"
+              "success": true
+              "data":
+                "orderCode": 261016040005123
+                "amount": 105000
+                "description": "FV7K3QF9X"
+                "accountNumber": "0000000000"
+                "reference": "FT00000000000"
+                "transactionDateTime": "2026-10-16 11:02:13"
+                "currency": "VND"
+                "paymentLinkId": "fake-link-id"
+                "code": "00"
+                "desc": "success"
+                "counterAccountBankId": ""
+                "counterAccountBankName": ""
+                "counterAccountName": ""
+                "counterAccountNumber": ""
+                "virtualAccountName": ""
+                "virtualAccountNumber": ""
+              "signature": "<hex-hmac-sha256-of-data>"
+      "responses":
+        "200":
+          "description": "Verified webhook acknowledged (minimal provider specific body)"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "type": "object"
+                "additionalProperties": true
+              "example":
+                "success": true
+        "401":
+          "description": "Signature missing or invalid, or the body is malformed"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unauthorized"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Webhook could not be verified"
+                "status": 401
+                "path": "/api/v1/webhooks/payments/{provider}"
+        "404":
+          "description": "Provider is not the active payment provider"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Not Found"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Payment provider not found"
+                "status": 404
+                "path": "/api/v1/webhooks/payments/{provider}"
+        "413":
+          "description": "Body larger than 64 KB"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Payload Too Large"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Webhook body is too large"
+                "status": 413
+                "path": "/api/v1/webhooks/payments/{provider}"
+        "415":
+          "description": "Content type is not application/json"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unsupported Media Type"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Unsupported Media Type"
+                "status": 415
+                "path": "/api/v1/webhooks/payments/{provider}"
+        "500":
+          "description": "Unexpected error; the provider should retry"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Internal Server Error"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/webhooks/payments/{provider}"
+      "security": []
+  "/api/v1/payment-webhook-logs":
+    "get":
+      "tags":
+        - "Payment Webhook Logs"
+      "summary": "List webhook attempts"
+      "description": "ADMIN only. Database pagination page0/size20/max100. Filters combine: provider (case-insensitive), verified, reference (exact match on the untrusted provider reference hint), receivedFrom (inclusive), receivedTo (exclusive). Sort receivedAt (default desc) or provider, each with a UUID tie-break. Items never include the body or signature."
+      "operationId": "listPaymentWebhookLogs"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size 1..100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "provider"
+          "in": "query"
+          "description": "Provider code, case-insensitive, for example PAYOS."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "verified"
+          "in": "query"
+          "description": "true for verified attempts only, false for rejected ones."
+          "required": false
+          "schema":
+            "type": "boolean"
+        -
+          "name": "reference"
+          "in": "query"
+          "description": "Exact provider reference hint (for payOS the orderCode)."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "receivedFrom"
+          "in": "query"
+          "description": "ISO-8601 instant, inclusive lower bound of receivedAt."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "receivedTo"
+          "in": "query"
+          "description": "ISO-8601 instant, exclusive upper bound of receivedAt."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "receivedAt or provider with optional asc/desc."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "receivedAt,desc"
+      "responses":
+        "400":
+          "description": "Invalid parameters"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Bad Request"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Request validation failed"
+                "status": 400
+                "path": "/api/v1/payment-webhook-logs"
+        "401":
+          "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unauthorized"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/payment-webhook-logs"
+        "403":
+          "description": "Authenticated account is not ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Forbidden"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/payment-webhook-logs"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Internal Server Error"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/payment-webhook-logs"
+        "200":
+          "description": "Database page of webhook attempts"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponsePaymentWebhookLogPageResponse"
+              "example":
+                "data":
+                  "size": 20
+                  "page": 0
+                  "totalPages": 1
+                  "totalElements": 1
+                  "content":
+                    -
+                      "id": "7a1c0000-0000-4000-8000-000000000001"
+                      "provider": "PAYOS"
+                      "eventType": "PAYMENT_SUCCESS"
+                      "reference": "261016040005123"
+                      "verified": true
+                      "receivedAt": "2026-10-16T04:00:00Z"
+                "message": "Success"
+                "timestamp": "2026-10-16T04:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/payment-webhook-logs/{id}":
+    "get":
+      "tags":
+        - "Payment Webhook Logs"
+      "summary": "Get a webhook attempt with its evidence"
+      "description": "ADMIN only. rawPayload is the parsed JSON body; rawBody carries the exact text only when the body was not valid JSON. The signature is never returned."
+      "operationId": "getPaymentWebhookLog"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Webhook log UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Webhook attempt details"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponsePaymentWebhookLogDetailResponse"
+              "example":
+                "data":
+                  "id": "7a1c0000-0000-4000-8000-000000000001"
+                  "provider": "PAYOS"
+                  "eventType": "PAYMENT_SUCCESS"
+                  "reference": "261016040005123"
+                  "verified": true
+                  "receivedAt": "2026-10-16T04:00:00Z"
+                  "rawPayload":
+                    "code": "00"
+                    "desc": "success"
+                    "success": true
+                    "data":
+                      "orderCode": 261016040005123
+                      "amount": 105000
+                      "description": "FV7K3QF9X"
+                      "accountNumber": "0000000000"
+                      "reference": "FT00000000000"
+                      "transactionDateTime": "2026-10-16 11:02:13"
+                      "currency": "VND"
+                      "paymentLinkId": "fake-link-id"
+                      "code": "00"
+                      "desc": "success"
+                      "counterAccountBankId": ""
+                      "counterAccountBankName": ""
+                      "counterAccountName": ""
+                      "counterAccountNumber": ""
+                      "virtualAccountName": ""
+                      "virtualAccountNumber": ""
+                    "signature": "<hex-hmac-sha256-of-data>"
+                  "rawBody": null
+                "message": "Success"
+                "timestamp": "2026-10-16T04:00:00Z"
+        "404":
+          "description": "Webhook log not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Not Found"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Payment provider not found"
+                "status": 404
+                "path": "/api/v1/payment-webhook-logs/{id}"
+        "400":
+          "description": "Invalid parameters"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Bad Request"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Request validation failed"
+                "status": 400
+                "path": "/api/v1/payment-webhook-logs/{id}"
+        "401":
+          "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unauthorized"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/payment-webhook-logs/{id}"
+        "403":
+          "description": "Authenticated account is not ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Forbidden"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/payment-webhook-logs/{id}"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Internal Server Error"
+                "timestamp": "2026-10-16T04:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/payment-webhook-logs/{id}"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/payments":
+    "get":
+      "tags":
+        - "Payments"
+      "summary": "List and filter payment attempts"
+      "description": "ADMIN only. Database pagination page0/size20/max100. Filters combine: status, provider (normalized to uppercase), orderId, machineId (through the order), createdFrom (inclusive), createdTo (exclusive). Approved sorts createdAt (default desc), amount, paidAt, each with a UUID tie-break. Items never include the QR payload."
+      "operationId": "listPayments"
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size 1..100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Exact stored payment status."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "PENDING"
+              - "SUCCESS"
+              - "FAILED"
+              - "EXPIRED"
+              - "REFUNDED"
+        -
+          "name": "provider"
+          "in": "query"
+          "description": "Provider code, case-insensitive, for example MOCK."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "orderId"
+          "in": "query"
+          "description": "Order UUID filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine UUID filter, resolved through the order."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "createdFrom"
+          "in": "query"
+          "description": "ISO-8601 instant, inclusive lower bound of createdAt."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "createdTo"
+          "in": "query"
+          "description": "ISO-8601 instant, exclusive upper bound of createdAt."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "requiresAttention"
+          "in": "query"
+          "description": "true returns SUCCESS payments that need human review: the order was CANCELLED (late payment) or another SUCCESS payment exists for the same order (duplicate payment, both are listed and the later one is the refund candidate). Amount mismatches leave the payment unchanged, so they are found through the webhook logs and audit_logs."
+          "required": false
+          "schema":
+            "type": "boolean"
+        -
+          "name": "sort"
+          "in": "query"
+          "description": "One of createdAt, amount, paidAt with optional asc/desc."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "createdAt,desc"
+      "responses":
+        "400":
+          "description": "Invalid parameters"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Bad Request"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Request validation failed"
+                "status": 400
+                "path": "/api/v1/payments"
+        "401":
+          "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unauthorized"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/payments"
+        "403":
+          "description": "Authenticated account is not ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Forbidden"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/payments"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Internal Server Error"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/payments"
+        "200":
+          "description": "Database page of payment summaries"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponsePaymentPageResponse"
+              "example":
+                "data":
+                  "size": 20
+                  "page": 0
+                  "totalPages": 1
+                  "totalElements": 1
+                  "content":
+                    -
+                      "id": "5d6e0000-0000-4000-8000-000000000001"
+                      "orderId": "e0f1a2b3-0000-4000-8000-000000000001"
+                      "orderCode": "ORD-20261015-7K3QF9XA"
+                      "machineCode": "FV-HCM-001"
+                      "provider": "MOCK"
+                      "status": "PENDING"
+                      "amount": 70000.0
+                      "paymentReference": "MOCK-8F3KQ2AB"
+                      "transactionId": null
+                      "createdAt": "2026-10-15T04:00:05Z"
+                      "paidAt": null
+                      "expiredAt": "2026-10-15T04:05:00Z"
+                "message": "Success"
+                "timestamp": "2026-10-15T04:00:00Z"
+      "security":
+        -
+          "bearerAuth": []
 components:
   securitySchemes:
     bearerAuth:
@@ -6819,73 +7238,6 @@ components:
         "cancelledAt":
           "type": "string"
           "format": "date-time"
-    "ApiResponsePaymentPageResponse":
-      "type": "object"
-      "properties":
-        "timestamp":
-          "type": "string"
-          "format": "date-time"
-        "message":
-          "type": "string"
-        "data":
-          "$ref": "#/components/schemas/PaymentPageResponse"
-    "PaymentPageResponse":
-      "type": "object"
-      "properties":
-        "content":
-          "type": "array"
-          "items":
-            "$ref": "#/components/schemas/PaymentResponse"
-        "page":
-          "type": "integer"
-          "format": "int32"
-        "size":
-          "type": "integer"
-          "format": "int32"
-        "totalElements":
-          "type": "integer"
-          "format": "int64"
-        "totalPages":
-          "type": "integer"
-          "format": "int32"
-    "PaymentResponse":
-      "type": "object"
-      "properties":
-        "id":
-          "type": "string"
-          "format": "uuid"
-        "orderId":
-          "type": "string"
-          "format": "uuid"
-        "orderCode":
-          "type": "string"
-        "machineCode":
-          "type": "string"
-        "provider":
-          "type": "string"
-        "status":
-          "type": "string"
-          "enum":
-            - "PENDING"
-            - "SUCCESS"
-            - "FAILED"
-            - "EXPIRED"
-            - "REFUNDED"
-        "amount":
-          "type": "number"
-        "paymentReference":
-          "type": "string"
-        "transactionId":
-          "type": "string"
-        "createdAt":
-          "type": "string"
-          "format": "date-time"
-        "paidAt":
-          "type": "string"
-          "format": "date-time"
-        "expiredAt":
-          "type": "string"
-          "format": "date-time"
     "ApiResponsePaymentDetailResponse":
       "type": "object"
       "properties":
@@ -7221,3 +7573,165 @@ components:
           "type": "string"
           "format": "date-time"
           "description": "Attempt deadline, never later than the order reservation deadline."
+    "ApiResponsePaymentWebhookLogPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/PaymentWebhookLogPageResponse"
+    "PaymentWebhookLogPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PaymentWebhookLogSummaryResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "PaymentWebhookLogSummaryResponse":
+      "type": "object"
+      "description": "One webhook attempt. The signature is never returned."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "provider":
+          "type": "string"
+        "eventType":
+          "type":
+            - "string"
+            - "null"
+          "description": "Event type reported by the verifier, for example PAYMENT_SUCCESS, PAYMENT_FAILED or UNKNOWN."
+        "reference":
+          "type":
+            - "string"
+            - "null"
+          "description": "Untrusted provider reference hint (for payOS the orderCode), not orders.order_code."
+        "verified":
+          "type": "boolean"
+        "receivedAt":
+          "type": "string"
+          "format": "date-time"
+    "ApiResponsePaymentWebhookLogDetailResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/PaymentWebhookLogDetailResponse"
+    "PaymentWebhookLogDetailResponse":
+      "type": "object"
+      "description": "Webhook attempt with its evidence. rawPayload holds the parsed JSON; rawBody holds the exact text only when the body was not valid JSON. The signature is never returned."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "provider":
+          "type": "string"
+        "eventType":
+          "type":
+            - "string"
+            - "null"
+        "reference":
+          "type":
+            - "string"
+            - "null"
+        "verified":
+          "type": "boolean"
+        "receivedAt":
+          "type": "string"
+          "format": "date-time"
+        "rawPayload":
+          "type":
+            - "string"
+            - "null"
+          "description": "Parsed JSON body, null when the body was not valid JSON."
+        "rawBody":
+          "type":
+            - "string"
+            - "null"
+          "description": "Exact received text, present only when rawPayload is null."
+    "ApiResponsePaymentPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/PaymentPageResponse"
+    "PaymentPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PaymentResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "PaymentResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "orderId":
+          "type": "string"
+          "format": "uuid"
+        "orderCode":
+          "type": "string"
+        "machineCode":
+          "type": "string"
+        "provider":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING"
+            - "SUCCESS"
+            - "FAILED"
+            - "EXPIRED"
+            - "REFUNDED"
+        "amount":
+          "type": "number"
+        "paymentReference":
+          "type": "string"
+        "transactionId":
+          "type": "string"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "paidAt":
+          "type": "string"
+          "format": "date-time"
+        "expiredAt":
+          "type": "string"
+          "format": "date-time"
