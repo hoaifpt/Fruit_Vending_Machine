@@ -7,6 +7,8 @@ import com.fruitmachine.backend.inventory.enums.InventoryStatus;
 import com.fruitmachine.backend.inventory.enums.InventoryTransactionType;
 import com.fruitmachine.backend.inventory.repository.InventoryItemRepository;
 import com.fruitmachine.backend.inventory.repository.InventoryTransactionRepository;
+import com.fruitmachine.backend.machine.entity.MachineSlot;
+import com.fruitmachine.backend.machine.repository.MachineSlotRepository;
 import com.fruitmachine.backend.order.entity.Order;
 import com.fruitmachine.backend.order.entity.OrderItem;
 import com.fruitmachine.backend.order.entity.OrderItemAllocation;
@@ -23,39 +25,51 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Inventory side effects of an order: reserve physical bowls and release them again. Callers own the
- * transaction and must already hold the order lock (lock order: Order, then InventoryItem).
+ * transaction. Reservation lock order: Product, Machine, Slot, InventoryItem; release lock order: Order, Payment, InventoryItem.
  */
 @Service
 @RequiredArgsConstructor
 public class OrderReservationService {
     public static final String REASON_CANCELLED = "ORDER_CANCELLED";
     public static final String REASON_EXPIRED = "RESERVATION_EXPIRED";
+    public static final String NOT_AVAILABLE = "Requested product is not available on this machine";
 
     private final InventoryItemRepository items;
+    private final MachineSlotRepository slots;
     private final InventoryTransactionRepository history;
     private final OrderItemAllocationRepository allocations;
     private final PaymentService payments;
 
-    /** FEFO bowls locked with SKIP LOCKED; fewer than requested means the whole order must fail. */
+    /**
+     * Locks and returns the bowl the machine will physically drop next for this product: the sellable head of one slot.
+     * Caller already holds Product (share) and Machine (share); this takes the candidate Slots FOR UPDATE in id order,
+     * then the head InventoryItem FOR UPDATE. Bowls behind a head are never reservable, so at most one bowl per slot is RESERVED.
+     */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
-    public List<InventoryItem> selectBowls(UUID machineId, UUID productId, int quantity, Instant holdDeadline) {
-        List<InventoryItem> bowls = items.findReservationCandidates(machineId, productId, holdDeadline, quantity);
-        if (bowls.size() < quantity) throw new ConflictException("Insufficient sellable quantity for a requested product");
-        return bowls;
+    public InventoryItem selectHead(UUID machineId, UUID productId, Instant holdDeadline) {
+        List<UUID> candidates = items.findSlotIdsHoldingProduct(machineId, productId);
+        if (candidates.isEmpty()) throw new ConflictException(NOT_AVAILABLE);
+        List<UUID> locked = slots.findAllForUpdateByIdInAndMachineId(candidates, machineId).stream().map(MachineSlot::getId).toList();
+        if (locked.isEmpty()) throw new ConflictException(NOT_AVAILABLE);
+        // Heads are recomputed under the slot locks: loading and removal take the same slot lock first.
+        UUID headId = items.findSellableHeadId(machineId, productId, locked, holdDeadline).orElseThrow(() -> new ConflictException(NOT_AVAILABLE));
+        InventoryItem head = items.findForUpdateById(headId).orElseThrow(() -> new ConflictException(NOT_AVAILABLE));
+        if (head.getStatus() != InventoryStatus.AVAILABLE || !head.getBatch().getExpiresAt().isAfter(holdDeadline)) {
+            throw new ConflictException(NOT_AVAILABLE);
+        }
+        return head;
     }
 
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
-    public void reserve(Order order, OrderItem line, List<InventoryItem> bowls, Instant now) {
-        for (InventoryItem bowl : bowls) {
-            bowl.setStatus(InventoryStatus.RESERVED);
-            bowl.setReservedAt(now);
-            var allocation = new OrderItemAllocation();
-            allocation.setOrderItem(line);
-            allocation.setInventoryItem(bowl);
-            allocation.setStatus(AllocationStatus.RESERVED);
-            allocations.save(allocation);
-            append(bowl, order, InventoryTransactionType.RESERVE, null, InventoryStatus.AVAILABLE, InventoryStatus.RESERVED);
-        }
+    public void reserve(Order order, OrderItem line, InventoryItem bowl, Instant now) {
+        bowl.setStatus(InventoryStatus.RESERVED);
+        bowl.setReservedAt(now);
+        var allocation = new OrderItemAllocation();
+        allocation.setOrderItem(line);
+        allocation.setInventoryItem(bowl);
+        allocation.setStatus(AllocationStatus.RESERVED);
+        allocations.save(allocation);
+        append(bowl, order, InventoryTransactionType.RESERVE, null, InventoryStatus.AVAILABLE, InventoryStatus.RESERVED);
     }
 
     /** PENDING_PAYMENT to CANCELLED, returning every RESERVED bowl to AVAILABLE with RETURN history. */

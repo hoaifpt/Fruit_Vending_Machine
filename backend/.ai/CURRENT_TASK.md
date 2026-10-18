@@ -1,156 +1,105 @@
-# Issue #33 — [BE] Implement Payment Webhook Handling
+# Issue #35 — [BE] Update orders (single bowl per order, slot-head reservation)
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/33
-Branch: feature/33-payment-webhook-handling (from origin/dev b8345b5, includes #31 via PR#32)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/35
+Branch: feature/35-single-bowl-orders (from origin/dev 903b4af, includes #33 via PR#34)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking the
 GitHub checkboxes of this issue is allowed after verification (AGENTS.md section 14).
-Note: the issue text refers to #13/#14/#15; in this repository those are #27/#29/#31.
+Note: the issue text refers to #13/#14/#16; in this repository order management is #27 and payments are #29/#31/#33.
 
 ## Scope
-Public `POST /api/v1/webhooks/payments/{provider}` (signature-based trust only): raw body read exactly (64 KB / JSON limits), every
-attempt persisted in its own transaction (payment_webhook_logs), provider-neutral verification through a new
-`PaymentGateway.verifyWebhook` (MOCK with HMAC secret, PAYOS via the #31 verifier/parser), idempotent processing
-(lock Order -> Payment): the ONLY path producing payment SUCCESS and order PAID, anomalies (late, duplicate, amount mismatch,
-transaction conflict) recorded in audit_logs and never auto-resolved, FAILED handling, ADMIN webhook-log read APIs,
-`requiresAttention` payment filter, kiosk polling shows PAID.
+- Breaking kiosk request: `POST /api/v1/kiosk/orders` takes `{ "productId": "<uuid>" }` only (strict DTO); every new order has one item, quantity 1.
+  Response shape and management order APIs unchanged (itemCount/totalQuantity stay, always 1 for new orders).
+- Remove `app.order.max-total-quantity` (ORDER_MAX_TOTAL_QUANTITY) and the catalog field `maxTotalQuantity`.
+- Slot head = physically present item (AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED) with the earliest loaded_at, tie-break id.
+  Only a sellable head can be reserved (head AVAILABLE, batch outlives the hold deadline, product/slot/machine ACTIVE, same machine, same product),
+  so at most one RESERVED bowl per slot. FEFO only between slot heads (head expiry, head loaded_at, slot_code, slot id).
+- Reservation in one transaction with locks Product (share) -> Machine (share) -> candidate Slots (update, sorted by id) -> head Item (update).
+- Catalog lists only products with a sellable head; availableQuantity counts AVAILABLE bowls of that product, outliving the hold deadline,
+  in slots whose head is sellable for that product (aggregate SQL with DISTINCT ON).
+- Optional section 9: headStatus / headExpired on the slot inventory summary.
 
 ## Non-goals
-Dispense commands, inventory SOLD, DISPENSING/COMPLETED, refunds, reconciliation polling, replay endpoint, PAID timeout, alerts,
-processing-status columns, rate limiting/IP allowlist, push to kiosk, frontend.
+Multi-bowl carts, slot position sensors, automatic EXPIRED transitions or blocked-slot alerts, inventory load/remove rule changes,
+dispense commands (Milestone 3), kiosk UI, schema changes.
 
 ## Database / API impact
-No schema change expected (V1-V12 untouched). New endpoints: the webhook, payment-webhook-logs list/detail, and the
-`requiresAttention` filter on GET /api/v1/payments.
+No schema change; V1-V12 untouched; no CHECK quantity = 1 (historical rows keep many lines). API: request shape of the kiosk order
+endpoint changes, catalog loses maxTotalQuantity, inventory summary gains headStatus/headExpired.
 
-## Status and verification (2026-10-16)
+## Status and verification (2026-10-18)
 Implemented and locally verified; see HANDOFF.md for Git delivery status.
-- `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, Maven 3.9.12, PostgreSQL 18.6 Testcontainers): 620 tests, 0 failures/errors/skips,
-  BUILD SUCCESS on the final code. Zero mentions of api-merchant.payos.vn in the run. Log: backend/target/issue33-verify.log (ignored).
-- New classes: PaymentWebhookEndpointIntegrationTest(12), PaymentWebhookProcessingIntegrationTest(18), PaymentWebhookRaceIntegrationTest(4, real parallel transactions),
-  PaymentWebhookRollbackIntegrationTest(1), PaymentWebhookLogManagementIntegrationTest(4), MockWebhookSchemeTest(6), MockWebhookIntegrationTest(1),
-  PayOsWebhookIntegrationTest(5, payOS-signed fixtures), PaymentWebhookDocumentationTest(1), DotenvIsolationTest(2). No migration, no dependency (pom.xml only gained a Surefire system property).
-- NOT verified (left unchecked): section 26, the three manual items that need a real payOS merchant account, a public HTTPS webhook URL and a real payment.
-  The payOS webhook signature canonicalization is implemented from the issue text and the docs sample and is still unconfirmed against a captured real webhook.
-- Test isolation fix found during this issue: the developer .env (real provider and credentials) was being imported into test contexts, so one default-provider test
-  created payment attempts through the real payOS (twice, unpaid, auto-expiring links of 70,000 VND). application.yaml now reads `${APP_DOTENV_IMPORT:...}`, Surefire sets it to a missing file,
-  AbstractCoreIntegrationTest defaults app.payment.provider=MOCK and DotenvIsolationTest guards it. CODING_RULES section 36 records the rule.
-- Design notes: requiresAttention follows the issue text literally (a duplicate lists both SUCCESS payments; the one with the later paid_at is the refund candidate); amount mismatch also applies to FAILED events that carry an amount;
-  PaymentGateway.verifyWebhook has a safe default that verifies nothing; a 401 is returned both for failed verification and for a signed but unparsable body.
-- Run Maven with JDK 21 and `clean` (an IDE auto-compiling into target/classes can break runs).
+- `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, PostgreSQL 18.6 Testcontainers): 628 tests, 0 failures/errors/skips, BUILD SUCCESS,
+  Flyway validated 12 migrations, Hibernate validate passed, zero mentions of api-merchant.payos.vn. A later test-only assertion (summary head fields) was rerun with its classes: 43 tests, 0 failures.
+- Evidence: OrderCreationIntegrationTest (request contract, head selection, slot choice), OrderCancelExpiryIntegrationTest (release keeps the head), OrderConcurrencyIntegrationTest
+  (one reservation per slot, several columns, race with load and with head removal), KioskCatalogIntegrationTest (blocked heads, counting, maxTotalQuantity gone, summary head fields),
+  OrderManagementReadIntegrationTest (historical multi-line orders), payment/webhook suites on one-bowl orders, OrderManagementDocumentationTest and InventoryManagementDocumentationTest (contract).
+- Assumption to confirm with the hardware team: columns are refilled from the top (earlier loaded_at = lower position).
 
 # Testing
 
-## 17. Endpoint / Verification Tests
+## 11. Request Contract Tests
 
-- [x] Valid MOCK signature → processed, `200`
-- [x] Invalid / missing signature → `401`, no state change
-- [x] Malformed JSON → `401`, logged with `raw_payload = NULL`
-- [x] Unknown / inactive provider path → `404`
-- [x] Body > 64 KB → `413`
-- [x] Non-JSON content type → `415`
-- [x] Body is verified from exact raw bytes (whitespace-sensitive test)
-- [x] payOS-signed payload (fixture signed in test with test key) → processed via `PayOsWebhookVerifier`
+- [x] `{ "productId": ... }` creates an order with one item, quantity 1
+- [x] Missing / invalid `productId` → `400`
+- [x] Old shape `{ "items": [...] }` → `400`
+- [x] Extra fields (`quantity`, `price`, `machineId`, `status`) → `400`
+- [x] Response has exactly one item; `subtotal = totalAmount = unitPrice`
 
-## 18. Logging Tests
+## 12. Head Selection Tests
 
-- [x] Every attempt (valid, invalid, malformed, unknown reference) creates exactly one log row
-- [x] Log row survives when business processing rolls back
-- [x] `is_verified` reflects verification result
-- [x] `order_code` holds the provider reference hint (≤ 64 chars)
-- [x] Signature and raw body never appear in application logs (log capture)
+- [x] Column with bowls loaded at t1 < t2 < t3 → bowl loaded at t1 is reserved
+- [x] Fresher bowl deeper in the column is NOT reserved before the head
+- [x] Head RESERVED → slot skipped; second order uses another slot or gets `409`
+- [x] Head EXPIRED status → slot blocked, `409` if no other slot
+- [x] Head AVAILABLE but batch expired → slot blocked
+- [x] Head expiring before `order.expiresAt` → slot blocked
+- [x] Head DISPENSE_FAILED → slot blocked
+- [x] Slot INACTIVE / ERROR → skipped
+- [x] Several sellable slots → slot with earliest head expiry chosen
+- [x] SOLD / REMOVED items are ignored when computing the head
+- [x] Bowls of the same load (same `loaded_at`) handled deterministically
 
-## 19. Success Processing Tests
+## 13. Release Tests
 
-- [x] PENDING payment + PENDING_PAYMENT order → payment `SUCCESS` (txn id, paid_at), order `PAID` (paid_at)
-- [x] Other PENDING attempts of the order → `EXPIRED`
-- [x] Inventory items and allocations remain `RESERVED`
-- [x] No dispense command, no `SOLD`, no `DISPENSED`
-- [x] Order past `expires_at` but still PENDING_PAYMENT → `PAID`
-- [x] Kiosk polling shows `PAID` and payment `SUCCESS`
-- [x] Expiry sweep after PAID does not touch the order
+- [x] Cancel / expiry returns head to AVAILABLE; it is still the head
+- [x] Next order reserves that same bowl again
 
-## 20. Idempotency Tests
+## 14. Concurrency Tests (real PostgreSQL)
 
-- [x] Same webhook delivered twice → second is no-op, `200`, one SUCCESS only
-- [x] Same webhook delivered concurrently (parallel requests) → exactly one state change
-- [x] Transaction id reused for a different payment → `TRANSACTION_CONFLICT`, no change
-- [x] SUCCESS payment receiving a different transaction id → `TRANSACTION_CONFLICT`
+- [x] Two concurrent orders, one slot with ≥ 2 bowls → one `201`, one `409` (one reservation per slot)
+- [x] Two concurrent orders, two sellable slots → both succeed on different slots
+- [x] Order vs concurrent inventory load into the same slot → consistent head
+- [x] Order vs concurrent removal of the head → never reserves a removed bowl
 
-## 21. Anomaly Tests
+## 15. Catalog Tests
 
-- [x] Amount mismatch → payment unchanged, `PAYMENT_AMOUNT_MISMATCH` audit row, `200`
-- [x] Payment for CANCELLED order → payment `SUCCESS`, order stays `CANCELLED`, no re-reservation, `PAYMENT_LATE` audit row
-- [x] Second successful attempt on PAID order → payment `SUCCESS`, order unchanged, `PAYMENT_DUPLICATE` audit row
-- [x] EXPIRED / FAILED payment receiving SUCCESS → `SUCCESS`
-- [x] Unknown reference → `200`, log only, no audit row
-- [x] `requiresAttention=true` returns late and duplicate payments only
+- [x] Product listed only with a sellable head
+- [x] Product whose only slot has an expired head is not listed
+- [x] `availableQuantity` counts only bowls in slots with sellable heads
+- [x] `maxTotalQuantity` no longer present
 
-## 22. FAILED Event Tests
+## 16. Regression / Documentation Tests
 
-- [x] PENDING → FAILED, order unchanged
-- [x] FAILED event on SUCCESS payment → ignored
-
-## 23. Race Tests (real PostgreSQL)
-
-- [x] Webhook vs expiry sweep on the same order → exactly one of {PAID, CANCELLED+LATE_PAYMENT}
-- [x] Webhook vs kiosk cancel → consistent result, inventory never both released and PAID
-- [x] Webhook vs #14 attempt creation step 3 → no lost update
-
-## 24. Management API Tests
-
-- [x] ADMIN can list webhook logs with pagination and filters
-- [x] ADMIN can view detail with raw payload/body
-- [x] Signature never returned
-- [x] STAFF → `403`; unauthenticated → `401`; kiosk key → `401`
-
-## 25. Documentation / Regression Tests
-
-- [x] Swagger UI shows webhook and webhook-log operations with correct security
-- [x] `api-contract/api.yaml` matches exposed OpenAPI
+- [x] Management order list/detail unchanged in shape; historical multi-item orders still readable
+- [x] Inventory load/remove/summary behavior unchanged (except optional §9 fields)
+- [x] Payment flow (#14/#16, if delivered) works with single-bowl orders
+- [x] `ORDER_MAX_TOTAL_QUANTITY` removed from config and `.env.example`
+- [x] Swagger and `api-contract/api.yaml` consistent (documentation test)
 - [x] All existing tests pass (`mvn clean verify`)
-- [x] #13/#14/#15 behavior unchanged except documented extensions
-- [x] Application starts with MOCK and with PAYOS (stubbed)
-
-## 26. Manual Verification (real payOS, not CI)
-
-- [ ] Register webhook URL via tunnel; payOS confirm-webhook succeeds (`200`)
-- [ ] Real small payment → order `PAID`, kiosk polling shows `PAID`
-- [ ] Re-delivery from payOS (if triggerable) is a no-op
-
-Leave manual items unchecked if real payOS access is not available, and state the reason at handoff.
-
----
-
----
+- [x] Flyway / Hibernate validation pass
 
 # Acceptance Criteria
 
-The issue is complete when:
-
-- [x] `POST /api/v1/webhooks/payments/{provider}` implemented for the active provider
-- [x] Raw body read exactly; size/content-type limits enforced
-- [x] Every webhook attempt persisted in its own transaction
-- [x] Signature verified via `PaymentGateway` (MOCK and PAYOS)
-- [x] Unverified requests never change payment/order state
-- [x] Payment resolved by `(provider, payment_reference)`
-- [x] Amount validated with `BigDecimal.compareTo`
-- [x] Payment `SUCCESS` and order `PAID` produced only by verified webhook
-- [x] Other pending attempts expired on PAID
-- [x] Duplicate deliveries are idempotent (sequential and concurrent)
-- [x] Late, duplicate, mismatched and conflicting payments recorded as anomalies
-- [x] No re-reservation for late payments; no automatic refund
-- [x] Response policy (§5) implemented
-- [x] Lock order `Order → Payment → InventoryItem` respected
-- [x] Webhook log list/detail APIs work (ADMIN only, no signature exposure)
-- [x] `requiresAttention` filter works
-- [x] No dispense / SOLD / DISPENSED side effects
-- [x] No secrets, signatures or raw bodies in application logs
-- [x] Existing RBAC and common error handling reused
-- [x] Swagger/OpenAPI and `api-contract/api.yaml` updated and consistent
-- [x] `.ai/` docs and `docs/payment-webhook.md` updated
+- [x] Kiosk order request accepts exactly one `productId`
+- [x] Every new order has exactly one item with quantity 1
+- [x] Only the head bowl of a slot can be reserved
+- [x] At most one RESERVED bowl per slot
+- [x] Blocked heads (reserved, expired, dispense-failed, expiring during hold) block their slot
+- [x] FEFO applied between slot heads only
+- [x] Reservation is atomic and concurrency-safe with slot-level locking
+- [x] Catalog lists only products with a sellable head
+- [x] `max-total-quantity` config and `maxTotalQuantity` field removed
+- [x] Management order APIs unchanged in shape
+- [x] No schema change; applied migrations unchanged
+- [x] `.ai/` docs, `docs/order-management.md`, Swagger and api-contract updated
 - [x] Tests pass (`mvn clean verify`)
-- [x] Flyway validation passes
-- [x] Hibernate `ddl-auto=validate` passes
-- [x] Existing applied migrations remain unchanged
-
----

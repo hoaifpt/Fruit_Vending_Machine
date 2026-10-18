@@ -13,7 +13,7 @@ class PaymentWebhookRollbackIntegrationTest extends AbstractWebhookIntegrationTe
 
     @Test
     void theLogRowSurvivesWhenBusinessProcessingFailsAndTheProviderIsToldToRetry() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         String reference = referenceOf(order.orderId());
         String body = webhookBody(reference, "TXN-ROLLBACK", orderTotal(order.orderId()), "SUCCESS");

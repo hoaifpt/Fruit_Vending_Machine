@@ -126,14 +126,18 @@ public class InventoryService {
         requireSlot(machineId, slotId);
         return listInventory(page, size, machineId, slotId, null, status, expired, null);
     }
-    @Transactional(readOnly = true)
+    /** REPEATABLE READ so the counts and the head come from one snapshot. */
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public InventorySummaryResponse getInventorySummary(UUID machineId, UUID slotId) {
         requireSlot(machineId, slotId); Instant now = clock.instant();
+        var head = items.findHeadCandidates(slotId, PHYSICAL, PageRequest.of(0, 1)).stream().findFirst().orElse(null);
         var counts = items.counts(slotId, now, PHYSICAL, InventoryStatus.AVAILABLE, InventoryStatus.EXPIRED, InventoryStatus.RESERVED, ProductStatus.ACTIVE);
         // Capacity, eligibility and item counts share one database statement snapshot.
         boolean eligible = counts.getSlotStatus() == SlotStatus.ACTIVE && counts.getMachineStatus() == MachineStatus.ACTIVE;
         return new InventorySummaryResponse(machineId, slotId, counts.getCapacity(), counts.getOccupied(), counts.getAvailable(), counts.getExpired(), counts.getReserved(),
-                eligible ? counts.getActiveProductAvailable() : 0, Math.max(0L, counts.getCapacity() - counts.getOccupied()), now);
+                eligible ? counts.getActiveProductAvailable() : 0, Math.max(0L, counts.getCapacity() - counts.getOccupied()), now,
+                head == null ? null : head.getStatus(),
+                head != null && (head.getStatus() == InventoryStatus.EXPIRED || !head.getBatch().getExpiresAt().isAfter(now)));
     }
     private com.fruitmachine.backend.machine.entity.MachineSlot requireSlot(UUID machineId, UUID slotId) {
         if (!machines.existsById(machineId)) throw missing("Machine");

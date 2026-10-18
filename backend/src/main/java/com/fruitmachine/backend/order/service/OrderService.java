@@ -24,13 +24,10 @@ import com.fruitmachine.backend.product.repository.ProductRepository;
 import com.fruitmachine.backend.security.kiosk.AuthenticatedKiosk;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.validation.Valid;
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,62 +67,41 @@ public class OrderService {
     private final Clock clock;
 
     /**
-     * Reserves physical bowls atomically. Lock order: Product (share, by id), Machine (share), then candidate
-     * InventoryItems (SKIP LOCKED). Slot rows are not locked; slot status is part of the candidate predicate.
+     * Reserves exactly one bowl atomically: the head (next bowl to dispense) of a sellable slot. Lock order: Product
+     * (share), Machine (share), candidate Slots (update, id order), head InventoryItem (update). Loading takes
+     * Product, Batch, Machine, Slot and removal Slot, InventoryItem, so no cycle exists.
      */
     @Transactional
     @PreAuthorize("hasRole('KIOSK')")
     public KioskOrderResponse createOrder(AuthenticatedKiosk kiosk, @Valid CreateOrderRequest request) {
-        List<CreateOrderItemRequest> lines = request.items().stream().sorted(Comparator.comparing(CreateOrderItemRequest::productId)).toList();
-        validateLines(lines);
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         Instant expiresAt = now.plus(properties.reservationTtl()).truncatedTo(ChronoUnit.MICROS);
 
-        // Products are first loaded through the shared lock so a concurrent deactivation cannot be missed.
-        Map<UUID, Product> locked = new java.util.LinkedHashMap<>();
-        for (CreateOrderItemRequest line : lines) {
-            Product product = products.findForShareById(line.productId()).orElseThrow(() -> new ResourceNotFoundException("Product not found"));
-            if (product.getStatus() != ProductStatus.ACTIVE) throw new ConflictException("Product is not available for ordering");
-            locked.put(product.getId(), product);
-        }
+        // The product is loaded through the shared lock so a concurrent deactivation cannot be missed.
+        Product product = products.findForShareById(request.productId()).orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+        if (product.getStatus() != ProductStatus.ACTIVE) throw new ConflictException("Product is not available for ordering");
         var machine = machines.findForShareById(kiosk.machineId()).orElseThrow(() -> new ResourceNotFoundException("Machine not found"));
         if (machine.getStatus() != MachineStatus.ACTIVE) throw new ConflictException("Machine is not accepting orders");
-
-        var selected = new java.util.LinkedHashMap<UUID, List<com.fruitmachine.backend.inventory.entity.InventoryItem>>();
-        for (CreateOrderItemRequest line : lines) {
-            selected.put(line.productId(), reservations.selectBowls(machine.getId(), line.productId(), line.quantity(), expiresAt));
-        }
+        var bowl = reservations.selectHead(machine.getId(), product.getId(), expiresAt);
 
         var order = new Order();
         order.setMachine(machine);
         order.setStatus(OrderStatus.PENDING_PAYMENT);
         order.setOrderCode(newOrderCode());
         order.setExpiresAt(expiresAt);
-        BigDecimal subtotal = BigDecimal.ZERO;
-        var built = new ArrayList<OrderItem>();
-        for (CreateOrderItemRequest line : lines) {
-            Product product = locked.get(line.productId());
-            var item = new OrderItem();
-            item.setOrder(order);
-            item.setProduct(product);
-            item.setQuantity(line.quantity());
-            // Immutable purchase-price snapshot; later product price changes never alter an existing order.
-            item.setUnitPrice(product.getPrice());
-            item.setTotalPrice(product.getPrice().multiply(BigDecimal.valueOf(line.quantity())));
-            subtotal = subtotal.add(item.getTotalPrice());
-            built.add(item);
-        }
-        order.setSubtotal(subtotal);
-        order.setTotalAmount(subtotal);
+        // One purchase = one bowl; immutable price snapshot, later product price changes never alter an existing order.
+        order.setSubtotal(product.getPrice());
+        order.setTotalAmount(product.getPrice());
         orders.saveAndFlush(order);
-        for (OrderItem item : built) {
-            orderItems.save(item);
-            order.getItems().add(item);
-        }
-        orderItems.flush();
-        for (OrderItem item : built) {
-            reservations.reserve(order, item, selected.get(item.getProduct().getId()), now);
-        }
+        var item = new OrderItem();
+        item.setOrder(order);
+        item.setProduct(product);
+        item.setQuantity(1);
+        item.setUnitPrice(product.getPrice());
+        item.setTotalPrice(product.getPrice());
+        orderItems.saveAndFlush(item);
+        order.getItems().add(item);
+        reservations.reserve(order, item, bowl, now);
         orders.flush();
         return mapper.kiosk(order, null);
     }
@@ -190,18 +166,6 @@ public class OrderService {
 
     private KioskPaymentResponse currentPayment(Order order) {
         return paymentRepository.findTopByOrderIdOrderByCreatedAtDescIdDesc(order.getId()).map(paymentMapper::kiosk).orElse(null);
-    }
-
-    private void validateLines(List<CreateOrderItemRequest> lines) {
-        Set<UUID> seen = new HashSet<>();
-        long total = 0;
-        for (CreateOrderItemRequest line : lines) {
-            if (!seen.add(line.productId())) throw new BadRequestException("Each productId may appear only once");
-            total += line.quantity();
-        }
-        if (total > properties.maxTotalQuantity()) {
-            throw new BadRequestException("Total quantity may not exceed " + properties.maxTotalQuantity());
-        }
     }
 
     private String newOrderCode() {

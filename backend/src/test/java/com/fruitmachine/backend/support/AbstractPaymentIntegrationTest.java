@@ -36,13 +36,26 @@ public abstract class AbstractPaymentIntegrationTest extends AbstractOrderIntegr
         return new Shop(machine, slot, product, issueKey(machine));
     }
 
-    protected PlacedOrder placeOrder(Shop shop, int quantity) throws Exception {
-        JsonNode order = kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), quantity)), 201);
+    /** Several slots of one bowl each, so that many orders can be PENDING at once (one RESERVED bowl per slot). */
+    protected Shop shopWithSlots(int count) throws Exception {
+        UUID machine = fixtures.machine(admin.token()), product = createProduct("Payment bowl", "35000");
+        UUID batch = fixtures.batch(product, count, staff.token()), first = null;
+        for (int n = 0; n < count; n++) {
+            UUID slot = createSlot(machine, "P" + (n + 1), 30);
+            load(batch, slot, 1);
+            if (first == null) first = slot;
+        }
+        return new Shop(machine, first, product, issueKey(machine));
+    }
+
+    protected PlacedOrder placeOrder(Shop shop) throws Exception {
+        JsonNode order = kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.productId()), 201);
         return new PlacedOrder(shop, UUID.fromString(order.path("id").asText()), order.path("orderCode").asText());
     }
 
-    protected PlacedOrder placeOrder(int quantity) throws Exception {
-        return placeOrder(shop(quantity + 2), quantity);
+    /** One bowl from a fresh machine whose single slot holds a few bowls (only the head is reservable). */
+    protected PlacedOrder placeOrder() throws Exception {
+        return placeOrder(shop(3));
     }
 
     protected JsonNode pay(PlacedOrder order, int expectedStatus) throws Exception {

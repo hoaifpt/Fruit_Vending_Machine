@@ -18,6 +18,13 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
         return null;
     }
 
+    private UUID head(UUID slotId) {
+        return jdbc.queryForObject("""
+                SELECT id FROM inventory_items WHERE slot_id=? AND status IN ('AVAILABLE','RESERVED','EXPIRED','DISPENSE_FAILED')
+                ORDER BY loaded_at, id LIMIT 1
+                """, UUID.class, slotId);
+    }
+
     @Test
     void listsOnlySellableProductsOfTheOwnMachineWithoutInternalIdentifiers() throws Exception {
         UUID machine = fixtures.machine(admin.token()), otherMachine = fixtures.machine(admin.token());
@@ -32,6 +39,7 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
         UUID inactiveSlotBatch = fixtures.batch(inactiveSlotProduct, 5, staff.token());
         UUID removedBatch = fixtures.batch(removedProduct, 5, staff.token());
         UUID otherBatch = fixtures.batch(otherOnly, 5, staff.token());
+        // Column A1 bottom to top: 3 sellable bowls, then short-lived, inactive and removed bowls behind them.
         load(sellableBatch, slot, 3); load(shortBatch, slot, 2); load(inactiveBatch, slot, 1);
         load(inactiveSlotBatch, inactiveSlot, 2); load(otherBatch, otherSlot, 2);
         load(fixtures.batch(sellable, 5, staff.token()), otherSlot, 4);
@@ -47,7 +55,9 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
         var result = catalog(key);
         assertThat(result.path("acceptingOrders").asBoolean()).isTrue();
         assertThat(result.path("machineId").asText()).isEqualTo(machine.toString());
-        assertThat(result.path("maxTotalQuantity").asInt()).isEqualTo(5);
+        // Removed in #35: one purchase is always one bowl.
+        assertThat(result.has("maxTotalQuantity")).isFalse();
+        assertThat(result.fieldNames()).toIterable().containsExactlyInAnyOrder("machineId", "machineCode", "acceptingOrders", "products");
         var only = product(result, sellable);
         assertThat(only).isNotNull();
         assertThat(only.path("availableQuantity").asInt()).isEqualTo(3);
@@ -62,15 +72,72 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
     }
 
     @Test
-    void reservedBowlsLeaveTheCatalogAndReleasedBowlsReturn() throws Exception {
+    void reservedHeadBlocksItsColumnAndReleasingItRestoresTheProduct() throws Exception {
         var stock = fixtures.stock(5, 5, admin.token(), staff.token());
         fixtures.load(stock, 4, staff.token());
         String key = issueKey(stock.machineId());
         assertThat(product(catalog(key), stock.productId()).path("availableQuantity").asInt()).isEqualTo(4);
-        var order = kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(line(stock.productId(), 3)), 201);
-        assertThat(product(catalog(key), stock.productId()).path("availableQuantity").asInt()).isEqualTo(1);
+        var order = kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(stock.productId()), 201);
+        // The only column's head is RESERVED: the three bowls behind it cannot drop, so the product is not listed.
+        assertThat(product(catalog(key), stock.productId())).isNull();
         kioskData("POST", "/api/v1/kiosk/orders/" + order.path("id").asText() + "/cancel", key, null, 200);
         assertThat(product(catalog(key), stock.productId()).path("availableQuantity").asInt()).isEqualTo(4);
+    }
+
+    @Test
+    void blockedHeadsHideTheProductAndOnlySellableColumnsAreCounted() throws Exception {
+        UUID machine = fixtures.machine(admin.token());
+        UUID expiredStatus = createProduct("Head EXPIRED status", "10000"), expiredBatch = createProduct("Head batch expired", "10000"),
+                failed = createProduct("Head DISPENSE_FAILED", "10000"), soon = createProduct("Head expires during hold", "10000"),
+                counted = createProduct("Counted product", "10000"), otherHead = createProduct("Other product head", "10000");
+        UUID a1 = createSlot(machine, "A1", 10), a2 = createSlot(machine, "A2", 10), a3 = createSlot(machine, "A3", 10), a4 = createSlot(machine, "A4", 10),
+                b1 = createSlot(machine, "B1", 10), b2 = createSlot(machine, "B2", 10), b3 = createSlot(machine, "B3", 10);
+        // A1: head set to EXPIRED status; fresh bowls of the same product behind it.
+        load(fixtures.batch(expiredStatus, 4, staff.token()), a1, 4);
+        jdbc.update("UPDATE inventory_items SET status='EXPIRED' WHERE id=?", head(a1));
+        // A2: head AVAILABLE but its batch is already expired; fresh bowls behind it.
+        UUID stale = shortBatch(expiredBatch, 1, 3600);
+        load(stale, a2, 1);
+        load(fixtures.batch(expiredBatch, 3, staff.token()), a2, 3);
+        jdbc.update("UPDATE product_batches SET expires_at = now() - interval '1 minute' WHERE id=?", stale);
+        // A3: head DISPENSE_FAILED.
+        load(fixtures.batch(failed, 3, staff.token()), a3, 3);
+        jdbc.update("UPDATE inventory_items SET status='DISPENSE_FAILED' WHERE id=?", head(a3));
+        // A4: head expires in 2 minutes, before the 5 minute hold ends.
+        load(shortBatch(soon, 1, 120), a4, 1);
+        load(fixtures.batch(soon, 2, staff.token()), a4, 2);
+        // Counted product: B1 sellable (2 bowls), B2 blocked by an EXPIRED head (3 fresh behind it), B3 with another product on top.
+        UUID countedBatch = fixtures.batch(counted, 10, staff.token());
+        load(countedBatch, b1, 2);
+        load(countedBatch, b2, 4);
+        jdbc.update("UPDATE inventory_items SET status='EXPIRED' WHERE id=?", head(b2));
+        load(fixtures.batch(otherHead, 1, staff.token()), b3, 1);
+        load(countedBatch, b3, 2);
+
+        var result = catalog(issueKey(machine));
+        for (UUID blocked : new UUID[]{expiredStatus, expiredBatch, failed, soon})
+            assertThat(product(result, blocked)).as("blocked product %s", blocked).isNull();
+        assertThat(product(result, counted).path("availableQuantity").asInt()).as("only B1 counts").isEqualTo(2);
+        assertThat(product(result, otherHead).path("availableQuantity").asInt()).isEqualTo(1);
+        assertThat(result.path("products")).hasSize(2);
+
+        // Optional section 9: the slot summary shows staff which head blocks a column; existing fields are unchanged.
+        String summary = "/api/v1/machines/" + machine + "/slots/%s/inventory/summary";
+        var expiredHead = fixtures.api("GET", summary.formatted(a1), null, staff.token(), 200);
+        assertThat(expiredHead.path("headStatus").asText()).isEqualTo("EXPIRED");
+        assertThat(expiredHead.path("headExpired").asBoolean()).isTrue();
+        assertThat(expiredHead.path("occupiedCount").asLong()).isEqualTo(4);
+        var staleHead = fixtures.api("GET", summary.formatted(a2), null, staff.token(), 200);
+        assertThat(staleHead.path("headStatus").asText()).isEqualTo("AVAILABLE");
+        assertThat(staleHead.path("headExpired").asBoolean()).isTrue();
+        assertThat(fixtures.api("GET", summary.formatted(a3), null, staff.token(), 200).path("headStatus").asText()).isEqualTo("DISPENSE_FAILED");
+        var sellableHead = fixtures.api("GET", summary.formatted(b1), null, staff.token(), 200);
+        assertThat(sellableHead.path("headStatus").asText()).isEqualTo("AVAILABLE");
+        assertThat(sellableHead.path("headExpired").asBoolean()).isFalse();
+        UUID empty = createSlot(machine, "E1", 10);
+        var emptySlot = fixtures.api("GET", summary.formatted(empty), null, staff.token(), 200);
+        assertThat(emptySlot.path("headStatus").isNull()).isTrue();
+        assertThat(emptySlot.path("headExpired").asBoolean()).isFalse();
     }
 
     @Test

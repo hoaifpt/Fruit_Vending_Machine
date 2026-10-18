@@ -24,12 +24,12 @@ class MockWebhookIntegrationTest extends AbstractOrderIntegrationTest {
         UUID slot = createSlot(machine, "M1", 10), product = createProduct("Mock bowl", "35000");
         load(fixtures.batch(product, 3, staff.token()), slot, 3);
         String key = issueKey(machine);
-        UUID orderId = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(line(product, 2)), 201).path("id").asText());
+        UUID orderId = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(product), 201).path("id").asText());
         var payment = kioskData("POST", "/api/v1/kiosk/orders/" + orderId + "/payments", key, null, 201);
         assertThat(payment.path("provider").asText()).isEqualTo("MOCK");
         String reference = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, orderId);
 
-        String body = "{\"paymentReference\":\"" + reference + "\",\"transactionId\":\"MOCK-TXN-0001\",\"amount\":70000.00,\"status\":\"SUCCESS\"}";
+        String body = "{\"paymentReference\":\"" + reference + "\",\"transactionId\":\"MOCK-TXN-0001\",\"amount\":35000.00,\"status\":\"SUCCESS\"}";
         var response = mvc.perform(post("/api/v1/webhooks/payments/mock").contentType("application/json").content(body)
                 .header("X-Mock-Signature", HmacSha256.hex(SECRET, body))).andReturn().getResponse();
         assertThat(response.getStatus()).isEqualTo(200);

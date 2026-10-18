@@ -65,7 +65,7 @@ class OrderManagementDocumentationTest {
         }
         List<String> schemas = new ArrayList<>();
         collectSchemaRefs(actual, actual.path("paths"), PATHS, schemas);
-        assertThat(schemas).contains("CreateOrderRequest", "CreateOrderItemRequest", "KioskOrderResponse", "OrderDetailResponse", "OrderPageResponse",
+        assertThat(schemas).contains("CreateOrderRequest", "KioskOrderResponse", "OrderDetailResponse", "OrderPageResponse",
                 "KioskCatalogResponse", "IssuedKioskCredentialResponse", "KioskCredentialResponse", "KioskIdentityResponse");
         // The shared error schema predates this issue and is hand-documented; only its property names are compared.
         assertThat(actual.at("/components/schemas/ApiErrorResponse/properties").fieldNames()).toIterable()
@@ -91,9 +91,14 @@ class OrderManagementDocumentationTest {
         }
         var create = actual.at("/components/schemas/CreateOrderRequest");
         assertThat(create.path("additionalProperties").asBoolean(true)).isFalse();
-        assertThat(create.at("/properties").fieldNames()).toIterable().containsExactly("items");
-        assertThat(actual.at("/components/schemas/CreateOrderItemRequest/properties").fieldNames()).toIterable().containsExactlyInAnyOrder("productId", "quantity");
-        assertThat(actual.at("/components/schemas/CreateOrderItemRequest/properties/quantity/minimum").asInt()).isEqualTo(1);
+        // Issue #35: one bowl per order, the request carries exactly one productId and nothing else.
+        assertThat(create.at("/properties").fieldNames()).toIterable().containsExactly("productId");
+        assertThat(create.path("required").toString()).contains("productId");
+        assertThat(create.at("/properties/productId/format").asText()).isEqualTo("uuid");
+        assertThat(actual.at("/components/schemas/CreateOrderItemRequest").isMissingNode()).isTrue();
+        assertThat(actual.at("/components/schemas/KioskCatalogResponse/properties").has("maxTotalQuantity")).isFalse();
+        assertThat(actual.at("/paths/~1api~1v1~1kiosk~1orders/post/requestBody/content/application~1json/example").fieldNames()).toIterable().containsExactly("productId");
+        assertThat(actual.at("/tags").toString()).contains("issue #35");
         assertThat(actual.at("/components/schemas/KioskCredentialResponse/properties").fieldNames()).toIterable()
                 .containsExactlyInAnyOrder("credentialId", "keyPrefix", "status", "createdAt", "createdBy", "revokedAt", "revokedBy");
         // The management Orders API is read-only; no write or status operation is exposed.

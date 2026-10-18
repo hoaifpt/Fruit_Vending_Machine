@@ -622,7 +622,7 @@ other orders method. User JWT on kiosk paths is 403; kiosk key on management pat
 `machine.kiosk` owns credential entity/repository/service/controllers (ADMIN issue/rotate, list,
 revoke) and kiosk identity. `inventory` owns the catalog (one grouped query). `order` owns
 OrderController (read-only management), KioskOrderController, OrderService (create/read/cancel/list),
-OrderReservationService (FEFO SKIP LOCKED selection, RESERVE and RETURN side effects),
+OrderReservationService (slot-head selection since #35, RESERVE and RETURN side effects),
 OrderExpiryService (own transaction per order, lock-then-recheck, injected Clock),
 OrderExpiryScheduler (trigger only, `app.order.expiry-sweep.enabled`) and OrderCodeGenerator.
 Typed `app.order.*` properties fail startup when invalid. Only PENDING_PAYMENT and CANCELLED are
@@ -662,3 +662,12 @@ raw body (64 KB, JSON only) and maps results; `PaymentWebhookService` orchestrat
 `PaymentConfirmationService` is the single place that produces payment SUCCESS and order PAID (one transaction, Order then Payment locks, idempotent, amounts compared with compareTo);
 `PaymentAnomalyRecorder` writes audit_logs rows (joins the transaction, or its own for a rolled-back unique violation); `PaymentWebhookLogService` and `PaymentWebhookLogController` are the ADMIN read APIs
 and `requiresAttention` is a derived filter on payments. Business services never reference provider classes. Tests never read the developer .env (see CODING_RULES). See [payment-webhook.md](../../docs/payment-webhook.md).
+
+## 22. Saleable inventory = sellable slot head — Issue #35
+
+Saleable inventory is the sellable head of a slot, not any AVAILABLE bowl: the head is the physically present bowl
+(AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED) with the earliest loaded_at (tie-break id), and only an AVAILABLE head whose batch outlives
+the hold deadline, of an ACTIVE product in an ACTIVE slot of an ACTIVE machine, can be reserved. Hence at most one RESERVED bowl per slot.
+`OrderService.createOrder` takes one productId; `OrderReservationService.selectHead` locks candidate slots (FOR UPDATE, id order), recomputes
+heads in SQL (`InventoryItemRepository.findSellableHeadId`, DISTINCT ON) and locks the chosen head. `KioskCatalogService` uses one aggregate
+SQL with the same head rule. `InventoryService.getInventorySummary` adds headStatus/headExpired under REPEATABLE READ. Release is unchanged.

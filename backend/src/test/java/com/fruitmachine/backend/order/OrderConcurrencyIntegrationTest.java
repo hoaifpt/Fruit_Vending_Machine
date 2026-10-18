@@ -5,7 +5,6 @@ import java.sql.Connection;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -45,8 +44,22 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
         }
     }
 
-    private Callable<Integer> create(Shop shop, int quantity) {
-        return () -> kioskCall("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), quantity))).getResponse().getStatus();
+    private Callable<Integer> create(Shop shop) {
+        return () -> kioskCall("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.productId())).getResponse().getStatus();
+    }
+
+    private Callable<Integer> loadTask(UUID batchId, UUID slotId, int quantity) {
+        return () -> mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/inventory/load")
+                .header("Authorization", "Bearer " + staff.token()).contentType("application/json")
+                .content(json.writeValueAsString(com.fruitmachine.backend.support.TestDataFactory.loadBody(batchId, slotId, quantity))))
+                .andReturn().getResponse().getStatus();
+    }
+
+    private UUID head(UUID slotId) {
+        return jdbc.queryForObject("""
+                SELECT id FROM inventory_items WHERE slot_id=? AND status IN ('AVAILABLE','RESERVED','EXPIRED','DISPENSE_FAILED')
+                ORDER BY loaded_at, id LIMIT 1
+                """, UUID.class, slotId);
     }
 
     private long count(String sql, Object... args) {
@@ -57,7 +70,7 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
     void twoConcurrentOrdersForTheLastBowlYieldExactlyOneCreatedAndOneConflict() throws Exception {
         for (int round = 0; round < 3; round++) {
             Shop shop = shop(1);
-            var statuses = parallel(List.of(create(shop, 1), create(shop, 1)));
+            var statuses = parallel(List.of(create(shop), create(shop)));
             assertThat(statuses).containsExactlyInAnyOrder(201, 409);
             assertThat(count("SELECT count(*) FROM orders WHERE machine_id=?", shop.machineId())).isEqualTo(1);
             assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", shop.slotId())).isEqualTo(1);
@@ -66,38 +79,79 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
     }
 
     @Test
-    void concurrentOrdersForNBowlsNeverOverReserveOrShareABowl() throws Exception {
-        Shop shop = shop(4);
-        var statuses = parallel(java.util.stream.IntStream.range(0, 8).mapToObj(i -> create(shop, 1)).toList());
-        assertThat(statuses.stream().filter(s -> s == 201).count()).isEqualTo(4);
-        assertThat(statuses.stream().filter(s -> s == 409).count()).isEqualTo(4);
-        assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", shop.slotId())).isEqualTo(4);
-        assertThat(count("SELECT count(DISTINCT a.inventory_item_id) FROM order_item_allocations a JOIN inventory_items i ON i.id=a.inventory_item_id WHERE i.slot_id=? AND a.status='RESERVED'", shop.slotId())).isEqualTo(4);
-        assertThat(count("SELECT count(*) FROM inventory_transactions WHERE type='RESERVE' AND slot_id=?", shop.slotId())).isEqualTo(4);
+    void twoConcurrentOrdersOnOneColumnWithSeveralBowlsYieldOneReservation() throws Exception {
+        for (int round = 0; round < 3; round++) {
+            Shop shop = shop(3);
+            UUID head = head(shop.slotId());
+            var statuses = parallel(List.of(create(shop), create(shop)));
+            assertThat(statuses).containsExactlyInAnyOrder(201, 409);
+            assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", shop.slotId())).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT status FROM inventory_items WHERE id=?", String.class, head)).isEqualTo("RESERVED");
+        }
     }
 
     @Test
-    void orderRacingWithRemovalOfTheSameBowlLeavesOneConsistentOutcome() throws Exception {
+    void concurrentOrdersOverSeveralColumnsReserveExactlyOneHeadPerColumn() throws Exception {
+        UUID machine = fixtures.machine(admin.token());
+        UUID product = createProduct("Race columns", "10000");
+        List<UUID> slots = new ArrayList<>();
+        for (int n = 1; n <= 4; n++) {
+            UUID slot = createSlot(machine, "R" + n, 10);
+            load(fixtures.batch(product, 2, staff.token()), slot, 2);
+            slots.add(slot);
+        }
+        Shop shop = new Shop(machine, slots.get(0), product, issueKey(machine));
+        // Two orders, two free columns: both succeed on different columns.
+        assertThat(parallel(List.of(create(shop), create(shop)))).containsExactly(201, 201);
+        assertThat(count("SELECT count(DISTINCT i.slot_id) FROM inventory_items i WHERE i.status='RESERVED' AND i.slot_id IN (?,?,?,?)", slots.toArray())).isEqualTo(2);
+        // Eight more orders for the two remaining free columns.
+        var statuses = parallel(java.util.stream.IntStream.range(0, 8).mapToObj(i -> create(shop)).toList());
+        assertThat(statuses.stream().filter(s -> s == 201).count()).isEqualTo(2);
+        assertThat(statuses.stream().filter(s -> s == 409).count()).isEqualTo(6);
+        for (UUID slot : slots) {
+            assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", slot)).as("one per column").isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT status FROM inventory_items WHERE id=?", String.class, head(slot))).isEqualTo("RESERVED");
+        }
+        assertThat(count("SELECT count(*) FROM inventory_transactions WHERE type='RESERVE' AND machine_id=?", machine)).isEqualTo(4);
+    }
+
+    @Test
+    void orderRacingWithALoadIntoTheSameColumnAlwaysReservesTheExistingHead() throws Exception {
         for (int round = 0; round < 3; round++) {
             Shop shop = shop(1);
-            UUID item = jdbc.queryForObject("SELECT id FROM inventory_items WHERE slot_id=?", UUID.class, shop.slotId());
-            var statuses = parallel(List.of(create(shop, 1), () -> {
+            UUID head = head(shop.slotId());
+            UUID more = fixtures.batch(shop.productId(), 2, staff.token());
+            var statuses = parallel(List.of(create(shop), loadTask(more, shop.slotId(), 2)));
+            assertThat(statuses).containsExactly(201, 201);
+            assertThat(head(shop.slotId())).isEqualTo(head);
+            assertThat(jdbc.queryForObject("SELECT status FROM inventory_items WHERE id=?", String.class, head)).isEqualTo("RESERVED");
+            assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", shop.slotId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM inventory_items WHERE batch_id=? AND status='AVAILABLE'", more)).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void orderRacingWithRemovalOfTheHeadNeverReservesTheRemovedBowl() throws Exception {
+        for (int round = 0; round < 4; round++) {
+            Shop shop = shop(2);
+            UUID item = head(shop.slotId());
+            var statuses = parallel(List.of(create(shop), () -> {
                 var req = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/inventory/" + item + "/remove")
                         .header("Authorization", "Bearer " + staff.token()).contentType("application/json").content("{\"reason\":\"Race removal\"}");
                 return mvc.perform(req).andReturn().getResponse().getStatus();
             }));
             String finalStatus = jdbc.queryForObject("SELECT status FROM inventory_items WHERE id=?", String.class, item);
-            long orders = count("SELECT count(*) FROM orders WHERE machine_id=?", shop.machineId());
             long allocations = count("SELECT count(*) FROM order_item_allocations WHERE inventory_item_id=?", item);
-            if (statuses.get(0) == 201) {
-                assertThat(statuses.get(1)).isEqualTo(409);
+            // The order always succeeds: either on the head, or (head removed first) on the bowl that became the head.
+            assertThat(statuses.get(0)).isEqualTo(201);
+            assertThat(count("SELECT count(*) FROM orders WHERE machine_id=?", shop.machineId())).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", shop.slotId())).isEqualTo(1);
+            if (statuses.get(1) == 409) {
                 assertThat(finalStatus).isEqualTo("RESERVED");
-                assertThat(orders).isEqualTo(1);
                 assertThat(allocations).isEqualTo(1);
             } else {
-                assertThat(statuses).containsExactly(409, 200);
+                assertThat(statuses.get(1)).isEqualTo(200);
                 assertThat(finalStatus).isEqualTo("REMOVED");
-                assertThat(orders).isZero();
                 assertThat(allocations).isZero();
             }
         }
@@ -114,7 +168,7 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
             }
             ExecutorService pool = Executors.newSingleThreadExecutor();
             try {
-                Future<Integer> order = pool.submit(create(shop, 1));
+                Future<Integer> order = pool.submit(create(shop));
                 awaitBlockedStatement();
                 assertThat(order.isDone()).isFalse();
                 try (var update = deactivation.prepareStatement("UPDATE products SET status='INACTIVE' WHERE id=?")) {
@@ -160,15 +214,15 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
     void cancelRacingWithTheExpirySweepReleasesEachOrderExactlyOnce() throws Exception {
         for (int round = 0; round < 4; round++) {
             Shop shop = shop(3);
-            UUID order = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), 3)), 201).path("id").asText());
+            UUID order = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.productId()), 201).path("id").asText());
             clock.advance(Duration.ofMinutes(10));
             var statuses = parallel(List.of(
                     () -> kioskCall("POST", "/api/v1/kiosk/orders/" + order + "/cancel", shop.key(), null).getResponse().getStatus(),
                     () -> expiry.sweep()));
             assertThat(statuses.get(0)).isEqualTo(200);
             assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, order)).isEqualTo("CANCELLED");
-            assertThat(count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", order)).isEqualTo(3);
-            assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status='RELEASED'", order)).isEqualTo(3);
+            assertThat(count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", order)).isEqualTo(1);
+            assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status='RELEASED'", order)).isEqualTo(1);
             assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='AVAILABLE'", shop.slotId())).isEqualTo(3);
             assertThat(jdbc.queryForObject("SELECT reason FROM inventory_transactions WHERE reference_id=? AND type='RETURN' LIMIT 1", String.class, order))
                     .isIn("ORDER_CANCELLED", "RESERVATION_EXPIRED");

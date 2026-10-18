@@ -77,7 +77,6 @@ app:
       cancel-timeout: ${PAYOS_CANCEL_TIMEOUT:PT3S}
   order:
     reservation-ttl: ${ORDER_RESERVATION_TTL:PT5M}
-    max-total-quantity: ${ORDER_MAX_TOTAL_QUANTITY:5}
     expiry-sweep:
       enabled: ${ORDER_EXPIRY_SWEEP_ENABLED:true}
       interval: ${ORDER_EXPIRY_SWEEP_INTERVAL:PT30S}

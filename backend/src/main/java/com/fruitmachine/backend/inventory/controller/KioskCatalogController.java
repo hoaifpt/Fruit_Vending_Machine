@@ -35,8 +35,9 @@ public class KioskCatalogController {
 
     @GetMapping("/api/v1/kiosk/catalog")
     @Operation(operationId = "getKioskCatalog", summary = "List sellable products of the kiosk machine",
-            description = "KIOSK only. Products with at least one sellable bowl: AVAILABLE, loaded in an ACTIVE slot of this machine, batch expiring after the reservation hold deadline, ACTIVE product. "
-                    + "A machine that is not ACTIVE returns acceptingOrders=false and no products. availableQuantity is a snapshot, not a reservation. No slot, item or batch identifiers are exposed.")
+            description = "KIOSK only. Products that can be dispensed now: an ACTIVE product listed only when at least one ACTIVE slot of this machine has a sellable head of it "
+                    + "(the bottom bowl of the column is AVAILABLE and its batch expires after the reservation hold deadline). A product whose slots are all blocked by a RESERVED, EXPIRED, DISPENSE_FAILED or expiring head is not listed. "
+                    + "A machine that is not ACTIVE returns acceptingOrders=false and no products. availableQuantity is a display snapshot, not a reservation. No slot, item or batch identifiers are exposed; one order buys one bowl.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Sellable catalog")
     public ResponseEntity<ApiResponse<KioskCatalogResponse>> catalog(@AuthenticationPrincipal AuthenticatedKiosk kiosk) {
         return ResponseEntity.ok().header("Cache-Control", "no-store").body(ApiResponse.success("Kiosk catalog retrieved", catalog.catalog(kiosk)));

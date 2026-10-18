@@ -76,7 +76,7 @@ class PayOsIntegrationTest extends AbstractOrderIntegrationTest {
         UUID slot = createSlot(machine, "Q1", 20), product = createProduct("PayOS bowl", price);
         load(fixtures.batch(product, quantity + 1, staff.token()), slot, quantity + 1);
         String key = issueKey(machine);
-        var order = kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(line(product, quantity)), 201);
+        var order = kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(product), 201);
         return new Placed(machine, slot, product, key, UUID.fromString(order.path("id").asText()));
     }
 
@@ -95,7 +95,7 @@ class PayOsIntegrationTest extends AbstractOrderIntegrationTest {
         var created = kioskJson("POST", order.payments(), order.key(), null, 201).path("data");
         assertThat(created.path("provider").asText()).isEqualTo("PAYOS");
         assertThat(created.path("status").asText()).isEqualTo("PENDING");
-        assertThat(created.path("amount").decimalValue()).isEqualByComparingTo("70000");
+        assertThat(created.path("amount").decimalValue()).isEqualByComparingTo("35000");
         assertThat(created.path("qrCode").asText()).isEqualTo("STUB-VIETQR-PAYLOAD");
 
         var row = jdbc.queryForMap("SELECT provider, payment_reference, qr_code, amount, status, expired_at FROM payments WHERE order_id=?", order.orderId());
@@ -105,7 +105,7 @@ class PayOsIntegrationTest extends AbstractOrderIntegrationTest {
         assertThat(STUB.creates()).hasSize(1);
         JsonNode sent = json.readTree(STUB.creates().get(0).body());
         assertThat(sent.get("orderCode").asLong()).isEqualTo(Long.parseLong((String) row.get("payment_reference")));
-        assertThat(sent.get("amount").asLong()).isEqualTo(70000L);
+        assertThat(sent.get("amount").asLong()).isEqualTo(35000L);
         assertThat(sent.get("expiredAt").asLong()).isEqualTo(((java.sql.Timestamp) row.get("expired_at")).toInstant().getEpochSecond());
         assertThat(sent.get("description").asText()).matches("FV[A-Z0-9]{0,7}");
         // Reuse does not call payOS again.

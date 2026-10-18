@@ -18,7 +18,7 @@ class PaymentWebhookEndpointIntegrationTest extends AbstractWebhookIntegrationTe
     }
 
     private PlacedOrder payable() throws Exception {
-        var order = placeOrder(2);
+        var order = placeOrder();
         pay(order, 201);
         return order;
     }

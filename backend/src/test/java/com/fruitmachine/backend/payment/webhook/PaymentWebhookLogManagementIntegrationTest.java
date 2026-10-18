@@ -79,7 +79,7 @@ class PaymentWebhookLogManagementIntegrationTest extends AbstractWebhookIntegrat
         String body = webhookBody("ACCESS-REF", "T", "1", "SUCCESS");
         send(body);
         UUID id = jdbc.queryForObject("SELECT id FROM payment_webhook_logs WHERE order_code='ACCESS-REF' LIMIT 1", UUID.class);
-        var order = placeOrder(1);
+        var order = placeOrder();
         for (String path : new String[]{LOGS, LOGS + "/" + id}) {
             fixtures.response("GET", path, null, staff.token(), 403);
             fixtures.response("GET", path, null, null, 401);
@@ -105,7 +105,7 @@ class PaymentWebhookLogManagementIntegrationTest extends AbstractWebhookIntegrat
 
     @Test
     void anAnomalousPaymentIsReachableFromTheWebhookLogByItsReference() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         String reference = referenceOf(order.orderId());
         paid(reference, "TXN-MISMATCH", "1");

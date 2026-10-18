@@ -22,14 +22,14 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void kioskCancelExpiresPendingAttemptsAndReleasesInventory() throws Exception {
-        var order = placeOrder(2);
+        var order = placeOrder();
         var shop = order.shop();
         pay(order, 201);
         kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", shop.key(), null, 200);
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE order_id=?", String.class, order.orderId())).isEqualTo("EXPIRED");
         assertThat(orderStatus(order.orderId())).isEqualTo("CANCELLED");
         assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", shop.slotId())).isZero();
-        assertThat(count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", order.orderId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", order.orderId())).isEqualTo(1);
         // Cancelling again stays idempotent and keeps the payment EXPIRED.
         kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", shop.key(), null, 200);
         assertThat(count("SELECT count(*) FROM payments WHERE order_id=? AND status='EXPIRED'", order.orderId())).isEqualTo(1);
@@ -37,7 +37,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void expirySweepExpiresPendingAttemptsAndReleasesInventory() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         clock.advance(Duration.ofMinutes(6));
         assertThat(expiry.sweep()).isEqualTo(1);
@@ -48,7 +48,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void failedAndExpiredAttemptsNeverChangeTheOrderAndNothingProducesSuccessOrPaid() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.mode(Mode.FAIL);
         pay(order, 502);
         gateway.mode(Mode.SUCCESS);
@@ -64,7 +64,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void kioskPollingShowsTheLatestAttemptAndHidesAStaleQr() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         assertThat(kioskData("GET", order.order(), order.shop().key(), null, 200).path("currentPayment").isNull()).isTrue();
         var created = pay(order, 201).path("data");
         var polled = kioskData("GET", order.order(), order.shop().key(), null, 200);
@@ -89,7 +89,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void cancelledOrderPollsAnExpiredPaymentWithoutQr() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         var cancelled = kioskData("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
         assertThat(cancelled.path("currentPayment").path("status").asText()).isEqualTo("EXPIRED");
@@ -98,7 +98,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void cancelledAttemptsInvalidateTheProviderLinkOnlyAfterCommitWithTheMatchingReason() throws Exception {
-        var cancelled = placeOrder(1);
+        var cancelled = placeOrder();
         pay(cancelled, 201);
         String cancelledRef = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, cancelled.orderId());
         assertThat(gateway.cancels()).isEmpty();
@@ -110,7 +110,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
         assertThat(gateway.cancels()).hasSize(1);
 
         gateway.reset();
-        var swept = placeOrder(1);
+        var swept = placeOrder();
         pay(swept, 201);
         String sweptRef = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, swept.orderId());
         clock.advance(Duration.ofMinutes(6));
@@ -120,7 +120,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void replacingAnExpiredAttemptInvalidatesTheOldLinkWithAttemptExpired() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         String first = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, order.orderId());
         clock.advance(Duration.ofMinutes(2).plusSeconds(1));
@@ -131,7 +131,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void aRolledBackExpiryDoesNotInvalidateAnything() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         transactions.executeWithoutResult(status -> {
             var entity = orders.findForUpdateById(order.orderId()).orElseThrow();
@@ -144,7 +144,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void attemptsOfAnotherProviderAreNeverCancelledThroughTheActiveGateway() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         jdbc.update("INSERT INTO payments(order_id, provider, payment_reference, amount, status, expired_at) VALUES (?, 'MOCK', 'MOCK-OLD', 1, 'PENDING', now() + interval '1 minute')", order.orderId());
         kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE payment_reference='MOCK-OLD'", String.class)).isEqualTo("EXPIRED");
@@ -153,7 +153,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void aLinkCreatedWhileTheOrderWasCancelledIsInvalidatedToo() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.duringCall(() -> {
             try {
                 kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
@@ -169,7 +169,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void concurrentCreateRequestsProduceAtMostOneAttempt() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         // Keep the first provider call open so the second request overlaps with it.
         gateway.duringCall(() -> sleep(400));
         List<Integer> statuses = parallel(List.of(
@@ -185,7 +185,7 @@ class PaymentLifecycleIntegrationTest extends AbstractPaymentIntegrationTest {
     @Test
     void createAttemptRacingWithCancelNeverLeavesAPendingAttemptOnACancelledOrder() throws Exception {
         for (int round = 0; round < 4; round++) {
-            var order = placeOrder(1);
+            var order = placeOrder();
             gateway.reset();
             gateway.duringCall(() -> sleep(150));
             List<Integer> statuses = parallel(List.of(

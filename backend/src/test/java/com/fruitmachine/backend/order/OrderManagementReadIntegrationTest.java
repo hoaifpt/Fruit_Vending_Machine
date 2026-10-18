@@ -12,12 +12,29 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
     private record Shop(UUID machineId, UUID slotId, UUID productId, UUID secondProductId, String key) {}
 
+    /** Each product has its own column (slot), so one PENDING order per product can coexist. */
     private Shop shop() throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "S1", 30), a = createProduct("Read A", "10000"), b = createProduct("Read B", "2500.50");
+        UUID slot = createSlot(machine, "S1", 30), second = createSlot(machine, "S2", 30);
+        UUID a = createProduct("Read A", "10000"), b = createProduct("Read B", "2500.50");
         load(fixtures.batch(a, 10, staff.token()), slot, 10);
-        load(fixtures.batch(b, 10, staff.token()), slot, 10);
+        load(fixtures.batch(b, 10, staff.token()), second, 10);
         return new Shop(machine, slot, a, b, issueKey(machine));
+    }
+
+    /** Historical (pre-#35) order: Read A x2 from S1 and Read B x1 from S2, CANCELLED with RELEASED allocations. */
+    private UUID historical(Shop shop) {
+        UUID id = insertHistoricalOrder(shop.machineId(), shop.slotId(), new Object[]{shop.productId(), 2});
+        UUID line = UUID.randomUUID();
+        jdbc.update("INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, total_price) SELECT ?, ?, id, 1, price, price FROM products WHERE id=?",
+                line, id, shop.secondProductId());
+        jdbc.update("""
+                INSERT INTO order_item_allocations (order_item_id, inventory_item_id, status, released_at)
+                SELECT ?, i.id, 'RELEASED', now() FROM inventory_items i JOIN machine_slots s ON s.id = i.slot_id
+                WHERE s.machine_id = ? AND s.slot_code = 'S2' ORDER BY i.loaded_at, i.id LIMIT 1
+                """, line, shop.machineId());
+        jdbc.update("UPDATE orders SET subtotal=22500.50, total_amount=22500.50 WHERE id=?", id);
+        return id;
     }
 
     @Test
@@ -25,10 +42,13 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
         Shop shop = shop(), other = shop();
         Instant start = Instant.now().minusSeconds(5);
         List<JsonNode> created = new ArrayList<>();
-        created.add(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), 1)), 201));
-        created.add(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), 2), line(shop.secondProductId(), 1)), 201));
-        created.add(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.secondProductId(), 3)), 201));
-        kioskData("POST", "/api/v1/kiosk/orders", other.key(), orderBody(line(other.productId(), 1)), 201);
+        created.add(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.productId()), 201));
+        Thread.sleep(5);
+        // Historical multi-line order (pre-#35 shape) stays listable with its real line and bowl counts.
+        created.add(fixtures.api("GET", "/api/v1/orders/" + historical(shop), null, admin.token(), 200));
+        Thread.sleep(5);
+        created.add(kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.secondProductId()), 201));
+        kioskData("POST", "/api/v1/kiosk/orders", other.key(), orderBody(other.productId()), 201);
         kioskData("POST", "/api/v1/kiosk/orders/" + created.get(2).path("id").asText() + "/cancel", shop.key(), null, 200);
 
         for (String token : new String[]{admin.token(), staff.token()}) {
@@ -44,18 +64,18 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
         assertThat(second.path("content")).hasSize(1);
         assertThat(second.path("content").get(0).path("itemCount").asLong()).isEqualTo(1);
         assertThat(second.path("content").get(0).path("totalQuantity").asLong()).isEqualTo(1);
-        // Newest first: 3 bowls of one product, then 2+1 bowls of two products, then 1 bowl.
+        // Newest first: a new one-bowl order, then the historical 2+1 bowls of two products, then a one-bowl order.
         var firstPage = fixtures.api("GET", "/api/v1/orders?machineId=" + shop.machineId() + "&size=2&page=0", null, admin.token(), 200);
         assertThat(firstPage.path("content").get(0).path("itemCount").asLong()).isEqualTo(1);
-        assertThat(firstPage.path("content").get(0).path("totalQuantity").asLong()).isEqualTo(3);
+        assertThat(firstPage.path("content").get(0).path("totalQuantity").asLong()).isEqualTo(1);
         assertThat(firstPage.path("content").get(1).path("itemCount").asLong()).isEqualTo(2);
         assertThat(firstPage.path("content").get(1).path("totalQuantity").asLong()).isEqualTo(3);
 
         var cancelled = fixtures.api("GET", "/api/v1/orders?status=CANCELLED&machineId=" + shop.machineId(), null, admin.token(), 200);
-        assertThat(cancelled.path("content")).hasSize(1);
+        assertThat(cancelled.path("content")).hasSize(2);
         assertThat(cancelled.path("content").get(0).path("cancelledAt").isNull()).isFalse();
         var pending = fixtures.api("GET", "/api/v1/orders?status=PENDING_PAYMENT&machineId=" + shop.machineId(), null, admin.token(), 200);
-        assertThat(pending.path("totalElements").asInt()).isEqualTo(2);
+        assertThat(pending.path("totalElements").asInt()).isEqualTo(1);
         var multiLine = fixtures.api("GET", "/api/v1/orders?machineId=" + shop.machineId() + "&sort=orderCode,asc&size=10", null, admin.token(), 200);
         assertThat(multiLine.path("content").findValuesAsText("orderCode")).isSorted();
         var byTotal = fixtures.api("GET", "/api/v1/orders?machineId=" + shop.machineId() + "&sort=totalAmount,desc", null, admin.token(), 200);
@@ -81,9 +101,16 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void detailsExposePriceSnapshotsAndAllocationsAndMissingOrderIs404() throws Exception {
         Shop shop = shop();
-        var order = kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), 2), line(shop.secondProductId(), 1)), 201);
-        String id = order.path("id").asText();
-        kioskData("POST", "/api/v1/kiosk/orders/" + id + "/cancel", shop.key(), null, 200);
+        // A new one-bowl order: exactly one line, quantity 1, one allocation.
+        var single = kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.productId()), 201);
+        kioskData("POST", "/api/v1/kiosk/orders/" + single.path("id").asText() + "/cancel", shop.key(), null, 200);
+        var singleDetail = fixtures.api("GET", "/api/v1/orders/" + single.path("id").asText(), null, admin.token(), 200);
+        assertThat(singleDetail.path("items")).hasSize(1);
+        assertThat(singleDetail.path("items").get(0).path("quantity").asInt()).isEqualTo(1);
+        assertThat(singleDetail.path("items").get(0).path("allocations")).hasSize(1);
+        assertThat(singleDetail.path("subtotal").decimalValue()).isEqualByComparingTo("10000");
+        // Historical multi-line order created before #35 is still readable with all of its lines and allocations.
+        String id = historical(shop).toString();
         for (String token : new String[]{admin.token(), staff.token()}) {
             var detail = fixtures.api("GET", "/api/v1/orders/" + id, null, token, 200);
             assertThat(detail.path("status").asText()).isEqualTo("CANCELLED");
@@ -98,7 +125,7 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
                 for (var allocation : item.path("allocations")) {
                     assertThat(allocation.path("status").asText()).isEqualTo("RELEASED");
                     assertThat(allocation.path("releasedAt").isNull()).isFalse();
-                    assertThat(allocation.path("slotCode").asText()).isEqualTo("S1");
+                    assertThat(allocation.path("slotCode").asText()).isIn("S1", "S2");
                     assertThat(allocation.path("batchCode").asText()).isNotBlank();
                     assertThat(Instant.parse(allocation.path("batchExpiresAt").asText())).isAfter(Instant.now());
                 }
@@ -111,7 +138,7 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void ordersApiIsReadOnlyAndRejectsKiosksAndAnonymousCallers() throws Exception {
         Shop shop = shop();
-        var order = kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(line(shop.productId(), 1)), 201);
+        var order = kioskData("POST", "/api/v1/kiosk/orders", shop.key(), orderBody(shop.productId()), 201);
         String id = order.path("id").asText();
         assertThat(kioskCall("GET", "/api/v1/orders", shop.key(), null).getResponse().getStatus()).isEqualTo(401);
         assertThat(kioskCall("GET", "/api/v1/orders/" + id, shop.key(), null).getResponse().getStatus()).isEqualTo(401);

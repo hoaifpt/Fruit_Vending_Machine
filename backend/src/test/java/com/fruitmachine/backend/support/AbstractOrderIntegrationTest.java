@@ -53,12 +53,39 @@ public abstract class AbstractOrderIntegrationTest extends AbstractCoreIntegrati
         return kioskJson(method, path, key, body, expected).path("data");
     }
 
-    protected static Map<String, Object> line(UUID productId, Object quantity) {
-        return Map.of("productId", productId, "quantity", quantity);
+    /** The only accepted kiosk order shape since issue #35: one product, one bowl. */
+    protected static Map<String, Object> orderBody(UUID productId) {
+        return Map.of("productId", productId);
     }
 
-    protected static Map<String, Object> orderBody(Map<String, Object>... lines) {
-        return Map.of("items", java.util.List.of(lines));
+    /**
+     * Inserts a CANCELLED multi-line order the way #27 used to create it (before the one-bowl rule of #35), with RELEASED
+     * allocations to bowls of the given slot. Lines are {productId, quantity}; prices are the current product prices.
+     */
+    protected UUID insertHistoricalOrder(UUID machineId, UUID slotId, Object[]... lines) {
+        UUID orderId = UUID.randomUUID();
+        java.math.BigDecimal total = java.math.BigDecimal.ZERO;
+        for (Object[] line : lines) {
+            total = total.add(jdbc.queryForObject("SELECT price FROM products WHERE id=?", java.math.BigDecimal.class, line[0])
+                    .multiply(java.math.BigDecimal.valueOf((Integer) line[1])));
+        }
+        jdbc.update("""
+                INSERT INTO orders (id, order_code, machine_id, status, subtotal, total_amount, created_at, cancelled_at)
+                VALUES (?, ?, ?, 'CANCELLED', ?, ?, now(), now())
+                """, orderId, "ORD-HIST-" + orderId.toString().substring(0, 8).toUpperCase(), machineId, total, total);
+        for (Object[] line : lines) {
+            UUID lineId = UUID.randomUUID();
+            jdbc.update("""
+                    INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, total_price)
+                    SELECT ?, ?, p.id, ?, p.price, p.price * ? FROM products p WHERE p.id = ?
+                    """, lineId, orderId, line[1], line[1], line[0]);
+            jdbc.update("""
+                    INSERT INTO order_item_allocations (order_item_id, inventory_item_id, status, released_at)
+                    SELECT ?, i.id, 'RELEASED', now() FROM inventory_items i JOIN product_batches b ON b.id = i.batch_id
+                    WHERE i.slot_id = ? AND b.product_id = ? ORDER BY i.loaded_at, i.id LIMIT ?
+                    """, lineId, slotId, line[0], line[1]);
+        }
+        return orderId;
     }
 
     /** A batch whose expiry is close to now, to exercise the hold-deadline rule. */
