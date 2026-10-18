@@ -15,9 +15,15 @@ export interface RequestOptions {
   query?: Record<string, QueryValue>
   body?: unknown
   signal?: AbortSignal
-  /** false for public endpoints (login): no Authorization header, no 401 session reset. */
+  /** false for public endpoints (login) and kiosk calls: no Authorization header, no 401 session reset. */
   auth?: boolean
+  /** Extra request headers (for example X-Kiosk-Key). Never logged. */
+  headers?: Record<string, string>
+  timeoutMs?: number
 }
+
+/** Unwrapped `data` plus envelope metadata: HTTP status and the server `timestamp` (for clock-skew correction). */
+export interface ApiResult<T> { data: T; status: number; serverTime?: number }
 
 export interface ClientConfig {
   baseUrl: string
@@ -76,14 +82,18 @@ async function readError(response: Response): Promise<ApiError> {
 }
 
 export async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
-  const { query, body, signal, auth = true } = options
-  const headers: Record<string, string> = { Accept: 'application/json' }
+  return (await requestWithMeta<T>(method, path, options)).data
+}
+
+export async function requestWithMeta<T>(method: string, path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
+  const { query, body, signal, auth = true, timeoutMs = TIMEOUT_MS } = options
+  const headers: Record<string, string> = { Accept: 'application/json', ...options.headers }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (auth) {
     const token = config.getToken()
     if (token) headers.Authorization = `Bearer ${token}`
   }
-  const timeout = AbortSignal.timeout(TIMEOUT_MS)
+  const timeout = AbortSignal.timeout(timeoutMs)
   let response: Response
   try {
     response = await config.fetcher(buildUrl(path, query), {
@@ -101,10 +111,11 @@ export async function request<T>(method: string, path: string, options: RequestO
     if (response.status === 401 && auth) config.onUnauthorized()
     throw error
   }
-  if (response.status === 204) return undefined as T
-  let envelope: { data?: T }
+  if (response.status === 204) return { data: undefined as T, status: 204 }
+  let envelope: { data?: T; timestamp?: unknown }
   try { envelope = await response.json() } catch { throw new ApiError(response.status, 'Phản hồi từ hệ thống không hợp lệ.') }
-  return envelope.data as T
+  const serverTime = typeof envelope.timestamp === 'string' ? Date.parse(envelope.timestamp) : NaN
+  return { data: envelope.data as T, status: response.status, serverTime: Number.isFinite(serverTime) ? serverTime : undefined }
 }
 
 export const api = {

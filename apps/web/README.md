@@ -2,7 +2,7 @@
 
 Ứng dụng frontend cho hệ thống máy bán trái cây, gồm trang giới thiệu công khai, đăng nhập admin/staff, khu quản trị, màn hình nhân viên và màn hình mua hàng tại kiosk.
 
-**Trạng thái:** khu quản trị ADMIN/STAFF (`/login`, `/admin/*`) đã tích hợp backend REST theo `api-contract/api.yaml`: đăng nhập JWT, phân quyền theo vai trò, người dùng, sản phẩm, máy, ngăn, khóa kiosk, lô hàng, tồn kho, đơn hàng, thanh toán và log webhook. Màn hình mua hàng kiosk (`/buy`) vẫn dùng dữ liệu mẫu trên trình duyệt, chưa nối backend hay phần cứng (issue riêng).
+**Trạng thái:** khu quản trị ADMIN/STAFF (`/login`, `/admin/*`) đã tích hợp backend REST theo `api-contract/api.yaml`: đăng nhập JWT, phân quyền theo vai trò, người dùng, sản phẩm, máy, ngăn, khóa kiosk, lô hàng, tồn kho, đơn hàng, thanh toán và log webhook. Màn hình kiosk (`/buy`) đã nối API kiosk: danh mục, đơn một hộp, thanh toán VietQR và polling tới `PAID`. Nhả hàng qua ESP32 chưa làm (backend Milestone 3).
 
 ## Công nghệ
 
@@ -36,34 +36,31 @@ Mở địa chỉ Vite in trong terminal, thường là `http://localhost:5173`.
 | `/admin/payments`, `/admin/payments/:id` | Thanh toán và danh sách "Cần xử lý" (ADMIN, chỉ xem) |
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Log webhook thanh toán (ADMIN, chỉ xem) |
 | `/admin/users` | Tài khoản nhân viên (ADMIN) |
-| `/buy` | Chọn sản phẩm và thanh toán tại màn hình kiosk (dữ liệu mẫu) |
+| `/buy` | Màn hình kiosk: chọn sản phẩm và thanh toán VietQR (cần `VITE_KIOSK_API_KEY`) |
 
 Các đường dẫn `/admin/*` yêu cầu đăng nhập; chưa đăng nhập hoặc token hết hạn (`401`) sẽ chuyển tới `/login`. Menu và nút thao tác ẩn theo vai trò, nhưng backend mới là nơi kiểm tra quyền. Bảng quyền và quy ước chi tiết: [web quản trị tích hợp backend](docs/admin-implementation.md).
 
 ## Luồng mua hàng tại kiosk
 
-1. Khách chọn sản phẩm trực tiếp trên màn hình máy hoặc nhập mã ngăn.
-2. Màn hình hiển thị ngay chi tiết sản phẩm và vùng QR thanh toán. Mỗi đơn chỉ mua **1 hộp**.
-3. Khách dùng điện thoại quét QR để thanh toán; điện thoại không dùng để chọn sản phẩm.
-4. Khi nhận xác nhận thanh toán, kiosk chuyển sang trạng thái chuẩn bị và đang nhả hàng, sau đó hiển thị kết quả nhận hàng.
-5. Nếu hết **90 giây** chờ thanh toán, kiosk tự quay về trang danh sách đầu tiên, bắt đầu từ ngăn 1.
+1. Khởi động: `GET /kiosk/me` kiểm tra khóa kiosk; khóa thiếu hoặc bị thu hồi → màn hình "Máy chưa được cấu hình".
+2. `GET /kiosk/catalog`: `acceptingOrders = false` → "Máy tạm ngừng phục vụ". Danh mục làm mới mỗi 45 giây khi rảnh, sau mỗi đơn kết thúc và sau lỗi `409`.
+3. Khách chạm sản phẩm → `POST /kiosk/orders` với **chỉ** `{ productId }` (1 đơn = 1 hộp). Không tự gửi lại khi lỗi/timeout vì đơn có thể đã giữ hàng; giữ chỗ tự hết hạn ở backend.
+4. Kiosk tự gọi `POST /kiosk/orders/{id}/payments`, vẽ QR từ chuỗi `qrCode` (VietQR) ngay trên máy và hiển thị số tiền do server trả về.
+5. Polling `GET /kiosk/orders/{id}` mỗi 2,5 giây (lỗi mạng: lùi dần tới 10 giây, hiện "Đang kết nối lại"). Chỉ kết quả polling quyết định màn hình; kiosk không bao giờ tự đánh dấu đã thanh toán.
+6. `PAID` → "Đã xác nhận thanh toán", tự về danh mục sau 12 giây. `CANCELLED` → "Đơn hàng đã hủy/hết hạn". QR `FAILED`/`EXPIRED` khi đơn còn hạn → nút "Tạo mã QR mới". `502` từ cổng thanh toán → nút "Thử lại".
+7. Nút "Hủy và chọn lại" hoặc không chạm màn hình trong `VITE_KIOSK_PAYMENT_IDLE_SECONDS` (mặc định 120 giây) → `POST /kiosk/orders/{id}/cancel`. Nếu hủy trả `409` (khách vừa trả kịp), kiosk hiển thị màn hình đã thanh toán.
+
+Bộ đếm dùng `min(currentPayment.expiresAt, order.expiresAt)` và hiệu chỉnh lệch đồng hồ bằng `timestamp` của phản hồi. Hết giờ vẫn tiếp tục polling vì backend mới là nơi quyết định hết hạn.
 
 ### Cách hiển thị danh sách
 
 - Giao diện nằm gọn trong một màn hình, không cuộn dọc.
-- Mỗi trang hiển thị tối đa **2 sản phẩm**, sắp xếp theo số ngăn tăng dần. Dữ liệu mẫu hiện gồm ngăn 1–6.
-- Tự chuyển sang trang tiếp theo sau **30 giây**; hết trang cuối sẽ quay lại trang đầu.
-- Có thể vuốt trái/phải, dùng nút trước/sau hoặc phím mũi tên để chuyển trang.
-- Không có bộ lọc loại sản phẩm. Sản phẩm hết hàng vẫn hiển thị nhưng không thể chọn.
-- Tự chuyển trang tạm dừng khi mở hộp thoại, bảng mô phỏng hoặc rời danh sách để thanh toán.
+- Mỗi trang tối đa **2 sản phẩm**; tự chuyển trang sau **30 giây**; vuốt trái/phải, nút trước/sau hoặc phím mũi tên.
+- Chỉ hiển thị sản phẩm backend cho là bán được ngay. `availableQuantity` chỉ để tham khảo ("Còn ít"), không giữ hàng.
 
-### Thử thanh toán khi chưa có backend
+### Thử với backend local (MOCK)
 
-Vùng QR hiện là **hình minh họa, không thể quét để chuyển tiền**. Mở **Thử tình huống** để mô phỏng đã thanh toán, lỗi tạo thanh toán, mất kết nối hoặc nhả hàng thất bại. Bộ đếm hết hạn chạy theo thời gian thực.
-
-Luồng đã xác nhận thanh toán/đang nhả hàng không bị bộ đếm QR đưa về danh sách. Tải lại khi đang nhả hàng sẽ chuyển sang trạng thái chưa xác nhận nhận hàng, tránh tự động nhả lại.
-
-Xem thêm [luồng mua hàng và hướng tích hợp](docs/purchase-flow.md).
+Đặt `PAYMENT_PROVIDER=MOCK` và `PAYMENT_MOCK_WEBHOOK_SECRET` ở backend. Mã `MOCK-QR|…` không thanh toán được bằng app ngân hàng; giả lập thanh toán bằng webhook MOCK đã ký hoặc `python scripts/payment_test_data.py mock-pay` (xem [payment webhook](../../docs/payment-webhook.md)). Chi tiết: [luồng kiosk và thanh toán](docs/purchase-flow.md).
 
 ## Chức năng quản trị và nhân viên
 
@@ -85,6 +82,8 @@ Copy-Item .env.example .env.local
 | --- | --- |
 | `VITE_API_BASE_URL` | Địa chỉ backend (không kèm `/api/v1`). Để trống để gọi cùng origin |
 | `DEV_API_PROXY_TARGET` | Chỉ cho `npm run dev`: Vite proxy `/api` tới backend, mặc định `http://localhost:8080` |
+| `VITE_KIOSK_API_KEY` | Khóa API của máy (ADMIN cấp ở Máy bán hàng → Khóa API kiosk). Chỉ đặt trong `.env.local` của máy kiosk |
+| `VITE_KIOSK_PAYMENT_IDLE_SECONDS` | Số giây không chạm màn hình thanh toán trước khi tự hủy đơn (mặc định 120) |
 | `VITE_PARTNERSHIP_EMAIL` | Email liên hệ hợp tác công khai |
 | `VITE_PARTNERSHIP_PHONE` | Số điện thoại liên hệ hợp tác công khai |
 
@@ -97,11 +96,10 @@ Không có tài khoản demo: dùng tài khoản ADMIN do backend tạo (xem [In
 | Phần | Nơi lưu | Khóa |
 | --- | --- | --- |
 | Phiên quản trị | `sessionStorage` (mất khi đóng tab) | `fruit-vending-session-v1` |
-| Kiosk (dữ liệu mẫu) | `sessionStorage`, riêng từng tab | `fruit-vending-purchase-demo-v1` |
 
 - Khu quản trị không lưu dữ liệu nghiệp vụ trong trình duyệt; mọi dữ liệu lấy từ API.
 - Token truy cập không có refresh token; hết hạn thì đăng nhập lại.
-- Dữ liệu kiosk độc lập với backend cho tới khi có issue tích hợp kiosk.
+- Kiosk không lưu đơn hàng hay khóa API vào storage; khởi động lại giữa chừng thì giữ chỗ tự hết hạn ở backend.
 
 ## Lệnh phát triển
 
@@ -124,6 +122,7 @@ Chạy `npm run gen:api` mỗi khi contract thay đổi và commit file kết qu
 apps/web/
 ├── src/
 │   ├── api/                # client, phiên JWT, hàm theo endpoint, schema.d.ts (sinh từ contract)
+│   ├── kiosk/              # API kiosk (X-Kiosk-Key) và quy tắc trạng thái đơn/QR
 │   ├── lib/                # định dạng tiền/giờ, router History API
 │   ├── admin/              # khung quản trị, ma trận quyền, thành phần dùng chung, pages/
 │   ├── assets/             # Ảnh và minh họa
@@ -131,7 +130,6 @@ apps/web/
 │   ├── features/
 │   │   ├── auth/           # Đăng nhập
 │   │   ├── landing/        # Xử lý thông tin liên hệ
-│   │   └── purchase/       # Trạng thái đơn và luồng kiosk (dữ liệu mẫu)
 │   ├── pages/              # Landing, đăng nhập, kiosk
 │   ├── App.tsx
 │   ├── routing.ts
@@ -153,7 +151,7 @@ npm run preview
 
 Triển khai nội dung `dist/` lên hosting tĩnh. Hosting cần rewrite các đường dẫn ứng dụng như `/buy`, `/login`, `/admin/*` và `/staff` về `index.html` để truy cập trực tiếp hoặc tải lại không gặp lỗi 404. `npm run preview` chỉ dùng kiểm tra bản build local.
 
-Hosting cũng cần phục vụ API cùng origin (reverse proxy) hoặc backend phải bật CORS. Trước khi vận hành thật, cần nối kiosk với backend (đơn hàng, thanh toán, xác nhận nhả hàng). Backend phải đối chiếu trạng thái đơn, bao gồm thanh toán đến muộn sau khi màn hình QR đã hết hạn; thao tác mô phỏng trên frontend không phải bằng chứng thanh toán.
+Hosting cũng cần phục vụ API cùng origin (reverse proxy) hoặc backend phải bật CORS. `VITE_KIOSK_API_KEY` được nhúng vào bundle JavaScript khi build, nên chỉ build bản kiosk trên chính máy kiosk và không phục vụ bản build đó công khai. Trước khi vận hành thật còn cần luồng nhả hàng (Serial/USB tới ESP32).
 
 ## Tài liệu liên quan
 
