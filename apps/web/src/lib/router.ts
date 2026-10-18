@@ -1,19 +1,43 @@
 // Minimal History API router: path + query string in the URL, so filters stay shareable and back-button friendly.
 import { useCallback, useSyncExternalStore } from 'react'
+import { flushSync } from 'react-dom'
 
 const listeners = new Set<() => void>()
 function emit() { listeners.forEach(listener => listener()) }
-function subscribe(listener: () => void) {
-  listeners.add(listener)
-  window.addEventListener('popstate', listener)
-  return () => { listeners.delete(listener); window.removeEventListener('popstate', listener) }
-}
 const snapshot = () => window.location.pathname + window.location.search
+
+/**
+ * Runs a screen change inside a View Transition (styles/app.css animates `.vt-content`), so moving between pages
+ * fades and slides instead of jumping. Falls back to an instant update when unsupported or reduced motion is on.
+ */
+function withTransition(update: () => void, direction: 'forward' | 'back') {
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (!document.startViewTransition || reduced) { update(); return }
+  document.documentElement.dataset.nav = direction
+  const transition = document.startViewTransition(() => flushSync(update))
+  transition.finished.finally(() => { delete document.documentElement.dataset.nav })
+}
+
+let lastPath = typeof window === 'undefined' ? '/' : window.location.pathname
+function onPopState() {
+  const changed = window.location.pathname !== lastPath
+  lastPath = window.location.pathname
+  if (changed) withTransition(emit, 'back'); else emit()
+}
+
+function subscribe(listener: () => void) {
+  if (!listeners.size) window.addEventListener('popstate', onPopState)
+  listeners.add(listener)
+  return () => { listeners.delete(listener); if (!listeners.size) window.removeEventListener('popstate', onPopState) }
+}
 
 export function navigate(to: string, { replace = false }: { replace?: boolean } = {}) {
   if (to === snapshot()) return
   window.history[replace ? 'replaceState' : 'pushState'](null, '', to)
-  emit()
+  // Filters and redirects replace the entry in place: no page animation for those.
+  const changed = window.location.pathname !== lastPath
+  lastPath = window.location.pathname
+  if (changed && !replace) withTransition(emit, 'forward'); else emit()
 }
 
 export function useLocation() {

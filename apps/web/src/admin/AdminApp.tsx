@@ -1,11 +1,12 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import type { ReactNode } from 'react'
+import '@fontsource-variable/inter/wght.css'
 import { loginPathFor, endSession } from '../api/session.ts'
 import type { Role } from '../api/session.ts'
-import { Icon } from '../components/Icon'
 import { navigate, useLocation } from '../lib/router.ts'
-import { Link, Loading } from './kit.tsx'
+import { Link, PageSkeleton } from './kit.tsx'
 import { canAccess, homeFor, matchRoute, navFor } from './routes.ts'
+import { AdminShell } from './shell/AdminShell.tsx'
 import { useSession } from './useSession.ts'
 import './admin.css'
 
@@ -28,7 +29,6 @@ const NO_ROLES: Role[] = []
 function AdminApp() {
   const { pathname, search } = useLocation()
   const { session, isAdmin } = useSession()
-  const [menuOpen, setMenuOpen] = useState(false)
   const roles = session?.user.roles ?? NO_ROLES
   const route = matchRoute(pathname)
 
@@ -36,19 +36,13 @@ function AdminApp() {
     if (!session) navigate(loginPathFor(pathname, search), { replace: true })
     else if (pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff') navigate(homeFor(roles), { replace: true })
   }, [session, pathname, search, roles])
-  useEffect(() => setMenuOpen(false), [pathname])
-  useEffect(() => {
-    if (!menuOpen) return
-    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false) }
-    window.addEventListener('keydown', close)
-    return () => window.removeEventListener('keydown', close)
-  }, [menuOpen])
+  // Move focus to the new screen after client-side navigation, like a full page load would.
+  useEffect(() => { document.getElementById('admin-main')?.focus({ preventScroll: true }); window.scrollTo({ top: 0 }) }, [pathname])
 
   if (!session) return <main className="route-message" role="status"><p>Đang chuyển đến trang đăng nhập…</p></main>
 
-  const nav = navFor(roles)
   let content: ReactNode
-  if (!route) content = pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff' ? <Loading /> : <NotFound />
+  if (!route) content = pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff' ? <PageSkeleton /> : <NotFound />
   else if (!canAccess(roles, route.roles)) content = <Forbidden />
   else {
     const id = route.id ?? ''
@@ -74,33 +68,9 @@ function AdminApp() {
     navigate('/login', { replace: true })
   }
 
-  return <div className="admin-app a-shell">
-    <a className="a-skip" href="#admin-main">Đến nội dung</a>
-    <aside className={`a-sidebar ${menuOpen ? 'is-open' : ''}`}>
-      <a className="a-brand" href="/">Fruit<span>Vending</span><i>●</i></a>
-      <p className="a-workspace">Không gian quản trị</p>
-      <nav aria-label="Quản trị">
-        {nav.map(item => {
-          const current = !!route && item.match.includes(route.page)
-          return <Link key={item.to} to={item.to} className={current ? 'is-current' : ''}>
-            <Icon name={item.icon} /><span aria-current={current ? 'page' : undefined}>{item.label}</span>
-          </Link>
-        })}
-      </nav>
-      <div className="a-sidebar-bottom">
-        <div className="a-avatar" aria-hidden="true">{(session.user.email[0] ?? '?').toUpperCase()}</div>
-        <div>{session.user.email || 'Tài khoản'}<small>{roles.map(role => (role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên')).join(' · ')}</small></div>
-        <button type="button" onClick={logout}>Đăng xuất</button>
-      </div>
-    </aside>
-    {menuOpen && <button type="button" className="a-scrim" aria-label="Đóng điều hướng" onClick={() => setMenuOpen(false)} />}
-    <div className="a-workarea" inert={menuOpen}>
-      <main id="admin-main">
-        <button type="button" className="a-menu" aria-label="Mở điều hướng" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}><Icon name="menu" /></button>
-        <Suspense fallback={<Loading label="Đang mở màn hình…" />}>{content}</Suspense>
-      </main>
-    </div>
-  </div>
+  return <AdminShell nav={navFor(roles)} route={route} email={session.user.email} roles={roles} onLogout={logout}>
+    <Suspense fallback={<PageSkeleton />}>{content}</Suspense>
+  </AdminShell>
 }
 
 function Forbidden() {

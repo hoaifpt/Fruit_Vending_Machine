@@ -36,18 +36,28 @@ export function matchRoute(pathname: string): RouteMatch | undefined {
   return undefined
 }
 
-export interface NavItem { to: string; label: string; icon: 'machine' | 'inventory' | 'transactions' | 'tasks' | 'users' | 'bag' | 'dashboard'; roles: readonly Role[]; match: PageKey[] }
+export type NavGroup = 'Vận hành' | 'Giao dịch' | 'Hệ thống'
+export interface NavItem { to: string; label: string; group: NavGroup; roles: readonly Role[]; match: PageKey[] }
 
 export const NAV: NavItem[] = [
-  { to: '/admin/machines', label: 'Máy bán hàng', icon: 'machine', roles: BOTH, match: ['machines', 'machine-detail'] },
-  { to: '/admin/products', label: 'Sản phẩm', icon: 'bag', roles: BOTH, match: ['products'] },
-  { to: '/admin/batches', label: 'Lô hàng', icon: 'tasks', roles: BOTH, match: ['batches'] },
-  { to: '/admin/inventory', label: 'Tồn kho', icon: 'inventory', roles: BOTH, match: ['inventory', 'inventory-history'] },
-  { to: '/admin/orders', label: 'Đơn hàng', icon: 'transactions', roles: BOTH, match: ['orders', 'order-detail'] },
-  { to: '/admin/payments', label: 'Thanh toán', icon: 'dashboard', roles: ADMIN, match: ['payments', 'payment-detail'] },
-  { to: '/admin/webhook-logs', label: 'Webhook thanh toán', icon: 'transactions', roles: ADMIN, match: ['webhook-logs', 'webhook-log-detail'] },
-  { to: '/admin/users', label: 'Tài khoản', icon: 'users', roles: ADMIN, match: ['users'] },
+  { to: '/admin/machines', label: 'Máy bán hàng', group: 'Vận hành', roles: BOTH, match: ['machines', 'machine-detail'] },
+  { to: '/admin/products', label: 'Sản phẩm', group: 'Vận hành', roles: BOTH, match: ['products'] },
+  { to: '/admin/batches', label: 'Lô hàng', group: 'Vận hành', roles: BOTH, match: ['batches'] },
+  { to: '/admin/inventory', label: 'Tồn kho', group: 'Vận hành', roles: BOTH, match: ['inventory', 'inventory-history'] },
+  { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', roles: BOTH, match: ['orders', 'order-detail'] },
+  { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', roles: ADMIN, match: ['payments', 'payment-detail'] },
+  { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', roles: ADMIN, match: ['webhook-logs', 'webhook-log-detail'] },
+  { to: '/admin/users', label: 'Tài khoản', group: 'Hệ thống', roles: ADMIN, match: ['users'] },
 ]
+
+/** Breadcrumb trail for a route: group, section (linked) and, on detail screens, the record level. */
+export function breadcrumbFor(route: RouteMatch | undefined): { label: string; to?: string }[] {
+  if (!route) return []
+  const item = NAV.find(entry => entry.match.includes(route.page))
+  if (!item) return []
+  const detail = route.page === 'inventory-history' ? 'Lịch sử' : route.id ? 'Chi tiết' : undefined
+  return [{ label: item.group }, { label: item.label, to: detail ? item.to : undefined }, ...(detail ? [{ label: detail }] : [])]
+}
 
 export function canAccess(userRoles: readonly Role[], required: readonly Role[]): boolean {
   return required.some(role => userRoles.includes(role))

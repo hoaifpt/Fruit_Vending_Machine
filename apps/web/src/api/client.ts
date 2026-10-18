@@ -1,4 +1,6 @@
 // Single HTTP client for the management API. Contract: api-contract/api.yaml (types in ./schema.d.ts).
+import { beginProgress } from '../lib/progress.ts'
+
 export class ApiError extends Error {
   readonly status: number
   readonly fieldErrors: Record<string, string>
@@ -86,6 +88,11 @@ export async function request<T>(method: string, path: string, options: RequestO
 }
 
 export async function requestWithMeta<T>(method: string, path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
+  const done = beginProgress()
+  try { return await send<T>(method, path, options) } finally { done() }
+}
+
+async function send<T>(method: string, path: string, options: RequestOptions): Promise<ApiResult<T>> {
   const { query, body, signal, auth = true, timeoutMs = TIMEOUT_MS } = options
   const headers: Record<string, string> = { Accept: 'application/json', ...options.headers }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
