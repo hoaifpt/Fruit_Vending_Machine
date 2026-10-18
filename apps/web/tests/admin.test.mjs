@@ -1,85 +1,55 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyAction, dayVN, inventory, revenue, staffView, validDay } from '../src/features/admin/domain.ts'
-import { createDemo } from '../src/features/admin/seed.ts'
-const now=new Date('2026-09-11T08:00:00Z'),today=dayVN(now),admin={role:'ADMIN'},staff={role:'STAFF',id:'s1'}
-const act=(s,a,actor=admin)=>applyAction(s,a,actor,now)
-const start=s=>act(s,{type:'task-status',id:'CV-1001',status:'IN_PROGRESS',note:''},staff)
-const complete={type:'complete',id:'CV-1001',actual:[{slotId:'m1s1',quantity:4,expiry:today},{slotId:'m1s1',quantity:6,expiry:'2026-09-14'}],notes:'',before:'',after:''}
-test('revenue excludes pending and all paid dispense failures, including resolved/refunded',()=>{
- let s=createDemo(now);const before=revenue(s.transactions,'day',today)
- const failed=s.transactions.find(t=>t.paid&&t.status==='DISPENSE_FAILED'&&dayVN(t.at)===today)
- s=act(s,{type:'incident',id:failed.id,status:'PROCESSING',note:'Kiểm tra'})
- s=act(s,{type:'incident',id:failed.id,status:'REFUNDED',note:'Ghi nhận hoàn tiền mẫu'})
- assert.equal(revenue(s.transactions,'day',today).total,before.total)
- assert.equal(before.total,s.transactions.filter(t=>t.paid&&t.status==='SUCCESS'&&dayVN(t.at)===today).reduce((n,t)=>n+t.amount,0))
+import { canAccess, homeFor, matchRoute, navFor } from '../src/admin/routes.ts'
+import { dateRangeToInstants, expiryState, formatDateTime, formatMoney, localDateTimeToInstant, parseDecimal, parseInteger, parsePrice } from '../src/lib/format.ts'
+import { prettyPayload } from '../src/admin/payload.ts'
+
+const labels = roles => navFor(roles).map(item => item.to.replace('/admin/', ''))
+
+test('role matrix: STAFF cannot see users, payments or webhook logs', () => {
+  assert.deepEqual(labels(['STAFF']), ['machines', 'products', 'batches', 'inventory', 'orders'])
+  assert.deepEqual(labels(['ADMIN']), ['machines', 'products', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'users'])
+  assert.equal(canAccess(['STAFF'], matchRoute('/admin/users').roles), false)
+  assert.equal(canAccess(['STAFF'], matchRoute('/admin/payments/abc').roles), false)
+  assert.equal(canAccess(['STAFF'], matchRoute('/admin/webhook-logs').roles), false)
+  assert.equal(canAccess(['STAFF'], matchRoute('/admin/orders/abc').roles), true)
+  assert.equal(canAccess(['STAFF', 'ADMIN'], matchRoute('/admin/users').roles), true)
+  assert.equal(homeFor(['STAFF']), '/admin/machines')
 })
-test('Vietnam date boundary and chart bucket sums match selected machine day/month/year',()=>{
- assert.equal(dayVN('2026-09-10T17:00:00Z'),today)
- const s=createDemo(now)
- for(const [mode,value] of [['day',today],['month','2026-09'],['year','2026']]){const r=revenue(s.transactions,mode,value,'m1');assert.equal(r.total,r.buckets.reduce((n,b)=>n+b.amount,0));assert.ok(r.transactions.every(t=>t.machineId==='m1'))}
+test('routes extract ids and reject unknown paths', () => {
+  assert.deepEqual(matchRoute('/admin/machines/m-1/'), { page: 'machine-detail', id: 'm-1', roles: ['ADMIN', 'STAFF'] })
+  assert.equal(matchRoute('/admin/unknown'), undefined)
+  assert.equal(matchRoute('/admin/machines/a/b'), undefined)
 })
-test('prices are isolated by machine and do not rewrite transaction history',()=>{
- const s=createDemo(now),next=act(s,{type:'price',machineId:'m1',productId:'p1',amount:39000})
- assert.equal(next.prices.find(p=>p.machineId==='m1'&&p.productId==='p1').amount,39000)
- assert.equal(next.prices.find(p=>p.machineId==='m2'&&p.productId==='p1').amount,26000)
- assert.deepEqual(next.transactions,s.transactions);assert.throws(()=>act(s,{type:'price',machineId:'m1',productId:'p1',amount:1},staff),/quyền/)
+
+test('money is shown as VND and times in Asia/Ho_Chi_Minh', () => {
+  assert.match(formatMoney(35000), /^35\.000\s₫$/)
+  assert.equal(formatMoney(undefined), '—')
+  assert.match(formatDateTime('2026-10-18T17:30:00Z'), /^00:30,? 19\/10\/2026$|^19\/10\/2026,? 00:30$/)
 })
-test('refill accepts multiple expiry lots, updates instantly and rejects duplicate completion',()=>{
- const original=createDemo(now),s=start(original),next=act(s,complete,staff)
- assert.equal(inventory(next,'m1s1',today).total,12)
- assert.equal(next.tasks.find(t=>t.id==='CV-1001').status,'DONE')
- assert.equal(next.lots.filter(l=>l.taskId==='CV-1001').length,2)
- assert.equal(inventory(original,'m1s1',today).total,2)
- assert.throws(()=>act(next,complete,staff),/kết thúc/)
+test('local date ranges become [from, to) UTC instants', () => {
+  assert.deepEqual(dateRangeToInstants('2026-10-18', '2026-10-18'), { from: '2026-10-17T17:00:00.000Z', to: '2026-10-18T17:00:00.000Z' })
+  assert.deepEqual(dateRangeToInstants('', ''), { from: undefined, to: undefined })
+  assert.equal(localDateTimeToInstant('2026-10-18T07:00'), '2026-10-18T00:00:00.000Z')
+  assert.equal(localDateTimeToInstant('bad'), undefined)
 })
-test('refill requires valid expiry, capacity, quantity and discrepancy note',()=>{
- const s=start(createDemo(now))
- for(const expiry of ['', '2026-09-10','2026-02-30'])assert.throws(()=>act(s,{...complete,actual:[{slotId:'m1s1',quantity:10,expiry}]},staff),/hạn dùng/)
- assert.throws(()=>act(s,{...complete,actual:[{slotId:'m1s1',quantity:19,expiry:today}]},staff),/sức chứa/)
- assert.throws(()=>act(s,{...complete,actual:[{slotId:'m1s1',quantity:1.5,expiry:today}]},staff),/số nguyên/)
- assert.throws(()=>act(s,{...complete,actual:[]},staff),/chênh lệch/)
- assert.equal(act(s,{...complete,actual:[],notes:'Không có hàng để nạp'},staff).tasks.find(t=>t.id==='CV-1001').status,'DONE')
+test('numeric inputs enforce contract limits', () => {
+  assert.equal(parsePrice('35000.50'), 35000.5)
+  for (const bad of ['0', '-1', '1.234', '', 'abc', '1,5']) assert.equal(parsePrice(bad), undefined)
+  assert.equal(parseInteger('12'), 12)
+  assert.equal(parseInteger('1.5'), undefined)
+  assert.equal(parseDecimal('-2.5'), -2.5)
 })
-test('staff cannot complete another assignment or unstarted work',()=>{
- const s=createDemo(now)
- assert.throws(()=>act(s,complete,staff),/bắt đầu/)
- assert.throws(()=>act(start(s),complete,{role:'STAFF',id:'s2'}),/phân công/)
- assert.throws(()=>act(start(s),{...complete,actual:[{slotId:'m2s1',quantity:1,expiry:today}]},staff),/ngoài phân công/)
+test('expiry is display-only: fresh, soon (within 2 days) or expired', () => {
+  const now = Date.parse('2026-10-18T00:00:00Z')
+  assert.equal(expiryState('2026-10-17T00:00:00Z', now), 'expired')
+  assert.equal(expiryState('2026-10-19T12:00:00Z', now), 'soon')
+  assert.equal(expiryState('2026-11-01T00:00:00Z', now), 'fresh')
+  assert.equal(expiryState(undefined, now), undefined)
 })
-test('low stock uses sellable quantity; expired inventory still occupies capacity',()=>{
- const s={lots:[{slotId:'a',quantity:2,expiry:today},{slotId:'a',quantity:10,expiry:'2026-09-10'},{slotId:'b',quantity:3,expiry:'2026-09-12'},{slotId:'c',quantity:3,expiry:'2026-09-13'}]}
- assert.deepEqual({...inventory(s,'a',today),lots:[]},{lots:[],total:12,sellable:2,low:true,expired:true,expiring:true})
- assert.equal(inventory(s,'b',today).expiring,true);assert.equal(inventory(s,'c',today).expiring,false)
- assert.equal(validDay('2026-02-30'),false)
-})
-test('deactivating staff with open work is blocked; staff projection omits finances',()=>{
- const s=createDemo(now)
- assert.throws(()=>act(s,{type:'staff',value:{...s.staff[0],active:false}}),/giao lại/)
- const view=staffView(s,'s1');assert.equal('transactions' in view,false);assert.equal('prices' in view,false);assert.equal('audit' in view,false)
- assert.ok(view.machines.every(m=>['m1','m2','m3'].includes(m.id)));assert.ok(view.tasks.every(t=>t.staffId==='s1'))
-})
-test('maintenance completion needs result and both photos',()=>{
- const s=createDemo(now),a={...complete,id:'CV-1002',actual:[],notes:'Đã sửa cảm biến'},actor={role:'STAFF',id:'s2'}
- assert.throws(()=>act(s,a,actor),/ảnh trước/)
- const png='data:image/png;base64,aGVsbG8='
- assert.equal(act(s,{...a,before:png,after:png},actor).tasks.find(t=>t.id==='CV-1002').status,'DONE')
-})
-test('incident transitions require notes and do not reopen terminal states',()=>{
- let s=createDemo(now);const id=s.transactions.find(t=>t.paid&&t.status==='DISPENSE_FAILED').id
- assert.throws(()=>act(s,{type:'incident',id,status:'RESOLVED',note:'x'}),/không hợp lệ/)
- assert.throws(()=>act(s,{type:'incident',id,status:'PROCESSING',note:''}),/ghi chú/)
- s=act(s,{type:'incident',id,status:'PROCESSING',note:'Kiểm tra'});s=act(s,{type:'incident',id,status:'RESOLVED',note:'Đã giải quyết'})
- assert.throws(()=>act(s,{type:'incident',id,status:'PROCESSING',note:'x'}),/không hợp lệ/)
-})
-test('archiving blocks occupied machines and preserves historical records',()=>{
- let s=createDemo(now);assert.throws(()=>act(s,{type:'archive',entity:'machines',id:'m1'}),/Còn hàng/)
- for(const lot of s.lots.filter(l=>l.slotId.startsWith('m6')&&l.quantity>0))s=act(s,{type:'remove-lot',id:lot.id,quantity:lot.quantity,reason:'Lấy hết hàng'})
- const before=s.transactions;s=act(s,{type:'archive',entity:'machines',id:'m6'})
- assert.equal(s.machines.find(m=>m.id==='m6').archived,true);assert.deepEqual(s.transactions,before)
-})
-test('slot cannot change product while occupied or reduce capacity below physical stock',()=>{
- const s=createDemo(now),slot=s.slots[0]
- assert.throws(()=>act(s,{type:'slot',value:{...slot,productId:'p2'}}),/còn hàng/)
- assert.throws(()=>act(s,{type:'slot',value:{...slot,capacity:1}}),/nhỏ hơn/)
+test('webhook payloads are shown as text, pretty-printed when JSON', () => {
+  assert.equal(prettyPayload('{"a":1}', null).text, '{\n  "a": 1\n}')
+  assert.deepEqual(prettyPayload('not json <script>', null), { kind: 'raw', text: 'not json <script>' })
+  assert.deepEqual(prettyPayload(null, '<img onerror=x>'), { kind: 'raw', text: '<img onerror=x>' })
+  assert.equal(prettyPayload(null, null).kind, 'none')
 })

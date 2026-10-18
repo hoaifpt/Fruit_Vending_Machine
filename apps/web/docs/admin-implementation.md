@@ -1,50 +1,43 @@
-# Dashboard admin — triển khai frontend
+# Web quản trị tích hợp backend (issue #39)
 
-Đã triển khai theo hướng A trong `apps/web`. Đây là bản frontend tương tác với dữ liệu mẫu, không phải khu quản trị đã kết nối hệ thống thật.
+Phạm vi: `apps/web` cho ADMIN/STAFF, gọi API thật theo `api-contract/api.yaml`. Giao diện giữ ngôn ngữ thiết kế hiện có. Ngoài phạm vi: dashboard/báo cáo, telemetry, lệnh nhả hàng, ứng dụng kiosk, refresh token, hoàn tiền hay đổi trạng thái thanh toán thủ công, tạo/hủy đơn (chỉ kiosk).
 
-## Mở bản thử
+## Màn hình và phân quyền
 
-- `/admin`: tổng quan doanh thu, mặc định hôm nay theo giờ Việt Nam; chọn tháng, năm và máy. Biểu đồ và số tổng dùng cùng tập giao dịch đã thanh toán và nhả hàng thành công.
-- `/admin/machines`: tìm kiếm, lọc vị trí/trạng thái, thêm/sửa/ngừng sử dụng máy. Mở từng máy để quản lý ngăn, giá, công việc và lịch sử giao dịch.
-- `/admin/products`: thêm/sửa/ngừng sản phẩm, ảnh tùy chọn, giá riêng cho từng máy.
-- `/admin/inventory`: ngăn/sức chứa, lô/hạn dùng, cảnh báo, ghi nhận lấy hàng ra và giao refill.
-- `/admin/transactions`: giao dịch theo thời gian; tab nhả hàng thất bại chứa toàn bộ lịch sử và có ghi chú xử lý theo trạng thái.
-- `/admin/tasks`: giao refill nhiều ngăn hoặc bảo trì có hạn và mô tả lỗi; sửa phân công chưa bắt đầu, hủy kèm lý do, đọc lịch sử/kết quả.
-- `/admin/staff`: hồ sơ nhân viên mẫu, phạm vi máy và trạng thái hoạt động.
-- `/staff?staff=s1`: mô phỏng staff nhận việc, báo cần hỗ trợ, nhập thực tế nhiều lô/hạn dùng hoặc ảnh trước/sau bảo trì. Có bộ chọn nhân viên mẫu rõ ràng.
+| Đường dẫn | ADMIN | STAFF |
+| --- | --- | --- |
+| `/admin/users` | Danh sách, tạo STAFF, sửa hồ sơ, đổi trạng thái | Ẩn |
+| `/admin/products` | Xem, tạo, sửa, đổi trạng thái | Chỉ xem |
+| `/admin/machines`, `/admin/machines/:id` | Xem, đăng ký, cấu hình, đổi trạng thái; ngăn chứa; khóa kiosk | Chỉ xem (máy và ngăn) |
+| `/admin/batches` | Tạo và xem (lô không sửa/xóa) | Tạo và xem |
+| `/admin/inventory`, `/admin/inventory/history` | Nạp hộp, gỡ hộp, xem, tóm tắt ngăn, lịch sử | Như ADMIN |
+| `/admin/orders`, `/admin/orders/:id` | Chỉ xem | Chỉ xem |
+| `/admin/payments`, `/admin/payments/:id` | Chỉ xem, chế độ "Cần xử lý" | Ẩn |
+| `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Chỉ xem | Ẩn |
 
-Chạy `npm run dev` từ `apps/web`. Các đường dẫn dùng fallback của Vite; hosting sau này cần rewrite SPA về `index.html`.
+Điều hướng và nút thao tác bị ẩn theo vai trò; truy cập thẳng URL không đủ quyền hiện "Không có quyền truy cập". `/admin` và `/staff` chuyển tới màn hình đầu tiên mà vai trò được xem.
 
-## Quy tắc đã triển khai
+## Quy ước chung
 
-- Doanh thu chỉ tính `paid && status === SUCCESS`. Việc giải quyết/đánh dấu đã hoàn tiền cho đơn lỗi không cộng doanh thu và không thay đổi số tiền lịch sử.
-- Sự cố: chờ xử lý → đang xử lý → đã hoàn tiền hoặc đã giải quyết; mỗi lần chuyển cần ghi chú. Đây chỉ là ghi nhận mẫu, không có giao dịch chuyển tiền.
-- Một ngăn chứa một sản phẩm và nhiều lô. Hàng hết hạn bị loại khỏi số có thể bán nhưng vẫn chiếm sức chứa đến khi lấy ra.
-- Cảnh báo khi còn tối đa 2 hộp có thể bán; cảnh báo hạn dùng hôm nay/ngày mai. Ngưỡng cố định theo yêu cầu.
-- Refill yêu cầu hạn hợp lệ, số nguyên dương theo lô, không vượt sức chứa. Chênh lệch so với phân công cần ghi chú. Hoàn thành cập nhật kho ngay và không thể hoàn thành lại.
-- Bảo trì cần kết quả và hai ảnh trước/sau; ảnh PNG/JPG/WebP tối đa 400 KB mỗi ảnh.
-- Staff chỉ thao tác công việc của mình trong phạm vi máy được giao. Màn hình staff không hiển thị doanh thu, giao dịch hay giá bán.
-- Không giới hạn cố định số máy/vị trí. Danh sách có tìm kiếm và phân trang. Xóa máy/sản phẩm được thực hiện bằng ngừng sử dụng để giữ lịch sử; chặn khi còn hàng hoặc việc đang mở. Khóa nhân viên cũng kiểm tra công việc đang mở.
+- **Phân trang, sắp xếp, lọc phía server.** Trang bắt đầu từ 0; bộ lọc nằm trong query string URL (chia sẻ được, nút Back hoạt động). Chỉ dùng các trường `sort` được contract liệt kê.
+- **Chỉ gửi field có trong contract.** Backend từ chối field lạ nên biểu mẫu không gửi id, thời gian hay trạng thái (trừ endpoint đổi trạng thái riêng). SKU, mã máy, mã ngăn bị khóa khi sửa.
+- **Tiền:** hiển thị VND (`35.000 ₫`), không tự tính tổng; giá nhập > 0, tối đa 2 chữ số thập phân.
+- **Thời gian:** API dùng UTC; giao diện hiển thị giờ `Asia/Ho_Chi_Minh`. Bộ lọc ngày được đổi thành khoảng `[từ, đến)` theo UTC.
+- **Không có thao tác xóa.** Dùng đổi trạng thái hoặc thu hồi.
+- **Khóa kiosk:** `apiKey` chỉ hiện một lần trong hộp thoại, có cảnh báo và nút sao chép; không lưu vào storage. Cấp khóa mới khi đang có khóa hoạt động cần xác nhận vì khóa cũ bị vô hiệu ngay.
+- **Webhook:** nội dung thô là dữ liệu không tin cậy, chỉ hiển thị dạng văn bản đã escape (`<pre>`), không bao giờ là HTML.
+- Danh sách chọn (sản phẩm, máy, ngăn, lô) tải tối đa 100 bản ghi đầu theo tên.
 
-## Lưu trữ và giới hạn tích hợp
+## Mã nguồn
 
-Dữ liệu lưu trong localStorage với khóa `fruit-vending-admin-demo-v1`. Làm mới trang giữ lại thay đổi; các tab cùng trình duyệt nhận sự kiện cập nhật. Có kiểm tra revision trước khi lưu và báo lỗi khi dữ liệu cũ/hỏng hoặc hết bộ nhớ. Nút Đặt lại mẫu cần xác nhận và thay dữ liệu trên trình duyệt bằng bộ mẫu ban đầu.
+```text
+src/api/        client, session (JWT), resources (hàm theo endpoint), schema.d.ts (sinh từ contract)
+src/lib/        format (tiền, giờ, parse), router (History API + query string)
+src/admin/      AdminApp (khung, điều hướng), routes (ma trận quyền), kit (bảng, biểu mẫu, hộp thoại), pages/
+```
 
-Đây không phải cơ chế đồng bộ nhiều người dùng hoặc giao dịch nguyên tử phía máy chủ. Phân quyền giao diện và `staffView` chỉ phục vụ bản demo; toàn bộ dữ liệu mẫu vẫn nằm trong trình duyệt và người xem có thể chọn cả hai vai trò. Không đưa dữ liệu thật vào bản này.
+## Kiểm thử
 
-Backend cần bổ sung trước khi dùng thật:
+`npm test` kiểm tra client (bóc `data`, ánh xạ lỗi, query), phiên/JWT và chặn open-redirect, ma trận quyền, định dạng tiền/giờ/khoảng ngày và hiển thị payload an toàn.
 
-1. Session đăng nhập và kiểm tra vai trò ở server cho từng API; giới hạn payload staff, không trả dữ liệu tài chính.
-2. Database, API phân trang/lọc, xác thực dữ liệu và nhật ký người thao tác thực tế. Dùng transaction + idempotency key/optimistic locking cho hoàn thành refill và cập nhật lô.
-3. Đồng bộ thanh toán, kết quả nhả hàng, tồn kho và trạng thái kết nối máy; xác nhận hoàn tiền qua nhà cung cấp thanh toán.
-4. Lưu ảnh qua dịch vụ upload, xác thực ảnh phía server và phân quyền truy cập.
-5. Cấp/khóa tài khoản staff thật; không dùng bộ chọn vai trò mẫu như cơ chế đăng nhập.
-
-Màn hình đăng nhập hiện có vẫn dùng hợp đồng API trong `docs/auth-integration.md`; dashboard mẫu không giả lập đăng nhập thành công.
-
-## Kiểm tra
-
-- 29 kiểm thử tự động gồm 12 kiểm thử nghiệp vụ quản trị và 17 kiểm thử đăng nhập/landing.
-- Build TypeScript/Vite và lint.
-- Thử trong trình duyệt: tạo máy, cập nhật giá tại máy, phân công refill, hoàn thành hai lô (2 → 12 hộp), chuyển trạng thái sự cố kèm ghi chú, màn hình staff không có nội dung tài chính.
-- Kiểm tra giao diện máy tính 1440 px, tablet và điện thoại 390/320 px. Trên điện thoại, bảng chuyển thành bản ghi có nhãn, toàn bộ nút thao tác nằm trong chiều rộng màn hình. Có hỗ trợ giảm chuyển động, focus và dialog bàn phím.
+Đã chạy smoke test thủ công với backend thật (PostgreSQL 18 + `PAYMENT_PROVIDER=MOCK`) cho: đăng nhập/đăng xuất, chuyển về URL cũ sau `401`, ADMIN và STAFF, sản phẩm (kiểm tra biểu mẫu), máy, ngăn, tóm tắt tồn kho, khóa kiosk (hiện một lần), lô, hộp tồn kho, lịch sử, đơn hàng, thanh toán, danh sách người dùng. Chưa có dữ liệu webhook thật để xem màn hình chi tiết webhook; cần thử lại khi có provider gọi về.

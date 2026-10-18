@@ -1,18 +1,47 @@
-# Kết nối đăng nhập
+# Kết nối đăng nhập và API
 
-Hiện frontend đã có giao diện và lớp gọi API; backend của repository chưa triển khai xác thực. Khi chưa cấu hình endpoint, nút Đăng nhập báo chưa kết nối và không gửi mật khẩu đi đâu. Không có tài khoản demo hoặc xác thực giả.
+Web quản trị gọi backend REST theo `api-contract/api.yaml` (nguồn chân lý). Không đoán field: thiếu gì thì mở issue backend.
 
-## Cấu hình dự kiến
+## Cấu hình
 
-Sao chép `.env.example` thành `.env.local`, đặt `VITE_AUTH_LOGIN_URL` thành URL đăng nhập thực tế rồi khởi động lại Vite. Ưu tiên URL cùng origin. Đây là **hợp đồng đề xuất**, chưa phải API đã thống nhất với backend.
+| Biến | Ý nghĩa |
+| --- | --- |
+| `VITE_API_BASE_URL` | Địa chỉ backend (scheme + host, không có `/api/v1`). Để trống để gọi cùng origin |
+| `DEV_API_PROXY_TARGET` | Chỉ dùng khi `npm run dev`: Vite proxy `/api` tới backend (mặc định `http://localhost:8080`) |
 
-- POST endpoint đã cấu hình; JSON `{ "identifier": "email hoặc tên đăng nhập", "password": "mật khẩu" }`.
-- HTTP 200 trả `{ "user": { "id": "string", "displayName": "string", "role": "ADMIN hoặc STAFF" } }`.
-- Backend tạo phiên bằng cookie HttpOnly/Secure với SameSite phù hợp. Client gửi `credentials: include` và không lưu mật khẩu/token vào localStorage.
-- Backend chịu trách nhiệm kiểm tra thông tin, phân quyền, chống CSRF/login-CSRF, giới hạn số lần thử. Cần thống nhất cơ chế CSRF và bổ sung token/header trước khi dùng thật nếu backend yêu cầu.
-- Nếu khác origin, backend phải cho phép CORS đúng origin và credentials; không dùng wildcard.
-- Các lỗi 401/403, 429, 5xx, mất mạng, timeout 15 giây và phản hồi không hợp lệ đều có thông báo.
+Backend chưa bật CORS, vì vậy khi phát triển nên để `VITE_API_BASE_URL` trống và dùng proxy của Vite. Khi triển khai, đặt web và API cùng origin (reverse proxy) hoặc bổ sung CORS ở backend.
 
-Sau khi API xác thực thành công, frontend hiện thông tin tài khoản. Dashboard, tự khôi phục phiên sau tải lại, bảo vệ route và đăng xuất chưa thuộc phần triển khai này. Backend phải kiểm tra quyền trên mọi API; vai trò hiển thị ở frontend không phải cơ chế bảo mật.
+## Đăng nhập
 
-Chỉnh contract tại `src/features/auth/auth.ts` khi backend chính thức có API. Không đặt secret trong biến VITE_*.
+- `POST /api/v1/auth/login` với `{ email, password }`. Email được cắt khoảng trắng; mật khẩu giữ nguyên.
+- Phản hồi chỉ có `accessToken`, `tokenType`, `expiresIn`. Backend **không có refresh token** và không có endpoint đăng xuất.
+- Token lưu trong bộ nhớ và `sessionStorage` (mất khi đóng tab), không ghi log, không đưa vào URL.
+- Vai trò (`ADMIN`, `STAFF`, có thể cả hai) được đọc từ claim `roles` của JWT **chỉ để ẩn/hiện giao diện**. Backend vẫn là nơi kiểm tra quyền; mọi lời gọi đều phải xử lý `403`.
+- Đăng xuất = xóa token phía client.
+- Token hết hạn hoặc bị từ chối (`401`) → xóa phiên và chuyển tới `/login?next=<URL đang xem>`; sau khi đăng nhập quay lại đúng URL. Chỉ chấp nhận đường dẫn nội bộ làm `next`.
+
+## API client
+
+Mọi gọi API đi qua `src/api/client.ts`:
+
+- Thêm `Authorization: Bearer <token>`, gửi JSON, không gửi cookie.
+- Bóc `data` khỏi `{ timestamp, message, data }`.
+- Lỗi được chuyển thành `ApiError`:
+
+| Mã | Hiển thị |
+| --- | --- |
+| 400 có `fieldErrors` | Thông báo cạnh từng ô nhập |
+| 400 không có field | Thông báo cấp biểu mẫu (từ `message`) |
+| 401 | Xóa phiên, chuyển tới đăng nhập |
+| 403 | "Bạn không có quyền…", không đăng xuất |
+| 404 | Trạng thái không tìm thấy |
+| 409 | `message` nghiệp vụ của backend (trùng mã, sai trạng thái, vượt sức chứa…) |
+| 5xx / mất mạng / quá 20 giây | Thông báo chung kèm nút "Thử lại"; không hiển thị stack trace hay nội dung thô |
+
+Kiểu dữ liệu nằm ở `src/api/schema.d.ts`, sinh từ contract:
+
+```powershell
+npm run gen:api
+```
+
+Commit lại file này mỗi khi `api-contract/api.yaml` thay đổi để mọi sai lệch hiện thành lỗi biên dịch.

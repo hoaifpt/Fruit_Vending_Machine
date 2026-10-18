@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint src tests vite.config.ts",
     "preview": "vite preview",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "gen:api": "npx --yes openapi-typescript@7.13.0 ../../api-contract/api.yaml -o src/api/schema.d.ts"
   },
   "dependencies": {
     "@fontsource/source-serif-4": "^5.3.0",
