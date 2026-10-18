@@ -54,7 +54,7 @@ class PayOsWebhookIntegrationTest extends AbstractOrderIntegrationTest {
         UUID slot = createSlot(machine, "W1", 10), product = createProduct("Webhook bowl", price);
         load(fixtures.batch(product, quantity + 1, staff.token()), slot, quantity + 1);
         String key = issueKey(machine);
-        UUID orderId = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(line(product, quantity)), 201).path("id").asText());
+        UUID orderId = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(product), 201).path("id").asText());
         kioskJson("POST", "/api/v1/kiosk/orders/" + orderId + "/payments", key, null, 201);
         String reference = jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=? ORDER BY created_at DESC LIMIT 1", String.class, orderId);
         String total = jdbc.queryForObject("SELECT total_amount::bigint::text FROM orders WHERE id=?", String.class, orderId);
@@ -107,7 +107,7 @@ class PayOsWebhookIntegrationTest extends AbstractOrderIntegrationTest {
         assertThat(payment.get("transaction_id")).isEqualTo("FT26101600001");
         assertThat(payment.get("provider")).isEqualTo("PAYOS");
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, order.orderId())).isEqualTo("PAID");
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", Long.class, order.slotId())).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", Long.class, order.slotId())).isEqualTo(1);
         var row = jdbc.queryForMap("SELECT provider, event_type, order_code, is_verified, signature FROM payment_webhook_logs WHERE order_code=?", order.reference());
         assertThat(row.get("provider")).isEqualTo("PAYOS");
         assertThat(row.get("event_type")).isEqualTo("PAYMENT_SUCCESS");

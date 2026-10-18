@@ -228,11 +228,11 @@ inventory_transactions rules are reused unchanged; there was no reservation dead
   allows one ACTIVE credential per machine; revoked rows are kept as history. FKs are RESTRICT.
 - **V11 orders.expires_at**: nullable TIMESTAMPTZ, `ck_orders_expires_at` (expires_at > created_at) and
   partial index `ix_orders_pending_expiry` on PENDING_PAYMENT. The service always sets it.
-- **Lock order for order workflows**: create = Product (FOR SHARE, sorted by id) -> Machine (FOR SHARE)
-  -> candidate InventoryItems (FOR UPDATE SKIP LOCKED, FEFO). Cancel/expiry = Order (FOR UPDATE) ->
+- **Lock order for order workflows** (superseded for creation by #35, see section 15): create = Product (FOR SHARE)
+  -> Machine (FOR SHARE) -> candidate Slots (FOR UPDATE, id order) -> head InventoryItem (FOR UPDATE). Cancel/expiry = Order (FOR UPDATE) ->
   InventoryItems sorted by id. Inventory loading (Product/Batch/Machine/Slot) and removal (Slot/Item)
   keep their order; shared locks serialize with their exclusive product/machine writes without
-  blocking other orders. Slot rows are not locked: slot ACTIVE is part of the candidate predicate.
+  blocking other orders.
   Later payment issues extend the order as Order -> Payment -> InventoryItem.
 - **History usage**: reservation appends one `RESERVE` row per bowl (reference_id = order id,
   performed_by NULL because a kiosk is not a user, snapshot machine/slot, AVAILABLE -> RESERVED).
@@ -281,3 +281,19 @@ V5, V6, V7, V11 and V12 and the AuditLog mapping were inspected; nothing is adde
 - `audit_logs`: one row per anomaly, `user_id` NULL, `entity_type` Payment, `entity_id` the payment id, actions PAYMENT_LATE, PAYMENT_DUPLICATE, PAYMENT_AMOUNT_MISMATCH, PAYMENT_TRANSACTION_CONFLICT; `old_value` and `new_value` carry statuses, transactionId, amountReceived and amountExpected.
 - **Lock order** is unchanged: Order, then Payment, then InventoryItem. The webhook locks the Order and then the Payment (found by an ids-only lookup so no stale copy is loaded first). Provider calls never happen inside the transaction; links of attempts expired by PAID are cancelled after commit.
 - Known limitation: PAID orders keep their bowls RESERVED until the dispense flow exists; there is no PAID timeout in this milestone.
+
+## 15. Issue #35 — one bowl per order, slot head (no schema change)
+
+V1-V12 untouched. `order_items` and `order_item_allocations` still allow many rows (historical #27 orders); the one-bowl rule lives in
+the request DTO and OrderService, deliberately without a CHECK quantity = 1.
+
+- **Head of a slot**: among `inventory_items` of the slot with status IN (AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED), the row with the
+  earliest `loaded_at`, tie-break `id`. SOLD/REMOVED rows keep `slot_id` for history but are not in the column. Assumption to confirm with the
+  hardware team: columns are refilled from the top, so earlier loaded_at = lower position; rows of one load share loaded_at, batch and expiry.
+- **Sellable slot**: head AVAILABLE, head batch `expires_at` > order `expires_at`, product ACTIVE, slot ACTIVE, machine ACTIVE, same machine,
+  head product = requested product. Only the head is reservable, so at most one RESERVED item per slot.
+- **FEFO between heads only**: head batch expires_at, then head loaded_at, slot_code, slot id. Never inside a column.
+- **Lock order**: create = Product (FOR SHARE) -> Machine (FOR SHARE) -> Slots holding the product (FOR UPDATE, sorted by id) -> head
+  InventoryItem (FOR UPDATE, rechecked). Loading = Product -> Batch -> Machine -> Slot; removal = Slot -> Item; release = Order -> Payment ->
+  InventoryItem. Loads of the same product or into the same machine wait on the shared Product/Machine locks; removal waits on the slot lock.
+- Queries: `findSlotIdsHoldingProduct` (unlocked discovery), `findSellableHeadId` and `findCatalog` (DISTINCT ON over the present items).

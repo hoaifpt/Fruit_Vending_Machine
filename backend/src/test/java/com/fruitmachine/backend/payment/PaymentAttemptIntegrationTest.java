@@ -24,15 +24,15 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void kioskCreatesAttemptWithOrderAmountReferenceQrAndDeadline() throws Exception {
-        var order = placeOrder(2);
+        var order = placeOrder();
         Instant before = Instant.now();
         var created = pay(order, 201).path("data");
         Instant after = Instant.now();
         assertThat(created.path("status").asText()).isEqualTo("PENDING");
         assertThat(created.path("provider").asText()).isEqualTo("TESTPAY");
         assertThat(created.path("orderId").asText()).isEqualTo(order.orderId().toString());
-        assertThat(created.path("amount").decimalValue()).isEqualByComparingTo("70000");
-        assertThat(created.path("qrCode").asText()).startsWith("TEST-QR|TEST-").endsWith("|70000.00");
+        assertThat(created.path("amount").decimalValue()).isEqualByComparingTo("35000");
+        assertThat(created.path("qrCode").asText()).startsWith("TEST-QR|TEST-").endsWith("|35000.00");
         // attempt-ttl is 2 minutes, shorter than the 5 minute reservation.
         assertThat(Instant.parse(created.path("expiresAt").asText())).isBetween(before.plus(Duration.ofMinutes(2)).minusMillis(1), after.plus(Duration.ofMinutes(2)).plusMillis(1));
         var row = jdbc.queryForMap("SELECT provider, payment_reference, qr_code, amount, status, transaction_id, paid_at FROM payments WHERE id=?", UUID.fromString(created.path("paymentId").asText()));
@@ -49,7 +49,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void qrDeadlineNeverOutlivesTheOrderReservation() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         Instant orderExpiry = instant("SELECT expires_at FROM orders WHERE id=?", order.orderId());
         clock.advance(Duration.ofMinutes(4));
         var created = pay(order, 201).path("data");
@@ -60,7 +60,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void providerDeadlineShorterThanOursIsHonored() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         Instant providerLimit = Instant.now().plus(Duration.ofSeconds(45));
         gateway.providerExpiresAt(providerLimit);
         var created = pay(order, 201).path("data");
@@ -69,7 +69,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void repeatedRequestReusesTheLiveAttemptWithoutCallingTheProviderAgain() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         var first = pay(order, 201).path("data");
         var second = pay(order, 200).path("data");
         var third = pay(order, 200).path("data");
@@ -81,7 +81,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void expiredPendingAttemptBecomesExpiredAndANewAttemptIsCreated() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         var first = pay(order, 201).path("data");
         clock.advance(Duration.ofMinutes(2).plusSeconds(1));
         var second = pay(order, 201).path("data");
@@ -96,7 +96,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void attemptStillBeingCreatedAnswers409() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         jdbc.update("INSERT INTO payments(order_id, provider, payment_reference, amount, status, expired_at) VALUES (?, 'TESTPAY', 'TEST-INFLIGHT', 1, 'PENDING', now() + interval '1 minute')", order.orderId());
         pay(order, 409);
         assertThat(gateway.calls()).isZero();
@@ -105,7 +105,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void maximumAttemptsPerOrderIsEnforced() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.mode(Mode.FAIL);
         for (int i = 0; i < 3; i++) pay(order, 502);
         gateway.mode(Mode.SUCCESS);
@@ -116,18 +116,18 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void orderThatIsNotPendingPaymentOrAlmostExpiredCannotStartAPayment() throws Exception {
-        var cancelled = placeOrder(1);
+        var cancelled = placeOrder();
         kioskJson("POST", "/api/v1/kiosk/orders/" + cancelled.orderId() + "/cancel", cancelled.shop().key(), null, 200);
         pay(cancelled, 409);
-        var other = placeOrder(1);
+        var other = placeOrder();
         // PAID is produced only by a later issue; simulate a backend-confirmed state directly.
         jdbc.update("UPDATE orders SET status='PAID', paid_at=now() WHERE id=?", other.orderId());
         pay(other, 409);
-        var late = placeOrder(1);
+        var late = placeOrder();
         clock.advance(Duration.ofMinutes(4).plusSeconds(40));
         pay(late, 409);
         clock.reset();
-        var expired = placeOrder(1);
+        var expired = placeOrder();
         clock.advance(Duration.ofMinutes(6));
         pay(expired, 409);
         assertThat(gateway.calls()).isZero();
@@ -136,7 +136,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void orderOfAnotherMachineOrMissingOrderIs404AndAuthenticationIsRequired() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         var other = shop(2);
         kioskJson("POST", order.payments(), other.key(), null, 404);
         kioskJson("POST", "/api/v1/kiosk/orders/" + UUID.randomUUID() + "/payments", order.shop().key(), null, 404);
@@ -149,7 +149,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void providerFailureMarksTheAttemptFailedReturns502AndLeavesTheOrderUnchanged() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.mode(Mode.FAIL);
         var error = pay(order, 502);
         assertThat(error.path("message").asText()).isEqualTo("Payment provider is currently unavailable");
@@ -167,7 +167,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void providerTimeoutMarksTheAttemptFailedAndReturns502() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.mode(Mode.TIMEOUT);
         long started = System.nanoTime();
         pay(order, 502);
@@ -178,7 +178,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void noDatabaseTransactionIsOpenWhileTheProviderIsCalled() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         assertThat(gateway.idleInTransactionDuringCall()).containsExactly(0L);
         // The service refuses to run inside an ambient transaction at all.
@@ -195,7 +195,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void orderCancelledDuringTheProviderCallKeepsTheAttemptExpiredAndAnswers409() throws Exception {
-        var order = placeOrder(2);
+        var order = placeOrder();
         gateway.duringCall(() -> {
             try {
                 kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
@@ -218,22 +218,22 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
         load(fixtures.batch(product, 3, staff.token()), slot, 3);
         String key = issueKey(machine);
         var fractional = new PlacedOrder(new Shop(machine, slot, product, key),
-                UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(line(product, 1)), 201).path("id").asText()), "x");
+                UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(product), 201).path("id").asText()), "x");
         var error = pay(fractional, 409);
         assertThat(error.path("message").asText()).contains("cannot be charged");
         assertThat(count("SELECT count(*) FROM payments WHERE order_id=?", fractional.orderId())).isZero();
         assertThat(gateway.calls()).isZero();
         // The same provider accepts a whole amount, and the default (MOCK-like) rule accepts fractions.
-        pay(placeOrder(1), 201);
+        pay(placeOrder(), 201);
         gateway.wholeAmountsOnly(false);
         pay(fractional, 201);
     }
 
     @Test
     void aCollidingReferenceIsRegeneratedInsteadOfFailing() throws Exception {
-        var other = placeOrder(1);
+        var other = placeOrder();
         jdbc.update("INSERT INTO payments(order_id, provider, payment_reference, amount, status, expired_at) VALUES (?, 'TESTPAY', 'TEST-DUPLICATE', 1, 'FAILED', now() + interval '1 minute')", other.orderId());
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.queueReferences("TEST-DUPLICATE", "TEST-DUPLICATE", "TEST-FRESH-1");
         pay(order, 201);
         assertThat(jdbc.queryForObject("SELECT payment_reference FROM payments WHERE order_id=?", String.class, order.orderId())).isEqualTo("TEST-FRESH-1");
@@ -242,7 +242,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void amountAndOtherValuesFromTheClientAreIgnored() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         var created = kioskJson("POST", order.payments(), order.shop().key(), Map.of("amount", 1, "provider", "MOCK", "status", "SUCCESS"), 201).path("data");
         assertThat(created.path("amount").decimalValue()).isEqualByComparingTo("35000");
         assertThat(created.path("provider").asText()).isEqualTo("TESTPAY");

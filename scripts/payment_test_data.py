@@ -145,7 +145,7 @@ def order(args):
     state = load_state()
     base = state["baseUrl"]
     product = pick_product(state, args)
-    created = data_of(call(base, "POST", "/api/v1/kiosk/orders", {"items": [{"productId": product["id"], "quantity": args.quantity}]},
+    created = data_of(call(base, "POST", "/api/v1/kiosk/orders", {"productId": product["id"]},
                            kiosk_key=state["kioskKey"]))
     state["lastOrderId"] = created["id"]
     save_state(state)
@@ -231,9 +231,9 @@ def main():
     p.add_argument("--base-url", default=os.environ.get("FVM_BASE_URL", "http://localhost:8080"))
     p.add_argument("--bowls", type=int, default=5, help="bowls loaded per slot (1..10)")
     p.set_defaults(handler=seed)
-    p = sub.add_parser("order", help="create an order and a payment attempt (REAL payOS link when the provider is PAYOS)")
+    p = sub.add_parser("order", help="create a one-bowl order and a payment attempt (REAL payOS link when the provider is PAYOS); "
+                       "a slot accepts a new order only after the previous one is paid, cancelled or expired")
     p.add_argument("--product", help="slot code (A1..) or product id; default A1 (2000 VND)")
-    p.add_argument("--quantity", type=int, default=1)
     p.set_defaults(handler=order)
     p = sub.add_parser("status", help="show the order as the kiosk sees it")
     p.add_argument("--order", help="order id; default the last one")

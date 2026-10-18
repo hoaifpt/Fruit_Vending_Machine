@@ -59,7 +59,7 @@ class InventoryManagementDocumentationTest {
         assertThat(load.at("/properties/quantity/minimum").asInt()).isEqualTo(1); assertThat(load.at("/properties/quantity/maximum").asInt()).isEqualTo(1000);
         assertThat(actual.at("/components/schemas/RemoveInventoryRequest/properties/reason/maxLength").asInt()).isEqualTo(500);
         assertThat(actual.at("/components/schemas/InventoryTransactionResponse/properties").fieldNames()).toIterable().containsExactlyInAnyOrder("id","inventoryItemId","batchId","batchCode","machineId","slotId","type","referenceId","performedBy","reason","statusBefore","statusAfter","createdAt");
-        assertThat(actual.at("/components/schemas/InventorySummaryResponse/properties").fieldNames()).toIterable().containsExactlyInAnyOrder("machineId","slotId","capacity","occupiedCount","availableCount","expiredCount","reservedCount","sellableCount","remainingCapacity","asOf");
+        assertThat(actual.at("/components/schemas/InventorySummaryResponse/properties").fieldNames()).toIterable().containsExactlyInAnyOrder("machineId","slotId","capacity","occupiedCount","availableCount","expiredCount","reservedCount","sellableCount","remainingCapacity","asOf","headStatus","headExpired");
         assertThat(actual.at("/paths/~1api~1v1~1inventory~1{id}").fieldNames()).toIterable().containsExactly("get");
         validateReferences(expected, expected);
         assertThat(body).doesNotContain(KEY, "passwordHash", "/test-only/");

@@ -13,26 +13,31 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class OrderPropertiesTest {
     private OrderProperties bind(Map<String, String> overrides) {
         var values = new HashMap<String, String>();
-        values.put("app.order.max-total-quantity", "5");
         values.putAll(overrides);
-        return new Binder(new MapConfigurationPropertySource(values)).bind("app.order", OrderProperties.class).get();
+        return new Binder(new MapConfigurationPropertySource(values)).bindOrCreate("app.order", OrderProperties.class);
     }
 
     @Test
     void defaultsMatchTheDocumentedConfiguration() {
         var properties = bind(Map.of());
         assertThat(properties.reservationTtl()).isEqualTo(Duration.ofMinutes(5));
-        assertThat(properties.maxTotalQuantity()).isEqualTo(5);
         assertThat(properties.expirySweep().enabled()).isTrue();
         assertThat(properties.expirySweep().interval()).isEqualTo(Duration.ofSeconds(30));
         assertThat(properties.expirySweep().batchSize()).isEqualTo(50);
     }
 
     @Test
+    void multiBowlSettingIsGone() {
+        // Removed in #35: one purchase is always one bowl, so there is no configurable maximum any more.
+        assertThat(java.util.Arrays.stream(OrderProperties.class.getRecordComponents()).map(java.lang.reflect.RecordComponent::getName))
+                .containsExactly("reservationTtl", "expirySweep");
+    }
+
+    @Test
     void invalidValuesFailBinding() {
         for (var invalid : java.util.List.of(
                 Map.of("app.order.reservation-ttl", "PT0S"), Map.of("app.order.reservation-ttl", "-PT1M"),
-                Map.of("app.order.max-total-quantity", "0"), Map.of("app.order.expiry-sweep.interval", "PT0S"),
+                Map.of("app.order.expiry-sweep.interval", "PT0S"),
                 Map.of("app.order.expiry-sweep.interval", "-PT5S"), Map.of("app.order.expiry-sweep.batch-size", "0"))) {
             assertThatThrownBy(() -> bind(invalid)).as("%s", invalid).isInstanceOf(RuntimeException.class);
         }

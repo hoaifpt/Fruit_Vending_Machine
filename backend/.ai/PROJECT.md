@@ -102,8 +102,8 @@ invent command IDs, select a different slot, or mark an order PAID. Backend crea
 and persists DispenseCommand before exposing it to the kiosk. The exact claim/status
 channel will be designed in its issue; polling/push transport is not implemented yet.
 
-For multiple bowls, one command targets one allocated inventory item. Complete the
-order only after all required commands succeed; record per-item results idempotently.
+One order buys exactly one bowl (issue #35): one order -> one allocation -> one dispense command -> one slot,
+so completing the order collapses to that single command; record its result idempotently.
 Use the existing DISPENSING state while fulfillment is in progress. Failure, timeout,
 disconnect and ambiguous physical outcomes require reconciliation, not blind resend.
 
@@ -412,3 +412,11 @@ Verified provider webhooks (payOS and the development MOCK) are the only source 
 late, duplicate, mismatched and conflicting payments are recorded for ADMIN review and never auto-resolved, ADMIN can read webhook logs and filter payments that require attention, and the kiosk sees PAID by polling.
 No dispense command, inventory SOLD, DISPENSING/COMPLETED, refund, reconciliation, replay or alert exists; PAID orders keep their bowls RESERVED. Real payOS webhook verification stays a manual check.
 See docs/payment-webhook.md and CURRENT_TASK.md.
+
+## 19. One bowl per order — Issue #35
+
+Hardware rules: one purchase = one bowl, and a slot (vertical column) can only release its bottom bowl. The kiosk order request
+is `{ "productId" }` only (breaking change, the kiosk has not shipped); every new order has one item of quantity 1. The backend reserves
+the head (bottom bowl) of a sellable slot, FEFO only between slot heads, at most one RESERVED bowl per slot, and the catalog lists only
+products with a sellable head. `app.order.max-total-quantity` and catalog `maxTotalQuantity` are removed. No schema change; historical
+multi-line orders stay readable. See docs/order-management.md.

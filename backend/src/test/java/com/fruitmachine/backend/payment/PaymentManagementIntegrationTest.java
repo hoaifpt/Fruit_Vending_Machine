@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PaymentManagementIntegrationTest extends AbstractPaymentIntegrationTest {
     @Test
     void adminListsFiltersPagesAndSortsPaymentsWithoutQrCodes() throws Exception {
-        var order = placeOrder(2);
-        var other = placeOrder(1);
+        var order = placeOrder();
+        var other = placeOrder();
         Instant start = Instant.now().minusSeconds(5);
         gateway.mode(Mode.FAIL);
         pay(order, 502);
@@ -51,7 +51,7 @@ class PaymentManagementIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void adminViewsPaymentDetailsIncludingTheQrCode() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         var created = pay(order, 201).path("data");
         var detail = fixtures.api("GET", "/api/v1/payments/" + created.path("paymentId").asText(), null, admin.token(), 200);
         assertThat(detail.path("qrCode").asText()).isEqualTo(created.path("qrCode").asText());
@@ -64,7 +64,7 @@ class PaymentManagementIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void onlyAdminMayUsePaymentsApiAndNoWriteOrStatusOperationExists() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         var created = pay(order, 201).path("data");
         String id = created.path("paymentId").asText();
         for (String path : new String[]{"/api/v1/payments", "/api/v1/payments/" + id}) {
@@ -88,7 +88,7 @@ class PaymentManagementIntegrationTest extends AbstractPaymentIntegrationTest {
 
     @Test
     void orderDetailsListPaymentSummariesForAdminAndStaffWithoutSensitiveFields() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         gateway.mode(Mode.FAIL);
         pay(order, 502);
         gateway.mode(Mode.SUCCESS);
@@ -102,7 +102,7 @@ class PaymentManagementIntegrationTest extends AbstractPaymentIntegrationTest {
             assertThat(payments.get(0).fieldNames()).toIterable().containsExactlyInAnyOrder("id", "provider", "status", "amount", "createdAt", "paidAt", "expiredAt");
             assertThat(payments.toString()).doesNotContain("qrCode", "paymentReference", "transactionId", "TEST-QR");
         }
-        var empty = placeOrder(1);
+        var empty = placeOrder();
         assertThat(fixtures.api("GET", "/api/v1/orders/" + empty.orderId(), null, staff.token(), 200).path("payments")).isEmpty();
         clock.advance(Duration.ofMinutes(10));
         assertThat(expiry.sweep()).isGreaterThanOrEqualTo(1);

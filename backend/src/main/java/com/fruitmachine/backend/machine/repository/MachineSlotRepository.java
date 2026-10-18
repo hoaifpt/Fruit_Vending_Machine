@@ -3,6 +3,8 @@ package com.fruitmachine.backend.machine.repository;
 import com.fruitmachine.backend.machine.entity.MachineSlot;
 import com.fruitmachine.backend.machine.enums.SlotStatus;
 import jakarta.persistence.LockModeType;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -24,4 +26,9 @@ public interface MachineSlotRepository extends JpaRepository<MachineSlot, UUID> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from MachineSlot s where s.id = :id and s.machineId = :machineId")
     Optional<MachineSlot> findForUpdateByIdAndMachineId(@Param("id") UUID id, @Param("machineId") UUID machineId);
+
+    /** Locks slots in id order so concurrent orders on overlapping slots never deadlock. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from MachineSlot s where s.id in :ids and s.machineId = :machineId order by s.id")
+    List<MachineSlot> findAllForUpdateByIdInAndMachineId(@Param("ids") Collection<UUID> ids, @Param("machineId") UUID machineId);
 }

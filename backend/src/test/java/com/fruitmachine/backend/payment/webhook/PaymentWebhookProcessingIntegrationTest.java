@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegrationTest {
-    private PlacedOrder payable(int quantity) throws Exception {
-        var order = placeOrder(quantity);
+    private PlacedOrder payable() throws Exception {
+        var order = placeOrder();
         pay(order, 201);
         return order;
     }
@@ -28,7 +28,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void successMakesThePaymentSuccessAndTheOrderPaidAndLeavesInventoryReserved() throws Exception {
-        var order = payable(2);
+        var order = payable();
         String reference = reference(order);
         assertThat(paid(reference, "TXN-1", orderTotal(order.orderId()))).isEqualTo(200);
 
@@ -42,9 +42,9 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         assertThat(row.get("completed_at")).isNull();
         assertThat(row.get("cancelled_at")).isNull();
         // Reservation only: nothing is sold, dispensed or commanded, and no anomaly exists.
-        assertThat(inventory(order.shop(), "RESERVED")).isEqualTo(2);
+        assertThat(inventory(order.shop(), "RESERVED")).isEqualTo(1);
         assertThat(inventory(order.shop(), "SOLD")).isZero();
-        assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status='RESERVED'", order.orderId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status='RESERVED'", order.orderId())).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status<>'RESERVED'", order.orderId())).isZero();
         assertThat(count("SELECT count(*) FROM dispense_commands")).isZero();
         assertThat(count("SELECT count(*) FROM audit_logs WHERE entity_id=?", paymentId(reference))).isZero();
@@ -53,7 +53,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void anOrderPastItsExpiryButStillPendingPaymentIsStillPaid() throws Exception {
-        var order = payable(1);
+        var order = payable();
         clock.advance(Duration.ofMinutes(6));
         assertThat(orderStatus(order.orderId())).isEqualTo("PENDING_PAYMENT");
         assertThat(paid(reference(order), "TXN-LATE-SWEEP", orderTotal(order.orderId()))).isEqualTo(200);
@@ -68,7 +68,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void otherPendingAttemptsAreExpiredAndTheirProviderLinksCancelledAfterCommit() throws Exception {
-        var order = payable(1);
+        var order = payable();
         String other = insertPendingAttempt(order.orderId(), "TEST-OTHER-1", orderTotal(order.orderId()));
         String reference = reference(order);
         // Make the paying attempt the newest by reference lookup: use the one created through the kiosk API.
@@ -84,7 +84,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void kioskPollingShowsPaidAndASuccessfulPayment() throws Exception {
-        var order = payable(1);
+        var order = payable();
         assertThat(kioskOrder(order).path("status").asText()).isEqualTo("PENDING_PAYMENT");
         paid(reference(order), "TXN-POLL", orderTotal(order.orderId()));
         var polled = kioskOrder(order);
@@ -99,7 +99,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void expiredAndFailedAttemptsStillBecomeSuccessWhenTheMoneyArrived() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         pay(order, 201);
         String first = reference(order);
         clock.advance(Duration.ofMinutes(2).plusSeconds(1));
@@ -109,7 +109,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         assertThat(paymentStatus(first)).isEqualTo("SUCCESS");
         assertThat(orderStatus(order.orderId())).isEqualTo("PAID");
 
-        var failedOrder = placeOrder(1);
+        var failedOrder = placeOrder();
         gateway.mode(Mode.FAIL);
         pay(failedOrder, 502);
         gateway.mode(Mode.SUCCESS);
@@ -122,7 +122,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void theSameWebhookDeliveredTwiceIsAnIdempotentNoOp() throws Exception {
-        var order = payable(1);
+        var order = payable();
         String reference = reference(order);
         String body = webhookBody(reference, "TXN-DUP", orderTotal(order.orderId()), "SUCCESS");
         assertThat(webhook(WEBHOOK, body, sign(body)).getResponse().getStatus()).isEqualTo(200);
@@ -140,7 +140,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
     @Test
     void parallelDeliveriesOfTheSameWebhookChangeStateExactlyOnce() throws Exception {
         for (int round = 0; round < 3; round++) {
-            var order = payable(1);
+            var order = payable();
             String reference = reference(order);
             String body = webhookBody(reference, "TXN-PAR-" + round, orderTotal(order.orderId()), "SUCCESS");
             List<Integer> statuses = parallel(java.util.stream.IntStream.range(0, 6).<java.util.concurrent.Callable<Integer>>mapToObj(
@@ -156,8 +156,8 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void aTransactionIdAlreadyUsedByAnotherPaymentIsAConflictAndChangesNothing() throws Exception {
-        var first = payable(1);
-        var second = payable(1);
+        var first = payable();
+        var second = payable();
         paid(reference(first), "TXN-SHARED", orderTotal(first.orderId()));
         String secondReference = reference(second);
         assertThat(paid(secondReference, "TXN-SHARED", orderTotal(second.orderId()))).isEqualTo(200);
@@ -169,7 +169,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void aSuccessPaymentReceivingADifferentTransactionIdKeepsItsOwnAndRecordsAConflict() throws Exception {
-        var order = payable(1);
+        var order = payable();
         String reference = reference(order);
         paid(reference, "TXN-A", orderTotal(order.orderId()));
         assertThat(paid(reference, "TXN-B", orderTotal(order.orderId()))).isEqualTo(200);
@@ -181,8 +181,8 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
     @Test
     void twoPaymentsRacingForTheSameTransactionIdYieldOneSuccessAndOneRecordedConflict() throws Exception {
         for (int round = 0; round < 3; round++) {
-            var first = payable(1);
-            var second = payable(1);
+            var first = payable();
+            var second = payable();
             String shared = "TXN-RACE-" + round;
             String firstReference = reference(first), secondReference = reference(second);
             String firstBody = webhookBody(firstReference, shared, orderTotal(first.orderId()), "SUCCESS");
@@ -200,7 +200,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void anAmountMismatchChangesNothingAndIsRecorded() throws Exception {
-        var order = payable(2);
+        var order = payable();
         String reference = reference(order);
         assertThat(paid(reference, "TXN-AMT", "69999.99")).isEqualTo(200);
         assertThat(paymentStatus(reference)).isEqualTo("PENDING");
@@ -210,10 +210,10 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         assertThat(auditCount("PAYMENT_AMOUNT_MISMATCH", id)).isEqualTo(1);
         JsonNode after = auditValue("PAYMENT_AMOUNT_MISMATCH", id, "new_value");
         assertThat(after.path("amountReceived").asText()).isEqualTo("69999.99");
-        assertThat(after.path("amountExpected").asText()).isEqualTo("70000.00");
+        assertThat(after.path("amountExpected").asText()).isEqualTo("35000.00");
         assertThat(after.path("transactionId").asText()).isEqualTo("TXN-AMT");
         assertThat(auditValue("PAYMENT_AMOUNT_MISMATCH", id, "old_value").path("paymentStatus").asText()).isEqualTo("PENDING");
-        assertThat(inventory(order.shop(), "RESERVED")).isEqualTo(2);
+        assertThat(inventory(order.shop(), "RESERVED")).isEqualTo(1);
         // A missing amount on a success event is also not accepted.
         String noAmount = "{\"paymentReference\":\"" + reference + "\",\"transactionId\":\"TXN-NA\",\"status\":\"SUCCESS\"}";
         assertThat(webhook(WEBHOOK, noAmount, sign(noAmount)).getResponse().getStatus()).isEqualTo(200);
@@ -222,30 +222,30 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void amountsAreComparedNumericallyNotAsText() throws Exception {
-        var order = payable(2);
+        var order = payable();
         String reference = reference(order);
-        // 70000 and 7.0E4 and 70000.000 all equal 70000.00 under BigDecimal.compareTo.
-        assertThat(paid(reference, "TXN-CMP", "7.0E4")).isEqualTo(200);
+        // 35000 and 3.5E4 and 35000.000 all equal 35000.00 under BigDecimal.compareTo.
+        assertThat(paid(reference, "TXN-CMP", "3.5E4")).isEqualTo(200);
         assertThat(paymentStatus(reference)).isEqualTo("SUCCESS");
-        var second = payable(2);
-        assertThat(paid(reference(second), "TXN-CMP-2", "70000.000")).isEqualTo(200);
+        var second = payable();
+        assertThat(paid(reference(second), "TXN-CMP-2", "35000.000")).isEqualTo(200);
         assertThat(paymentStatus(reference(second))).isEqualTo("SUCCESS");
-        var third = payable(2);
-        assertThat(paid(reference(third), "TXN-CMP-3", "70000")).isEqualTo(200);
+        var third = payable();
+        assertThat(paid(reference(third), "TXN-CMP-3", "35000")).isEqualTo(200);
         assertThat(orderStatus(third.orderId())).isEqualTo("PAID");
     }
 
     @Test
     void aPaymentForACancelledOrderIsRecordedAsLateWithoutReReservingOrRefunding() throws Exception {
-        var order = payable(2);
+        var order = payable();
         String reference = reference(order);
         kioskJson("POST", "/api/v1/kiosk/orders/" + order.orderId() + "/cancel", order.shop().key(), null, 200);
-        assertThat(inventory(order.shop(), "AVAILABLE")).isEqualTo(4);
+        assertThat(inventory(order.shop(), "AVAILABLE")).isEqualTo(3);
         assertThat(paid(reference, "TXN-LATE", orderTotal(order.orderId()))).isEqualTo(200);
         assertThat(paymentStatus(reference)).isEqualTo("SUCCESS");
         assertThat(orderStatus(order.orderId())).isEqualTo("CANCELLED");
         // No re-reservation: the bowls stay available.
-        assertThat(inventory(order.shop(), "AVAILABLE")).isEqualTo(4);
+        assertThat(inventory(order.shop(), "AVAILABLE")).isEqualTo(3);
         assertThat(inventory(order.shop(), "RESERVED")).isZero();
         UUID id = paymentId(reference);
         assertThat(auditCount("PAYMENT_LATE", id)).isEqualTo(1);
@@ -258,7 +258,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void aSecondSuccessfulAttemptOnAPaidOrderIsRecordedAsDuplicate() throws Exception {
-        var order = payable(1);
+        var order = payable();
         String first = reference(order);
         paid(first, "TXN-FIRST", orderTotal(order.orderId()));
         String second = insertPendingAttempt(order.orderId(), "TEST-SECOND-QR", orderTotal(order.orderId()));
@@ -282,7 +282,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void failedEventsOnlyMoveAPendingPaymentToFailed() throws Exception {
-        var order = payable(1);
+        var order = payable();
         String reference = reference(order);
         String failed = webhookBody(reference, "null", orderTotal(order.orderId()), "FAILED").replace("\"null\"", "null");
         assertThat(webhook(WEBHOOK, failed, sign(failed)).getResponse().getStatus()).isEqualTo(200);
@@ -294,7 +294,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         // The kiosk may try again while the order is still payable.
         pay(order, 201);
 
-        var paidOrder = payable(1);
+        var paidOrder = payable();
         String paidReference = reference(paidOrder);
         paid(paidReference, "TXN-F", orderTotal(paidOrder.orderId()));
         String ignored = webhookBody(paidReference, "null", orderTotal(paidOrder.orderId()), "FAILED").replace("\"null\"", "null");
@@ -302,7 +302,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         assertThat(paymentStatus(paidReference)).isEqualTo("SUCCESS");
         assertThat(orderStatus(paidOrder.orderId())).isEqualTo("PAID");
         // A failed notification for a different amount is an anomaly, not a state change.
-        var mismatch = payable(1);
+        var mismatch = payable();
         String wrong = webhookBody(reference(mismatch), "null", "1", "FAILED").replace("\"null\"", "null");
         assertThat(webhook(WEBHOOK, wrong, sign(wrong)).getResponse().getStatus()).isEqualTo(200);
         assertThat(paymentStatus(reference(mismatch))).isEqualTo("PENDING");
@@ -310,7 +310,7 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void aRefundedPaymentIsNeverTouchedByASuccessWebhook() throws Exception {
-        var order = payable(1);
+        var order = payable();
         String reference = reference(order);
         jdbc.update("UPDATE payments SET status='REFUNDED', transaction_id='TXN-OLD', paid_at=now() WHERE payment_reference=?", reference);
         assertThat(paid(reference, "TXN-OLD", orderTotal(order.orderId()))).isEqualTo(200);
@@ -320,14 +320,14 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void requiresAttentionListsLateAndDuplicatePaymentsOnly() throws Exception {
-        var shop = shop(10);
-        var normal = placeOrder(shop, 1);
+        var shop = shopWithSlots(4);
+        var normal = placeOrder(shop);
         pay(normal, 201);
-        var late = placeOrder(shop, 1);
+        var late = placeOrder(shop);
         pay(late, 201);
-        var duplicate = placeOrder(shop, 1);
+        var duplicate = placeOrder(shop);
         pay(duplicate, 201);
-        var pending = placeOrder(shop, 1);
+        var pending = placeOrder(shop);
         pay(pending, 201);
 
         paid(reference(normal), "TXN-N", orderTotal(normal.orderId()));

@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping(produces = "application/json")
 @PreAuthorize("hasRole('KIOSK')")
 @SecurityRequirement(name = "kioskKey")
-@Tag(name = "Kiosk Orders", description = "Kiosk order creation with atomic bowl reservation, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; payment attempts are in Kiosk Payments and there is no dispensing.")
+@Tag(name = "Kiosk Orders", description = "Kiosk order creation with atomic reservation of exactly one bowl, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; payment attempts are in Kiosk Payments and there is no dispensing. Changelog (issue #35, breaking): the create request is now {\"productId\"} only; the former items[]/quantity shape is rejected with 400.")
 @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Authenticated as a user, not a kiosk", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
@@ -41,14 +41,17 @@ public class KioskOrderController {
     private final OrderService orders;
 
     @PostMapping(value = "/api/v1/kiosk/orders", consumes = "application/json")
-    @Operation(operationId = "createKioskOrder", summary = "Create an order and reserve bowls",
-            description = "KIOSK only. All-or-nothing in one transaction: locks products and the machine (shared), selects FEFO bowls of this machine with SKIP LOCKED whose batch outlives the hold deadline, "
-                    + "snapshots server-side prices, creates a PENDING_PAYMENT order with expiresAt = now + reservation TTL and reserves the bowls with RESERVE history. Machine, prices and status are never accepted from the client.")
+    @Operation(operationId = "createKioskOrder", summary = "Create a one-bowl order and reserve the next bowl to dispense",
+            description = "KIOSK only. One purchase = one bowl. In one transaction: locks the product and the machine (shared) and the slots of this machine holding the product (FOR UPDATE, id order), "
+                    + "then reserves the head of a sellable slot: the bottom bowl of the column (earliest loadedAt, tie-break id) that must be AVAILABLE, of the requested ACTIVE product, in an ACTIVE slot, "
+                    + "with a batch outliving the hold deadline. Bowls behind a head are never reserved, so a slot has at most one RESERVED bowl; a RESERVED, EXPIRED, DISPENSE_FAILED or soon-expiring head blocks its slot. "
+                    + "Between sellable slots the head expiring first wins (then head loadedAt, slotCode, slot id). Creates a PENDING_PAYMENT order with exactly one item of quantity 1 at the server-side price, "
+                    + "expiresAt = now + reservation TTL, one allocation and RESERVE history. Machine, prices, quantity and status are never accepted from the client.")
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Order created and bowls reserved"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation failure: empty/duplicate lines, quantity < 1 or fractional, total above maximum, unknown fields", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Order created with one item (quantity 1) and its bowl reserved"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation failure: missing or malformed productId, or any other field (items, quantity, price, machineId, status, ...)", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Unknown product", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Inactive product, machine not ACTIVE or insufficient sellable quantity; nothing reserved", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Inactive product, machine not ACTIVE or no slot whose head is a sellable bowl of the product; nothing reserved", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
     })
     public ResponseEntity<ApiResponse<KioskOrderResponse>> create(@AuthenticationPrincipal AuthenticatedKiosk kiosk,
             @Valid @RequestBody CreateOrderRequest request) {

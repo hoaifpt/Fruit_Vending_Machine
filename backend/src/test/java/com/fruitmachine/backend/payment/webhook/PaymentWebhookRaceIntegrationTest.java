@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Real PostgreSQL transactions on separate connections: the order lock leaves exactly one winner. */
 class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
     private PlacedOrder payable() throws Exception {
-        var order = placeOrder(2);
+        var order = placeOrder();
         pay(order, 201);
         return order;
     }
@@ -32,13 +32,13 @@ class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
             long reserved = count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", order.shop().slotId());
             long released = count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", order.orderId());
             if (orderStatus(order.orderId()).equals("PAID")) {
-                assertThat(reserved).isEqualTo(2);
+                assertThat(reserved).isEqualTo(1);
                 assertThat(released).isZero();
                 assertThat(auditCount("PAYMENT_LATE", payment)).isZero();
             } else {
                 assertThat(orderStatus(order.orderId())).isEqualTo("CANCELLED");
                 assertThat(reserved).isZero();
-                assertThat(released).isEqualTo(2);
+                assertThat(released).isEqualTo(1);
                 assertThat(auditCount("PAYMENT_LATE", payment)).isEqualTo(1);
             }
         }
@@ -58,7 +58,7 @@ class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
             if (orderStatus(order.orderId()).equals("PAID")) {
                 // The webhook won: the cancel was refused and the bowls are still reserved.
                 assertThat(results.get(1)).isEqualTo(409);
-                assertThat(reserved).isEqualTo(2);
+                assertThat(reserved).isEqualTo(1);
                 assertThat(count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", order.orderId())).isZero();
             } else {
                 // The cancel won: the order stays CANCELLED, the bowls are released and the payment is a recorded late payment.
@@ -72,7 +72,7 @@ class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
 
     @Test
     void aWebhookArrivingWhileTheAttemptIsStillBeingCreatedIsNotLost() throws Exception {
-        var order = placeOrder(1);
+        var order = placeOrder();
         // The provider call is in flight (step 2, no transaction); the customer pays and the webhook arrives right now.
         gateway.duringCall(() -> {
             try {
@@ -96,10 +96,10 @@ class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
 
     @Test
     void manyDifferentWebhooksForManyOrdersAllApplyIndependently() throws Exception {
-        var shop = shop(20);
+        var shop = shopWithSlots(6);
         var orders = new java.util.ArrayList<PlacedOrder>();
         for (int i = 0; i < 6; i++) {
-            var order = placeOrder(shop, 1);
+            var order = placeOrder(shop);
             pay(order, 201);
             orders.add(order);
         }

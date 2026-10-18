@@ -55,26 +55,42 @@ Cấp key mới khóa dòng máy, thu hồi key ACTIVE cũ và tạo key mới t
 
 ## Catalog
 
-Bát bán được: `AVAILABLE`, có slot `ACTIVE` của chính máy, batch còn hạn **sau** hạn giữ chỗ (`now + ttl`), product `ACTIVE`;
-máy phải `ACTIVE`, nếu không `acceptingOrders=false` và danh sách rỗng. Một câu truy vấn gộp theo product; không lộ slot, item
-hay batch. `availableQuantity` chỉ là ảnh chụp, không phải giữ chỗ.
+Mỗi slot là một **cột dọc**: chỉ bát ở **đáy cột (head)** rơi ra được. Head của slot là bát còn nằm trong máy
+(`AVAILABLE`, `RESERVED`, `EXPIRED`, `DISPENSE_FAILED`) có `loaded_at` sớm nhất, hòa thì theo `id`; bát `SOLD`/`REMOVED` không còn trong cột.
+Giả định (cần phần cứng xác nhận): cột được nạp từ trên xuống nên nạp trước = nằm dưới = rơi trước; các bát cùng một lần nạp có cùng
+`loaded_at`, cùng batch nên thay thế được cho nhau.
+
+Slot **bán được** khi head `AVAILABLE`, batch của head còn hạn **sau** hạn giữ chỗ (`now + ttl`), product `ACTIVE`, slot `ACTIVE`, máy `ACTIVE`.
+Head `RESERVED` (đang có người trả tiền), `EXPIRED`, `DISPENSE_FAILED`, hoặc `AVAILABLE` nhưng hết hạn / sắp hết hạn trong lúc giữ chỗ
+sẽ **chặn cả cột**: các bát phía sau không bán được dù còn tươi.
+
+Catalog chỉ liệt kê product có ít nhất một slot bán được với head là product đó; máy không `ACTIVE` thì `acceptingOrders=false` và danh sách rỗng.
+`availableQuantity` (chỉ để hiển thị, không phải giữ chỗ) = số bát `AVAILABLE` của product, còn hạn sau `now + ttl`, nằm trong các slot có head
+bán được của chính product đó. Một câu SQL gộp (`DISTINCT ON` tìm head), không nạp item vào Java; không lộ slot, item hay batch.
+Trường `maxTotalQuantity` đã bị bỏ (issue #35).
 
 ## Tạo đơn
 
-Body: `{"items":[{"productId":"...","quantity":2}]}` — 1..10 dòng, productId không trùng, `quantity` là số nguyên >= 1
-(không nhận `1.5` hay `"2"`), tổng không vượt `app.order.max-total-quantity`. Mọi field khác (`machineId`, giá, `status`,
-`orderCode`, id slot/item) bị từ chối (400). Giá lấy từ DB tại thời điểm tạo và là snapshot bất biến trong `order_items`.
+**Một đơn = một bát** (ràng buộc phần cứng). Body: `{"productId":"<uuid>"}`, bắt buộc. Mọi field khác (`items`, `quantity`, `machineId`, giá,
+`status`, `orderCode`, id slot/item) bị từ chối (400). **Breaking change của issue #35**: dạng cũ `{"items":[...]}` trả 400; ứng dụng kiosk
+(chưa phát hành) phải gửi dạng mới, cần thống nhất với người làm kiosk. Response giữ nguyên dạng và luôn có đúng một item `quantity = 1`,
+`subtotal = totalAmount = unitPrice`. Giá lấy từ DB tại thời điểm tạo và là snapshot bất biến trong `order_items`.
 Mã đơn: `ORD-<yyyyMMdd UTC>-<8 ký tự Crockford base32>`, thử lại tối đa 3 lần, DB UNIQUE là chốt cuối.
 
-Thuật toán (một transaction, hoặc tất cả hoặc không): khóa product (FOR SHARE, theo id) -> khóa máy (FOR SHARE) -> với mỗi
-product chọn bát bằng `FOR UPDATE OF item SKIP LOCKED` theo FEFO (`batch.expires_at`, `loaded_at`, `id`), batch phải sống lâu
-hơn `expiresAt` -> tạo order, order_items, allocation `RESERVED`, item `RESERVED` và history `RESERVE`. Lỗi: 400 sai request, 404 product
-không tồn tại, 409 product không ACTIVE / máy không ACTIVE / thiếu hàng (không giữ gì).
+Thuật toán (một transaction): khóa product (FOR SHARE) -> khóa máy (FOR SHARE) -> tìm các slot của máy đang chứa product rồi khóa
+chúng `FOR UPDATE` theo id -> tính lại head của từng slot dưới khóa, giữ slot bán được -> chọn slot có head hết hạn sớm nhất (FEFO **giữa các head**,
+không bao giờ bên trong một cột), hòa thì theo `loaded_at` của head, `slot_code`, id slot -> khóa head `FOR UPDATE`, kiểm tra lại `AVAILABLE` và hạn
+-> tạo order, một order_item (quantity 1, snapshot giá), head `AVAILABLE -> RESERVED`, một allocation `RESERVED`, một history `RESERVE`.
+Bát không phải head **không bao giờ** được giữ, nên mỗi slot có tối đa một bát `RESERVED`. Khóa ở mức slot (không còn `SKIP LOCKED` theo item)
+vì "một reservation mỗi slot" và "chỉ head" là luật của slot: hai đơn đồng thời trên cùng slot phải xếp hàng trên slot.
+Lỗi: 400 sai request, 404 product không tồn tại, 409 product không ACTIVE / máy không ACTIVE / không slot nào có head bán được
+("Requested product is not available on this machine"; không giữ gì).
 
 ## Hủy và hết hạn
 
 Hủy (kiosk) hoặc sweep: khóa order, `PENDING_PAYMENT -> CANCELLED`, allocation `RELEASED`, item `RESERVED -> AVAILABLE`
-(`reserved_at = NULL`), history `RETURN` với lý do `ORDER_CANCELLED` hoặc `RESERVATION_EXPIRED`. Thứ tự khóa: Order -> InventoryItem.
+(`reserved_at = NULL`), history `RETURN` với lý do `ORDER_CANCELLED` hoặc `RESERVATION_EXPIRED`. Thứ tự khóa: Order -> Payment -> InventoryItem.
+Bát được trả lại vẫn là head của cột (không đổi `loaded_at`) nên đơn kế tiếp giữ lại đúng bát đó.
 Sweep (`app.order.expiry-sweep.*`) lấy tối đa `batch-size` đơn đến hạn, mỗi đơn một transaction riêng, khóa rồi kiểm tra lại, nên an toàn khi
 chạy song song với hủy hoặc nhiều instance và một đơn lỗi không chặn đơn khác. Đọc đơn không ghi: đơn quá hạn vẫn hiện
 `PENDING_PAYMENT` cho tới khi sweep chạy (kiosk dùng `expiresAt` để đếm ngược).
@@ -84,7 +100,6 @@ chạy song song với hủy hoặc nhiều instance và một đơn lỗi khôn
 | Biến | Mặc định | Ý nghĩa |
 | --- | --- | --- |
 | `ORDER_RESERVATION_TTL` | `PT5M` | thời gian giữ chỗ |
-| `ORDER_MAX_TOTAL_QUANTITY` | `5` | tổng số bát tối đa mỗi đơn |
 | `ORDER_EXPIRY_SWEEP_ENABLED` | `true` | bật scheduler (profile test tắt) |
 | `ORDER_EXPIRY_SWEEP_INTERVAL` | `PT30S` | chu kỳ sweep |
 | `ORDER_EXPIRY_SWEEP_BATCH_SIZE` | `50` | số đơn mỗi lượt |
@@ -103,3 +118,15 @@ Xem `.ai/DATABASE.md` mục 11. V10 tạo `kiosk_credentials` (partial UNIQUE m�
 `OrderManagementReadIntegrationTest`, `OrderConcurrencyIntegrationTest` (giao dịch PostgreSQL thật, nhiều thread/connection),
 `OrderSchemaIntegrationTest` và `OrderManagementDocumentationTest` (Swagger/OpenAPI khớp `api-contract/api.yaml`).
 Test dùng `OffsetClock` (chỉ chạy tiến) và gọi `OrderExpiryService.sweep()` trực tiếp; scheduler tắt ở profile test.
+
+## Một bát mỗi đơn và head của slot (issue #35)
+
+- Không đổi schema: `order_items` / `order_item_allocations` vẫn cho nhiều dòng (dữ liệu lịch sử của #27 vẫn đọc được qua API quản lý,
+  `itemCount`/`totalQuantity` giữ nguyên, luôn bằng 1 với đơn mới). Luật một bát do DTO và service đảm bảo; không thêm CHECK `quantity = 1`.
+- `app.order.max-total-quantity` / `ORDER_MAX_TOTAL_QUANTITY` đã bị xóa.
+- Thứ tự khóa: tạo đơn Product -> Machine -> Slot -> InventoryItem; nạp hàng Product -> Batch -> Machine -> Slot; gỡ hàng Slot -> Item;
+  hủy/hết hạn Order -> Payment -> InventoryItem. Không có vòng khóa.
+- Inventory summary của slot có thêm `headStatus` (`AVAILABLE | RESERVED | EXPIRED | DISPENSE_FAILED | null` khi trống) và `headExpired`
+  (head có status `EXPIRED` hoặc batch đã hết hạn) để nhân viên thấy bát đáy hết hạn đang chặn cột. Các trường cũ không đổi.
+- Ảnh hưởng Milestone 3 (chỉ ghi nhận, chưa làm): một đơn -> một allocation -> một lệnh dispense -> một slot; "hoàn tất đơn sau khi mọi lệnh
+  thành công" thu gọn còn một lệnh.

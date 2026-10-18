@@ -8,12 +8,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties("app.order")
 public record OrderProperties(
         @DefaultValue("PT5M") Duration reservationTtl,
-        @DefaultValue("5") int maxTotalQuantity,
         @DefaultValue ExpirySweep expirySweep) {
     public OrderProperties {
         if (reservationTtl == null || reservationTtl.isZero() || reservationTtl.isNegative())
             throw new IllegalArgumentException("app.order.reservation-ttl must be positive");
-        if (maxTotalQuantity < 1) throw new IllegalArgumentException("app.order.max-total-quantity must be at least 1");
     }
 
     public record ExpirySweep(

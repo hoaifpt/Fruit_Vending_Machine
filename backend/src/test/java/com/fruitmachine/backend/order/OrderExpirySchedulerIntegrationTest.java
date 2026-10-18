@@ -22,14 +22,14 @@ class OrderExpirySchedulerIntegrationTest extends AbstractCoreIntegrationTest {
         String key = fixtures.api("POST", "/api/v1/machines/" + machine + "/kiosk-credentials", null, admin.token(), 201).path("apiKey").asText();
         var request = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/kiosk/orders")
                 .header("X-Kiosk-Key", key).contentType("application/json")
-                .content(json.writeValueAsString(Map.of("items", java.util.List.of(Map.of("productId", product, "quantity", 2)))));
+                .content(json.writeValueAsString(Map.of("productId", product)));
         var order = json.readTree(mvc.perform(request).andReturn().getResponse().getContentAsString()).path("data");
         UUID orderId = UUID.fromString(order.path("id").asText());
         assertThat(order.path("status").asText()).isEqualTo("PENDING_PAYMENT");
 
         await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(250)).untilAsserted(() ->
                 assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, orderId)).isEqualTo("CANCELLED"));
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN' AND reason='RESERVATION_EXPIRED'", Long.class, orderId)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type='RETURN' AND reason='RESERVATION_EXPIRED'", Long.class, orderId)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='AVAILABLE'", Long.class, slot)).isEqualTo(2);
     }
 }
