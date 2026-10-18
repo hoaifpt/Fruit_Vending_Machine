@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { login } from '../features/auth/auth'
-import type { AuthUser } from '../features/auth/auth'
+import { getSession, safeNext } from '../api/session'
+import { homeFor } from '../admin/routes'
+import { navigate } from '../lib/router'
 import fruitStillLife from '../assets/fruit-still-life.webp'
 import orangeMark from '../assets/orange-mark.webp'
 import '../App.css'
@@ -13,6 +15,11 @@ function EyeIcon({ visible }: { visible: boolean }) {
   </svg>
 }
 
+function nextTarget(roles: Parameters<typeof homeFor>[0]) {
+  const next = new URLSearchParams(window.location.search).get('next')
+  return next ? safeNext(next) : homeFor(roles)
+}
+
 function LoginPage() {
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -20,19 +27,22 @@ function LoginPage() {
   const [errors, setErrors] = useState({ identifier: '', password: '' })
   const [message, setMessage] = useState('')
   const [pending, setPending] = useState(false)
-  const [user, setUser] = useState<AuthUser | null>(null)
   const identifierRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const feedbackRef = useRef<HTMLDivElement>(null)
   const requestRef = useRef<AbortController | null>(null)
   useEffect(() => () => requestRef.current?.abort(), [])
-  useEffect(() => { if (message || user) feedbackRef.current?.focus() }, [message, user])
+  useEffect(() => { if (message) feedbackRef.current?.focus() }, [message])
+  useEffect(() => {
+    const session = getSession()
+    if (session) navigate(nextTarget(session.user.roles), { replace: true })
+  }, [])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (requestRef.current) return
     const nextErrors = {
-      identifier: identifier.trim() ? '' : 'Vui lòng nhập email hoặc tên đăng nhập.',
+      identifier: identifier.trim() ? '' : 'Vui lòng nhập email.',
       password: password ? '' : 'Vui lòng nhập mật khẩu.',
     }
     setErrors(nextErrors)
@@ -45,10 +55,8 @@ function LoginPage() {
     requestRef.current = controller
     setPending(true)
     try {
-      const authenticatedUser = await login({ identifier: identifier.trim(), password }, {
-        endpoint: import.meta.env.VITE_AUTH_LOGIN_URL, signal: controller.signal,
-      })
-      if (!controller.signal.aborted) { setPassword(''); setVisible(false); setUser(authenticatedUser) }
+      const session = await login(identifier, password, controller.signal)
+      if (!controller.signal.aborted) { setPassword(''); setVisible(false); navigate(nextTarget(session.user.roles), { replace: true }) }
     } catch (error) {
       if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : 'Không thể đăng nhập. Vui lòng thử lại.')
     } finally {
@@ -74,23 +82,17 @@ function LoginPage() {
           <img src={orangeMark} width="100" height="90" alt="" />
         </header>
         <div className="login-content">
-          {user ? <div className="success-state" ref={feedbackRef} tabIndex={-1} role="status">
-            <span className="success-symbol" aria-hidden="true">✓</span>
-            <h1 id="login-title">Đã đăng nhập</h1>
-            <p>Xin chào, {user.displayName}.</p>
-            <p className="account-role">{user.role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên'}</p>
-            <p>Tài khoản của bạn đã được xác thực. Các màn hình quản lý sẽ được bổ sung tiếp theo.</p>
-          </div> : <>
+          <>
             <div className="form-heading"><h1 id="login-title">Đăng nhập</h1><p>Dành cho admin và staff</p></div>
             <form onSubmit={handleSubmit} noValidate aria-busy={pending}>
               <div className="form-field">
-                <label htmlFor="identifier">Email hoặc tên đăng nhập</label>
-                <input ref={identifierRef} id="identifier" name="username" type="text" autoComplete="username"
+                <label htmlFor="identifier">Email</label>
+                <input ref={identifierRef} id="identifier" name="username" type="email" autoComplete="username"
                   autoCapitalize="none" spellCheck={false} required readOnly={pending}
-                  placeholder="Nhập email hoặc tên đăng nhập" value={identifier}
+                  placeholder="Nhập email" value={identifier}
                   aria-invalid={!!errors.identifier} aria-describedby={errors.identifier ? 'identifier-error' : undefined}
                   onChange={event => { setIdentifier(event.target.value); setErrors(previous => ({ ...previous, identifier: '' })); setMessage('') }}
-                  onBlur={() => { if (!identifier.trim()) setErrors(previous => ({ ...previous, identifier: 'Vui lòng nhập email hoặc tên đăng nhập.' })) }} />
+                  onBlur={() => { if (!identifier.trim()) setErrors(previous => ({ ...previous, identifier: 'Vui lòng nhập email.' })) }} />
                 <p className="field-error" id="identifier-error">{errors.identifier}</p>
               </div>
               <div className="form-field">
@@ -114,7 +116,7 @@ function LoginPage() {
               <span className="sr-only" role="status">{pending ? 'Đang xác thực tài khoản. Vui lòng chờ.' : ''}</span>
             </form>
             <p className="login-note">Sử dụng tài khoản được cấp để truy cập hệ thống.</p>
-          </>}
+          </>
         </div>
       </section>
     </main>
