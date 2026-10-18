@@ -2,7 +2,7 @@
 
 Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-> **Trạng thái hiện tại:** frontend web (`apps/web`) đã có giao diện và luồng tương tác dùng dữ liệu mẫu, chưa nối backend; backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, nền ADMIN/STAFF method authorization, Swagger/OpenAPI và health check. Đã có User Management API dành cho ADMIN, Product Management, Machine Management và Machine Slot Management API (ADMIN đọc/ghi, STAFF chỉ đọc); đã có Product Batch Management (ADMIN/STAFF tạo và đọc lô bất biến). Chưa có refresh token hoặc các API nghiệp vụ khác. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
+> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, nền ADMIN/STAFF method authorization, Swagger/OpenAPI và health check. Đã có User Management API dành cho ADMIN, Product Management, Machine Management và Machine Slot Management API (ADMIN đọc/ghi, STAFF chỉ đọc); đã có Product Batch Management (ADMIN/STAFF tạo và đọc lô bất biến). Chưa có refresh token hoặc các API nghiệp vụ khác. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
 
 Hướng dẫn chạy backend, cấu hình `JWT_SECRET`, Swagger và login: [JWT authentication](docs/jwt-authentication.md).
 Hợp đồng API cho frontend: [api-contract/api.yaml](api-contract/api.yaml).
@@ -10,8 +10,6 @@ Database chưa có ADMIN cần cấu hình lần đầu: [Initial Admin Bootstra
 Quyền ADMIN/STAFF, `@PreAuthorize` và lỗi 401/403: [Authorization](docs/admin-staff-authorization.md).
 API tạo STAFF, phân trang/lọc, cập nhật hồ sơ và trạng thái: [User Management](docs/user-management.md).
 API danh mục sản phẩm, SKU, giá và ACTIVE/INACTIVE: [Product Management](docs/product-management.md).
-
-Giao diện web (landing, admin/staff, kiosk mua hàng): [apps/web/README.md](apps/web/README.md).
 
 API lô sản phẩm, thời gian sản xuất/hết hạn và người tạo: [Product Batch Management](docs/product-batch-management.md).
 API danh tính, cấu hình môi trường và trạng thái quản trị máy: [Machine Management](docs/machine-management.md).
@@ -59,7 +57,7 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 .
 ├─ apps/
 │  ├─ kiosk/              # Electron + React: giao diện và điều phối tại máy
-│  └─ web/                # React + Vite: landing, admin/staff, kiosk mua hàng
+│  └─ web/                # React: dashboard quản trị
 ├─ backend/               # Java + Spring Boot: API, nghiệp vụ, payment, MQTT
 ├─ firmware/              # ESP-IDF + C++: chương trình cho ESP32
 ├─ packages/
@@ -84,7 +82,7 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 | Nhóm | Nơi làm việc chính | Trách nhiệm |
 | --- | --- | --- |
 | Kiosk | `apps/kiosk` | UI cảm ứng, hiển thị QR, gọi backend, giao tiếp Serial với ESP32 |
-| Web quản trị | `apps/web` | Landing page, đăng nhập, dashboard admin/staff và màn hình kiosk mua hàng (dữ liệu mẫu) |
+| Web quản trị | `apps/web` | Quản lý máy, sản phẩm, tồn kho, giao dịch và cảnh báo |
 | Backend | `backend` | Spring Boot API, PostgreSQL, xác thực, webhook thanh toán, MQTT |
 | Firmware | `firmware` | Motor, cảm biến rơi hàng, nhiệt độ, cơ chế an toàn và Serial protocol |
 | Hạ tầng | `infra` | Docker Compose, PostgreSQL, Mosquitto và cấu hình môi trường |
@@ -111,6 +109,32 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 | Local development | Docker Compose |
 | CI/CD | GitHub Actions |
 
+## Frontend web — `apps/web`
+
+Ứng dụng web (React 19, TypeScript, Vite) gồm trang giới thiệu, đăng nhập, khu quản trị admin/staff và
+màn hình mua hàng kiosk. Hiện toàn bộ dùng dữ liệu mẫu trên trình duyệt; chưa kết nối backend, cổng
+thanh toán hay phần cứng. Không có tài khoản đăng nhập demo.
+
+```powershell
+cd apps/web
+npm ci
+npm run dev
+```
+
+| Đường dẫn | Nội dung |
+| --- | --- |
+| `/` | Giới thiệu hệ thống và liên hệ hợp tác đặt máy |
+| `/login` | Đăng nhập (cần cấu hình `VITE_AUTH_LOGIN_URL`) |
+| `/admin`, `/admin/machines`, `/admin/products`, `/admin/inventory`, `/admin/transactions`, `/admin/tasks`, `/admin/staff` | Dashboard quản trị |
+| `/staff?staff=s1` | Luồng công việc nhân viên mẫu |
+| `/buy` | Kiosk: tối đa 2 sản phẩm/trang, tự chuyển sau 30 giây, QR minh họa hết hạn sau 90 giây, mỗi đơn 1 hộp |
+
+Lệnh: `npm run dev | build | preview | lint | test` (44 test). Biến môi trường: `VITE_AUTH_LOGIN_URL`,
+`VITE_PARTNERSHIP_EMAIL`, `VITE_PARTNERSHIP_PHONE`. Chi tiết: [apps/web/README.md](apps/web/README.md),
+[auth](apps/web/docs/auth-integration.md), [landing](apps/web/docs/landing-page.md),
+[admin](apps/web/docs/admin-implementation.md), [kiosk/thanh toán](apps/web/docs/purchase-flow.md).
+Khi nối backend, dùng [api-contract/api.yaml](api-contract/api.yaml) và [JWT authentication](docs/jwt-authentication.md).
+
 ## Bắt đầu đóng góp
 
 1. Đọc phần thư mục liên quan đến nhóm của bạn và các tài liệu trong `docs/`.
@@ -133,33 +157,3 @@ Chạy `mvn clean verify` trong module backend/ với Java21, Maven và Docker. 
 PostgreSQL18 Testcontainers riêng, kiểm toàn bộ M1 management, Flyway/JPA/JWT/RBAC và
 atomicity/concurrency của inventory. [Hướng dẫn testing/CI](docs/core-integration-testing.md)
 mô tả hạ tầng dùng chung, isolation, reports và GitHub Actions backend workflow.
-
-## Frontend web — nhánh `feature/frontend_web`
-
-Ứng dụng `apps/web` (React 19, TypeScript, Vite) gồm trang giới thiệu, đăng nhập, khu quản trị
-admin/staff và màn hình mua hàng kiosk. Hiện toàn bộ dùng dữ liệu mẫu trên trình duyệt; chưa kết nối
-backend, cổng thanh toán hay phần cứng. Không có tài khoản đăng nhập demo.
-
-Chạy thử:
-
-```powershell
-cd apps/web
-npm ci
-npm run dev
-```
-
-| Đường dẫn | Nội dung |
-| --- | --- |
-| `/` | Giới thiệu hệ thống và liên hệ hợp tác đặt máy |
-| `/login` | Đăng nhập (cần cấu hình `VITE_AUTH_LOGIN_URL`) |
-| `/admin`, `/admin/machines`, `/admin/products`, `/admin/inventory`, `/admin/transactions`, `/admin/tasks`, `/admin/staff` | Dashboard quản trị |
-| `/staff?staff=s1` | Luồng công việc nhân viên mẫu |
-| `/buy` | Chọn sản phẩm (tối đa 2 sản phẩm/trang, tự chuyển sau 30 giây) và thanh toán QR minh họa, hết hạn sau 90 giây, mỗi đơn 1 hộp |
-
-Các lệnh `npm run dev | build | preview | lint | test` (44 test). Biến môi trường: `VITE_AUTH_LOGIN_URL`,
-`VITE_PARTNERSHIP_EMAIL`, `VITE_PARTNERSHIP_PHONE`.
-
-Chi tiết đầy đủ: [apps/web/README.md](apps/web/README.md), cùng [auth](apps/web/docs/auth-integration.md),
-[landing](apps/web/docs/landing-page.md), [admin](apps/web/docs/admin-implementation.md) và
-[luồng kiosk/thanh toán](apps/web/docs/purchase-flow.md). Khi nối backend, dùng
-[api-contract/api.yaml](api-contract/api.yaml) và [JWT authentication](docs/jwt-authentication.md).
