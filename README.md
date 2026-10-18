@@ -109,6 +109,32 @@ Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồ
 | Local development | Docker Compose |
 | CI/CD | GitHub Actions |
 
+## Frontend web — `apps/web`
+
+Ứng dụng web (React 19, TypeScript, Vite) gồm trang giới thiệu, đăng nhập, khu quản trị admin/staff và
+màn hình mua hàng kiosk. Hiện toàn bộ dùng dữ liệu mẫu trên trình duyệt; chưa kết nối backend, cổng
+thanh toán hay phần cứng. Không có tài khoản đăng nhập demo.
+
+```powershell
+cd apps/web
+npm ci
+npm run dev
+```
+
+| Đường dẫn | Nội dung |
+| --- | --- |
+| `/` | Giới thiệu hệ thống và liên hệ hợp tác đặt máy |
+| `/login` | Đăng nhập (cần cấu hình `VITE_AUTH_LOGIN_URL`) |
+| `/admin`, `/admin/machines`, `/admin/products`, `/admin/inventory`, `/admin/transactions`, `/admin/tasks`, `/admin/staff` | Dashboard quản trị |
+| `/staff?staff=s1` | Luồng công việc nhân viên mẫu |
+| `/buy` | Kiosk: tối đa 2 sản phẩm/trang, tự chuyển sau 30 giây, QR minh họa hết hạn sau 90 giây, mỗi đơn 1 hộp |
+
+Lệnh: `npm run dev | build | preview | lint | test` (44 test). Biến môi trường: `VITE_AUTH_LOGIN_URL`,
+`VITE_PARTNERSHIP_EMAIL`, `VITE_PARTNERSHIP_PHONE`. Chi tiết: [apps/web/README.md](apps/web/README.md),
+[auth](apps/web/docs/auth-integration.md), [landing](apps/web/docs/landing-page.md),
+[admin](apps/web/docs/admin-implementation.md), [kiosk/thanh toán](apps/web/docs/purchase-flow.md).
+Khi nối backend, dùng [api-contract/api.yaml](api-contract/api.yaml) và [JWT authentication](docs/jwt-authentication.md).
+
 ## Bắt đầu đóng góp
 
 1. Đọc phần thư mục liên quan đến nhóm của bạn và các tài liệu trong `docs/`.
