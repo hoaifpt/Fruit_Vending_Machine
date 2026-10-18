@@ -1,18 +1,146 @@
-# Fruit Vending Machine — Web
+# Fruit Vending Machine
 
-Ứng dụng frontend cho hệ thống máy bán trái cây, gồm trang giới thiệu công khai, đăng nhập admin/staff, khu quản trị, màn hình nhân viên và màn hình mua hàng tại kiosk.
+Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-**Trạng thái:** giao diện và các luồng tương tác đã có. Quản trị, nhân viên và kiosk hiện dùng dữ liệu mẫu trên trình duyệt; chưa kết nối backend, cổng thanh toán hoặc phần cứng máy.
+> **Trạng thái hiện tại:** frontend web (`apps/web`) đã có giao diện và luồng tương tác dùng dữ liệu mẫu, chưa nối backend; backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, nền ADMIN/STAFF method authorization, Swagger/OpenAPI và health check. Đã có User Management API dành cho ADMIN, Product Management, Machine Management và Machine Slot Management API (ADMIN đọc/ghi, STAFF chỉ đọc); đã có Product Batch Management (ADMIN/STAFF tạo và đọc lô bất biến). Chưa có refresh token hoặc các API nghiệp vụ khác. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
 
-## Công nghệ
+Hướng dẫn chạy backend, cấu hình `JWT_SECRET`, Swagger và login: [JWT authentication](docs/jwt-authentication.md).
+Hợp đồng API cho frontend: [api-contract/api.yaml](api-contract/api.yaml).
+Database chưa có ADMIN cần cấu hình lần đầu: [Initial Admin Bootstrap](docs/initial-admin-bootstrap.md).
+Quyền ADMIN/STAFF, `@PreAuthorize` và lỗi 401/403: [Authorization](docs/admin-staff-authorization.md).
+API tạo STAFF, phân trang/lọc, cập nhật hồ sơ và trạng thái: [User Management](docs/user-management.md).
+API danh mục sản phẩm, SKU, giá và ACTIVE/INACTIVE: [Product Management](docs/product-management.md).
 
-- React 19, TypeScript 6, Vite 8.
-- CSS responsive, minh họa trái cây WebP và hỗ trợ giảm chuyển động.
-- Oxlint để kiểm tra mã nguồn; Node.js Test Runner để kiểm thử.
+Giao diện web (landing, admin/staff, kiosk mua hàng): [apps/web/README.md](apps/web/README.md).
 
-## Khởi chạy
+API lô sản phẩm, thời gian sản xuất/hết hạn và người tạo: [Product Batch Management](docs/product-batch-management.md).
+API danh tính, cấu hình môi trường và trạng thái quản trị máy: [Machine Management](docs/machine-management.md).
+API vị trí slot, sức chứa và trạng thái slot theo máy: [Machine Slot Management](docs/machine-slot-management.md).
 
-Khuyến nghị Node.js 24 LTS và npm. Thực hiện từ thư mục gốc repository:
+## Tổng quan kiến trúc
+
+```text
+Người dùng
+    │ chạm màn hình / quét QR
+    ▼
+Kiosk (Electron + React) ── Serial/USB ──> ESP32 ──> Motor, cảm biến
+    │ REST / kênh trạng thái backend
+    └──────────────────> Backend (Spring Boot)
+                               │
+                               ├── PostgreSQL
+                               ├── MQTT telemetry/events (tích hợp tương lai)
+                               ├── Cổng thanh toán QR
+                               └── Web quản trị (React)
+```
+
+### Luồng mua hàng
+
+1. Khách chọn sản phẩm trên **kiosk**.
+2. Kiosk gọi `POST /api/v1/orders`; backend kiểm tra/giữ hàng và tạo Order = PENDING_PAYMENT.
+3. Backend tạo QR payment; kiosk hiển thị QR.
+4. Khách thanh toán; provider gửi webhook về backend.
+5. Backend verify payment và chuyển Order = PAID.
+6. Backend tạo/lưu DispenseCommand; kiosk nhận PAID cùng commandId/slot được backend cấp.
+7. Kiosk gửi `DISPENSE <commandId> <slot=A2>` tới **ESP32** qua Serial/USB.
+8. ESP32 điều khiển motor, xác nhận kết quả vật lý và trả `DISPENSE_SUCCESS <commandId>` cho kiosk.
+9. Kiosk báo kết quả tương ứng lên backend.
+10. Backend kiểm tra quyền máy/command/trạng thái, xử lý idempotent: command SUCCESS,
+    allocation DISPENSED, item SOLD; Order COMPLETED khi tất cả phần hàng đã nhả thành công.
+
+Trong lúc nhả hàng dùng trạng thái DISPENSING. Kiosk không tự tạo command hay đánh dấu PAID.
+Mất kết nối/timeout/kết quả không rõ phải đối soát, không gửi lại mù quáng gây nhả hàng hai lần.
+MQTT không thay thế đường Serial/USB cho dispense trong flow đã thống nhất.
+
+Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồng bộ giao dịch khi mất điện/mất mạng.
+
+## Cấu trúc repository
+
+```text
+.
+├─ apps/
+│  ├─ kiosk/              # Electron + React: giao diện và điều phối tại máy
+│  └─ web/                # React + Vite: landing, admin/staff, kiosk mua hàng
+├─ backend/               # Java + Spring Boot: API, nghiệp vụ, payment, MQTT
+├─ firmware/              # ESP-IDF + C++: chương trình cho ESP32
+├─ packages/
+│  ├─ contracts/          # TypeScript types/DTO dùng chung cho các ứng dụng web
+│  ├─ protocol/           # Giao thức Serial và MQTT, hằng số/mã dùng chung
+│  └─ config/             # Cấu hình dùng chung: lint, TypeScript, build
+├─ api-contract/
+│  └─ api.yaml            # Hợp đồng API REST (OpenAPI) giữa frontend và backend
+├─ infra/
+│  ├─ docker-compose.yml  # Môi trường local: PostgreSQL, Mosquitto, backend
+│  ├─ db/                 # Cấu hình/dữ liệu khởi tạo database nếu cần
+│  └─ mosquitto/          # Cấu hình MQTT broker
+├─ docs/                  # Tài liệu kiến trúc, giao thức, phần cứng
+├─ scripts/
+│  └─ simulate-controller.ts  # Giả lập ESP32 phục vụ phát triển kiosk
+├─ .github/workflows/     # CI/CD với GitHub Actions (khi được bổ sung)
+└─ README.md
+```
+
+## Phân công theo khu vực
+
+| Nhóm | Nơi làm việc chính | Trách nhiệm |
+| --- | --- | --- |
+| Kiosk | `apps/kiosk` | UI cảm ứng, hiển thị QR, gọi backend, giao tiếp Serial với ESP32 |
+| Web quản trị | `apps/web` | Landing page, đăng nhập, dashboard admin/staff và màn hình kiosk mua hàng (dữ liệu mẫu) |
+| Backend | `backend` | Spring Boot API, PostgreSQL, xác thực, webhook thanh toán, MQTT |
+| Firmware | `firmware` | Motor, cảm biến rơi hàng, nhiệt độ, cơ chế an toàn và Serial protocol |
+| Hạ tầng | `infra` | Docker Compose, PostgreSQL, Mosquitto và cấu hình môi trường |
+| Phân tích/tích hợp | `api-contract`, `packages/protocol`, `docs` | Chuẩn hoá API, giao thức và tài liệu kỹ thuật |
+
+## Các nguyên tắc tích hợp
+
+- Không lưu API key hoặc secret thanh toán trong kiosk hay repository. Dùng biến môi trường và GitHub Secrets.
+- Mọi thay đổi API REST phải cập nhật `api-contract/api.yaml` trước hoặc cùng lúc với backend/frontend.
+- Mọi lệnh Serial giữa kiosk và ESP32 phải được mô tả trong `packages/protocol` và tài liệu tương ứng.
+- ESP32 chỉ xử lý các việc thời gian thực: điều khiển motor, đọc cảm biến, nhiệt độ và bảo vệ an toàn. Không đưa logic thanh toán xuống firmware.
+- Trạng thái Order do backend quản lý: `PENDING_PAYMENT`, `PAID`, `DISPENSING`, `COMPLETED` và các trạng thái lỗi/hủy/hoàn tiền theo Flyway. `SUCCESS` là trạng thái của Payment/DispenseCommand, không phải Order.
+
+## Công nghệ dự kiến
+
+| Thành phần | Công nghệ |
+| --- | --- |
+| Kiosk | Electron, React, TypeScript |
+| Admin web | React, TypeScript |
+| Backend | Java 21, Spring Boot 3, Spring Data JPA |
+| Database | PostgreSQL, Flyway |
+| Messaging | MQTT, Mosquitto |
+| Firmware | ESP-IDF, C++ |
+| Local development | Docker Compose |
+| CI/CD | GitHub Actions |
+
+## Bắt đầu đóng góp
+
+1. Đọc phần thư mục liên quan đến nhóm của bạn và các tài liệu trong `docs/`.
+2. Thống nhất API trước khi frontend/backend triển khai tính năng mới.
+3. Tạo branch từ `dev` mới nhất: tính năng dùng `feature/<issue-number>-<description>`, issue báo lỗi (ví dụ nhãn `[BUG]`) dùng `fix/<issue-number>-<description>`, tài liệu dùng `docs/`. Ví dụ: `feature/6-jwt-authentication` hoặc `fix/27-duplicate-payment-webhook`. Phần mô tả dùng chữ thường kebab-case.
+4. Không commit file môi trường, mật khẩu, token hay khóa của cổng thanh toán.
+
+Các hướng dẫn chạy, biến môi trường và quy ước code sẽ được bổ sung khi từng module bắt đầu được triển khai.
+
+## Inventory Management — Issue #22
+
+Backend hỗ trợ nạp/lấy từng hộp, tra cứu và thống kê tồn kho, lịch sử append-only cho
+ADMIN/STAFF. Kiểm tra schema thực tế trước triển khai cho thấy lịch sử chưa có lý do
+và trạng thái trước/sau; V9 bổ sung ba cột nullable, giữ nguyên V1–V8 và dữ liệu cũ.
+Xem [API, quy tắc tồn kho và cách kiểm thử Swagger](docs/inventory-management.md).
+
+## Core integration tests — Issue #24
+
+Chạy `mvn clean verify` trong module backend/ với Java21, Maven và Docker. Tests dùng
+PostgreSQL18 Testcontainers riêng, kiểm toàn bộ M1 management, Flyway/JPA/JWT/RBAC và
+atomicity/concurrency của inventory. [Hướng dẫn testing/CI](docs/core-integration-testing.md)
+mô tả hạ tầng dùng chung, isolation, reports và GitHub Actions backend workflow.
+
+## Frontend web — nhánh `feature/frontend_web`
+
+Ứng dụng `apps/web` (React 19, TypeScript, Vite) gồm trang giới thiệu, đăng nhập, khu quản trị
+admin/staff và màn hình mua hàng kiosk. Hiện toàn bộ dùng dữ liệu mẫu trên trình duyệt; chưa kết nối
+backend, cổng thanh toán hay phần cứng. Không có tài khoản đăng nhập demo.
+
+Chạy thử:
 
 ```powershell
 cd apps/web
@@ -20,157 +148,18 @@ npm ci
 npm run dev
 ```
 
-Mở địa chỉ Vite in trong terminal, thường là `http://localhost:5173`. Nếu đang ở `apps/web`, bỏ qua lệnh `cd`.
-
-## Các màn hình
-
 | Đường dẫn | Nội dung |
 | --- | --- |
-| `/` | Giới thiệu hệ thống, đăng nhập quản lý và liên hệ hợp tác đặt máy |
-| `/login` | Đăng nhập bằng email hoặc tên đăng nhập và mật khẩu |
-| `/admin` | Tổng quan doanh thu, giao dịch và tình trạng vận hành |
-| `/admin/machines` | Máy, vị trí, ngăn máy và thông tin vận hành |
-| `/admin/products` | Sản phẩm và giá bán riêng theo máy |
-| `/admin/inventory` | Tồn kho, sức chứa, lô hàng và hạn sử dụng |
-| `/admin/transactions` | Giao dịch và lịch sử nhả hàng thất bại |
-| `/admin/tasks` | Phân công refill và bảo trì |
-| `/admin/staff` | Nhân viên và phạm vi máy được giao |
-| `/staff?staff=s1` | Thử luồng công việc của nhân viên mẫu |
-| `/buy` | Chọn sản phẩm và thanh toán tại màn hình kiosk |
+| `/` | Giới thiệu hệ thống và liên hệ hợp tác đặt máy |
+| `/login` | Đăng nhập (cần cấu hình `VITE_AUTH_LOGIN_URL`) |
+| `/admin`, `/admin/machines`, `/admin/products`, `/admin/inventory`, `/admin/transactions`, `/admin/tasks`, `/admin/staff` | Dashboard quản trị |
+| `/staff?staff=s1` | Luồng công việc nhân viên mẫu |
+| `/buy` | Chọn sản phẩm (tối đa 2 sản phẩm/trang, tự chuyển sau 30 giây) và thanh toán QR minh họa, hết hạn sau 90 giây, mỗi đơn 1 hộp |
 
-Các đường dẫn admin/staff hiện mở trực tiếp để thử giao diện. Đây chưa phải các trang được bảo vệ bằng phiên đăng nhập và phân quyền server.
+Các lệnh `npm run dev | build | preview | lint | test` (44 test). Biến môi trường: `VITE_AUTH_LOGIN_URL`,
+`VITE_PARTNERSHIP_EMAIL`, `VITE_PARTNERSHIP_PHONE`.
 
-## Luồng mua hàng tại kiosk
-
-1. Khách chọn sản phẩm trực tiếp trên màn hình máy hoặc nhập mã ngăn.
-2. Màn hình hiển thị ngay chi tiết sản phẩm và vùng QR thanh toán. Mỗi đơn chỉ mua **1 hộp**.
-3. Khách dùng điện thoại quét QR để thanh toán; điện thoại không dùng để chọn sản phẩm.
-4. Khi nhận xác nhận thanh toán, kiosk chuyển sang trạng thái chuẩn bị và đang nhả hàng, sau đó hiển thị kết quả nhận hàng.
-5. Nếu hết **90 giây** chờ thanh toán, kiosk tự quay về trang danh sách đầu tiên, bắt đầu từ ngăn 1.
-
-### Cách hiển thị danh sách
-
-- Giao diện nằm gọn trong một màn hình, không cuộn dọc.
-- Mỗi trang hiển thị tối đa **2 sản phẩm**, sắp xếp theo số ngăn tăng dần. Dữ liệu mẫu hiện gồm ngăn 1–6.
-- Tự chuyển sang trang tiếp theo sau **30 giây**; hết trang cuối sẽ quay lại trang đầu.
-- Có thể vuốt trái/phải, dùng nút trước/sau hoặc phím mũi tên để chuyển trang.
-- Không có bộ lọc loại sản phẩm. Sản phẩm hết hàng vẫn hiển thị nhưng không thể chọn.
-- Tự chuyển trang tạm dừng khi mở hộp thoại, bảng mô phỏng hoặc rời danh sách để thanh toán.
-
-### Thử thanh toán khi chưa có backend
-
-Vùng QR hiện là **hình minh họa, không thể quét để chuyển tiền**. Mở **Thử tình huống** để mô phỏng đã thanh toán, lỗi tạo thanh toán, mất kết nối hoặc nhả hàng thất bại. Bộ đếm hết hạn chạy theo thời gian thực.
-
-Luồng đã xác nhận thanh toán/đang nhả hàng không bị bộ đếm QR đưa về danh sách. Tải lại khi đang nhả hàng sẽ chuyển sang trạng thái chưa xác nhận nhận hàng, tránh tự động nhả lại.
-
-Xem thêm [luồng mua hàng và hướng tích hợp](docs/purchase-flow.md).
-
-## Chức năng quản trị và nhân viên
-
-### Admin
-
-- Xem doanh thu mặc định hôm nay, có lựa chọn tháng/năm và máy. Chỉ tính giao dịch **đã thanh toán và nhả hàng thành công**.
-- Thêm, sửa và ngừng sử dụng máy/sản phẩm để giữ lịch sử; quản lý nhiều máy, nhiều vị trí và giá riêng theo máy.
-- Quản lý ngăn, sức chứa và nhiều lô cùng sản phẩm với hạn sử dụng khác nhau.
-- Cảnh báo khi còn tối đa **2 hộp** có thể bán; cảnh báo hạn dùng hôm nay/ngày mai.
-- Giao refill kèm số lượng; giao bảo trì kèm hạn hoàn thành và mô tả lỗi.
-- Xử lý sự cố nhả hàng theo trạng thái **Chờ xử lý → Đang xử lý → Đã hoàn tiền/Đã giải quyết**, kèm ghi chú. Việc đánh dấu hoàn tiền chỉ cập nhật dữ liệu mẫu.
-
-### Staff
-
-- Xem và xử lý công việc trong phạm vi máy được phân công.
-- Nhập số lượng thực tế và hạn dùng theo từng lô khi refill; hoàn thành cập nhật ngay kho mẫu.
-- Ghi nhận kết quả bảo trì và ảnh trước/sau.
-- Giao diện không hiển thị doanh thu và không cho sửa giá bán.
-
-Xem [chi tiết triển khai quản trị](docs/admin-implementation.md) để biết quy tắc dữ liệu và các phần cần bổ sung phía backend.
-
-## Cấu hình môi trường
-
-Từ `apps/web`, tạo file cấu hình local nếu chưa có:
-
-```powershell
-Copy-Item .env.example .env.local
-```
-
-| Biến | Mục đích |
-| --- | --- |
-| `VITE_AUTH_LOGIN_URL` | URL API đăng nhập |
-| `VITE_PARTNERSHIP_EMAIL` | Email liên hệ hợp tác công khai |
-| `VITE_PARTNERSHIP_PHONE` | Số điện thoại liên hệ hợp tác công khai |
-
-Khởi động lại Vite sau khi thay đổi cấu hình. Các biến `VITE_*` được đưa vào mã phía trình duyệt; không đặt secret trong các biến này.
-
-Khi chưa cấu hình API đăng nhập, ứng dụng báo chưa kết nối và không gửi mật khẩu. **Không có tài khoản đăng nhập demo hoặc đăng nhập giả thành công.** Hợp đồng API đăng nhập hiện là đề xuất; xem [hướng dẫn kết nối xác thực](docs/auth-integration.md).
-
-Nếu chưa cấu hình email/số điện thoại, phần liên hệ trên landing page hiển thị thông tin đang cập nhật.
-
-## Dữ liệu mẫu và lưu trữ
-
-| Phần | Nơi lưu | Khóa |
-| --- | --- | --- |
-| Admin/staff | `localStorage` | `fruit-vending-admin-demo-v1` |
-| Kiosk | `sessionStorage`, riêng từng tab | `fruit-vending-purchase-demo-v1` |
-
-- Tải lại trang giữ dữ liệu đã lưu trong phạm vi lưu trữ tương ứng.
-- Nút **Đặt lại mẫu** trong khu quản trị khôi phục dữ liệu mẫu sau xác nhận.
-- Dữ liệu kiosk độc lập với dữ liệu admin/staff; giao dịch mua hàng mẫu chưa cập nhật sang dashboard.
-- Lưu trữ trình duyệt không thay thế database hoặc cơ chế đồng bộ nhiều người dùng. Bộ chọn nhân viên mẫu không phải cơ chế phân quyền thật.
-
-## Lệnh phát triển
-
-Chạy các lệnh trong `apps/web`:
-
-| Lệnh | Tác dụng |
-| --- | --- |
-| `npm run dev` | Khởi chạy máy chủ phát triển Vite |
-| `npm run build` | Kiểm tra TypeScript và tạo bản build trong `dist/` |
-| `npm run preview` | Xem bản build local sau khi build |
-| `npm run lint` | Kiểm tra mã nguồn với Oxlint |
-| `npm test` | Chạy kiểm thử đăng nhập, landing, quản trị và kiosk |
-
-Bộ kiểm thử hiện có **44 trường hợp**, bao gồm quy tắc doanh thu, tồn kho, xác thực, thời hạn QR, khôi phục phiên và ngăn nhả hàng lặp. Các tương tác vuốt, bố cục responsive và tự chuyển trang cần kiểm tra thêm trên trình duyệt.
-
-## Cấu trúc thư mục
-
-```text
-apps/web/
-├── src/
-│   ├── assets/             # Ảnh và minh họa
-│   ├── components/         # Thành phần dùng chung
-│   ├── features/
-│   │   ├── admin/          # Quy tắc quản trị, dữ liệu và lưu trữ mẫu
-│   │   ├── auth/           # Lớp kết nối API đăng nhập
-│   │   ├── landing/        # Xử lý thông tin liên hệ
-│   │   └── purchase/       # Trạng thái đơn và luồng kiosk
-│   ├── pages/              # Các màn hình và CSS tương ứng
-│   ├── App.tsx             # Component ứng dụng
-│   ├── routing.ts          # Ánh xạ đường dẫn
-│   ├── main.tsx            # Điểm khởi chạy React
-│   └── index.css           # Kiểu toàn cục
-├── tests/                  # Kiểm thử tự động
-├── docs/                   # Thiết kế, nghiệp vụ và tích hợp
-├── public/                 # Tài nguyên tĩnh
-├── .env.example            # Mẫu biến môi trường
-└── vite.config.ts          # Cấu hình Vite
-```
-
-## Build và triển khai
-
-```powershell
-npm run build
-npm run preview
-```
-
-Triển khai nội dung `dist/` lên hosting tĩnh. Hosting cần rewrite các đường dẫn ứng dụng như `/buy`, `/login`, `/admin/*` và `/staff` về `index.html` để truy cập trực tiếp hoặc tải lại không gặp lỗi 404. `npm run preview` chỉ dùng kiểm tra bản build local.
-
-Trước khi vận hành thật, cần kết nối phiên đăng nhập và phân quyền server, API quản trị, lưu ảnh, thanh toán, xác nhận nhả hàng và đồng bộ tồn kho. Backend phải đối chiếu trạng thái đơn, bao gồm thanh toán đến muộn sau khi màn hình QR đã hết hạn; thao tác mô phỏng trên frontend không phải bằng chứng thanh toán.
-
-## Tài liệu liên quan
-
-- [Thiết kế giao diện](DESIGN.md)
-- [Kết nối đăng nhập](docs/auth-integration.md)
-- [Landing page và liên hệ](docs/landing-page.md)
-- [Triển khai dashboard admin/staff](docs/admin-implementation.md)
-- [Luồng kiosk và thanh toán](docs/purchase-flow.md)
-- [Ảnh giao diện và bản thiết kế](docs/design/)
+Chi tiết đầy đủ: [apps/web/README.md](apps/web/README.md), cùng [auth](apps/web/docs/auth-integration.md),
+[landing](apps/web/docs/landing-page.md), [admin](apps/web/docs/admin-implementation.md) và
+[luồng kiosk/thanh toán](apps/web/docs/purchase-flow.md). Khi nối backend, dùng
+[api-contract/api.yaml](api-contract/api.yaml) và [JWT authentication](docs/jwt-authentication.md).
