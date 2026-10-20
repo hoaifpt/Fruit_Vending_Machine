@@ -1,0 +1,15 @@
+# Mosquitto ACL (issue #43). Everything not granted here is denied; anonymous clients are rejected by mosquitto.conf.
+# Contract: api-contract/mqtt-contract.md
+
+# Backend account: subscribes to the three machine channels and never publishes to machine topics.
+user fvm-backend
+topic read vending/+/telemetry
+topic read vending/+/status
+topic read vending/+/events
+
+# Machine accounts: username = machine code, so a machine may publish ONLY its own channels
+# (FV-DEV-001 -> vending/FV-DEV-001/telemetry|status|events, including its Last Will on status).
+# There is no command, dispense, payment or order topic.
+pattern write vending/%u/telemetry
+pattern write vending/%u/status
+pattern write vending/%u/events

@@ -297,3 +297,8 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   InventoryItem (FOR UPDATE, rechecked). Loading = Product -> Batch -> Machine -> Slot; removal = Slot -> Item; release = Order -> Payment ->
   InventoryItem. Loads of the same product or into the same machine wait on the shared Product/Machine locks; removal waits on the slot lock.
 - Queries: `findSlotIdsHoldingProduct` (unlocked discovery), `findSellableHeadId` and `findCatalog` (DISTINCT ON over the present items).
+
+## 16. Issue #43 — MQTT integration (no schema change)
+
+V1-V12 untouched. MQTT only reads `machines` (`findIdByCode`, code -> id); `sensor_readings`, `machines.last_seen_at` and `machine_events`
+are not written. Rejected messages are not persisted.

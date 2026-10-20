@@ -231,14 +231,15 @@ dispense-command path. Direct ESP32 MQTT connectivity is not required for purcha
 Conceptual topics:
 
 ```text
-vending/{machineId}/telemetry
-vending/{machineId}/status
-vending/{machineId}/events
+vending/{machineCode}/telemetry
+vending/{machineCode}/status
+vending/{machineCode}/events
 ```
 
 Final MQTT contracts must be documented before production implementation.
 
-Specify whether topic identifiers are machine UUIDs or machine codes. Serial examples
+Decided in issue #43: topic identifiers are machine **codes** (unique, immutable, readable in firmware
+configuration and broker ACLs), not UUIDs; the contract is api-contract/mqtt-contract.md. Serial examples
 above describe the approved flow, not a finalized framing/checksum/security protocol.
 
 ---
@@ -420,3 +421,11 @@ is `{ "productId" }` only (breaking change, the kiosk has not shipped); every ne
 the head (bottom bowl) of a sellable slot, FEFO only between slot heads, at most one RESERVED bowl per slot, and the catalog lists only
 products with a sellable head. `app.order.max-total-quantity` and catalog `maxTotalQuantity` are removed. No schema change; historical
 multi-line orders stay readable. See docs/order-management.md.
+
+## 20. MQTT integration scope — Issue #43
+
+Inbound-only MQTT boundary: topics `vending/{machineCode}/{telemetry|status|events}` (machine code, not UUID), versioned envelope
+(schemaVersion 1) documented in api-contract/mqtt-contract.md, local Mosquitto with per-machine accounts and ACL (infra/mosquitto),
+spring-integration-mqtt client (disabled by default), validation, machine resolution by code and dispatch to `MachineMessageHandler`
+beans. No sensor storage, last_seen_at, online/offline, alerts, machine_events, duplicate detection or commands to machines (later issues);
+no dispense, payment or order topic. No schema or REST change. See docs/mqtt-integration.md.

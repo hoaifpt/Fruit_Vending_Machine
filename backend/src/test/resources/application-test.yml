@@ -22,3 +22,6 @@ app:
     expiry-sweep:
       # The sweep is invoked directly by tests with a controlled clock.
       enabled: false
+  mqtt:
+    # Tests never need a broker; MQTT suites enable it explicitly against a Testcontainers Mosquitto.
+    enabled: false

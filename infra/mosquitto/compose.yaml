@@ -1,0 +1,16 @@
+name: fruit-machine-mqtt
+
+# Local MQTT broker (issue #43). Generate config/passwd first: sh infra/mosquitto/generate-passwd.sh
+# Start: docker compose -f infra/mosquitto/compose.yaml up -d
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./config:/mosquitto/config:ro
+      - data:/mosquitto/data
+    restart: unless-stopped
+
+volumes:
+  data:

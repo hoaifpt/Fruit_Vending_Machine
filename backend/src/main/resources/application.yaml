@@ -75,6 +75,19 @@ app:
       description-prefix: ${PAYOS_DESCRIPTION_PREFIX:FV}
       description-max-length: ${PAYOS_DESCRIPTION_MAX_LENGTH:9}
       cancel-timeout: ${PAYOS_CANCEL_TIMEOUT:PT3S}
+  # Inbound MQTT (telemetry/status/events only; see api-contract/mqtt-contract.md). Disabled unless MQTT_ENABLED=true.
+  mqtt:
+    enabled: ${MQTT_ENABLED:false}
+    broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
+    client-id: ${MQTT_CLIENT_ID:fvm-backend}
+    username: ${MQTT_USERNAME:}
+    password: ${MQTT_PASSWORD:}
+    topic-root: ${MQTT_TOPIC_ROOT:vending}
+    qos: ${MQTT_QOS:1}
+    clean-session: ${MQTT_CLEAN_SESSION:false}
+    max-payload-bytes: ${MQTT_MAX_PAYLOAD_BYTES:8192}
+    completion-timeout: ${MQTT_COMPLETION_TIMEOUT:PT5S}
+    max-reconnect-delay: ${MQTT_MAX_RECONNECT_DELAY:PT30S}
   order:
     reservation-ttl: ${ORDER_RESERVATION_TTL:PT5M}
     expiry-sweep:

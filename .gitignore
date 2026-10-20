@@ -1,3 +1,5 @@
 # Local database credentials; commit only the example.
 /.env
 /backend/target/
+# Generated local MQTT password file (hashes of real local passwords); commit only the templates.
+/infra/mosquitto/config/passwd

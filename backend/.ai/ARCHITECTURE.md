@@ -671,3 +671,16 @@ the hold deadline, of an ACTIVE product in an ACTIVE slot of an ACTIVE machine, 
 `OrderService.createOrder` takes one productId; `OrderReservationService.selectHead` locks candidate slots (FOR UPDATE, id order), recomputes
 heads in SQL (`InventoryItemRepository.findSellableHeadId`, DISTINCT ON) and locks the chosen head. `KioskCatalogService` uses one aggregate
 SQL with the same head rule. `InventoryService.getInventorySummary` adds headStatus/headExpired under REPEATABLE READ. Release is unchanged.
+
+## 23. MQTT inbound infrastructure — Issue #43
+
+Delivered under `mqtt/`: `config.MqttProperties` (typed `app.mqtt.*`, enabled=false by default, password redacted), `config.MqttInboundConfig`
+(only when enabled: Paho v3 client factory with automatic reconnect and exponential backoff, `MqttPahoMessageDrivenChannelAdapter`
+subscribed to `{root}/+/telemetry|status|events`, autoStartup=false and started on its own thread after ApplicationReadyEvent so startup
+never waits for the broker; prod requires ssl://), `inbound.MqttInboundAdapter` (the callback boundary: never throws, no transaction),
+`inbound.MachineMessageParser` (topic + envelope rules), `inbound.MachineResolver` (code to id via `MachineRepository.findIdByCode`),
+`inbound.MachineMessageDispatcher` (one handler per channel, handler failures contained), `inbound.RejectionLogLimiter` (sanitized,
+rate-limited WARN), `MqttConnectionState` and `MqttMetrics` (Micrometer counters). Extension point: a `message.MachineMessageHandler` bean per
+`MachineChannel`; handlers delegate to application services that own transactions and deduplicate by messageId (QoS 1).
+The backend never publishes to machine topics; dispensing stays Backend -> Kiosk -> Serial/USB -> ESP32. Single instance assumed
+(shared subscriptions are future work). See [mqtt-integration.md](../../docs/mqtt-integration.md).

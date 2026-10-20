@@ -71,7 +71,8 @@ class CoreManagementFlowIntegrationTest extends AbstractCoreIntegrationTest {
         fixtures.api("GET", "/api/v1/product-batches/"+stock.batchId(), null, staff.token(), 200);
         fixtures.response("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 1), staff.token(), 409);
         fixtures.api("PATCH", "/api/v1/products/"+stock.productId()+"/status", Map.of("status", "ACTIVE"), admin.token(), 200);
-        jdbc.update("UPDATE product_batches SET expires_at=CURRENT_TIMESTAMP WHERE id=?", stock.batchId());
+        // One second in the past: the database clock (Docker VM) may run a few ms ahead of the JVM clock used by the summary.
+        jdbc.update("UPDATE product_batches SET expires_at=CURRENT_TIMESTAMP - interval '1 second' WHERE id=?", stock.batchId());
         summary = fixtures.api("GET", stock.slotInventory()+"/summary", null, staff.token(), 200);
         assertThat(summary.path("occupiedCount").asInt()).isEqualTo(2);
         assertThat(summary.path("expiredCount").asInt()).isEqualTo(2);

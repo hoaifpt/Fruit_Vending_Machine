@@ -69,6 +69,17 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- Issue #43: inbound MQTT (telemetry/status/events only). Boot-managed version; Paho MQTT v3 client (MQTT 3.1.1, ESP32 PubSubClient compatible). -->
+        <dependency>
+            <groupId>org.springframework.integration</groupId>
+            <artifactId>spring-integration-mqtt</artifactId>
+        </dependency>
+        <!-- Optional in spring-integration-mqtt 6.x and not managed by Spring Boot; 1.2.5 is the final Paho v3 release. -->
+        <dependency>
+            <groupId>org.eclipse.paho</groupId>
+            <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
+            <version>1.2.5</version>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

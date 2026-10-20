@@ -21,4 +21,8 @@ public interface MachineRepository extends JpaRepository<Machine, UUID>, JpaSpec
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("select m from Machine m where m.id = :id")
     Optional<Machine> findForShareById(@Param("id") UUID id);
+
+    /** Scalar lookup for MQTT machine resolution; codes are unique and immutable. */
+    @Query("select m.id from Machine m where m.code = :code")
+    Optional<UUID> findIdByCode(@Param("code") String code);
 }
