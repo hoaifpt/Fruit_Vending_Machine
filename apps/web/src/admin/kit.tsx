@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ApiError } from '../api/client.ts'
+import { toast } from 'sonner'
+import { Skeleton } from '../components/ui/skeleton.tsx'
 import { linkHandler } from '../lib/router.ts'
 import { errorMessage } from './useApi.ts'
 import type { ApiState } from './useApi.ts'
@@ -45,8 +47,32 @@ export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?
   return <p className={tone === 'error' ? 'a-error' : 'a-notice'} role={tone === 'error' ? 'alert' : 'status'}>{children}</p>
 }
 
-export function Loading({ label = 'Đang tải dữ liệu…' }: { label?: string }) {
-  return <p className="a-empty" role="status">{label}</p>
+/** First load of a block: shimmering placeholder rows; the label is announced to screen readers only. */
+export function Loading({ label = 'Đang tải dữ liệu…', rows = 4 }: { label?: string; rows?: number }) {
+  return <div role="status" className="grid gap-3 py-2">
+    <span className="sr-only">{label}</span>
+    {Array.from({ length: rows }, (_, index) => <Skeleton key={index} className="h-4" style={{ width: `${92 - ((index * 17) % 40)}%` }} />)}
+  </div>
+}
+
+/** Table-shaped placeholder used while a list loads for the first time. */
+export function TableSkeleton({ columns = 5, rows = 6 }: { columns?: number; rows?: number }) {
+  return <div role="status" className="a-table-wrap">
+    <span className="sr-only">Đang tải dữ liệu…</span>
+    <div className="flex gap-6 border-b bg-muted px-3.5 py-3">{Array.from({ length: columns }, (_, index) => <Skeleton key={index} className="h-3 flex-1 opacity-70" />)}</div>
+    {Array.from({ length: rows }, (_, row) => <div key={row} className="flex items-center gap-6 border-b px-3.5 py-4 last:border-b-0">
+      {Array.from({ length: columns }, (_, index) => <Skeleton key={index} className={index === 0 ? 'h-4 flex-[1.3]' : 'h-4 flex-1'} style={{ opacity: 1 - row * 0.1 }} />)}
+    </div>)}
+  </div>
+}
+
+/** Whole-screen placeholder while a lazy screen loads: header, toolbar and a table. */
+export function PageSkeleton() {
+  return <div role="status" aria-label="Đang mở màn hình…" className="animate-in fade-in-0 duration-300">
+    <div className="mb-6 grid gap-2.5"><Skeleton className="h-7 w-56" /><Skeleton className="h-4 w-96 max-w-full" /></div>
+    <div className="mb-4 flex gap-3"><Skeleton className="h-9 w-72 max-w-full" /><Skeleton className="h-9 w-40" /></div>
+    <TableSkeleton />
+  </div>
 }
 
 /** Query failure: 403 explains the missing permission without logging out; others offer a retry. */
@@ -64,7 +90,7 @@ export function DataTable<T>({ columns, rows, rowKey, state, empty = 'Không có
   columns: Column<T>[]; rows: T[] | undefined; rowKey: (row: T) => string; state: Pick<ApiState<unknown>, 'loading' | 'error' | 'reload'>; empty?: string
 }) {
   if (state.error && !rows) return <ErrorState error={state.error} retry={state.reload} />
-  if (!rows) return <Loading />
+  if (!rows) return <TableSkeleton columns={Math.min(columns.length, 6)} />
   return <div className="a-table-wrap" aria-busy={state.loading}>
     {state.error && <ErrorState error={state.error} retry={state.reload} />}
     <table>
@@ -134,7 +160,7 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
     event.preventDefault()
     if (pending) return
     setPending(true); setMessage('')
-    try { await onSubmit(); close() } catch (error) {
+    try { await onSubmit(); close(); toast.success(`Đã ${submitLabel.charAt(0).toLowerCase()}${submitLabel.slice(1)}`, { description: title }) } catch (error) {
       if (error instanceof ApiError && Object.keys(error.fieldErrors).length) { onFieldErrors?.(error.fieldErrors); setMessage('Vui lòng kiểm tra các trường được đánh dấu.') }
       else if (error instanceof ValidationError) { onFieldErrors?.(error.fieldErrors); setMessage('Vui lòng kiểm tra các trường được đánh dấu.') }
       else setMessage(errorMessage(error))
