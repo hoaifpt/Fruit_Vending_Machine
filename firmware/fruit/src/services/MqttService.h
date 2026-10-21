@@ -4,28 +4,33 @@
 #include <PubSubClient.h>
 #include <WiFiClient.h>
 
-#include "application/DispenseController.h"
-
+// Machine -> backend MQTT (backend repo: api-contract/mqtt-contract.md, schemaVersion 1). Publish only: telemetry, status, events.
+// There is no command subscription; dispensing never goes over MQTT (it comes from the kiosk over Serial).
 class MqttService
 {
 public:
-    explicit MqttService(DispenseController &dispenseController);
+    MqttService();
 
     bool begin();
     void loop();
+    bool connected();
+
+    // payloadJson must be a JSON object built from trusted values (numbers, validated ids).
+    bool publishTelemetry(float temperatureC, float humidityPercent);
+    bool publishEvent(const char *eventType, const char *detailsJson);
 
 private:
-    static MqttService *activeInstance;
-    static void onMessage(char *topic, uint8_t *payload, unsigned int length);
-
-    void handleMessage(char *topic, uint8_t *payload, unsigned int length);
     bool connect();
-    void publishStatus(const char *message);
+    bool publish(const char *channel, const char *payloadJson);
+    void buildEnvelope(char *out, size_t size, const char *messageId, const char *payloadJson);
+    void topicFor(char *out, size_t size, const char *channel);
 
-    DispenseController &dispenseController;
     WiFiClient networkClient;
     PubSubClient mqttClient;
-    char commandTopic[96] = {};
     char statusTopic[96] = {};
+    char willMessage[256] = {};
+    char bootId[9] = {};
+    unsigned long sequence = 0;
     unsigned long lastAttemptAt = 0;
+    bool configured = false;
 };

@@ -11,4 +11,5 @@ public:
 private:
     unsigned long lastAttemptAt = 0;
     bool connectionLogged = false;
+    bool configured = false;
 };

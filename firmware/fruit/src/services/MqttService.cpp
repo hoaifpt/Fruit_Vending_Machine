@@ -1,44 +1,38 @@
 #include "MqttService.h"
 
 #include <WiFi.h>
-#include <cstring>
 
 #include "app_config.h"
+#include "utils/Logger.h"
 
-MqttService *MqttService::activeInstance = nullptr;
-
-MqttService::MqttService(DispenseController &dispenseController)
-    : dispenseController(dispenseController), mqttClient(networkClient) {}
+MqttService::MqttService()
+    : mqttClient(networkClient) {}
 
 bool MqttService::begin()
 {
-    if (AppConfig::MQTT_HOST[0] == '\0')
+    if (AppConfig::MQTT_HOST[0] == '\0' || AppConfig::MQTT_PASSWORD[0] == '\0')
     {
-        Serial.println("MQTT broker is not configured; add include/secrets.h");
+        Logger::info("MQTT not configured (APP_MQTT_HOST / APP_MQTT_PASSWORD in include/secrets.h); running Serial-only");
         return false;
     }
 
-    snprintf(
-        commandTopic,
-        sizeof(commandTopic),
-        "fruit-vending/%s/command",
-        AppConfig::MACHINE_ID);
-    snprintf(
-        statusTopic,
-        sizeof(statusTopic),
-        "fruit-vending/%s/status",
-        AppConfig::MACHINE_ID);
+    // A new id per boot keeps messageIds unique per machine without a real-time clock.
+    snprintf(bootId, sizeof(bootId), "%08lx", static_cast<unsigned long>(esp_random()));
+    topicFor(statusTopic, sizeof(statusTopic), "status");
+    char willId[24];
+    snprintf(willId, sizeof(willId), "lwt-%s", bootId);
+    buildEnvelope(willMessage, sizeof(willMessage), willId, "{\"state\":\"OFFLINE\"}");
 
-    activeInstance = this;
     mqttClient.setServer(AppConfig::MQTT_HOST, AppConfig::MQTT_PORT);
-    mqttClient.setCallback(MqttService::onMessage);
-    mqttClient.setBufferSize(128);
+    mqttClient.setBufferSize(AppConfig::MQTT_BUFFER_SIZE);
+    mqttClient.setKeepAlive(AppConfig::MQTT_KEEP_ALIVE_SECONDS);
+    configured = true;
     return true;
 }
 
 void MqttService::loop()
 {
-    if (WiFi.status() != WL_CONNECTED || AppConfig::MQTT_HOST[0] == '\0')
+    if (!configured || WiFi.status() != WL_CONNECTED)
     {
         return;
     }
@@ -46,7 +40,7 @@ void MqttService::loop()
     if (!mqttClient.connected())
     {
         const unsigned long now = millis();
-        if (now - lastAttemptAt >= AppConfig::MQTT_RETRY_INTERVAL_MS)
+        if (lastAttemptAt == 0 || now - lastAttemptAt >= AppConfig::MQTT_RETRY_INTERVAL_MS)
         {
             lastAttemptAt = now;
             connect();
@@ -57,102 +51,76 @@ void MqttService::loop()
     mqttClient.loop();
 }
 
+bool MqttService::connected()
+{
+    return configured && mqttClient.connected();
+}
+
 bool MqttService::connect()
 {
-    Serial.print("Connecting to MQTT broker...");
+    // Username = client id = machine code; the broker ACL lets this account publish only vending/<code>/....
+    const bool ok = mqttClient.connect(
+        AppConfig::MACHINE_CODE,
+        AppConfig::MACHINE_CODE,
+        AppConfig::MQTT_PASSWORD,
+        statusTopic,
+        1,
+        false,
+        willMessage);
 
-    bool connected = false;
-    if (AppConfig::MQTT_USERNAME[0] != '\0')
+    if (!ok)
     {
-        connected = mqttClient.connect(
-            AppConfig::MACHINE_ID,
-            AppConfig::MQTT_USERNAME,
-            AppConfig::MQTT_PASSWORD,
-            statusTopic,
-            0,
-            true,
-            "offline");
-    }
-    else
-    {
-        connected = mqttClient.connect(
-            AppConfig::MACHINE_ID,
-            statusTopic,
-            0,
-            true,
-            "offline");
-    }
-
-    if (!connected)
-    {
-        Serial.print(" failed, state=");
-        Serial.println(mqttClient.state());
+        // state 5 = not authorised (password/ACL), -2 = broker unreachable.
+        Logger::info("MQTT connect to %s:%u failed, state=%d", AppConfig::MQTT_HOST, AppConfig::MQTT_PORT, mqttClient.state());
         return false;
     }
 
-    Serial.println(" connected");
-    mqttClient.subscribe(commandTopic);
-    publishStatus("online");
-    Serial.print("Subscribed to: ");
-    Serial.println(commandTopic);
+    char payload[128];
+    snprintf(payload, sizeof(payload), "{\"state\":\"ONLINE\",\"firmwareVersion\":\"%s\",\"uptimeSeconds\":%lu}",
+             AppConfig::FIRMWARE_VERSION, millis() / 1000UL);
+    publish("status", payload);
+    Logger::info("MQTT connected as %s", AppConfig::MACHINE_CODE);
     return true;
 }
 
-void MqttService::publishStatus(const char *message)
+bool MqttService::publishTelemetry(float temperatureC, float humidityPercent)
 {
-    if (mqttClient.connected())
-    {
-        mqttClient.publish(statusTopic, message, true);
-    }
+    char payload[96];
+    snprintf(payload, sizeof(payload), "{\"temperature\":%.1f,\"humidity\":%.1f}", temperatureC, humidityPercent);
+    return publish("telemetry", payload);
 }
 
-void MqttService::onMessage(
-    char *topic,
-    uint8_t *payload,
-    unsigned int length)
+bool MqttService::publishEvent(const char *eventType, const char *detailsJson)
 {
-    if (activeInstance != nullptr)
-    {
-        activeInstance->handleMessage(topic, payload, length);
-    }
+    char payload[192];
+    snprintf(payload, sizeof(payload), "{\"eventType\":\"%s\",\"details\":%s}", eventType, detailsJson);
+    return publish("events", payload);
 }
 
-void MqttService::handleMessage(
-    char *topic,
-    uint8_t *payload,
-    unsigned int length)
+bool MqttService::publish(const char *channel, const char *payloadJson)
 {
-    if (strcmp(topic, commandTopic) != 0)
+    if (!connected())
     {
-        return;
+        return false;
     }
+    char messageId[32];
+    snprintf(messageId, sizeof(messageId), "%s-%lu", bootId, ++sequence);
+    char topic[96];
+    topicFor(topic, sizeof(topic), channel);
+    char envelope[AppConfig::MQTT_BUFFER_SIZE - 128];
+    buildEnvelope(envelope, sizeof(envelope), messageId, payloadJson);
+    // PubSubClient publishes at QoS 0; the backend accepts it (the contract recommends QoS 1 when the library allows it).
+    return mqttClient.publish(topic, envelope, false);
+}
 
-    DispenseCommand command;
-    const char *commandName;
-    if (length == 4 && memcmp(payload, "NEXT", 4) == 0)
-    {
-        command = DispenseCommand::NEXT;
-        commandName = "NEXT";
-    }
-    else if (length == 4 && memcmp(payload, "STOP", 4) == 0)
-    {
-        command = DispenseCommand::STOP;
-        commandName = "STOP";
-    }
-    else
-    {
-        publishStatus("rejected:UNKNOWN_COMMAND");
-        return;
-    }
+void MqttService::buildEnvelope(char *out, size_t size, const char *messageId, const char *payloadJson)
+{
+    // sentAt is omitted: the ESP32 has no reliable clock; the backend records receivedAt itself.
+    snprintf(out, size, "{\"schemaVersion\":1,\"messageId\":\"%s\",\"machineCode\":\"%s\",\"payload\":%s}",
+             messageId, AppConfig::MACHINE_CODE, payloadJson);
+}
 
-    if (dispenseController.handleCommand(command))
-    {
-        char response[32];
-        snprintf(response, sizeof(response), "accepted:%s", commandName);
-        publishStatus(response);
-    }
-    else
-    {
-        publishStatus("rejected:BUSY");
-    }
+void MqttService::topicFor(char *out, size_t size, const char *channel)
+{
+    snprintf(out, size, "%s/%s/%s", AppConfig::MQTT_TOPIC_ROOT, AppConfig::MACHINE_CODE, channel);
 }
