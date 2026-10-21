@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: Fruit Vending Machine Backend API
+  version: 0.1.0
+paths:
+  /api/machines/{machineId}/commands/{command}:
+    post:
+      summary: Publish a command to an ESP32 machine over MQTT
+      parameters:
+        - name: machineId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,64}$'
+        - name: command
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [NEXT, STOP]
+      responses:
+        '200':
+          description: Command published to MQTT
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [machineId, command, topic, published]
+                properties:
+                  machineId:
+                    type: string
+                  command:
+                    type: string
+                    enum: [NEXT, STOP]
+                  topic:
+                    type: string
+                  published:
+                    type: boolean
+        '400':
+          description: Invalid machine ID or command
+        '503':
+          description: MQTT broker unavailable
