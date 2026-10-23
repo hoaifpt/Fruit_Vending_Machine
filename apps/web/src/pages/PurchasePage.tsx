@@ -7,6 +7,7 @@ import { configuredKioskKey, createKioskApi } from '../kiosk/api'
 import type { KioskIdentity, KioskOrder, KioskProduct } from '../kiosk/api'
 import { CATALOG_REFRESH_MS, ENDED_RETURN_MS, PAID_RETURN_MS, clockOffset, configuredSeconds, formatCountdown, pollDelay, secondsLeft, viewForOrder } from '../kiosk/flow'
 import type { OrderView } from '../kiosk/flow'
+import { activeOrderId, clearActiveOrder, rememberActiveOrder } from '../kiosk/active-order'
 import orange from '../assets/orange-mark.webp'
 import mix from '../assets/fruit-still-life.webp'
 import './PurchasePage.css'
@@ -24,7 +25,7 @@ type Screen =
   | { kind: 'catalog' }
   | { kind: 'creating'; product: KioskProduct }
   | { kind: 'order'; product: KioskProduct; order: KioskOrder; view: OrderView }
-  | { kind: 'paid'; product: KioskProduct; order: KioskOrder }
+  | { kind: 'fulfillment'; phase: 'preparing' | 'dispensing' | 'completed' | 'support'; product: KioskProduct; order: KioskOrder }
   | { kind: 'ended'; reason: 'cancelled' | 'expired'; product: KioskProduct; order: KioskOrder }
 
 type PaymentProblem = '' | 'provider' | 'network' | 'conflict'
@@ -53,6 +54,7 @@ export default function PurchasePage() {
   const suppressClick = useRef(false)
   const modal = useRef<HTMLDialogElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
+  const preparedOrders = useRef(new Set<string>())
 
   const serverNow = () => Date.now() + offset.current
   const remember = (serverTime: number | undefined) => { offset.current = clockOffset(serverTime, Date.now()) }
@@ -71,6 +73,7 @@ export default function PurchasePage() {
   }, [api, setScreen])
 
   const goHome = useCallback(() => {
+    clearActiveOrder()
     setDialog(null); setPaymentProblem(''); setCreatingPayment(false); setReconnecting(false); setPage(0)
     setScreen({ kind: 'catalog' })
     void loadCatalog()
@@ -79,7 +82,11 @@ export default function PurchasePage() {
   /** Maps a polled/returned order onto a screen. The backend is the only source of payment state. */
   const applyOrder = useCallback((product: KioskProduct, order: KioskOrder) => {
     const view = viewForOrder(order, serverNow())
-    if (view.kind === 'paid') { setDialog(null); setScreen({ kind: 'paid', product, order }); return }
+    if (view.kind === 'paid' || view.kind === 'dispensing' || view.kind === 'completed' || view.kind === 'support') {
+      setDialog(null)
+      setScreen({ kind: 'fulfillment', phase: view.kind === 'paid' ? 'preparing' : view.kind, product, order })
+      return
+    }
     if (view.kind === 'cancelled' || view.kind === 'ended') { setDialog(null); setScreen({ kind: 'ended', reason: view.kind === 'cancelled' ? 'cancelled' : 'expired', product, order }); return }
     if (view.kind === 'qr') setPaymentProblem('')
     setScreen({ kind: 'order', product, order, view })
@@ -115,6 +122,7 @@ export default function PurchasePage() {
     setNotice(''); setPaymentProblem(''); setScreen({ kind: 'creating', product })
     try {
       const result = await api.createOrder(product.productId)
+      if (result.data.id) rememberActiveOrder(result.data.id)
       remember(result.serverTime)
       lastInteraction.current = Date.now()
       applyOrder(product, result.data)
@@ -150,15 +158,39 @@ export default function PurchasePage() {
   useEffect(() => {
     if (!key) return
     let active = true
-    api.me().then(result => { if (active) { remember(result.serverTime); setMachine(result.data); void loadCatalog() } },
+    api.me().then(async result => {
+      if (!active) return
+      remember(result.serverTime); setMachine(result.data)
+      const saved = activeOrderId()
+      if (saved) {
+        try {
+          const restored = await api.getOrder(saved)
+          if (!active) return
+          const item = restored.data.items?.[0]
+          if (item) {
+            remember(restored.serverTime)
+            applyOrder({ productId: item.productId, sku: item.sku, name: item.productName, price: item.unitPrice }, restored.data)
+            return
+          }
+        } catch (error) {
+          if (!active) return
+          if (isAuthError(error)) { setScreen({ kind: 'unconfigured' }); return }
+          // Keep the pointer on network errors: never hide an in-progress paid purchase.
+          if (!(error instanceof ApiError && error.status === 404)) { setScreen({ kind: 'offline' }); return }
+        }
+        clearActiveOrder()
+      }
+      void loadCatalog()
+    },
       error => { if (active) setScreen(isAuthError(error) ? { kind: 'unconfigured' } : { kind: 'offline' }) })
     return () => { active = false }
-  }, [api, key, loadCatalog, setScreen])
+  }, [api, key, loadCatalog, setScreen, applyOrder])
 
   // Catalog refresh while idle; retry while offline / out of service.
   useEffect(() => {
     if (!['catalog', 'out-of-service', 'offline'].includes(screen.kind) || !key) return
     const timer = setInterval(() => {
+      if (activeOrderId() && screenRef.current.kind === 'offline') { window.location.reload(); return }
       if (!machine) api.me().then(result => { setMachine(result.data); void loadCatalog() }, () => {})
       else void loadCatalog()
     }, screen.kind === 'catalog' ? CATALOG_REFRESH_MS : 15_000)
@@ -166,7 +198,8 @@ export default function PurchasePage() {
   }, [screen.kind, key, machine, api, loadCatalog])
 
   // Automatically create the first payment attempt when the order has none.
-  const orderId = screen.kind === 'order' ? screen.order.id : undefined
+  const orderId = screen.kind === 'order' || screen.kind === 'fulfillment' ? screen.order.id : undefined
+  const tracking = screen.kind === 'order' || screen.kind === 'fulfillment' && (screen.phase === 'preparing' || screen.phase === 'dispensing')
   const needsPayment = screen.kind === 'order' && screen.view.kind === 'create-payment'
   useEffect(() => {
     const current = screenRef.current
@@ -174,9 +207,35 @@ export default function PurchasePage() {
     void createPayment(current.product, current.order)
   }, [needsPayment, orderId, creatingPayment, paymentProblem, createPayment])
 
+  // Idempotent backend authorization only. The browser never claims or sends motor commands.
+  const preparing = screen.kind === 'fulfillment' && screen.phase === 'preparing'
+  useEffect(() => {
+    if (!preparing || !orderId || preparedOrders.current.has(orderId)) return
+    let stopped = false, timer: ReturnType<typeof setTimeout>
+    const prepare = async () => {
+      try {
+        await api.prepareDispense(orderId)
+        preparedOrders.current.add(orderId)
+        if (!stopped) setNotice('')
+      } catch (error) {
+        if (stopped) return
+        if (isAuthError(error)) { setScreen({ kind: 'unconfigured' }); return }
+        if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
+          const current = screenRef.current
+          if (current.kind === 'fulfillment') setScreen({ ...current, phase: 'support' })
+          return
+        }
+        setNotice('Đang kết nối để chuẩn bị tô. Không thanh toán lại; vui lòng chờ hoặc liên hệ nhân viên.')
+        timer = setTimeout(prepare, 5_000)
+      }
+    }
+    void prepare()
+    return () => { stopped = true; clearTimeout(timer) }
+  }, [api, preparing, orderId, setScreen])
+
   // Status polling: every 2.5 s, backing off to 10 s on network errors; stops on final states or leaving the screen.
   useEffect(() => {
-    if (screen.kind !== 'order' || !orderId) return
+    if (!tracking || !orderId || (screen.kind !== 'order' && screen.kind !== 'fulfillment')) return
     const product = screen.product
     let failures = 0, timer: ReturnType<typeof setTimeout>, stopped = false
     const controller = new AbortController()
@@ -193,13 +252,14 @@ export default function PurchasePage() {
         if (error instanceof ApiError && error.status === 404) { goHome(); return }
         failures += 1; setReconnecting(true)
       }
-      if (!stopped && screenRef.current.kind === 'order') timer = setTimeout(tick, pollDelay(failures))
+      const current = screenRef.current
+      if (!stopped && (current.kind === 'order' || current.kind === 'fulfillment' && (current.phase === 'preparing' || current.phase === 'dispensing'))) timer = setTimeout(tick, pollDelay(failures))
     }
     timer = setTimeout(tick, pollDelay(0))
     return () => { stopped = true; controller.abort(); clearTimeout(timer) }
     // Restart only when the order changes, not on every poll result.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId, screen.kind === 'order'])
+  }, [orderId, tracking])
 
   // Clock for countdowns and the idle timeout on the payment screen.
   useEffect(() => {
@@ -222,11 +282,12 @@ export default function PurchasePage() {
   })
 
   // Final screens return to the catalog by themselves.
+  const returnAfterMs = screen.kind === 'ended' ? ENDED_RETURN_MS : screen.kind === 'fulfillment' && screen.phase === 'completed' ? PAID_RETURN_MS : null
   useEffect(() => {
-    if (screen.kind !== 'paid' && screen.kind !== 'ended') return
-    const timer = setTimeout(goHome, screen.kind === 'paid' ? PAID_RETURN_MS : ENDED_RETURN_MS)
+    if (returnAfterMs === null) return
+    const timer = setTimeout(goHome, returnAfterMs)
     return () => clearTimeout(timer)
-  }, [screen.kind, goHome])
+  }, [returnAfterMs, goHome])
 
   useEffect(() => {
     if (!notice) return
@@ -311,17 +372,19 @@ export default function PurchasePage() {
         </div>
       </section>}
 
-      {(screen.kind === 'paid' || screen.kind === 'ended') && <section className={`buy-result buy-result-${screen.kind === 'paid' ? 'success' : 'cancelled'}`}>
-        <div className="buy-result-icon" aria-hidden="true">{screen.kind === 'paid' ? <Icon name="bag" /> : <span>!</span>}</div>
-        <p className="buy-kicker">{screen.kind === 'paid' ? 'Cảm ơn bạn đã chọn Fruit Vending' : 'Fruit Vending'}</p>
-        <h1 ref={heading} tabIndex={-1}>{screen.kind === 'paid' ? 'Đã xác nhận thanh toán' : screen.reason === 'cancelled' ? 'Đơn hàng đã hủy' : 'Đơn hàng đã hết hạn'}</h1>
+      {(screen.kind === 'fulfillment' || screen.kind === 'ended') && <section className={`buy-result buy-result-${screen.kind === 'fulfillment' && screen.phase === 'completed' ? 'success' : 'cancelled'}`}>
+        <div className="buy-result-icon" aria-hidden="true">{screen.kind === 'fulfillment' && (screen.phase === 'preparing' || screen.phase === 'dispensing') ? <span className="buy-spinner" /> : screen.kind === 'fulfillment' && screen.phase === 'completed' ? <Icon name="bag" /> : <span>!</span>}</div>
+        <p className="buy-kicker">Fruit Vending</p>
+        <h1 ref={heading} tabIndex={-1}>{screen.kind === 'fulfillment'
+          ? screen.phase === 'completed' ? 'Mời bạn nhận tô trái cây' : screen.phase === 'support' ? 'Cần nhân viên hỗ trợ' : screen.phase === 'dispensing' ? 'Máy đang nhả tô' : 'Đã thanh toán — đang chuẩn bị tô'
+          : screen.reason === 'cancelled' ? 'Đơn hàng đã hủy' : 'Đơn hàng đã hết hạn'}</h1>
         <div role="status" className="buy-result-description">
-          {screen.kind === 'paid'
-            ? <p>Đã nhận {money(screen.order.totalAmount)} cho <strong>1 hộp {screen.product.name?.toLowerCase()}</strong>.<br />Máy đang chuẩn bị hộp trái cây của bạn.</p>
+          {screen.kind === 'fulfillment'
+            ? <p>{screen.phase === 'completed' ? 'Máy đã xác nhận nhả tô. Vui lòng lấy sản phẩm tại khay nhận.' : screen.phase === 'support' ? 'Chưa thể xác nhận tô đã được giao. Không thanh toán lại; vui lòng báo nhân viên mã đơn bên dưới.' : reconnecting ? 'Đang kết nối lại để theo dõi giao hàng. Không thanh toán lại.' : 'Vui lòng chờ máy hoàn thành. Không thanh toán lại.'}</p>
             : <p>Không chuyển tiền vào mã QR cũ. Nếu đã bị trừ tiền, vui lòng liên hệ nhân viên kèm mã đơn bên dưới.</p>}
         </div>
         <div className="buy-receipt"><div><span>Mã đơn</span><strong>{screen.order.orderCode ?? '—'}</strong></div><div><span>Sản phẩm</span><strong>{screen.product.name} · 1 hộp</strong></div><div><span>Tổng tiền</span><strong>{money(screen.order.totalAmount)}</strong></div></div>
-        <div className="buy-result-actions"><button className="buy-primary" onClick={goHome}>{screen.kind === 'paid' ? 'Mua sản phẩm khác' : 'Về danh sách sản phẩm'}<Icon name="arrow" /></button></div>
+        {(screen.kind === 'ended' || screen.phase === 'completed' || screen.phase === 'support') && <div className="buy-result-actions"><button className="buy-primary" onClick={goHome}>{screen.kind === 'fulfillment' && screen.phase === 'completed' ? 'Mua sản phẩm khác' : 'Về danh sách sản phẩm'}<Icon name="arrow" /></button></div>}
       </section>}
     </main>
     <footer className="buy-footer"><span><Icon name="leaf" /> Tươi ngon, gần bạn hơn.</span><span>1 sản phẩm / đơn <b>·</b> Thanh toán VietQR</span></footer>
@@ -331,7 +394,7 @@ export default function PurchasePage() {
         <div className="buy-dialog-actions"><button onClick={() => setDialog(null)}>Tiếp tục thanh toán</button><button disabled={cancelling} onClick={() => void cancelOrder()}>{cancelling ? 'Đang hủy…' : 'Xác nhận hủy'}</button></div></>}
       {dialog === 'help' && <><p>Chạm sản phẩm trên màn hình để chọn. Mỗi đơn gồm một hộp. Quét mã VietQR bằng ứng dụng ngân hàng; máy tự xác nhận khi nhận được thanh toán.</p>
         <h3>Đã thanh toán nhưng màn hình chưa xác nhận?</h3><p>Không thanh toán lại. Chờ thêm ít giây; nếu vẫn chưa xác nhận, hãy báo nhân viên mã đơn và mã máy.</p>
-        {(screen.kind === 'order' || screen.kind === 'paid' || screen.kind === 'ended') && screen.order.orderCode && <p><strong>Mã đơn {screen.order.orderCode}</strong></p>}
+        {(screen.kind === 'order' || screen.kind === 'fulfillment' || screen.kind === 'ended') && screen.order.orderCode && <p><strong>Mã đơn {screen.order.orderCode}</strong></p>}
         {machine && <p><strong>Máy {machine.machineCode}</strong> · {machine.machineName}</p>}</>}
     </dialog>
   </div>

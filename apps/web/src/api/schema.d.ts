@@ -4,6 +4,90 @@
  */
 
 export interface paths {
+    "/api/v1/kiosk/orders/{orderId}/dispense-command": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the owning order's command
+         * @description KIOSK only. Read-only status for the purchase UI; never contains dispatchToken and never moves hardware. 404 before a command exists.
+         */
+        get: operations["getKioskDispense"];
+        put?: never;
+        /**
+         * Create or reuse the authorized command for a PAID order
+         * @description KIOSK only. Idempotent by order; price, inventory and slot are selected by backend, not the request. Exactly one reserved bowl is supported. Expired bowls are refused. Returns the same command on repeated calls, including terminal commands.
+         */
+        post: operations["prepareKioskDispense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/dispense-commands/{commandId}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report correlated ACK or terminal physical observation
+         * @description KIOSK station worker only, with the claim token. ACK is not completion. SUCCESS requires exactly one IR count increment and the station's completed idle cycle observation; atomically marks command SUCCESS, allocation DISPENSED, bowl SOLD, order COMPLETED and appends SALE history. FAILED/TIMEOUT quarantine the bowl and put the machine in MAINTENANCE. Identical terminal retries are idempotent; conflicting/late transitions return 409. Unknown outcomes require staff reconciliation, no automatic refund or re-dispense.
+         */
+        post: operations["reportKioskDispenseResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/dispense-commands/{commandId}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exclusively claim physical dispatch once
+         * @description KIOSK station worker only. Rechecks PAID, machine/slot ACTIVE and bowl expiry, persists SENT, changes order to DISPENSING and returns dispatchToken once. One in-flight command per machine. Repeated/lost claims return 409; no takeover and no hardware resend.
+         */
+        post: operations["claimKioskDispense"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/dispense-commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List up to 20 pending commands for this machine
+         * @description KIOSK station worker only. Ordered by createdAt then id; no claims, secrets or hardware side effects. Stations must serialize all physical columns sharing one IR sensor.
+         */
+        get: operations["listPendingKioskDispenses"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/inventory/transactions": {
         parameters: {
             query?: never;
@@ -808,6 +892,65 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ApiResponseDispenseClaimResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["DispenseClaimResponse"];
+        };
+        ApiResponseDispenseCommandResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["DispenseCommandResponse"];
+        };
+        ApiResponseListDispenseCommandResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["DispenseCommandResponse"][];
+        };
+        /** @description Exclusive dispatch claim. dispatchToken is returned once; loss of this response never permits a second claim or motor resend. Keep it in the station journal, not the browser. */
+        DispenseClaimResponse: {
+            command?: components["schemas"]["DispenseCommandResponse"];
+            /** Format: uuid */
+            dispatchToken?: string;
+        };
+        /** @description Backend-authorized command for one reserved bowl. slotId is immutable; the station maps it to its configured physical column. Read responses never expose the dispatch token. */
+        DispenseCommandResponse: {
+            /** Format: uuid */
+            id?: string;
+            commandCode?: string;
+            /** Format: uuid */
+            orderId?: string;
+            /** Format: uuid */
+            machineId?: string;
+            /** Format: uuid */
+            slotId?: string;
+            /** Format: uuid */
+            inventoryItemId?: string;
+            /** @enum {string} */
+            status?: "PENDING" | "SENT" | "ACKNOWLEDGED" | "SUCCESS" | "FAILED" | "TIMEOUT";
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            sentAt?: string;
+            /** Format: date-time */
+            acknowledgedAt?: string;
+            /** Format: date-time */
+            completedAt?: string;
+        };
+        /** @description Correlated observation by the claiming station. SUCCESS requires a completed idle motion sequence and exactly one IR count increment; ACK alone is not success. Ambiguity must be TIMEOUT, never an automatic resend. */
+        DispenseResultRequest: {
+            /** Format: uuid */
+            dispatchToken: string;
+            /** @enum {string} */
+            status: "ACKNOWLEDGED" | "SUCCESS" | "FAILED" | "TIMEOUT";
+            /** Format: int64 */
+            bowlCountBefore?: number;
+            /** Format: int64 */
+            bowlCountAfter?: number;
+        };
         /** @description Append-only per-item history. Location snapshots, actor UUID, grouping reference, reason/status snapshots; legacy fields may be null. Each row represents one box; no aggregate quantity column. */
         InventoryTransactionResponse: {
             /** Format: uuid */
@@ -2035,6 +2178,444 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getKioskDispense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation succeeded */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "id": "d1500000-0000-4000-8000-000000000001",
+                     *         "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                     *         "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *         "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                     *         "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                     *         "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                     *         "status": "PENDING",
+                     *         "createdAt": "2026-10-23T04:00:00Z"
+                     *       },
+                     *       "message": "Success",
+                     *       "timestamp": "2026-10-23T04:00:08Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseDispenseCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body or observation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid kiosk key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description User JWT cannot act as kiosk */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing resource or resource owned by another machine */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    prepareKioskDispense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation succeeded */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "id": "d1500000-0000-4000-8000-000000000001",
+                     *         "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                     *         "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *         "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                     *         "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                     *         "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                     *         "status": "PENDING",
+                     *         "createdAt": "2026-10-23T04:00:00Z"
+                     *       },
+                     *       "message": "Success",
+                     *       "timestamp": "2026-10-23T04:00:08Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseDispenseCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body or observation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid kiosk key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description User JWT cannot act as kiosk */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing resource or resource owned by another machine */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    reportKioskDispenseResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "bowlCountBefore": 7,
+                 *       "status": "SUCCESS",
+                 *       "bowlCountAfter": 8,
+                 *       "dispatchToken": "00000000-0000-4000-8000-000000000099"
+                 *     }
+                 */
+                "application/json": components["schemas"]["DispenseResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Operation succeeded */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "id": "d1500000-0000-4000-8000-000000000001",
+                     *         "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                     *         "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *         "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                     *         "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                     *         "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                     *         "status": "SUCCESS",
+                     *         "createdAt": "2026-10-23T04:00:00Z",
+                     *         "sentAt": "2026-10-23T04:00:01Z",
+                     *         "completedAt": "2026-10-23T04:00:08Z"
+                     *       },
+                     *       "message": "Success",
+                     *       "timestamp": "2026-10-23T04:00:08Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseDispenseCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body or observation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid kiosk key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description User JWT cannot act as kiosk */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing resource or resource owned by another machine */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    claimKioskDispense: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation succeeded */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "dispatchToken": "00000000-0000-4000-8000-000000000099",
+                     *         "command": {
+                     *           "id": "d1500000-0000-4000-8000-000000000001",
+                     *           "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                     *           "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *           "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                     *           "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                     *           "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                     *           "status": "SENT",
+                     *           "createdAt": "2026-10-23T04:00:00Z",
+                     *           "sentAt": "2026-10-23T04:00:01Z"
+                     *         }
+                     *       },
+                     *       "message": "Success",
+                     *       "timestamp": "2026-10-23T04:00:08Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseDispenseClaimResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body or observation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid kiosk key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description User JWT cannot act as kiosk */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing resource or resource owned by another machine */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listPendingKioskDispenses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Operation succeeded */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": [
+                     *         {
+                     *           "id": "d1500000-0000-4000-8000-000000000001",
+                     *           "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                     *           "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *           "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                     *           "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                     *           "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                     *           "status": "PENDING",
+                     *           "createdAt": "2026-10-23T04:00:00Z"
+                     *         }
+                     *       ],
+                     *       "message": "Success",
+                     *       "timestamp": "2026-10-23T04:00:08Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseListDispenseCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body or observation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid kiosk key */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description User JWT cannot act as kiosk */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing resource or resource owned by another machine */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     listInventoryTransactions: {
         parameters: {
             query?: {

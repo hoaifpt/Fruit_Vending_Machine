@@ -2,7 +2,7 @@
 
 Ứng dụng frontend cho hệ thống máy bán trái cây, gồm trang giới thiệu công khai, đăng nhập admin/staff, khu quản trị, màn hình nhân viên và màn hình mua hàng tại kiosk.
 
-**Trạng thái:** khu quản trị ADMIN/STAFF (`/login`, `/admin/*`) đã tích hợp backend REST theo `api-contract/api.yaml`: đăng nhập JWT, phân quyền theo vai trò, người dùng, sản phẩm, máy, ngăn, khóa kiosk, lô hàng, tồn kho, đơn hàng, thanh toán và log webhook. Màn hình kiosk (`/buy`) đã nối API kiosk: danh mục, đơn một hộp, thanh toán VietQR và polling tới `PAID`. Nhả hàng qua ESP32 chưa làm (backend Milestone 3).
+**Trạng thái:** khu quản trị ADMIN/STAFF (`/login`, `/admin/*`) đã tích hợp backend REST theo `api-contract/api.yaml`: đăng nhập JWT, phân quyền theo vai trò, người dùng, sản phẩm, máy, ngăn, khóa kiosk, lô hàng, tồn kho, đơn hàng, thanh toán và log webhook. Màn hình kiosk (`/buy`) nối danh mục, đơn một tô, VietQR và polling qua PAID/DISPENSING tới COMPLETED hoặc hỗ trợ khi lỗi. Station worker riêng trên máy kiosk chuyển lệnh backend qua Serial; xem [hướng dẫn nhả tô](../../docs/dispense-integration.md). Phần cứng thật chưa được kiểm thử trên nhánh này.
 
 ## Công nghệ
 
@@ -47,7 +47,7 @@ Các đường dẫn `/admin/*` yêu cầu đăng nhập; chưa đăng nhập ho
 3. Khách chạm sản phẩm → `POST /kiosk/orders` với **chỉ** `{ productId }` (1 đơn = 1 hộp). Không tự gửi lại khi lỗi/timeout vì đơn có thể đã giữ hàng; giữ chỗ tự hết hạn ở backend.
 4. Kiosk tự gọi `POST /kiosk/orders/{id}/payments`, vẽ QR từ chuỗi `qrCode` (VietQR) ngay trên máy và hiển thị số tiền do server trả về.
 5. Polling `GET /kiosk/orders/{id}` mỗi 2,5 giây (lỗi mạng: lùi dần tới 10 giây, hiện "Đang kết nối lại"). Chỉ kết quả polling quyết định màn hình; kiosk không bao giờ tự đánh dấu đã thanh toán.
-6. `PAID` → "Đã xác nhận thanh toán", tự về danh mục sau 12 giây. `CANCELLED` → "Đơn hàng đã hủy/hết hạn". QR `FAILED`/`EXPIRED` khi đơn còn hạn → nút "Tạo mã QR mới". `502` từ cổng thanh toán → nút "Thử lại".
+6. `PAID` → yêu cầu backend cấp command idempotent và chờ station; `DISPENSING` → "Máy đang nhả tô"; chỉ `COMPLETED` → mời nhận tô và về danh mục sau 12 giây. `DISPENSE_FAILED` → hỗ trợ nhân viên, không tự retry motor/thanh toán. `CANCELLED` → "Đơn hàng đã hủy/hết hạn". QR `FAILED`/`EXPIRED` khi đơn còn hạn → nút "Tạo mã QR mới". `502` từ cổng thanh toán → nút "Thử lại".
 7. Nút "Hủy và chọn lại" hoặc không chạm màn hình trong `VITE_KIOSK_PAYMENT_IDLE_SECONDS` (mặc định 120 giây) → `POST /kiosk/orders/{id}/cancel`. Nếu hủy trả `409` (khách vừa trả kịp), kiosk hiển thị màn hình đã thanh toán.
 
 Bộ đếm dùng `min(currentPayment.expiresAt, order.expiresAt)` và hiệu chỉnh lệch đồng hồ bằng `timestamp` của phản hồi. Hết giờ vẫn tiếp tục polling vì backend mới là nơi quyết định hết hạn.
@@ -99,7 +99,7 @@ Không có tài khoản demo: dùng tài khoản ADMIN do backend tạo (xem [In
 
 - Khu quản trị không lưu dữ liệu nghiệp vụ trong trình duyệt; mọi dữ liệu lấy từ API.
 - Token truy cập không có refresh token; hết hạn thì đăng nhập lại.
-- Kiosk không lưu đơn hàng hay khóa API vào storage; khởi động lại giữa chừng thì giữ chỗ tự hết hạn ở backend.
+- Kiosk lưu duy nhất UUID đơn đang theo dõi trong sessionStorage để reload và đọc lại backend; không lưu dispatch token, lệnh motor hoặc tự xác nhận payment. Khóa API không lưu vào storage.
 
 ## Lệnh phát triển
 
@@ -151,7 +151,7 @@ npm run preview
 
 Triển khai nội dung `dist/` lên hosting tĩnh. Hosting cần rewrite các đường dẫn ứng dụng như `/buy`, `/login`, `/admin/*` và `/staff` về `index.html` để truy cập trực tiếp hoặc tải lại không gặp lỗi 404. `npm run preview` chỉ dùng kiểm tra bản build local.
 
-Hosting cũng cần phục vụ API cùng origin (reverse proxy) hoặc backend phải bật CORS. `VITE_KIOSK_API_KEY` được nhúng vào bundle JavaScript khi build, nên chỉ build bản kiosk trên chính máy kiosk và không phục vụ bản build đó công khai. Trước khi vận hành thật còn cần luồng nhả hàng (Serial/USB tới ESP32).
+Hosting cũng cần phục vụ API cùng origin (reverse proxy) hoặc backend phải bật CORS. `VITE_KIOSK_API_KEY` được nhúng vào bundle JavaScript khi build, nên chỉ build bản kiosk trên chính máy kiosk và không phục vụ bản build đó công khai. Trước khi vận hành thật cần cấu hình station/mapping và kiểm thử HIL theo [hướng dẫn nhả tô](../../docs/dispense-integration.md).
 
 ## Tài liệu liên quan
 

@@ -62,8 +62,24 @@ test('state table §7 maps polled orders to screens', () => {
   assert.deepEqual(viewForOrder(order('PENDING_PAYMENT', { status: 'EXPIRED' }), now), { kind: 'qr-expired', canRenew: true })
   assert.deepEqual(viewForOrder(order('PENDING_PAYMENT', { status: 'FAILED' }, '2026-10-18T06:59:00Z'), now), { kind: 'qr-expired', canRenew: false })
   assert.deepEqual(viewForOrder(order('PAID', { status: 'SUCCESS' }), now), { kind: 'paid' })
+  assert.deepEqual(viewForOrder(order('DISPENSING', { status: 'SUCCESS' }), now), { kind: 'dispensing' })
+  assert.deepEqual(viewForOrder(order('COMPLETED', { status: 'SUCCESS' }), now), { kind: 'completed' })
+  assert.deepEqual(viewForOrder(order('DISPENSE_FAILED', { status: 'SUCCESS' }), now), { kind: 'support' })
   assert.deepEqual(viewForOrder(order('CANCELLED', { status: 'PENDING' }), now), { kind: 'cancelled' })
   assert.deepEqual(viewForOrder(order('PAYMENT_FAILED', undefined), now), { kind: 'ended' })
+})
+
+test('the purchase UI requests an idempotent backend command without choosing hardware or claiming it', async () => {
+  const { calls } = setup(() => jsonResponse(200, { data: { id: 'cmd1', status: 'PENDING' } }))
+  const api = createKioskApi(KEY)
+  await api.prepareDispense('o 1')
+  await api.getDispense('o 1')
+  assert.equal(calls[0].url, '/api/v1/kiosk/orders/o%201/dispense-command')
+  assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.body, undefined)
+  assert.equal(calls[0].init.headers['X-Kiosk-Key'], KEY)
+  assert.equal(calls[1].init.method, 'GET')
+  assert.ok(calls.every(call => !call.url.includes('/claim') && !call.url.includes('/results')))
 })
 
 test('the QR countdown never outlives the reservation', () => {

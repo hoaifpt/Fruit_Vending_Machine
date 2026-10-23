@@ -14,16 +14,21 @@ export type OrderView =
   | { kind: 'qr'; qrCode: string; amount: number | undefined; deadline: number | undefined }
   | { kind: 'qr-expired'; canRenew: boolean }
   | { kind: 'paid' }
+  | { kind: 'dispensing' }
+  | { kind: 'completed' }
+  | { kind: 'support' }
   | { kind: 'cancelled' }
   | { kind: 'ended' }
 
-const PAID_STATES = new Set(['PAID', 'DISPENSING', 'COMPLETED'])
 const time = (value: string | undefined) => { const parsed = value ? Date.parse(value) : NaN; return Number.isFinite(parsed) ? parsed : undefined }
 
 /** Screen for a polled order. `serverNow` is the client clock corrected by the server offset. */
 export function viewForOrder(order: KioskOrder, serverNow: number): OrderView {
   const status = order.status
-  if (status && PAID_STATES.has(status)) return { kind: 'paid' }
+  if (status === 'PAID') return { kind: 'paid' }
+  if (status === 'DISPENSING') return { kind: 'dispensing' }
+  if (status === 'COMPLETED') return { kind: 'completed' }
+  if (status === 'DISPENSE_FAILED') return { kind: 'support' }
   if (status === 'CANCELLED') return { kind: 'cancelled' }
   if (status !== 'PENDING_PAYMENT') return { kind: 'ended' }
   const payment = order.currentPayment

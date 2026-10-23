@@ -11,6 +11,7 @@ export type KioskCatalog = S['KioskCatalogResponse']
 export type KioskProduct = S['KioskCatalogProductResponse']
 export type KioskOrder = S['KioskOrderResponse']
 export type KioskPayment = S['KioskPaymentResponse']
+export type DispenseCommand = S['DispenseCommandResponse']
 
 export function configuredKioskKey(): string {
   const env = (import.meta as { env?: Record<string, string | undefined> }).env
@@ -24,6 +25,8 @@ export interface KioskApi {
   getOrder: (orderId: string, signal?: AbortSignal) => Promise<ApiResult<KioskOrder>>
   cancelOrder: (orderId: string) => Promise<ApiResult<KioskOrder>>
   createPayment: (orderId: string) => Promise<ApiResult<KioskPayment>>
+  prepareDispense: (orderId: string) => Promise<ApiResult<DispenseCommand>>
+  getDispense: (orderId: string, signal?: AbortSignal) => Promise<ApiResult<DispenseCommand>>
 }
 
 export function createKioskApi(key: string): KioskApi {
@@ -38,5 +41,7 @@ export function createKioskApi(key: string): KioskApi {
     getOrder: (orderId, signal) => call('GET', `/kiosk/orders/${id(orderId)}`, { signal, timeoutMs: 8_000 }),
     cancelOrder: orderId => call('POST', `/kiosk/orders/${id(orderId)}/cancel`),
     createPayment: orderId => call('POST', `/kiosk/orders/${id(orderId)}/payments`, { timeoutMs: 30_000 }),
+    prepareDispense: orderId => call('POST', `/kiosk/orders/${id(orderId)}/dispense-command`),
+    getDispense: (orderId, signal) => call('GET', `/kiosk/orders/${id(orderId)}/dispense-command`, { signal }),
   }
 }
