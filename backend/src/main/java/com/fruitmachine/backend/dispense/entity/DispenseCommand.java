@@ -83,4 +83,14 @@ public class DispenseCommand extends UpdatedEntity {
 
     @Column(name = "completed_at", columnDefinition = "timestamptz")
     private Instant completedAt;
+
+    // Returned only once to the worker that claimed dispatch; never included in read DTOs.
+    @Column(name = "dispatch_token")
+    private UUID dispatchToken;
+
+    @Column(name = "bowl_count_before")
+    private Long bowlCountBefore;
+
+    @Column(name = "bowl_count_after")
+    private Long bowlCountAfter;
 }

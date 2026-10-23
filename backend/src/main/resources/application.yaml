@@ -47,6 +47,10 @@ management:
       show-components: never
 
 app:
+  dispense:
+    timeout: ${DISPENSE_TIMEOUT:PT2M}
+    sweep-enabled: ${DISPENSE_SWEEP_ENABLED:true}
+    sweep-interval: ${DISPENSE_SWEEP_INTERVAL:PT15S}
   bootstrap:
     admin:
       email: ${INITIAL_ADMIN_EMAIL:}

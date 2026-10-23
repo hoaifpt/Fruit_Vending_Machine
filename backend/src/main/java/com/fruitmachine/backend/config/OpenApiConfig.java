@@ -494,6 +494,7 @@ public class OpenApiConfig {
         detail.put("payments", List.of(paymentSummary));
         return api -> api.getPaths().forEach((name, path) -> {
             boolean mine = name.startsWith("/api/v1/kiosk") || name.startsWith("/api/v1/orders") || name.contains("/kiosk-credentials");
+            if (name.contains("/dispense-command")) return; // Fulfillment has its own schemas/examples.
             if (!mine || name.endsWith("/payments")) return;
             path.readOperations().forEach(operation -> {
                 String id = operation.getOperationId();

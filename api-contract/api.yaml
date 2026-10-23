@@ -14,6 +14,8 @@ tags:
     description: "Kiosk-facing APIs authenticated with the machine-bound X-Kiosk-Key header (not a user JWT). The machine is always derived from the credential."
   - name: Kiosk Credentials
     description: "ADMIN-only management of machine-bound kiosk API keys. The plaintext key is shown once, only its SHA-256 digest is stored. STAFF cannot read credential metadata."
+  - name: Kiosk Dispensing
+    description: "Machine-scoped fulfillment after verified payment. A station exclusively claims a persisted command, relays the assigned slot over Serial/USB and reports its correlated observation. Never retry hardware after an ambiguous result."
   - name: Kiosk Orders
     description: "Kiosk order creation with atomic reservation of exactly one bowl, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; payment attempts are in Kiosk Payments and there is no dispensing. Changelog (issue #35, breaking): the create request is now {\"productId\"} only; the former items[]/quantity shape is rejected with 400."
   - name: Kiosk Payments
@@ -37,6 +39,567 @@ tags:
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
+  "/api/v1/kiosk/orders/{orderId}/dispense-command": {
+    "get": {
+      "tags": [
+        "Kiosk Dispensing"
+      ],
+      "summary": "Read the owning order's command",
+      "description": "KIOSK only. Read-only status for the purchase UI; never contains dispatchToken and never moves hardware. 404 before a command exists.",
+      "operationId": "getKioskDispense",
+      "parameters": [
+        {
+          "name": "orderId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Operation succeeded",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string",
+                "const": "no-store"
+              }
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiResponseDispenseCommandResponse"
+              },
+              "example": {
+                "data": {
+                  "id": "d1500000-0000-4000-8000-000000000001",
+                  "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                  "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                  "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                  "status": "PENDING",
+                  "createdAt": "2026-10-23T04:00:00Z"
+                },
+                "message": "Success",
+                "timestamp": "2026-10-23T04:00:08Z"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Malformed UUID, invalid body or observation",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Missing or invalid kiosk key",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "User JWT cannot act as kiosk",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Missing resource or resource owned by another machine",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        }
+      },
+      "security": [
+        {
+          "kioskKey": []
+        }
+      ]
+    },
+    "post": {
+      "tags": [
+        "Kiosk Dispensing"
+      ],
+      "summary": "Create or reuse the authorized command for a PAID order",
+      "description": "KIOSK only. Idempotent by order; price, inventory and slot are selected by backend, not the request. Exactly one reserved bowl is supported. Expired bowls are refused. Returns the same command on repeated calls, including terminal commands.",
+      "operationId": "prepareKioskDispense",
+      "parameters": [
+        {
+          "name": "orderId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Operation succeeded",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string",
+                "const": "no-store"
+              }
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiResponseDispenseCommandResponse"
+              },
+              "example": {
+                "data": {
+                  "id": "d1500000-0000-4000-8000-000000000001",
+                  "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                  "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                  "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                  "status": "PENDING",
+                  "createdAt": "2026-10-23T04:00:00Z"
+                },
+                "message": "Success",
+                "timestamp": "2026-10-23T04:00:08Z"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Malformed UUID, invalid body or observation",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Missing or invalid kiosk key",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "User JWT cannot act as kiosk",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Missing resource or resource owned by another machine",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        }
+      },
+      "security": [
+        {
+          "kioskKey": []
+        }
+      ]
+    }
+  }
+  "/api/v1/kiosk/dispense-commands/{commandId}/results": {
+    "post": {
+      "tags": [
+        "Kiosk Dispensing"
+      ],
+      "summary": "Report correlated ACK or terminal physical observation",
+      "description": "KIOSK station worker only, with the claim token. ACK is not completion. SUCCESS requires exactly one IR count increment and the station's completed idle cycle observation; atomically marks command SUCCESS, allocation DISPENSED, bowl SOLD, order COMPLETED and appends SALE history. FAILED/TIMEOUT quarantine the bowl and put the machine in MAINTENANCE. Identical terminal retries are idempotent; conflicting/late transitions return 409. Unknown outcomes require staff reconciliation, no automatic refund or re-dispense.",
+      "operationId": "reportKioskDispenseResult",
+      "parameters": [
+        {
+          "name": "commandId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "requestBody": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DispenseResultRequest"
+            },
+            "example": {
+              "bowlCountBefore": 7,
+              "status": "SUCCESS",
+              "bowlCountAfter": 8,
+              "dispatchToken": "00000000-0000-4000-8000-000000000099"
+            }
+          }
+        },
+        "required": true
+      },
+      "responses": {
+        "200": {
+          "description": "Operation succeeded",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string",
+                "const": "no-store"
+              }
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiResponseDispenseCommandResponse"
+              },
+              "example": {
+                "data": {
+                  "id": "d1500000-0000-4000-8000-000000000001",
+                  "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                  "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                  "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                  "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                  "status": "SUCCESS",
+                  "createdAt": "2026-10-23T04:00:00Z",
+                  "sentAt": "2026-10-23T04:00:01Z",
+                  "completedAt": "2026-10-23T04:00:08Z"
+                },
+                "message": "Success",
+                "timestamp": "2026-10-23T04:00:08Z"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Malformed UUID, invalid body or observation",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Missing or invalid kiosk key",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "User JWT cannot act as kiosk",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Missing resource or resource owned by another machine",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        }
+      },
+      "security": [
+        {
+          "kioskKey": []
+        }
+      ]
+    }
+  }
+  "/api/v1/kiosk/dispense-commands/{commandId}/claim": {
+    "post": {
+      "tags": [
+        "Kiosk Dispensing"
+      ],
+      "summary": "Exclusively claim physical dispatch once",
+      "description": "KIOSK station worker only. Rechecks PAID, machine/slot ACTIVE and bowl expiry, persists SENT, changes order to DISPENSING and returns dispatchToken once. One in-flight command per machine. Repeated/lost claims return 409; no takeover and no hardware resend.",
+      "operationId": "claimKioskDispense",
+      "parameters": [
+        {
+          "name": "commandId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "responses": {
+        "200": {
+          "description": "Operation succeeded",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string",
+                "const": "no-store"
+              }
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiResponseDispenseClaimResponse"
+              },
+              "example": {
+                "data": {
+                  "dispatchToken": "00000000-0000-4000-8000-000000000099",
+                  "command": {
+                    "id": "d1500000-0000-4000-8000-000000000001",
+                    "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                    "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                    "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                    "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                    "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                    "status": "SENT",
+                    "createdAt": "2026-10-23T04:00:00Z",
+                    "sentAt": "2026-10-23T04:00:01Z"
+                  }
+                },
+                "message": "Success",
+                "timestamp": "2026-10-23T04:00:08Z"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Malformed UUID, invalid body or observation",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Missing or invalid kiosk key",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "User JWT cannot act as kiosk",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Missing resource or resource owned by another machine",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        }
+      },
+      "security": [
+        {
+          "kioskKey": []
+        }
+      ]
+    }
+  }
+  "/api/v1/kiosk/dispense-commands": {
+    "get": {
+      "tags": [
+        "Kiosk Dispensing"
+      ],
+      "summary": "List up to 20 pending commands for this machine",
+      "description": "KIOSK station worker only. Ordered by createdAt then id; no claims, secrets or hardware side effects. Stations must serialize all physical columns sharing one IR sensor.",
+      "operationId": "listPendingKioskDispenses",
+      "responses": {
+        "200": {
+          "description": "Operation succeeded",
+          "headers": {
+            "Cache-Control": {
+              "schema": {
+                "type": "string",
+                "const": "no-store"
+              }
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiResponseListDispenseCommandResponse"
+              },
+              "example": {
+                "data": [
+                  {
+                    "id": "d1500000-0000-4000-8000-000000000001",
+                    "commandCode": "DSP-d1500000-0000-4000-8000-000000000001",
+                    "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                    "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                    "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                    "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                    "status": "PENDING",
+                    "createdAt": "2026-10-23T04:00:00Z"
+                  }
+                ],
+                "message": "Success",
+                "timestamp": "2026-10-23T04:00:08Z"
+              }
+            }
+          }
+        },
+        "400": {
+          "description": "Malformed UUID, invalid body or observation",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "401": {
+          "description": "Missing or invalid kiosk key",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "403": {
+          "description": "User JWT cannot act as kiosk",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "404": {
+          "description": "Missing resource or resource owned by another machine",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        },
+        "409": {
+          "description": "Invalid transition, expired bowl, wrong claim or machine busy; never blindly resend a motor command",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              }
+            }
+          }
+        }
+      },
+      "security": [
+        {
+          "kioskKey": []
+        }
+      ]
+    }
+  }
   "/api/v1/inventory/transactions":
     "get":
       "tags":
@@ -5847,6 +6410,158 @@ components:
       "name": "X-Kiosk-Key"
       "in": "header"
   schemas:
+    "ApiResponseDispenseClaimResponse": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/components/schemas/DispenseClaimResponse"
+        }
+      }
+    }
+    "ApiResponseDispenseCommandResponse": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/components/schemas/DispenseCommandResponse"
+        }
+      }
+    }
+    "ApiResponseListDispenseCommandResponse": {
+      "type": "object",
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/DispenseCommandResponse"
+          }
+        }
+      }
+    }
+    "DispenseClaimResponse": {
+      "type": "object",
+      "description": "Exclusive dispatch claim. dispatchToken is returned once; loss of this response never permits a second claim or motor resend. Keep it in the station journal, not the browser.",
+      "properties": {
+        "command": {
+          "$ref": "#/components/schemas/DispenseCommandResponse"
+        },
+        "dispatchToken": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    }
+    "DispenseCommandResponse": {
+      "type": "object",
+      "description": "Backend-authorized command for one reserved bowl. slotId is immutable; the station maps it to its configured physical column. Read responses never expose the dispatch token.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "commandCode": {
+          "type": "string"
+        },
+        "orderId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "machineId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "slotId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "inventoryItemId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "SENT",
+            "ACKNOWLEDGED",
+            "SUCCESS",
+            "FAILED",
+            "TIMEOUT"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "acknowledgedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+    "DispenseResultRequest": {
+      "type": "object",
+      "description": "Correlated observation by the claiming station. SUCCESS requires a completed idle motion sequence and exactly one IR count increment; ACK alone is not success. Ambiguity must be TIMEOUT, never an automatic resend.",
+      "properties": {
+        "dispatchToken": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ACKNOWLEDGED",
+            "SUCCESS",
+            "FAILED",
+            "TIMEOUT"
+          ]
+        },
+        "bowlCountBefore": {
+          "type": "integer",
+          "format": "int64",
+          "maximum": 4294967295,
+          "minimum": 0
+        },
+        "bowlCountAfter": {
+          "type": "integer",
+          "format": "int64",
+          "maximum": 4294967295,
+          "minimum": 0
+        }
+      },
+      "required": [
+        "dispatchToken",
+        "status"
+      ]
+    }
     "InventoryTransactionResponse":
       "type": "object"
       "description": "Append-only per-item history. Location snapshots, actor UUID, grouping reference, reason/status snapshots; legacy fields may be null. Each row represents one box; no aggregate quantity column."
