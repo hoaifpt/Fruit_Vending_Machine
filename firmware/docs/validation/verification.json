@@ -1,0 +1,77 @@
+{
+  "date_local": "2026-10-23",
+  "timezone": "Asia/Bangkok",
+  "recorded_utc": "2026-10-23T04:11:26.220555+00:00",
+  "branch": "feature/integrate-esp32-firmware",
+  "base_dev_commit": "a81f6de037b7716704e9d1e40adc0472c80f6200",
+  "source_commit": "b6b1688717092d94895bec0cb42fac61d9d193db",
+  "board": "ESP32 DevKit 38-pin",
+  "environment": "esp32dev",
+  "servo_pins": [
+    18,
+    19,
+    21,
+    22
+  ],
+  "ir_pins": {
+    "rx": 25,
+    "tx": 26
+  },
+  "serial_port": "COM4",
+  "commands": [
+    "powershell -NoProfile -ExecutionPolicy Bypass -File firmware/tools/check.ps1"
+  ],
+  "tests": {
+    "result": "PASS",
+    "total": 14,
+    "failures": 0,
+    "hardware_access": false
+  },
+  "clean_build": {
+    "result": "PASS",
+    "ram_bytes": 45908,
+    "flash_bytes": 874133,
+    "ram_capacity_bytes": 327680,
+    "application_partition_bytes": 1310720
+  },
+  "toolchain": {
+    "python": "3.14.0",
+    "platformio": "6.2.0",
+    "platform": "espressif32@7.1.3",
+    "framework": "4.20017.260907+sha.dcc1105b",
+    "ESP32Servo": "1.2.1",
+    "GFX": "1.4.9"
+  },
+  "artifacts": {
+    "firmware.bin": {
+      "bytes": 880704,
+      "sha256": "d71c25d6045613bed6c9a5e5ee60167e3fd87eec62cf4c73d0ca1d250f7b4f8a"
+    },
+    "firmware.elf": {
+      "bytes": 13937600,
+      "sha256": "e1916aeb370534f1fe4717105a2a862deaadb5f7b7b9652a4308778597915331"
+    },
+    "bootloader.bin": {
+      "bytes": 17536,
+      "sha256": "3d234a7471f67b013686dabd4dee7c1fa915c9928463616a94bc9297acf1abf8"
+    },
+    "partitions.bin": {
+      "bytes": 3072,
+      "sha256": "148b959cbff1c38aa8e1d5c0ba9d612c54997b945e56a63f41223eef650653a1"
+    }
+  },
+  "outside_firmware_changes": [],
+  "project_b_modified": false,
+  "upload": {
+    "result": "NOT_RUN",
+    "reason": "User declined; ESP32 disconnected"
+  },
+  "hil": {
+    "result": "NOT_RUN",
+    "reason": "User declined; ESP32 disconnected"
+  },
+  "purchase_end_to_end": {
+    "result": "BLOCKED_BY_MISSING_CONTRACT",
+    "reason": "Project A lacks authorized dispense command/result API, assigned slot in kiosk response, and kiosk serial dispatch. No protocol or external modules modified."
+  }
+}

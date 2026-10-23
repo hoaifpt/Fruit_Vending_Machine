@@ -1,0 +1,104 @@
+#pragma once
+#include "core/runtime_state.hpp"
+
+// Explicit declarations replace Arduino .ino auto-prototypes.
+String jsonEscape(const String &value);
+String motionStateText(MotionState st);
+String colDispenseStateText(ColumnDispenseState st);
+String motionStateText();
+bool motionIsRunning(MotionState st);
+bool motionIsRunning();
+bool parseIntStrict(const String &text, int &value);
+bool parseUnsignedLongStrict(const String &text, unsigned long &value);
+void sendJsonError(int statusCode, const String &message);
+void sendJsonOk(const String &message = "");
+void lcdShow(
+    String title,
+    String line1 = "",
+    String line2 = "",
+    String line3 = ""
+);
+void updateLcdQuad();
+void updateLcdDual();
+void attachServo1IfNeeded();
+void servo1StopNow();
+void servo1ForwardNow();
+void servo1ReverseNow();
+void servo1TestStopValue(int value);
+void attachServo2IfNeeded();
+void servo2StopNow();
+void servo2ForwardNow();
+void servo2ReverseNow();
+void servo2TestStopValue(int value);
+void attachServo3IfNeeded();
+void servo3StopNow();
+void servo3ForwardNow();
+void servo3ReverseNow();
+void servo3TestStopValue(int value);
+void attachServo4IfNeeded();
+void servo4StopNow();
+void servo4ForwardNow();
+void servo4ReverseNow();
+void servo4TestStopValue(int value);
+void attachServoIfNeeded();
+void servoStopNow();
+void servoForwardNow();
+void servoReverseNow();
+void servoTestStopValue(int val);
+void startMotion1();
+void startOpen1();
+void startClose1();
+void stopMotion1();
+void testForward1();
+void testReverse1();
+void startMotion2();
+void startOpen2();
+void startClose2();
+void stopMotion2();
+void testForward2();
+void testReverse2();
+void startMotion3();
+void startOpen3();
+void startClose3();
+void stopMotion3();
+void testForward3();
+void testReverse3();
+void startMotion4();
+void startOpen4();
+void startClose4();
+void stopMotion4();
+void testForward4();
+void testReverse4();
+void startMotion();
+void startOpen();
+void startClose();
+void stopMotion();
+void startDispenseCol1();
+void startDispenseCol2();
+void startAll();
+void stopAll();
+void openAll();
+void closeAll();
+void updateMotion1();
+void updateMotion2();
+void updateMotion3();
+void updateMotion4();
+void updateColumnDispense();
+void updateMotion();
+void setupIrSensor();
+void updateIrSensor();
+void setDefaultConfig();
+void saveConfig();
+void loadConfig();
+String makeConfigJson();
+String makeStatusJson();
+void handleRoot();
+void handleStatus();
+void handleGetConfig();
+void handleFactoryReset();
+void handleConfig();
+void setupWebServer();
+void setupWiFi();
+void handleSerial();
+void setup();
+void loop();

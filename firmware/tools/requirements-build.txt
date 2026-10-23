@@ -1,0 +1,3 @@
+platformio==6.2.0
+# Required by the esptool package bundled with espressif32 7.1.3.
+intelhex==2.3.0

@@ -1,0 +1,150 @@
+[2026-10-02 19:03:01] Connecting to COM3 at 115200 baud...
+[2026-10-02 19:03:02] 
+==================== PHASE 5: BOOT VERIFICATION ====================
+[2026-10-02 19:03:02] Rebooting ESP32-S3 via DTR/RTS...
+[2026-10-02 19:03:02] BOOT: ESP-ROM:esp32s3-20210327
+[2026-10-02 19:03:02] BOOT: Build:Mar 27 2021
+[2026-10-02 19:03:02] BOOT: rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+[2026-10-02 19:03:02] BOOT: Saved PC:0x4208397a
+[2026-10-02 19:03:02] BOOT: SPIWP:0xee
+[2026-10-02 19:03:02] BOOT: mode:DIO, clock div:1
+[2026-10-02 19:03:02] BOOT: load:0x3fce3808,len:0x4bc
+[2026-10-02 19:03:02] BOOT: load:0x403c9700,len:0xbd8
+[2026-10-02 19:03:02] BOOT: load:0x403cc700,len:0x2a0c
+[2026-10-02 19:03:02] BOOT: entry 0x403c98d0
+[2026-10-02 19:03:02] BOOT: ================================
+[2026-10-02 19:03:02] BOOT: ESP32 CONTROL CENTER
+[2026-10-02 19:03:02] BOOT: LILYGO T-Display-S3
+[2026-10-02 19:03:02] BOOT: SERVO STOP BUG FIXED VERSION
+[2026-10-02 19:03:02] BOOT: ================================
+[2026-10-02 19:03:03] BOOT: [CONFIG] Loaded
+[2026-10-02 19:03:03] BOOT: [CONFIG] stop=90 forward=70 reverse=110 fwdMs=1000 revMs=1000 pauseMs=500 cycles=1\n[SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:03] BOOT: [WIFI] AP started
+[2026-10-02 19:03:03] BOOT: [WIFI] SSID: ESP32-Servo
+[2026-10-02 19:03:03] BOOT: [WIFI] IP: 192.168.4.1
+[2026-10-02 19:03:03] BOOT: [WEB] Server started
+[2026-10-02 19:03:03] BOOT: [SYSTEM] READY
+[2026-10-02 19:03:04] 
+==================== PHASE 6: API VERIFICATION ====================
+[2026-10-02 19:03:04] CMD >> STATUS
+[2026-10-02 19:03:04] ESP << [RES] {"ok":true,"state":"Sẵn sàng","running":false,"cycle":0,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:04] GET /api/status response: {'ok': True, 'state': 'Sẵn sàng', 'running': False, 'cycle': 0, 'cycles': 1, 'servoStop': 90, 'servoForward': 70, 'servoReverse': 110, 'forwardMs': 1000, 'reverseMs': 1000, 'pauseMs': 500, 'ip': '192.168.4.1'}
+[2026-10-02 19:03:04] CMD >> CONFIG
+[2026-10-02 19:03:04] ESP << [RES] {"ok":true,"servoPin":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"cycles":1}
+[2026-10-02 19:03:04] GET /api/config response: {'ok': True, 'servoPin': 1, 'servoStop': 90, 'servoForward': 70, 'servoReverse': 110, 'forwardMs': 1000, 'reverseMs': 1000, 'pauseMs': 500, 'cycles': 1}
+[2026-10-02 19:03:04] 
+==================== PHASE 7: CONFIGURATION TEST ====================
+[2026-10-02 19:03:04] CMD >> CONFIG_SET stop=90 forward=70 reverse=110 forwardMs=1000 reverseMs=1000 pauseMs=500 cycles=1
+[2026-10-02 19:03:04] ESP << [CONFIG] Saved to Preferences
+[2026-10-02 19:03:04] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:04] ESP << [RES] {"ok":true,"servoPin":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"cycles":1}
+[2026-10-02 19:03:04] Set config response: {'ok': True, 'servoPin': 1, 'servoStop': 90, 'servoForward': 70, 'servoReverse': 110, 'forwardMs': 1000, 'reverseMs': 1000, 'pauseMs': 500, 'cycles': 1}
+[2026-10-02 19:03:04] CMD >> CONFIG_SET stop=90 forward=70 reverse=110 forwardMs=1500 reverseMs=1000 pauseMs=500 cycles=1
+[2026-10-02 19:03:04] ESP << [CONFIG] Saved to Preferences
+[2026-10-02 19:03:04] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:04] ESP << [RES] {"ok":true,"servoPin":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1500,"reverseMs":1000,"pauseMs":500,"cycles":1}
+[2026-10-02 19:03:04] Change forwardMs to 1500 response: {'ok': True, 'servoPin': 1, 'servoStop': 90, 'servoForward': 70, 'servoReverse': 110, 'forwardMs': 1500, 'reverseMs': 1000, 'pauseMs': 500, 'cycles': 1}
+[2026-10-02 19:03:04] Testing NVS Flash persistence across reboot...
+[2026-10-02 19:03:04] Rebooting ESP32-S3 via DTR/RTS...
+[2026-10-02 19:03:08] CMD >> CONFIG
+[2026-10-02 19:03:08] ESP << [RES] {"ok":true,"servoPin":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1500,"reverseMs":1000,"pauseMs":500,"cycles":1}
+[2026-10-02 19:03:08] Post-reboot config: {'ok': True, 'servoPin': 1, 'servoStop': 90, 'servoForward': 70, 'servoReverse': 110, 'forwardMs': 1500, 'reverseMs': 1000, 'pauseMs': 500, 'cycles': 1}
+[2026-10-02 19:03:08] CMD >> CONFIG_SET stop=90 forward=70 reverse=110 forwardMs=1000 reverseMs=1000 pauseMs=500 cycles=1
+[2026-10-02 19:03:08] ESP << [CONFIG] Saved to Preferences
+[2026-10-02 19:03:08] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:08] ESP << [RES] {"ok":true,"servoPin":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"cycles":1}
+[2026-10-02 19:03:08] 
+==================== PHASE 8: SERVO MOTION & STOP TEST ====================
+[2026-10-02 19:03:08] CMD >> STOP
+[2026-10-02 19:03:08] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:08] ESP << [MOTION] STOP -> IDLE
+[2026-10-02 19:03:08] ESP << [RES] {"ok":true,"message":"Đã dừng"}
+[2026-10-02 19:03:08] Testing manual forward (bounded 0.5s)...
+[2026-10-02 19:03:08] CMD >> TEST_FWD
+[2026-10-02 19:03:08] ESP << [DEBUG] attachServoIfNeeded: attaching SERVO_PIN=1
+[2026-10-02 19:03:08] ESP << [DEBUG] servo.attach returned: 0
+[2026-10-02 19:03:08] ESP << [SERVO] FORWARD = 70
+[2026-10-02 19:03:08] ESP << [RES] {"ok":true,"message":"Servo đang quay thuận"}
+[2026-10-02 19:03:09] Stopping manual forward...
+[2026-10-02 19:03:09] CMD >> STOP
+[2026-10-02 19:03:09] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:09] ESP << [MOTION] STOP -> IDLE
+[2026-10-02 19:03:09] ESP << [RES] {"ok":true,"message":"Đã dừng"}
+[2026-10-02 19:03:09] Testing manual reverse (bounded 0.5s)...
+[2026-10-02 19:03:09] CMD >> TEST_REV
+[2026-10-02 19:03:09] ESP << [DEBUG] attachServoIfNeeded: attaching SERVO_PIN=1
+[2026-10-02 19:03:09] ESP << [DEBUG] servo.attach returned: 0
+[2026-10-02 19:03:09] ESP << [SERVO] REVERSE = 110
+[2026-10-02 19:03:09] ESP << [RES] {"ok":true,"message":"Servo đang quay nghịch"}
+[2026-10-02 19:03:09] Stopping manual reverse...
+[2026-10-02 19:03:09] CMD >> STOP
+[2026-10-02 19:03:09] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:09] ESP << [MOTION] STOP -> IDLE
+[2026-10-02 19:03:09] ESP << [RES] {"ok":true,"message":"Đã dừng"}
+[2026-10-02 19:03:09] Executing automatic cycle: FWD 1s -> PAUSE 0.5s -> REV 1s -> PAUSE 0.5s -> COMPLETE...
+[2026-10-02 19:03:09] CMD >> START
+[2026-10-02 19:03:09] ESP << [SERVO] STOP -> PWM DETACHED, stop=90
+[2026-10-02 19:03:09] ESP << [DEBUG] attachServoIfNeeded: attaching SERVO_PIN=1
+[2026-10-02 19:03:09] ESP << [DEBUG] servo.attach returned: 0
+[2026-10-02 19:03:09] ESP << [SERVO] FORWARD = 70
+[2026-10-02 19:03:09] ESP << [MOTION] START cycle=1/1
+[2026-10-02 19:03:09] ESP << [RES] {"ok":true,"message":"Đã bắt đầu"}
+[2026-10-02 19:03:09] CMD >> STATUS
+[2026-10-02 19:03:09] ESP << [RES] {"ok":true,"state":"Đang quay thuận","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:09] T+0.01s: State='Đang quay thuận', Running=True, Cycle=1
+[2026-10-02 19:03:10] CMD >> STATUS
+[2026-10-02 19:03:10] ESP << [RES] {"ok":true,"state":"Đang quay thuận","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:10] T+0.31s: State='Đang quay thuận', Running=True, Cycle=1
+[2026-10-02 19:03:10] CMD >> STATUS
+[2026-10-02 19:03:10] ESP << [RES] {"ok":true,"state":"Đang quay thuận","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:10] T+0.61s: State='Đang quay thuận', Running=True, Cycle=1
+[2026-10-02 19:03:10] CMD >> STATUS
+[2026-10-02 19:03:10] ESP << [RES] {"ok":true,"state":"Đang quay thuận","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:10] T+0.91s: State='Đang quay thuận', Running=True, Cycle=1
+[2026-10-02 19:03:10] CMD >> STATUS
+[2026-10-02 19:03:10] ESP << [RES] {"ok":true,"state":"Đang dừng","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:10] T+1.22s: State='Đang dừng', Running=True, Cycle=1
+[2026-10-02 19:03:11] CMD >> STATUS
+[2026-10-02 19:03:11] ESP << [SERVO] REVERSE = 110
+[2026-10-02 19:03:11] ESP << [RES] {"ok":true,"state":"Đang quay nghịch","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:11] T+1.54s: State='Đang quay nghịch', Running=True, Cycle=1
+[2026-10-02 19:03:11] CMD >> STATUS
+[2026-10-02 19:03:11] ESP << [RES] {"ok":true,"state":"Đang quay nghịch","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:11] T+1.85s: State='Đang quay nghịch', Running=True, Cycle=1
+[2026-10-02 19:03:11] CMD >> STATUS
+[2026-10-02 19:03:11] ESP << [RES] {"ok":true,"state":"Đang quay nghịch","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:11] T+2.15s: State='Đang quay nghịch', Running=True, Cycle=1
+[2026-10-02 19:03:12] CMD >> STATUS
+[2026-10-02 19:03:12] ESP << [RES] {"ok":true,"state":"Đang quay nghịch","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:12] T+2.45s: State='Đang quay nghịch', Running=True, Cycle=1
+[2026-10-02 19:03:12] CMD >> STATUS
+[2026-10-02 19:03:12] ESP << [RES] {"ok":true,"state":"Đang dừng","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:12] T+2.76s: State='Đang dừng', Running=True, Cycle=1
+[2026-10-02 19:03:12] CMD >> STATUS
+[2026-10-02 19:03:12] ESP << [RES] {"ok":true,"state":"Đang dừng","running":true,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:12] T+3.06s: State='Đang dừng', Running=True, Cycle=1
+[2026-10-02 19:03:13] CMD >> STATUS
+[2026-10-02 19:03:13] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:13] T+3.37s: State='Hoàn thành', Running=False, Cycle=1
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:14] Post-completion verification status: {'ok': True, 'state': 'Hoàn thành', 'running': False, 'cycle': 1, 'cycles': 1, 'servoStop': 90, 'servoForward': 70, 'servoReverse': 110, 'forwardMs': 1000, 'reverseMs': 1000, 'pauseMs': 500, 'ip': '192.168.4.1'}
+[2026-10-02 19:03:14] 
+==================== PHASE 9: STATUS POLLING PURITY ====================
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:14] CMD >> STATUS
+[2026-10-02 19:03:14] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:15] CMD >> STATUS
+[2026-10-02 19:03:15] ESP << [RES] {"ok":true,"state":"Hoàn thành","running":false,"cycle":1,"cycles":1,"servoStop":90,"servoForward":70,"servoReverse":110,"forwardMs":1000,"reverseMs":1000,"pauseMs":500,"ip":"192.168.4.1"}
+[2026-10-02 19:03:15] Status polling verified: 100% read-only, no actuator commands issued.
+[2026-10-02 19:03:15] 
+==================== ALL HIL TESTS PASSED ====================

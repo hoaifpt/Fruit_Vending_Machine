@@ -1,0 +1,141 @@
+{
+  "source_commit": "b6b1688717092d94895bec0cb42fac61d9d193db",
+  "source_sketch": "ESP32_Control_Center_ServoStop_FIXED_v2.ino",
+  "source_sha256": "59f7aec11fea06c3942ef25dc323b414f21a424d05b832782ef1a664e0c50326",
+  "modules": {
+    "src/core/helpers.cpp": {
+      "ranges": [
+        [
+          253,
+          362
+        ]
+      ]
+    },
+    "src/display/display.cpp": {
+      "ranges": [
+        [
+          362,
+          447
+        ]
+      ]
+    },
+    "src/actuators/servo_control.cpp": {
+      "ranges": [
+        [
+          447,
+          614
+        ]
+      ]
+    },
+    "src/motion/motion.cpp": {
+      "ranges": [
+        [
+          614,
+          868
+        ],
+        [
+          889,
+          1224
+        ],
+        [
+          1367,
+          1376
+        ]
+      ]
+    },
+    "src/dispense/column_dispense.cpp": {
+      "ranges": [
+        [
+          868,
+          889
+        ],
+        [
+          1224,
+          1367
+        ]
+      ]
+    },
+    "src/sensors/ir_sensor.cpp": {
+      "ranges": [
+        [
+          1376,
+          1447
+        ]
+      ]
+    },
+    "src/storage/preferences_store.cpp": {
+      "ranges": [
+        [
+          1447,
+          1633
+        ]
+      ]
+    },
+    "src/transport/telemetry.cpp": {
+      "ranges": [
+        [
+          1633,
+          1803
+        ]
+      ]
+    },
+    "src/transport/http_server.cpp": {
+      "ranges": [
+        [
+          1803,
+          2027
+        ]
+      ]
+    },
+    "src/transport/wifi.cpp": {
+      "ranges": [
+        [
+          2027,
+          2040
+        ]
+      ]
+    },
+    "src/transport/serial_cli.cpp": {
+      "ranges": [
+        [
+          2040,
+          2394
+        ]
+      ]
+    },
+    "src/main.cpp": {
+      "ranges": [
+        [
+          2394,
+          2460
+        ]
+      ]
+    }
+  },
+  "copied": {
+    "include/transport/web_ui.h": "e2790c9f2147b03de8bf6265aa824ad6d5e040a6cf8439b9b2ea159395df34a5",
+    "tools/control_center/server.py": "b327b4e34c10e37e78771e36ca25121edcfa9f88273367231a895a506f951d36",
+    "tools/control_center/web/app.js": "a7d3c54d4e09ea77a81be08aaad7ccd66a807741ff4d12e73ba6188ec4b6d035",
+    "tools/control_center/web/index.html": "cf93b459943d2dff671b2765fa15cf879f7f10a603cc20d00eb2c7d3a9352b86",
+    "tools/control_center/web/style.css": "71d5cb0775a9b3e0a330d86f4bade2288fcab64d0cf3d0717e8f7828e8dea04a",
+    "reference/project-b/scripts/capture_serial.py": "a28bfe8575f7ccc6b67ad9f4c6763711e4ebdfec50e1b560faed2790b436bb43",
+    "reference/project-b/scripts/hil_test_suite.py": "8ce8ad9c8ff2a5c6fc761c19b1703a8d5095215d7b504893b99f02c3449ac0f9",
+    "reference/project-b/docs/DEPLOYMENT_AND_HIL_REPORT.md": "42862e7713bdb9a0d6e61094495002f643dc4952d21f4f9d9d8f95c0cd4ea521",
+    "reference/project-b/docs/traces/boot_log.txt": "9756bc63cc1cd3337434b19ce33828ede7322bd4369b6bf3b6336a44a2ed51c9",
+    "reference/project-b/docs/traces/hil_execution_trace.txt": "2de44026f973b0aabc9793696d0364ea23f9836c9d0faf709f6d5fdafcce0bc5",
+    "reference/project-b/docs/validation/hil_test_results.json": "199d4649e2960d1d1da3d02a4c9e7a86d28269eefa20862045042a40035e0acb",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/display.md": "92697b73b162a7e54e8fdbf78ff7faf66fdca91972fd859cb8033ea0395a3244",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/firmware-architecture.md": "746c426397e99c4f6dda8c182576f964ecada7632233fe906dff17483ba4e8b0",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/hardware-specification.md": "9a94437d8489a2c91829ef1d35f04a11933dc7964022cc0fc1d326446f233385",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/peripherals.md": "5dae5bc0f78d99beecfc38c01a8dc398eecedc8cd3af9caf2148aecc201ba2d4",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/pinout.md": "120b86a98b11e15ccaaa74e9a00063135118f1d287999176b1495f098451513f",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/platformio.md": "ba1d9ac8ae1482596d778edff2298244c050657eba5d11fc017edbbc58350cbc",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/power.md": "fbb42e418a6f615091f7cae4754346397550a827073ae8224f9b5b936d4a851f",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/protocol.md": "11b95c541a017bcee135edff0e2e311451d35e5abe2334d6c3a3f1ba81ef39e6",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/README.md": "3738a30f0f30aa460fd872a1dd7454e3ae1bd8d64d28b53e7e2f2d0c3c87497a",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/testing.md": "3e1781c978a7e1388b14efbd20ad961aa35c032d934bc47d08708b702c812437",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/troubleshooting.md": "77d7c5396944965983489ec443251e15a173686ea5dd385ca7292daffdd612d4",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/usb-debugging.md": "2b428336f49c823bd38acc53cc95342c49adc9ba7cab793c3e68885b2bfc41e0",
+    "reference/project-b/docs/hardware/lilygo-t-display-s3/wifi.md": "9883170a5478fda1303584dc95ab955afb1f6564a18dacce0234d20b71819522"
+  }
+}

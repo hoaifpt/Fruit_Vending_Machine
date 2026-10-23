@@ -1,0 +1,24 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x420848aa
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3808,len:0x4bc
+load:0x403c9700,len:0xbd8
+load:0x403cc700,len:0x2a0c
+entry 0x403c98d0
+
+================================
+ESP32 CONTROL CENTER
+LILYGO T-Display-S3
+SERVO STOP BUG FIXED VERSION
+================================
+[CONFIG] Loaded
+[CONFIG] stop=90 forward=70 reverse=110 fwdMs=500 revMs=500 pauseMs=300 cycles=1\n[SERVO] STOP -> PWM DETACHED, stop=90
+[WIFI] AP started
+[WIFI] SSID: ESP32-Servo
+[WIFI] IP: 192.168.4.1
+[WEB] Server started
+[SYSTEM] READY
+[SYSTEM] STOP mode = PWM detached

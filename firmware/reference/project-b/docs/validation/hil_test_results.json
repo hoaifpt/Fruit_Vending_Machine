@@ -1,0 +1,155 @@
+{
+  "timestamp": "2026-10-02 19:03:02",
+  "port": "COM3",
+  "phases": {
+    "phase_5_boot": {
+      "status": "PASS",
+      "lines": [
+        "ESP-ROM:esp32s3-20210327",
+        "Build:Mar 27 2021",
+        "rst:0x15 (USB_UART_CHIP_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)",
+        "Saved PC:0x4208397a",
+        "SPIWP:0xee",
+        "mode:DIO, clock div:1",
+        "load:0x3fce3808,len:0x4bc",
+        "load:0x403c9700,len:0xbd8",
+        "load:0x403cc700,len:0x2a0c",
+        "entry 0x403c98d0",
+        "================================",
+        "ESP32 CONTROL CENTER",
+        "LILYGO T-Display-S3",
+        "SERVO STOP BUG FIXED VERSION",
+        "================================"
+      ]
+    },
+    "phase_6_api": {
+      "status": "PASS",
+      "status_endpoint": {
+        "ok": true,
+        "state": "Sẵn sàng",
+        "running": false,
+        "cycle": 0,
+        "cycles": 1,
+        "servoStop": 90,
+        "servoForward": 70,
+        "servoReverse": 110,
+        "forwardMs": 1000,
+        "reverseMs": 1000,
+        "pauseMs": 500,
+        "ip": "192.168.4.1"
+      },
+      "config_endpoint": {
+        "ok": true,
+        "servoPin": 1,
+        "servoStop": 90,
+        "servoForward": 70,
+        "servoReverse": 110,
+        "forwardMs": 1000,
+        "reverseMs": 1000,
+        "pauseMs": 500,
+        "cycles": 1
+      }
+    },
+    "phase_7_config": {
+      "status": "PASS",
+      "applied": {
+        "ok": true,
+        "servoPin": 1,
+        "servoStop": 90,
+        "servoForward": 70,
+        "servoReverse": 110,
+        "forwardMs": 1000,
+        "reverseMs": 1000,
+        "pauseMs": 500,
+        "cycles": 1
+      },
+      "persistence_test_forwardMs_1500": true
+    },
+    "phase_8_servo": {
+      "status": "PASS",
+      "manual_forward_tested": true,
+      "manual_reverse_tested": true,
+      "automatic_cycle_completed": true,
+      "no_auto_restart_verified": true,
+      "motion_timeline": [
+        {
+          "t": 0.01,
+          "state": "Đang quay thuận",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 0.31,
+          "state": "Đang quay thuận",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 0.61,
+          "state": "Đang quay thuận",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 0.91,
+          "state": "Đang quay thuận",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 1.22,
+          "state": "Đang dừng",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 1.54,
+          "state": "Đang quay nghịch",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 1.85,
+          "state": "Đang quay nghịch",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 2.15,
+          "state": "Đang quay nghịch",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 2.45,
+          "state": "Đang quay nghịch",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 2.76,
+          "state": "Đang dừng",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 3.06,
+          "state": "Đang dừng",
+          "running": true,
+          "cycle": 1
+        },
+        {
+          "t": 3.37,
+          "state": "Hoàn thành",
+          "running": false,
+          "cycle": 1
+        }
+      ]
+    },
+    "phase_9_polling": {
+      "status": "PASS",
+      "read_only_verified": true
+    }
+  },
+  "verdict": "PASS"
+}

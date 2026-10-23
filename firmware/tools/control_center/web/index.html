@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32-S3 Servo Telemetry & Control Center</title>
+  <meta name="description" content="Hệ thống giám sát và điều khiển thời gian thực cho ESP32-S3 LILYGO T-Display-S3 Continuous Servo Control Center.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Background Glow & Grid -->
+  <div class="ambient-glow glow-1"></div>
+  <div class="ambient-glow glow-2"></div>
+  <div class="grid-overlay"></div>
+
+  <div class="dashboard-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" stroke="#00f2fe" stroke-dasharray="4 2"/>
+            <path d="M12 6v6l4 2" stroke="#10b981"/>
+            <circle cx="12" cy="12" r="2" fill="#00f2fe"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">ESP32-S3 CONTROL CENTER</h1>
+          <p class="brand-subtitle">LILYGO T-Display-S3 • Real-Time HIL Telemetry & Motion Studio</p>
+        </div>
+      </div>
+
+      <div class="header-status-bar">
+        <div class="status-pill" id="pill-serial">
+          <span class="pulse-dot green" id="dot-serial"></span>
+          <span class="pill-label">PORT:</span>
+          <span class="pill-value" id="val-port">COM3 (115200)</span>
+        </div>
+        <div class="status-pill" id="pill-ws">
+          <span class="pulse-dot green" id="dot-ws"></span>
+          <span class="pill-label">STREAM:</span>
+          <span class="pill-value" id="val-ws">ONLINE</span>
+        </div>
+        <div class="status-pill" id="pill-wifi">
+          <span class="pulse-dot cyan"></span>
+          <span class="pill-label">WIFI AP:</span>
+          <span class="pill-value" id="val-ip">192.168.4.1</span>
+        </div>
+        <button class="btn-header-reboot" id="btn-reboot" title="Khởi động lại phần cứng ESP32 qua DTR/RTS">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          Reboot
+        </button>
+        <button class="btn-header-estop" id="btn-estop">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          </svg>
+          STOP NOW
+        </button>
+      </div>
+    </header>
+
+    <!-- Top Action Deck (Bàn điều khiển nổi bật 2 Servo độc lập) -->
+    <section class="top-action-deck" id="top-action-deck" aria-label="Bàn điều khiển nhanh 2 Servo">
+      <!-- Master Row -->
+      <div class="deck-row deck-row-master">
+        <div class="deck-badge">
+          <span class="pulse-dot purple"></span>
+          <span class="deck-title">ĐIỀU KHIỂN ĐỒNG THỜI (MASTER / ALL SERVOS)</span>
+        </div>
+        <div class="deck-buttons">
+          <button class="btn-top-mode btn-top-open" id="top-btn-all-open">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 3h18v18H3z"/><path d="M9 3v18"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/></svg>
+            MỞ TẤT CẢ (ALL OPEN)
+          </button>
+          <button class="btn-top-mode btn-top-close" id="top-btn-all-close">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+            ĐÓNG TẤT CẢ (ALL CLOSE)
+          </button>
+          <button class="btn-top-mode btn-top-start" id="top-btn-all-start">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            CHU KỲ TẤT CẢ
+          </button>
+          <button class="btn-top-mode btn-top-stop" id="top-btn-all-stop">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+            DỪNG TẤT CẢ KHẨN CẤP
+          </button>
+          <button class="btn-top-mode btn-top-open" id="top-btn-col1-dispense" style="background:#059669;border-color:#10b981;font-weight:700">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            NHẢ TÔ CỘT 1 (TÁO)
+          </button>
+          <button class="btn-top-mode btn-top-open" id="top-btn-col2-dispense" style="background:#0284c7;border-color:#38bdf8;font-weight:700">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            NHẢ TÔ CỘT 2 (DƯA LƯỚI)
+          </button>
+        </div>
+      </div>
+
+      <div class="deck-divider"></div>
+
+      <!-- Servo 1 Row (Col 1 Lower Gate) -->
+      <div class="deck-row">
+        <div class="deck-badge">
+          <span class="pulse-dot cyan"></span>
+          <span class="deck-channel-badge">SERVO 1 • GPIO 18 (CỘT 1 DƯỚI)</span>
+        </div>
+        <div class="deck-buttons">
+          <button class="btn-top-mode btn-top-open" id="top-btn-s1-open">Mode Mở S1</button>
+          <button class="btn-top-mode btn-top-close" id="top-btn-s1-close">Mode Đóng S1</button>
+          <button class="btn-top-mode btn-top-start" id="top-btn-s1-start">Chu Kỳ S1</button>
+          <button class="btn-top-mode btn-top-stop" id="top-btn-s1-stop">Dừng S1</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s1-test-fwd">↻ Test Thuận</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s1-test-rev">↺ Test Nghịch</button>
+        </div>
+      </div>
+
+      <!-- Servo 2 Row (Col 1 Upper Gate) -->
+      <div class="deck-row">
+        <div class="deck-badge">
+          <span class="pulse-dot emerald"></span>
+          <span class="deck-channel-badge badge-s2">SERVO 2 • GPIO 19 (CỘT 1 TRÊN)</span>
+        </div>
+        <div class="deck-buttons">
+          <button class="btn-top-mode btn-top-open" id="top-btn-s2-open">Mode Mở S2</button>
+          <button class="btn-top-mode btn-top-close" id="top-btn-s2-close">Mode Đóng S2</button>
+          <button class="btn-top-mode btn-top-start" id="top-btn-s2-start">Chu Kỳ S2</button>
+          <button class="btn-top-mode btn-top-stop" id="top-btn-s2-stop">Dừng S2</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s2-test-fwd">↻ Test Thuận</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s2-test-rev">↺ Test Nghịch</button>
+        </div>
+      </div>
+
+      <!-- Servo 3 Row (Col 2 Lower Gate) -->
+      <div class="deck-row">
+        <div class="deck-badge">
+          <span class="pulse-dot amber"></span>
+          <span class="deck-channel-badge badge-s3" style="color:#f59e0b;border-color:#f59e0b">SERVO 3 • GPIO 21 (CỘT 2 DƯỚI)</span>
+        </div>
+        <div class="deck-buttons">
+          <button class="btn-top-mode btn-top-open" id="top-btn-s3-open">Mode Mở S3</button>
+          <button class="btn-top-mode btn-top-close" id="top-btn-s3-close">Mode Đóng S3</button>
+          <button class="btn-top-mode btn-top-start" id="top-btn-s3-start">Chu Kỳ S3</button>
+          <button class="btn-top-mode btn-top-stop" id="top-btn-s3-stop">Dừng S3</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s3-test-fwd">↻ Test Thuận</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s3-test-rev">↺ Test Nghịch</button>
+        </div>
+      </div>
+
+      <!-- Servo 4 Row (Col 2 Upper Gate) -->
+      <div class="deck-row">
+        <div class="deck-badge">
+          <span class="pulse-dot purple"></span>
+          <span class="deck-channel-badge badge-s4" style="color:#a855f7;border-color:#a855f7">SERVO 4 • GPIO 22 (CỘT 2 TRÊN)</span>
+        </div>
+        <div class="deck-buttons">
+          <button class="btn-top-mode btn-top-open" id="top-btn-s4-open">Mode Mở S4</button>
+          <button class="btn-top-mode btn-top-close" id="top-btn-s4-close">Mode Đóng S4</button>
+          <button class="btn-top-mode btn-top-start" id="top-btn-s4-start">Chu Kỳ S4</button>
+          <button class="btn-top-mode btn-top-stop" id="top-btn-s4-stop">Dừng S4</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s4-test-fwd">↻ Test Thuận</button>
+          <button class="btn-top-mode btn-top-test" id="top-btn-s4-test-rev">↺ Test Nghịch</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Overview Stat Matrix -->
+    <section class="stat-matrix" aria-label="Hardware Overview">
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-tag">MCU PROFILE</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00f2fe" stroke-width="2">
+            <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/>
+          </svg>
+        </div>
+        <div class="stat-value" id="card-mcu">ESP32 DevKit</div>
+        <div class="stat-sub">38 Chân • 240MHz Dual-Core • 520KB SRAM • 4MB Flash</div>
+      </div>
+
+      <!-- Servo 1 Card -->
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-tag">SERVO 1 (GPIO 18 - C1 DƯỚI)</span>
+          <span class="live-badge" id="badge-s1-state">SẴN SÀNG</span>
+        </div>
+        <div class="stat-value text-cyan" id="card-s1-val">IDLE</div>
+        <div class="stat-sub" id="card-s1-sub">LEDC Ch0 • PWM Detached • Clamp: LOW</div>
+        <div class="cycle-bar-track">
+          <div class="cycle-bar-fill" id="bar-s1-cycle" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Servo 2 Card -->
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-tag">SERVO 2 (GPIO 19 - C1 TRÊN)</span>
+          <span class="live-badge" id="badge-s2-state">SẴN SÀNG</span>
+        </div>
+        <div class="stat-value text-emerald" id="card-s2-val">IDLE</div>
+        <div class="stat-sub" id="card-s2-sub">LEDC Ch1 • PWM Detached • Clamp: LOW</div>
+        <div class="cycle-bar-track">
+          <div class="cycle-bar-fill" id="bar-s2-cycle" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Servo 3 Card -->
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-tag">SERVO 3 (GPIO 21 - C2 DƯỚI)</span>
+          <span class="live-badge" id="badge-s3-state">SẴN SÀNG</span>
+        </div>
+        <div class="stat-value text-amber" id="card-s3-val">IDLE</div>
+        <div class="stat-sub" id="card-s3-sub">LEDC Ch2 • PWM Detached • Clamp: LOW</div>
+        <div class="cycle-bar-track">
+          <div class="cycle-bar-fill" id="bar-s3-cycle" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Servo 4 Card -->
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-tag">SERVO 4 (GPIO 22 - C2 TRÊN)</span>
+          <span class="live-badge" id="badge-s4-state">SẴN SÀNG</span>
+        </div>
+        <div class="stat-value text-purple" id="card-s4-val">IDLE</div>
+        <div class="stat-sub" id="card-s4-sub">LEDC Ch3 • PWM Detached • Clamp: LOW</div>
+        <div class="cycle-bar-track">
+          <div class="cycle-bar-fill" id="bar-s4-cycle" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Safety & Interlock Card -->
+      <div class="stat-card">
+        <div class="stat-header">
+          <span class="stat-tag">ANTI-CREEP CLAMP</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div class="stat-value text-emerald" id="card-clamp">QUAD ACTIVE LOW</div>
+        <div class="stat-sub">GPIO 18, 19, 21, 22 0V • 0% Motor Drift</div>
+      </div>
+    </section>
+
+    <!-- IR Bowl Detection Deck (Cảm biến hồng ngoại nhận biết tô) -->
+    <section class="panel ir-sensor-deck" id="ir-sensor-deck" aria-label="Cảm biến hồng ngoại nhận diện tô">
+      <div class="panel-header">
+        <div class="panel-title">
+          <span class="title-indicator crimson"></span>
+          <h2>HỆ THỐNG CẢM BIẾN HỒNG NGOẠI NHẬN BIẾT TÔ (IR BEAM-BREAK & COUNTER)</h2>
+        </div>
+        <div class="panel-actions">
+          <span class="badge-accent" id="ir-pin-badge">CHÙM TIA: GPIO 10 (RX) • GPIO 11 (TX)</span>
+        </div>
+      </div>
+
+      <div class="ir-grid-container">
+        <!-- Col 1: Beam Status Display -->
+        <div class="ir-status-card" id="ir-status-card">
+          <div class="ir-radar-circle" id="ir-radar-circle">
+            <div class="ir-icon" id="ir-icon">◎</div>
+          </div>
+          <div class="ir-readout-block">
+            <div class="ir-status-main" id="ir-status-main">THÔNG SUỐT (CLEAR)</div>
+            <div class="ir-status-sub" id="ir-status-sub">Sẵn sàng nhận diện khi có tô đi qua</div>
+            <div class="ir-meta-tags">
+              <span class="ir-tag" id="ir-tag-raw">RAW: HIGH (1)</span>
+              <span class="ir-tag" id="ir-tag-block">THỜI GIAN CHE: 0 ms</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Col 2: Bowl Counter -->
+        <div class="ir-counter-card">
+          <div class="ir-counter-header">
+            <span class="ir-counter-title">TỔNG SỐ TÔ ĐÃ QUA</span>
+            <span class="badge-mini" id="ir-tx-badge">TX: BẬT</span>
+          </div>
+          <div class="ir-counter-number" id="ir-counter-number">0000</div>
+          <div class="ir-counter-footer">
+            <span id="ir-last-time-text">Lần cuối: Chưa có</span>
+            <button class="btn-small" id="btn-ir-reset" title="Đặt lại số lượng tô đã đếm">
+              Reset Đếm
+            </button>
+          </div>
+        </div>
+
+        <!-- Col 3: Automation & Actions -->
+        <div class="ir-control-card">
+          <span class="ir-control-title">TỰ ĐỘNG KÍCH HOẠT SERVO KHI TÔ ĐẾN</span>
+          <div class="ir-auto-options">
+            <button type="button" class="btn-auto-opt active" id="btn-auto-off" data-mode="0">TẮT</button>
+            <button type="button" class="btn-auto-opt" id="btn-auto-s1" data-mode="1">MỞ S1</button>
+            <button type="button" class="btn-auto-opt" id="btn-auto-s2" data-mode="2">MỞ S2</button>
+            <button type="button" class="btn-auto-opt" id="btn-auto-both" data-mode="3">MỞ CẢ 2</button>
+          </div>
+          <div class="ir-quick-buttons">
+            <button type="button" class="btn-small btn-accent" id="btn-ir-simulate" title="Mô phỏng 1 tô đi qua để test">
+              ⚡ Test Mô Phỏng Tô Đi Qua
+            </button>
+            <button type="button" class="btn-small" id="btn-ir-toggle-tx" title="Bật/Tắt LED phát hồng ngoại">
+              Đổi TX LED
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Visualizer Grid -->
+    <section class="visualizer-grid">
+      <!-- Left: Interactive Dual Servo Tachometer & Angle Gauge -->
+      <div class="panel gauge-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator cyan"></span>
+            <h2>DUAL SERVO TACHOMETER & MONITOR</h2>
+          </div>
+        </div>
+        
+        <div class="dual-gauges-container">
+          <!-- Gauge 1 -->
+          <div class="gauge-card">
+            <div class="gauge-card-header">
+              <span class="gauge-card-title">CH1: SERVO 1 (GPIO 18 - C1 DƯỚI)</span>
+              <span class="badge-accent" id="s1-gauge-pwm-badge">90° (DỪNG)</span>
+            </div>
+            <div class="gauge-wrapper">
+              <canvas id="servoGaugeCanvas1" width="220" height="220"></canvas>
+              <div class="gauge-center-readout">
+                <div class="gauge-angle" id="s1-gauge-angle-text">90°</div>
+                <div class="gauge-unit">PWM LEVEL</div>
+                <div class="gauge-state-badge" id="s1-gauge-state-pill">STANDBY</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gauge 2 -->
+          <div class="gauge-card">
+            <div class="gauge-card-header">
+              <span class="gauge-card-title title-s2">CH2: SERVO 2 (GPIO 19 - C1 TRÊN)</span>
+              <span class="badge-accent" id="s2-gauge-pwm-badge">90° (DỪNG)</span>
+            </div>
+            <div class="gauge-wrapper">
+              <canvas id="servoGaugeCanvas2" width="220" height="220"></canvas>
+              <div class="gauge-center-readout">
+                <div class="gauge-angle" id="s2-gauge-angle-text">90°</div>
+                <div class="gauge-unit">PWM LEVEL</div>
+                <div class="gauge-state-badge" id="s2-gauge-state-pill">STANDBY</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gauge 3 -->
+          <div class="gauge-card">
+            <div class="gauge-card-header">
+              <span class="gauge-card-title" style="color:#f59e0b">CH3: SERVO 3 (GPIO 21 - C2 DƯỚI)</span>
+              <span class="badge-accent" id="s3-gauge-pwm-badge">90° (DỪNG)</span>
+            </div>
+            <div class="gauge-wrapper">
+              <canvas id="servoGaugeCanvas3" width="220" height="220"></canvas>
+              <div class="gauge-center-readout">
+                <div class="gauge-angle" id="s3-gauge-angle-text">90°</div>
+                <div class="gauge-unit">PWM LEVEL</div>
+                <div class="gauge-state-badge" id="s3-gauge-state-pill">STANDBY</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gauge 4 -->
+          <div class="gauge-card">
+            <div class="gauge-card-header">
+              <span class="gauge-card-title" style="color:#a855f7">CH4: SERVO 4 (GPIO 22 - C2 TRÊN)</span>
+              <span class="badge-accent" id="s4-gauge-pwm-badge">90° (DỪNG)</span>
+            </div>
+            <div class="gauge-wrapper">
+              <canvas id="servoGaugeCanvas4" width="220" height="220"></canvas>
+              <div class="gauge-center-readout">
+                <div class="gauge-angle" id="s4-gauge-angle-text">90°</div>
+                <div class="gauge-unit">PWM LEVEL</div>
+                <div class="gauge-state-badge" id="s4-gauge-state-pill">STANDBY</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="gauge-legend">
+          <div class="legend-item"><span class="legend-color cyan"></span> Quay Thuận (0°-89°)</div>
+          <div class="legend-item"><span class="legend-color emerald"></span> Điểm Dừng (90°)</div>
+          <div class="legend-item"><span class="legend-color amber"></span> Quay Nghịch (91°-180°)</div>
+        </div>
+      </div>
+
+      <!-- Right: Live Non-Blocking State Machine -->
+      <div class="panel state-machine-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator emerald"></span>
+            <h2>NON-BLOCKING MOTION STATE MACHINE</h2>
+          </div>
+          <div class="panel-actions">
+            <span class="timer-display" id="state-timer-display">S1: IDLE | S2: IDLE</span>
+          </div>
+        </div>
+
+        <div class="state-nodes-container">
+          <div class="state-node active" id="node-idle" data-state="Sẵn sàng">
+            <div class="node-ring"></div>
+            <div class="node-icon">⏹</div>
+            <div class="node-label">SẴN SÀNG</div>
+            <div class="node-sub">IDLE</div>
+          </div>
+
+          <div class="state-connector" id="conn-1"></div>
+
+          <div class="state-node" id="node-fwd" data-state="Đang quay thuận">
+            <div class="node-ring"></div>
+            <div class="node-icon">⟳</div>
+            <div class="node-label">QUAY THUẬN</div>
+            <div class="node-sub" id="label-fwd-ms">1000 ms</div>
+          </div>
+
+          <div class="state-connector" id="conn-2"></div>
+
+          <div class="state-node" id="node-pause1" data-state="Đang dừng (Tạm dừng)">
+            <div class="node-ring"></div>
+            <div class="node-icon">⏸</div>
+            <div class="node-label">TẠM DỪNG</div>
+            <div class="node-sub" id="label-pause-ms1">500 ms</div>
+          </div>
+
+          <div class="state-connector" id="conn-3"></div>
+
+          <div class="state-node" id="node-rev" data-state="Đang quay nghịch">
+            <div class="node-ring"></div>
+            <div class="node-icon">⟲</div>
+            <div class="node-label">QUAY NGHỊCH</div>
+            <div class="node-sub" id="label-rev-ms">1000 ms</div>
+          </div>
+
+          <div class="state-connector" id="conn-4"></div>
+
+          <div class="state-node" id="node-complete" data-state="Hoàn thành">
+            <div class="node-ring"></div>
+            <div class="node-icon">✓</div>
+            <div class="node-label">HOÀN THÀNH</div>
+            <div class="node-sub">FINISHED</div>
+          </div>
+        </div>
+
+        <!-- Oscilloscope Timeline Preview -->
+        <div class="oscilloscope-container">
+          <div class="scope-header">
+            <span>DUAL PWM & CLAMP OSCILLOSCOPE (30s HISTORY)</span>
+            <span class="scope-meta">CH1: GPIO 18 (Cyan) • CH2: GPIO 19 (Green)</span>
+          </div>
+          <canvas id="scopeCanvas" width="600" height="130"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Dual Independent Motion Decks -->
+    <div class="dual-motion-panels">
+      <!-- Servo 1 Panel -->
+      <div class="panel motion-deck-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator cyan"></span>
+            <h2>SERVO 1 DECK (GPIO 18 - C1 DƯỚI)</h2>
+          </div>
+        </div>
+
+        <div class="mode-actions">
+          <button class="btn-primary-action btn-open" id="btn-s1-open">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 3h18v18H3z"/><path d="M9 3v18"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE MỞ S1</span>
+              <span class="btn-subtext">Xoay mở & không quay về</span>
+            </div>
+          </button>
+
+          <button class="btn-primary-action btn-close" id="btn-s1-close">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE ĐÓNG S1</span>
+              <span class="btn-subtext">Xoay về vị trí ban đầu</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="deck-actions">
+          <button class="btn-primary-action btn-start" id="btn-s1-start">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">CHU KỲ S1</span><span class="btn-subtext">Auto-Cycle S1</span></div>
+          </button>
+
+          <button class="btn-primary-action btn-stop" id="btn-s1-stop">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">DỪNG S1</span><span class="btn-subtext">Clamp LOW GPIO 18</span></div>
+          </button>
+        </div>
+
+        <div class="manual-test-buttons">
+          <button class="btn-secondary" id="btn-s1-test-fwd">↻ Test Thuận S1</button>
+          <button class="btn-secondary" id="btn-s1-test-rev">↺ Test Nghịch S1</button>
+        </div>
+
+        <!-- Calibration Slider Block S1 -->
+        <div class="calibration-box">
+          <div class="calib-header">
+            <div>
+              <span class="calib-title">HIỆU CHỈNH ĐIỂM DỪNG S1 (GPIO 18)</span>
+              <p class="calib-sub">Khắc phục trôi vị trí Servo 1</p>
+            </div>
+            <div class="calib-val" id="s1-calib-val-display">90°</div>
+          </div>
+          <div class="calib-slider-wrap">
+            <input type="range" min="0" max="180" value="90" id="slider-stop-1" class="custom-slider">
+          </div>
+          <div class="calib-actions">
+            <button class="btn-small" id="btn-s1-calib-test">Test Điểm Này</button>
+            <button class="btn-small btn-accent" id="btn-s1-calib-save">Lưu NVS Flash</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Servo 2 Panel -->
+      <div class="panel motion-deck-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator emerald"></span>
+            <h2>SERVO 2 DECK (GPIO 19 - C1 TRÊN)</h2>
+          </div>
+        </div>
+
+        <div class="mode-actions">
+          <button class="btn-primary-action btn-open" id="btn-s2-open">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 3h18v18H3z"/><path d="M9 3v18"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE MỞ S2</span>
+              <span class="btn-subtext">Xoay mở & không quay về</span>
+            </div>
+          </button>
+
+          <button class="btn-primary-action btn-close" id="btn-s2-close">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE ĐÓNG S2</span>
+              <span class="btn-subtext">Xoay về vị trí ban đầu</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="deck-actions">
+          <button class="btn-primary-action btn-start" id="btn-s2-start">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">CHU KỲ S2</span><span class="btn-subtext">Auto-Cycle S2</span></div>
+          </button>
+
+          <button class="btn-primary-action btn-stop" id="btn-s2-stop">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">DỪNG S2</span><span class="btn-subtext">Clamp LOW GPIO 19</span></div>
+          </button>
+        </div>
+
+        <div class="manual-test-buttons">
+          <button class="btn-secondary" id="btn-s2-test-fwd">↻ Test Thuận S2</button>
+          <button class="btn-secondary" id="btn-s2-test-rev">↺ Test Nghịch S2</button>
+        </div>
+
+        <!-- Calibration Slider Block S2 -->
+        <div class="calibration-box">
+          <div class="calib-header">
+            <div>
+              <span class="calib-title">HIỆU CHỈNH ĐIỂM DỪNG S2 (GPIO 19)</span>
+              <p class="calib-sub">Khắc phục trôi vị trí Servo 2</p>
+            </div>
+            <div class="calib-val" id="s2-calib-val-display">90°</div>
+          </div>
+          <div class="calib-slider-wrap">
+            <input type="range" min="0" max="180" value="90" id="slider-stop-2" class="custom-slider">
+          </div>
+          <div class="calib-actions">
+            <button class="btn-small" id="btn-s2-calib-test">Test Điểm Này</button>
+            <button class="btn-small btn-accent" id="btn-s2-calib-save">Lưu NVS Flash</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Servo 3 Panel -->
+      <div class="panel motion-deck-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator amber"></span>
+            <h2>SERVO 3 DECK (GPIO 21 - CỘT 2 DƯỚI)</h2>
+          </div>
+        </div>
+
+        <div class="mode-actions">
+          <button class="btn-primary-action btn-open" id="btn-s3-open">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 3h18v18H3z"/><path d="M9 3v18"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE MỞ S3</span>
+              <span class="btn-subtext">Xoay mở cửa dưới Cột 2</span>
+            </div>
+          </button>
+
+          <button class="btn-primary-action btn-close" id="btn-s3-close">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE ĐÓNG S3</span>
+              <span class="btn-subtext">Đóng cửa dưới Cột 2</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="deck-actions">
+          <button class="btn-primary-action btn-start" id="btn-s3-start">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">CHU KỲ S3</span><span class="btn-subtext">Auto-Cycle S3</span></div>
+          </button>
+
+          <button class="btn-primary-action btn-stop" id="btn-s3-stop">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">DỪNG S3</span><span class="btn-subtext">Clamp LOW GPIO 21</span></div>
+          </button>
+        </div>
+
+        <div class="manual-test-buttons">
+          <button class="btn-secondary" id="btn-s3-test-fwd">↻ Test Thuận S3</button>
+          <button class="btn-secondary" id="btn-s3-test-rev">↺ Test Nghịch S3</button>
+        </div>
+
+        <!-- Calibration Slider Block S3 -->
+        <div class="calibration-box">
+          <div class="calib-header">
+            <div>
+              <span class="calib-title">HIỆU CHỈNH ĐIỂM DỪNG S3 (GPIO 21)</span>
+              <p class="calib-sub">Khắc phục trôi vị trí Servo 3</p>
+            </div>
+            <div class="calib-val" id="s3-calib-val-display">90°</div>
+          </div>
+          <div class="calib-slider-wrap">
+            <input type="range" min="0" max="180" value="90" id="slider-stop-3" class="custom-slider">
+          </div>
+          <div class="calib-actions">
+            <button class="btn-small" id="btn-s3-calib-test">Test Điểm Này</button>
+            <button class="btn-small btn-accent" id="btn-s3-calib-save">Lưu NVS Flash</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Servo 4 Panel -->
+      <div class="panel motion-deck-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator purple"></span>
+            <h2>SERVO 4 DECK (GPIO 22 - CỘT 2 TRÊN)</h2>
+          </div>
+        </div>
+
+        <div class="mode-actions">
+          <button class="btn-primary-action btn-open" id="btn-s4-open">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 3h18v18H3z"/><path d="M9 3v18"/><circle cx="15" cy="12" r="1.5" fill="currentColor"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE MỞ S4</span>
+              <span class="btn-subtext">Xoay mở cửa trên Cột 2</span>
+            </div>
+          </button>
+
+          <button class="btn-primary-action btn-close" id="btn-s4-close">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+            </div>
+            <div class="btn-text-block">
+              <span class="btn-heading">MODE ĐÓNG S4</span>
+              <span class="btn-subtext">Đóng cửa trên Cột 2</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="deck-actions">
+          <button class="btn-primary-action btn-start" id="btn-s4-start">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">CHU KỲ S4</span><span class="btn-subtext">Auto-Cycle S4</span></div>
+          </button>
+
+          <button class="btn-primary-action btn-stop" id="btn-s4-stop">
+            <div class="btn-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></div>
+            <div class="btn-text-block"><span class="btn-heading">DỪNG S4</span><span class="btn-subtext">Clamp LOW GPIO 22</span></div>
+          </button>
+        </div>
+
+        <div class="manual-test-buttons">
+          <button class="btn-secondary" id="btn-s4-test-fwd">↻ Test Thuận S4</button>
+          <button class="btn-secondary" id="btn-s4-test-rev">↺ Test Nghịch S4</button>
+        </div>
+
+        <!-- Calibration Slider Block S4 -->
+        <div class="calibration-box">
+          <div class="calib-header">
+            <div>
+              <span class="calib-title">HIỆU CHỈNH ĐIỂM DỪNG S4 (GPIO 22)</span>
+              <p class="calib-sub">Khắc phục trôi vị trí Servo 4</p>
+            </div>
+            <div class="calib-val" id="s4-calib-val-display">90°</div>
+          </div>
+          <div class="calib-slider-wrap">
+            <input type="range" min="0" max="180" value="90" id="slider-stop-4" class="custom-slider">
+          </div>
+          <div class="calib-actions">
+            <button class="btn-small" id="btn-s4-calib-test">Test Điểm Này</button>
+            <button class="btn-small btn-accent" id="btn-s4-calib-save">Lưu NVS Flash</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls & Configuration Studio -->
+    <section class="controls-grid">
+      <!-- Configuration Studio (NVS Persistence) -->
+      <div class="panel config-studio-panel" style="grid-column: 1 / -1;">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator amber"></span>
+            <h2>CONFIGURATION STUDIO (NVS PERSISTENCE CHO CẢ 4 SERVO)</h2>
+          </div>
+          <button class="btn-small" id="btn-reset-config">Khôi Phục Mặc Định Cả 4</button>
+        </div>
+
+        <form id="config-form" class="config-form">
+          <div class="cfg-tabs">
+            <button type="button" class="cfg-tab-btn active" id="tab-btn-s1">SERVO 1 (C1 DƯỚI)</button>
+            <button type="button" class="cfg-tab-btn tab-s2" id="tab-btn-s2">SERVO 2 (C1 TRÊN)</button>
+            <button type="button" class="cfg-tab-btn" id="tab-btn-s3" style="color:#f59e0b">SERVO 3 (C2 DƯỚI)</button>
+            <button type="button" class="cfg-tab-btn" id="tab-btn-s4" style="color:#a855f7">SERVO 4 (C2 TRÊN)</button>
+          </div>
+
+          <!-- Section S1 -->
+          <div id="cfg-pane-s1">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-speed-1">S1 Mức Thuận (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="110" id="cfg-fwd-speed-1" class="custom-slider">
+                  <span class="num-bubble" id="cfg-fwd-speed-val-1">110</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-speed-1">S1 Mức Nghịch (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="70" id="cfg-rev-speed-1" class="custom-slider">
+                  <span class="num-bubble" id="cfg-rev-speed-val-1">70</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-ms-1">S1 Thời Gian Thuận (ms)</label>
+                <input type="number" id="cfg-fwd-ms-1" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-ms-1">S1 Thời Gian Nghịch (ms)</label>
+                <input type="number" id="cfg-rev-ms-1" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-pause-ms-1">S1 Thời Gian Dừng (ms)</label>
+                <input type="number" id="cfg-pause-ms-1" value="500" min="0" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-cycles-1">S1 Số Chu Kỳ (1-1000)</label>
+                <input type="number" id="cfg-cycles-1" value="1" min="1" max="1000" class="custom-input">
+              </div>
+            </div>
+          </div>
+
+          <!-- Section S2 -->
+          <div id="cfg-pane-s2" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-speed-2">S2 Mức Thuận (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="110" id="cfg-fwd-speed-2" class="custom-slider">
+                  <span class="num-bubble" id="cfg-fwd-speed-val-2">110</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-speed-2">S2 Mức Nghịch (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="70" id="cfg-rev-speed-2" class="custom-slider">
+                  <span class="num-bubble" id="cfg-rev-speed-val-2">70</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-ms-2">S2 Thời Gian Thuận (ms)</label>
+                <input type="number" id="cfg-fwd-ms-2" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-ms-2">S2 Thời Gian Nghịch (ms)</label>
+                <input type="number" id="cfg-rev-ms-2" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-pause-ms-2">S2 Thời Gian Dừng (ms)</label>
+                <input type="number" id="cfg-pause-ms-2" value="500" min="0" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-cycles-2">S2 Số Chu Kỳ (1-1000)</label>
+                <input type="number" id="cfg-cycles-2" value="1" min="1" max="1000" class="custom-input">
+              </div>
+            </div>
+          </div>
+
+          <!-- Section S3 -->
+          <div id="cfg-pane-s3" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-speed-3">S3 Mức Thuận (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="110" id="cfg-fwd-speed-3" class="custom-slider">
+                  <span class="num-bubble" id="cfg-fwd-speed-val-3">110</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-speed-3">S3 Mức Nghịch (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="70" id="cfg-rev-speed-3" class="custom-slider">
+                  <span class="num-bubble" id="cfg-rev-speed-val-3">70</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-ms-3">S3 Thời Gian Thuận (ms)</label>
+                <input type="number" id="cfg-fwd-ms-3" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-ms-3">S3 Thời Gian Nghịch (ms)</label>
+                <input type="number" id="cfg-rev-ms-3" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-pause-ms-3">S3 Thời Gian Dừng (ms)</label>
+                <input type="number" id="cfg-pause-ms-3" value="500" min="0" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-cycles-3">S3 Số Chu Kỳ (1-1000)</label>
+                <input type="number" id="cfg-cycles-3" value="1" min="1" max="1000" class="custom-input">
+              </div>
+            </div>
+          </div>
+
+          <!-- Section S4 -->
+          <div id="cfg-pane-s4" style="display: none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-speed-4">S4 Mức Thuận (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="110" id="cfg-fwd-speed-4" class="custom-slider">
+                  <span class="num-bubble" id="cfg-fwd-speed-val-4">110</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-speed-4">S4 Mức Nghịch (0-180)</label>
+                <div class="input-with-val">
+                  <input type="range" min="0" max="180" value="70" id="cfg-rev-speed-4" class="custom-slider">
+                  <span class="num-bubble" id="cfg-rev-speed-val-4">70</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-fwd-ms-4">S4 Thời Gian Thuận (ms)</label>
+                <input type="number" id="cfg-fwd-ms-4" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-rev-ms-4">S4 Thời Gian Nghịch (ms)</label>
+                <input type="number" id="cfg-rev-ms-4" value="1000" min="50" max="60000" step="50" class="custom-input">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="cfg-pause-ms-4">S4 Thời Gian Dừng (ms)</label>
+                <input type="number" id="cfg-pause-ms-4" value="500" min="0" max="60000" step="50" class="custom-input">
+              </div>
+              <div class="form-group">
+                <label for="cfg-cycles-4">S4 Số Chu Kỳ (1-1000)</label>
+                <input type="number" id="cfg-cycles-4" value="1" min="1" max="1000" class="custom-input">
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn-save-config" id="btn-save-cfg">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            LƯU TẤT CẢ CẤU HÌNH VÀO NVS FLASH (S1 - S4)
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Bottom Row: Automated HIL Suite Runner & Live Serial Terminal -->
+    <section class="bottom-grid">
+      <!-- Automated HIL Test Suite Runner -->
+      <div class="panel hil-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator purple"></span>
+            <h2>HIL AUTOMATED VERIFICATION SUITE</h2>
+          </div>
+          <button class="btn-small btn-accent" id="btn-run-hil">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            Run HIL Test Suite
+          </button>
+        </div>
+
+        <div class="hil-phases-list">
+          <div class="hil-phase-item" id="hil-phase-5">
+            <div class="phase-left">
+              <span class="phase-num">05</span>
+              <div class="phase-info">
+                <span class="phase-name">Serial Boot & Hardware Init</span>
+                <span class="phase-desc">ROM bootloader, ST7789 parallel bus & [SYSTEM] READY</span>
+              </div>
+            </div>
+            <span class="phase-badge pass" id="badge-p5">PASS</span>
+          </div>
+
+          <div class="hil-phase-item" id="hil-phase-6">
+            <div class="phase-left">
+              <span class="phase-num">06</span>
+              <div class="phase-info">
+                <span class="phase-name">REST API & Web Endpoints</span>
+                <span class="phase-desc">JSON schema verification for /api/status & /api/config</span>
+              </div>
+            </div>
+            <span class="phase-badge pass" id="badge-p6">PASS</span>
+          </div>
+
+          <div class="hil-phase-item" id="hil-phase-7">
+            <div class="phase-left">
+              <span class="phase-num">07</span>
+              <div class="phase-info">
+                <span class="phase-name">NVS Flash Persistence Across Reboot</span>
+                <span class="phase-desc">Config write, hard DTR/RTS reset & post-boot verification</span>
+              </div>
+            </div>
+            <span class="phase-badge pass" id="badge-p7">PASS</span>
+          </div>
+
+          <div class="hil-phase-item" id="hil-phase-8">
+            <div class="phase-left">
+              <span class="phase-num">08</span>
+              <div class="phase-info">
+                <span class="phase-name">Servo Motion & Zero-Drift Verification</span>
+                <span class="phase-desc">FWD 1s -> PAUSE 0.5s -> REV 1s -> PAUSE 0.5s -> STOP clamp</span>
+              </div>
+            </div>
+            <span class="phase-badge pass" id="badge-p8">PASS</span>
+          </div>
+
+          <div class="hil-phase-item" id="hil-phase-9">
+            <div class="phase-left">
+              <span class="phase-num">09</span>
+              <div class="phase-info">
+                <span class="phase-name">Status Polling Read-Only Purity</span>
+                <span class="phase-desc">Rapid 10Hz burst polling with zero actuator side-effects</span>
+              </div>
+            </div>
+            <span class="phase-badge pass" id="badge-p9">PASS</span>
+          </div>
+        </div>
+
+        <div class="hil-status-banner" id="hil-summary-banner">
+          <span class="summary-icon">🏆</span>
+          <span class="summary-text" id="hil-summary-text">Toàn bộ 5 Phases kiểm thử phần cứng HIL đạt: PASS (100% compliant)</span>
+        </div>
+      </div>
+
+      <!-- Real-Time Serial Console -->
+      <div class="panel terminal-panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span class="title-indicator cyan"></span>
+            <h2>REAL-TIME SERIAL CONSOLE (COM3 @ 115200)</h2>
+          </div>
+          <div class="terminal-toolbar">
+            <label class="terminal-opt">
+              <input type="checkbox" id="chk-autoscroll" checked> Auto-Scroll
+            </label>
+            <button class="btn-small" id="btn-clear-term">Clear</button>
+          </div>
+        </div>
+
+        <div class="terminal-body" id="term-body">
+          <div class="term-line system">[SYSTEM] Console Initialized. Listening on COM3 at 115200 baud...</div>
+        </div>
+
+        <div class="terminal-input-bar">
+          <span class="term-prompt">&gt;</span>
+          <input type="text" id="term-input" placeholder="Gõ lệnh (STATUS, START, STOP, PING, SCAN, CALIB 90...)" autocomplete="off">
+          <button class="btn-term-send" id="btn-term-send">GỬI</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Host tools only; not linked into ESP32 firmware. Versions used for local validation.
+pyserial==3.5
+starlette==1.7.0
+uvicorn==0.54.0
+wsproto==1.3.2
