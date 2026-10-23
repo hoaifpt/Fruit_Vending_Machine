@@ -2,11 +2,12 @@ name: Backend tests
 
 on:
   pull_request:
-    branches: [dev, main]
+    branches: [dev, main, 'feature/integrate-esp32-firmware']
     paths:
       - 'backend/**'
       - 'api-contract/**'
       - 'docs/**'
+      - 'firmware/**'
       - '.github/workflows/backend-tests.yml'
   push:
     branches: [dev, main, 'feature/**', 'fix/**']
@@ -14,6 +15,7 @@ on:
       - 'backend/**'
       - 'api-contract/**'
       - 'docs/**'
+      - 'firmware/**'
       - '.github/workflows/backend-tests.yml'
   workflow_dispatch:
 
@@ -51,6 +53,8 @@ jobs:
         run: docker info
       - name: Build and run all unit and integration tests
         run: mvn --batch-mode --no-transfer-progress clean verify
+      - name: Verify preserved firmware and station worker (no USB)
+        run: python3 -m unittest discover -s ../firmware/tests -v
       - name: Upload test reports even on failure
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
