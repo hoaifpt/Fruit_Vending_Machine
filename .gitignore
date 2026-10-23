@@ -1,3 +1,9 @@
 # Local database credentials; commit only the example.
 /.env
 /backend/target/
+
+# Local MQTT broker accounts and ESP32 Wi-Fi/broker secrets.
+/infra/mosquitto/passwd
+/firmware/fruit/include/secrets.h
+/firmware/fruit/.pio/
+__pycache__/

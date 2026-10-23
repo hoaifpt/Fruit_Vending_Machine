@@ -271,15 +271,17 @@ Never dispense based solely on client-reported payment status.
 
 ## 10. IoT Rules
 
-Dispensing uses Backend -> Kiosk -> Serial/USB -> ESP32. The kiosk reports the
-correlated ESP32 result to backend. MQTT is optional for future telemetry/events,
-not the dispense transport in the approved flow.
+Dispensing uses Backend -> MQTT broker -> ESP32 (decision of 2026-10-23, replacing the earlier
+Kiosk -> Serial/USB flow). The ESP32 reports acceptance and the result as MQTT events; the kiosk
+only polls the order status. Contract and local setup: docs/mqtt-dispense.md. USB Serial remains
+a firmware test/calibration channel with the same idempotent DISPENSE command.
 
 ESP32 must never decide whether an order is paid.
 
 Backend creates/authorizes dispense commands only after payment verification.
-Kiosk must use the backend-issued command ID and assigned slot. Backend validates
-machine ownership and result transitions idempotently before changing inventory/order.
+The machine must use the backend-issued command ID. Backend validates machine
+ownership (topic, envelope and command machine) and result transitions idempotently
+before changing inventory/order.
 
 Every dispense command must have a unique command ID.
 

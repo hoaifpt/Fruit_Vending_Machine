@@ -1,0 +1,9 @@
+# Backend account: sends commands, reads every machine's events and status.
+user backend
+topic readwrite vending/#
+
+# Machine accounts: username = machine code; each machine only touches its own topics.
+pattern read vending/%u/commands
+pattern write vending/%u/events
+pattern write vending/%u/status
+pattern write vending/%u/telemetry
