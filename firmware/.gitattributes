@@ -1,0 +1,5 @@
+# Project B snapshots/assets were imported with CRLF and their exact byte hashes
+# are part of the migration evidence. Preserve these bytes on Linux CI as well.
+reference/project-b/** text eol=crlf
+include/transport/web_ui.h text eol=crlf
+tools/control_center/** text eol=crlf

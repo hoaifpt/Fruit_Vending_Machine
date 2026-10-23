@@ -8,3 +8,5 @@ __pycache__/
 !.env.example
 docs/validation/local-*
 tools/control_center/docs/
+.local/
+tools/bridge.local.json
