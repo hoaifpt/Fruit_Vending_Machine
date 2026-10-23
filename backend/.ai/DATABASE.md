@@ -2,7 +2,7 @@
 
 ## 1. Authority and status
 
-PostgreSQL 18; Flyway V1–V12 under `src/main/resources/db/migration/` (relative to
+PostgreSQL 18; Flyway V1–V13 under `src/main/resources/db/migration/` (relative to
 the backend module). These migrations define the current schema, not a proposed model.
 There are **20 business tables** (V10 adds `kiosk_credentials`) plus `flyway_schema_history` (Flyway infrastructure,
 not a JPA business entity). Detailed constraints and ERD also appear in
@@ -11,7 +11,7 @@ not a JPA business entity). Detailed constraints and ERD also appear in
 
 Hibernate uses `ddl-auto=validate`, `generate-ddl=false`; SQL initialization is disabled.
 Validation is not a full audit of CHECK/index/trigger/nullability definitions.
-Never edit an applied migration. A genuine schema change needs a new V13+ migration.
+Never edit an applied migration. A genuine schema change needs a new V14+ migration.
 The package/convention alignment does not require any schema change.
 
 ## 2. Types and conventions
@@ -50,7 +50,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
-| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at |
+| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at, dispatch_token, bowl_count_before, bowl_count_after (V13) |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
 | machine_events | id, machine_id, event_type, payload, created_at |
 | kiosk_credentials | id, machine_id, key_prefix, secret_hash, status, created_by, created_at, revoked_by, revoked_at |
@@ -297,3 +297,9 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   InventoryItem (FOR UPDATE, rechecked). Loading = Product -> Batch -> Machine -> Slot; removal = Slot -> Item; release = Order -> Payment ->
   InventoryItem. Loads of the same product or into the same machine wait on the shared Product/Machine locks; removal waits on the slot lock.
 - Queries: `findSlotIdsHoldingProduct` (unlocked discovery), `findSellableHeadId` and `findCatalog` (DISTINCT ON over the present items).
+
+## V13 — authorized dispense dispatch
+
+One command per order, exclusive dispatch_token UUID and paired uint32 bowl counts.
+No V1–V12 rewrite. Nullable additions preserve historical rows; UNIQUE rejects
+existing duplicate order commands rather than deleting history. See docs/dispense-integration.md.

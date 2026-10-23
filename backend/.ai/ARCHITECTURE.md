@@ -671,3 +671,17 @@ the hold deadline, of an ACTIVE product in an ACTIVE slot of an ACTIVE machine, 
 `OrderService.createOrder` takes one productId; `OrderReservationService.selectHead` locks candidate slots (FOR UPDATE, id order), recomputes
 heads in SQL (`InventoryItemRepository.findSellableHeadId`, DISTINCT ON) and locks the chosen head. `KioskCatalogService` uses one aggregate
 SQL with the same head rule. `InventoryService.getInventorySummary` adds headStatus/headExpired under REPEATABLE READ. Release is unchanged.
+
+## 23. Authorized dispensing — direct user request
+
+Branch feature/connect-purchase-dispensing is based on feature/integrate-esp32-firmware
+03bec8a, following the user's explicit stacked-branch request.
+DispenseService owns prepare/claim/result/timeout transitions, serialized by Order;
+claim additionally locks Machine then Slot/Item. No hardware I/O inside DB transactions.
+V13 adds one command per order, an exclusive dispatch token and paired IR evidence.
+Browser authorizes idempotently after PAID and polls through DISPENSING to COMPLETED.
+The host station in firmware/tools/dispense_bridge.py journals before claim/UART and relays
+unchanged Project B DISPENSE 1/2 commands using explicit slot UUID mappings. One in-flight
+command per machine protects the shared IR sensor. Only HTTP result evidence is retried.
+Timeout/failure quarantines inventory and puts the machine in MAINTENANCE; no automated
+refund, reconciliation or physical re-dispatch. See docs/dispense-integration.md.

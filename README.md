@@ -2,7 +2,7 @@
 
 Hệ thống máy bán trái cây tự động, gồm kiosk tại máy, bộ điều khiển phần cứng ESP32 và hệ thống quản trị tập trung.
 
-> **Trạng thái hiện tại:** backend đã có Flyway, JPA mappings, common foundation, User/Role persistence, JWT login/stateless authentication, Initial Admin Bootstrap, nền ADMIN/STAFF method authorization, Swagger/OpenAPI và health check. Đã có User Management API dành cho ADMIN, Product Management, Machine Management và Machine Slot Management API (ADMIN đọc/ghi, STAFF chỉ đọc); đã có Product Batch Management (ADMIN/STAFF tạo và đọc lô bất biến). Chưa có refresh token hoặc các API nghiệp vụ khác. Các nghiệp vụ mua hàng/payment/dispense dưới đây là thiết kế mục tiêu, chưa được triển khai đầy đủ; các phần còn lại có thể vẫn là placeholder.
+> **Trạng thái hiện tại:** nhánh tích hợp có quản trị, tồn kho, đơn một tô, QR/webhook, API nhả hàng, UI theo dõi giao hàng và station Serial cho ESP32. Các kiểm tra tự động dùng payment/controller giả lập; upload và rơi tô thật chưa được xác minh. Xem [hướng dẫn tích hợp nhả tô](docs/dispense-integration.md).
 
 Hướng dẫn chạy backend, cấu hình `JWT_SECRET`, Swagger và login: [JWT authentication](docs/jwt-authentication.md).
 Hợp đồng API cho frontend: [api-contract/api.yaml](api-contract/api.yaml).

@@ -10,9 +10,10 @@ Servo S1/S2/S3/S4: **GPIO 18/19/21/22**; IR RX/TX: **GPIO 25/26**.
 COM4, baud 115200; upload 460800. Không dùng sơ đồ S3/GPIO 1 trong báo cáo cũ.
 
 **Trạng thái:** đã build offline và kiểm tra hồi quy trên máy phát triển.
-Chưa upload/HIL: người dùng xác nhận không cắm ESP32 và không cho chạy chuyển động
-trong phiên tích hợp. Luồng UI → PAID của Project A chưa có cầu nối cấp lệnh và
-ghi nhận nhả hàng, nên chưa thể tuyên bố mua hàng → rơi tô chạy xuyên suốt.
+Nhánh `feature/connect-purchase-dispensing` bổ sung API backend, UI trạng thái
+giao hàng và station worker `tools/dispense_bridge.py`; xem
+[hướng dẫn tích hợp](../docs/dispense-integration.md). Chưa upload/HIL: người dùng
+xác nhận không cắm ESP32 và không cho chạy chuyển động trong phiên tích hợp.
 
 ## Thiết lập và build (PowerShell, từ repository root)
 
@@ -65,6 +66,7 @@ kiểm tra vật lý. Xem hướng dẫn đầy đủ và các giới hạn trư
 
 - [Review, kiến trúc, cấu trúc file và hướng dẫn vận hành](docs/REVIEW_AND_RUN_GUIDE.md).
 - [Báo cáo build/HIL hiện hành cho ESP32 DevKit](docs/DEPLOYMENT_AND_HIL_REPORT.md).
+- [API, station worker, journal và kiểm thử luồng mua hàng](../docs/dispense-integration.md).
 - `include/`, `src/`: firmware được compile; `reference/` không được compile.
 - `tools/control_center/`: dashboard bảo trì nguyên gốc B, không phải UI mua hàng.
 - `tools/hil_check.py`: kiểm tra thiết bị thực, có opt-in rõ ràng cho chuyển động.

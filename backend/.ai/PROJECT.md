@@ -420,3 +420,12 @@ is `{ "productId" }` only (breaking change, the kiosk has not shipped); every ne
 the head (bottom bowl) of a sellable slot, FEFO only between slot heads, at most one RESERVED bowl per slot, and the catalog lists only
 products with a sellable head. `app.order.max-total-quantity` and catalog `maxTotalQuantity` are removed. No schema change; historical
 multi-line orders stay readable. See docs/order-management.md.
+
+## 20. Purchase dispensing — direct user request
+
+Kiosk Dispensing APIs and a local station bridge connect backend-authorized one-bowl
+fulfillment to the preserved ESP32 CLI. The UI waits for COMPLETED, not merely PAID.
+V13 and idempotent result transactions preserve per-bowl inventory history.
+Testing uses isolated PostgreSQL, verified mock payment and simulated UART; hardware
+upload/HIL was explicitly declined for this session. No issue number was supplied.
+The user authorized grouped commits and push for the child branch on 2026-10-23; PR creation and merge remain outside this request. See docs/dispense-integration.md.

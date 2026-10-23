@@ -1,5 +1,7 @@
 # Review tích hợp và hướng dẫn chạy firmware
 
+> Bản ghi import trên nhánh `feature/integrate-esp32-firmware`. Nhánh con đã bổ sung API/worker/UI; xem [hướng dẫn hiện hành](../../docs/dispense-integration.md). Các mục thiếu backend dưới đây mô tả thời điểm import.
+
 Ngày review: 23/10/2026 (Asia/Bangkok).
 
 ## 1. Kết quả và phạm vi
