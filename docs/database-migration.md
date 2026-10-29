@@ -64,144 +64,266 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
+ERD vật lý theo đúng các migration V1–V12 hiện có (20 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
+`dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
+`machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
+`machine_slots (id, machine_id)`.
+
 ```mermaid
 erDiagram
-    users ||--o{ user_roles : has
-    roles ||--o{ user_roles : grants
-    users o|--o{ product_batches : creates
-    machines ||--o{ machine_slots : contains
-    products ||--o{ product_batches : produces
-    product_batches ||--o{ inventory_items : contains
-    machine_slots o|--o{ inventory_items : stores
-    machines ||--o{ sensor_readings : reports
-    machines ||--o{ alerts : triggers
-    users o|--o{ alerts : resolves
-    machines ||--o{ orders : receives
-    orders ||--o{ order_items : contains
-    products ||--o{ order_items : identifies
-    order_items ||--o{ order_item_allocations : allocates
-    inventory_items ||--o{ order_item_allocations : tracks
-    orders ||--o{ payments : attempts
-    orders ||--o{ dispense_commands : requests
-    machines ||--o{ dispense_commands : executes
-    machine_slots ||--o{ dispense_commands : targets
-    inventory_items ||--o{ dispense_commands : dispenses
-    inventory_items ||--o{ inventory_transactions : records
-    machines o|--o{ inventory_transactions : records
-    machine_slots o|--o{ inventory_transactions : records
-    users o|--o{ inventory_transactions : performs
-    machines ||--o{ machine_events : emits
-    users o|--o{ audit_logs : acts
     users {
         uuid id PK
-        varchar email UK
-        varchar status
+        varchar email UK "lower-case"
+        varchar password_hash "BCrypt"
+        varchar full_name
+        varchar phone "nullable"
+        varchar status "ACTIVE, INACTIVE, LOCKED"
+        timestamptz created_at
+        timestamptz updated_at
     }
     roles {
         uuid id PK
-        varchar name UK
+        varchar name UK "ADMIN, STAFF"
+        varchar description "nullable"
+        timestamptz created_at
     }
     user_roles {
-        uuid user_id PK,FK
-        uuid role_id PK,FK
+        uuid user_id PK, FK
+        uuid role_id PK, FK
     }
     machines {
         uuid id PK
         varchar code UK
-        varchar status
+        varchar name
+        varchar location "nullable"
+        varchar status "ACTIVE, INACTIVE, MAINTENANCE"
+        numeric temperature_min "default 2"
+        numeric temperature_max "default 8"
+        numeric humidity_min "default 0"
+        numeric humidity_max "default 100"
+        timestamptz last_seen_at "nullable"
+        timestamptz created_at
+        timestamptz updated_at
     }
     machine_slots {
-        uuid id PK
-        uuid machine_id FK
+        uuid id PK "UK (id, machine_id)"
+        uuid machine_id FK "UK (machine, slot_code)"
         varchar slot_code
-        int capacity
+        int capacity "> 0"
+        varchar status "ACTIVE, INACTIVE, ERROR"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    kiosk_credentials {
+        uuid id PK
+        uuid machine_id FK "1 ACTIVE per machine"
+        varchar key_prefix UK "12 chars"
+        varchar secret_hash "SHA-256 hex"
+        varchar status "ACTIVE, REVOKED"
+        uuid created_by FK "nullable"
+        timestamptz created_at
+        uuid revoked_by FK "nullable"
+        timestamptz revoked_at "nullable"
     }
     products {
         uuid id PK
         varchar sku UK
-        numeric price
+        varchar name
+        text description "nullable"
+        numeric price "numeric(12,2)"
+        varchar image_url "nullable"
+        varchar status "ACTIVE, INACTIVE"
+        timestamptz created_at
+        timestamptz updated_at
     }
     product_batches {
         uuid id PK
+        varchar batch_code UK
         uuid product_id FK
-        uuid created_by FK
-        timestamptz expires_at
+        timestamptz manufactured_at
+        timestamptz expires_at "> manufactured_at"
+        int quantity "> 0"
+        uuid created_by FK "nullable"
+        timestamptz created_at
     }
     inventory_items {
-        uuid id PK
+        uuid id PK "UK (id, slot_id)"
         uuid batch_id FK
-        uuid slot_id FK
-        varchar status
+        uuid slot_id FK "nullable"
+        varchar status "enum E3"
+        timestamptz loaded_at "nullable"
+        timestamptz reserved_at "nullable"
+        timestamptz sold_at "nullable"
+        timestamptz removed_at "nullable"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    inventory_transactions {
+        uuid id PK
+        uuid inventory_item_id FK
+        uuid machine_id FK "null; FK (slot, machine)"
+        uuid slot_id FK "nullable"
+        varchar type "enum E4"
+        uuid reference_id "nullable, no FK"
+        uuid performed_by FK "nullable"
+        varchar reason "nullable"
+        varchar status_before "nullable"
+        varchar status_after "nullable"
+        timestamptz created_at "append-only"
     }
     sensor_readings {
-        bigint id PK
+        bigint id PK "identity"
         uuid machine_id FK
+        numeric temperature "nullable"
+        numeric humidity "nullable"
         timestamptz recorded_at
     }
     alerts {
         uuid id PK
         uuid machine_id FK
-        uuid resolved_by FK
-        varchar status
+        varchar type "enum E5"
+        varchar severity "INFO, WARNING, CRITICAL"
+        varchar title
+        text message "nullable"
+        varchar status "OPEN, ACKNOWLEDGED, RESOLVED"
+        timestamptz triggered_at
+        timestamptz resolved_at "nullable"
+        uuid resolved_by FK "nullable"
+        timestamptz created_at
+        timestamptz updated_at
     }
     orders {
-        uuid id PK
-        uuid machine_id FK
+        uuid id PK "UK (id, machine_id)"
         varchar order_code UK
+        uuid machine_id FK
+        varchar status "enum E1"
+        numeric subtotal
         numeric total_amount
+        timestamptz expires_at "nullable (V11)"
+        timestamptz created_at
+        timestamptz paid_at "nullable"
+        timestamptz completed_at "nullable"
+        timestamptz cancelled_at "nullable"
     }
     order_items {
         uuid id PK
         uuid order_id FK
         uuid product_id FK
-        int quantity
-        numeric unit_price
+        int quantity "> 0"
+        numeric unit_price "price snapshot"
+        numeric total_price "quantity x unit_price"
+        timestamptz created_at
     }
     order_item_allocations {
         uuid id PK
         uuid order_item_id FK
-        uuid inventory_item_id FK
-        varchar status
+        uuid inventory_item_id FK "UK while live"
+        varchar status "RESERVED, DISPENSED, RELEASED"
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz released_at "nullable"
     }
     payments {
         uuid id PK
         uuid order_id FK
-        varchar provider
-        varchar transaction_id
+        varchar provider "PAYOS, MOCK"
+        varchar transaction_id "null; UK w/ provider"
+        varchar payment_reference "null; UK w/ provider"
+        numeric amount
+        varchar status "enum E6"
+        text qr_code "nullable"
+        timestamptz created_at
+        timestamptz paid_at "nullable"
+        timestamptz expired_at "nullable"
     }
     payment_webhook_logs {
         uuid id PK
         varchar provider
-        varchar order_code
-        jsonb raw_payload
+        varchar event_type "nullable"
+        varchar order_code "nullable, no FK"
+        jsonb raw_payload "nullable"
         text raw_body
+        text signature "nullable"
+        boolean is_verified
+        timestamptz received_at
     }
     dispense_commands {
         uuid id PK
-        uuid order_id FK
-        uuid machine_id FK
-        uuid slot_id FK
-        uuid inventory_item_id FK
         varchar command_code UK
-    }
-    inventory_transactions {
-        uuid id PK
-        uuid inventory_item_id FK
-        uuid machine_id FK
-        uuid slot_id FK
-        uuid performed_by FK
+        uuid order_id FK "FK (order, machine)"
+        uuid machine_id FK "via composite FKs"
+        uuid slot_id FK "FK (slot, machine)"
+        uuid inventory_item_id FK "FK (item, slot)"
+        varchar status "enum E2"
+        timestamptz sent_at "nullable"
+        timestamptz acknowledged_at "nullable"
+        timestamptz completed_at "nullable"
+        timestamptz created_at
+        timestamptz updated_at
     }
     machine_events {
         uuid id PK
         uuid machine_id FK
         varchar event_type
+        jsonb payload
+        timestamptz created_at
     }
     audit_logs {
         uuid id PK
-        uuid user_id FK
-        uuid entity_id
+        uuid user_id FK "nullable"
+        varchar action
+        varchar entity_type
+        uuid entity_id "no FK"
+        jsonb old_value "nullable"
+        jsonb new_value "nullable"
+        varchar ip_address "nullable"
+        timestamptz created_at
     }
+
+    users ||--o{ user_roles : "has"
+    roles ||--o{ user_roles : "granted in"
+    users |o--o{ kiosk_credentials : "created_by"
+    users |o--o{ kiosk_credentials : "revoked_by"
+    users |o--o{ product_batches : "created_by"
+    users |o--o{ inventory_transactions : "performed_by"
+    users |o--o{ alerts : "resolved_by"
+    users |o--o{ audit_logs : "user_id"
+
+    machines ||--o{ machine_slots : "has"
+    machines ||--o{ kiosk_credentials : "authenticates"
+    machines ||--o{ sensor_readings : "reports"
+    machines ||--o{ alerts : "raises"
+    machines ||--o{ machine_events : "emits"
+    machines ||--o{ orders : "sells"
+
+    products ||--o{ product_batches : "produced in"
+    products ||--o{ order_items : "ordered as"
+    product_batches ||--o{ inventory_items : "contains"
+    machine_slots |o--o{ inventory_items : "holds"
+    inventory_items ||--o{ inventory_transactions : "history"
+    machine_slots |o--o{ inventory_transactions : "location snapshot"
+
+    orders ||--o{ order_items : "contains"
+    order_items ||--o{ order_item_allocations : "reserves"
+    inventory_items ||--o{ order_item_allocations : "allocated by"
+    orders ||--o{ payments : "paid by"
+
+    orders ||--o{ dispense_commands : "triggers"
+    machine_slots ||--o{ dispense_commands : "targets"
+    inventory_items ||--o{ dispense_commands : "dispenses"
 ```
+
+Các cột trạng thái dài được ghi mã E1–E6 trong sơ đồ; giá trị CHECK tương ứng:
+
+| Mã | Cột | Giá trị |
+| --- | --- | --- |
+| E1 | orders.status | PENDING_PAYMENT, PAID, DISPENSING, COMPLETED, CANCELLED, PAYMENT_FAILED, DISPENSE_FAILED, REFUNDED |
+| E2 | dispense_commands.status | PENDING, SENT, ACKNOWLEDGED, SUCCESS, FAILED, TIMEOUT |
+| E3 | inventory_items.status | AVAILABLE, RESERVED, SOLD, EXPIRED, REMOVED, DISPENSE_FAILED |
+| E4 | inventory_transactions.type | LOAD, RESERVE, SALE, EXPIRE, REMOVE, RETURN, ADJUSTMENT |
+| E5 | alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK |
+| E6 | payments.status | PENDING, SUCCESS, FAILED, EXPIRED, REFUNDED |
 
 Webhook logs độc lập với payment/order ở cấp FK: đối soát bằng provider, order_code và
 transaction ID trong payload. Audit entity_id là tham chiếu đa hình không FK.
@@ -221,15 +343,16 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | user_roles — membership | (user_id, role_id); users, roles | không lặp membership; cascade chỉ từ user | role_id; PK hỗ trợ user_id |
 | machines — máy và ngưỡng | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền | code đã có UNIQUE index |
 | machine_slots — slot vật lý | id; machine_id → machines | UNIQUE(machine_id, slot_code), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
+| kiosk_credentials — khóa API của kiosk (V10) | id; machine_id → machines; created_by, revoked_by → users nullable | key_prefix UNIQUE 12 ký tự; secret_hash SHA-256 hex; ACTIVE/REVOKED; REVOKED cần revoked_at ≥ created_at | partial UNIQUE một ACTIVE/máy, machine/time |
 | products — danh mục, giá hiện tại | id | sku UNIQUE; giá không âm hợp lệ; ACTIVE/INACTIVE | sku đã có UNIQUE index |
 | product_batches — lô sản xuất | id; product_id → products; created_by → users nullable | batch_code UNIQUE; quantity > 0; finite expires_at > manufactured_at | product_id, expires_at, creator partial |
 | inventory_items — từng tô | id; batch_id → batches; slot_id → slots nullable | status CHECK; loaded/reserved/sold/removed timestamps cơ bản; UNIQUE(id, slot_id) cho FK | (slot_id, status), batch_id, status |
 | sensor_readings — chuỗi thời gian | BIGINT identity id; machine_id → machines | ít nhất một reading; giá trị trong miền; finite recorded_at | (machine_id, recorded_at DESC), BRIN(recorded_at) |
 | alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at | machine/time, status/time, triggered_at, resolver partial |
-| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; UNIQUE(id, machine_id) cho FK | machine/time, status/time, created_at |
+| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
 | order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price | order_id, product_id |
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
-| payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at | order/time, status, partial UNIQUE(provider, transaction_id) |
+| payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12) |
 | payment_webhook_logs — callback thô kể cả lỗi | id; không FK order | provider không rỗng; raw_body bắt buộc; JSONB nullable; is_verified mặc định false | order_code/time, provider/time |
 | dispense_commands — lệnh có retry | id; composite FK orders/machine_slots/inventory_items | command_code UNIQUE; status CHECK; SUCCESS cần completed_at; một active/success command/tô | machine/time, order_id, slot_id, status, inventory_item_id, partial UNIQUE live inventory |
 | inventory_transactions — lịch sử bất biến | id; inventory_item_id → inventory_items; (slot_id, machine_id) → slots; performed_by → users nullable | type CHECK; MATCH FULL snapshot vị trí; append-only trigger | item/time, machine/time, slot_id, created_at, actor partial |
@@ -256,6 +379,9 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V7 | query indexes và partial uniqueness |
 | V8 | ADMIN và STAFF, không user/password |
 | V9 | inventory_transactions: nullable reason/status_before/status_after; bảo toàn lịch sử cũ |
+| V10 | kiosk_credentials: khóa API gắn một máy, tối đa một khóa ACTIVE mỗi máy |
+| V11 | orders.expires_at và partial index cho đơn PENDING_PAYMENT |
+| V12 | partial UNIQUE payments(provider, payment_reference) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)
@@ -294,7 +420,7 @@ dev/migration; production tách migration owner và runtime user quyền tối t
 Flyway clean bị vô hiệu hóa. Dừng container bằng `docker compose --env-file .env -f backend/db/compose.yaml stop`;
 volume giữ dữ liệu. Không reset/xóa volume database đang dùng để sửa checksum.
 
-Migration mới dùng V10 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
+Migration mới dùng V13 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
 Flyway chạy trước ứng dụng. Sau này Maven/Spring Boot dùng flyway-core và module
 flyway-database-postgresql với phiên bản tương thích. Module JPA hiện có pom Java 21,
 Spring Boot 3.5.14 và Flyway 11.20.1 cùng phiên bản đã kiểm chứng bằng Docker.
@@ -328,7 +454,7 @@ và FK RESTRICT bảo toàn lịch sử. Sensor sequence có thể tăng dù rol
 
 `inspect.sql` xem version, Flyway history, bảng/index, roles, tồn kho theo máy/slot,
 saleable/expired/expiring stock, latest sensor và diagnostics cho allocation/command.
-Sau migration có **19 bảng nghiệp vụ + flyway_schema_history**. Truy vấn nhanh:
+Sau migration V1–V12 có **20 bảng nghiệp vụ + flyway_schema_history** (V10 thêm kiosk_credentials). Truy vấn nhanh:
 
 ```sql
 SELECT * FROM flyway_schema_history ORDER BY installed_rank;
