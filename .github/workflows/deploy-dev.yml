@@ -1,0 +1,54 @@
+
+name: Deploy dev to Azure VM
+
+on:
+  push:
+    branches:
+      - dev
+
+  # Cho phép chạy deploy thủ công từ tab Actions
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Azure VM
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          fingerprint: ${{ secrets.VM_HOST_FINGERPRINT }}
+          script_stop: true
+          script: |
+            set -eu
+
+            cd /opt/afvm-server/Fruit_Vending_Machine
+
+            git fetch origin dev
+            git checkout -B dev origin/dev
+            git reset --hard origin/dev
+
+            docker compose up -d --build app
+
+            for i in $(seq 1 30); do
+              if curl -fsS \
+                http://localhost:8080/actuator/health; then
+                echo "Deployment successful"
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Health check failed"
+            docker compose logs --tail=100 app
+            exit 1
