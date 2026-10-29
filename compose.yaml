@@ -41,7 +41,7 @@ services:
 
       PAYMENT_PROVIDER: MOCK
       MQTT_ENABLED: "false"
-      API_DOCS_ENABLED: "false"
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
     ports:
       - "8080:8080"
     depends_on:
