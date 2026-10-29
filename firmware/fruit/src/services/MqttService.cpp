@@ -115,7 +115,22 @@ void MqttService::handleMessage(char *topic, uint8_t *payload, unsigned int leng
     char commandId[48];
     strncpy(commandId, id, sizeof(commandId) - 1);
     commandId[sizeof(commandId) - 1] = '\0';
-    dispenseHandler(commandId);
+
+    uint8_t column = 1;
+    if (doc["payload"]["column"].is<int>())
+    {
+        column = doc["payload"]["column"].as<uint8_t>();
+    }
+    else if (doc["payload"]["slot"].is<const char *>())
+    {
+        const char *s = doc["payload"]["slot"];
+        if (s != nullptr && (s[0] == 'B' || s[0] == 'b' || s[0] == '2'))
+        {
+            column = 2;
+        }
+    }
+
+    dispenseHandler(commandId, column);
 }
 
 bool MqttService::publishTelemetry(float temperatureC, float humidityPercent)

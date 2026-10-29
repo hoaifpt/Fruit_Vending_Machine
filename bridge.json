@@ -1,0 +1,10 @@
+{
+  "backendUrl": "http://localhost:8080",
+  "machineId": "dadbad45-ec0b-4fc5-9a72-2127b1e5c920",
+  "port": "COM4",
+  "timeoutSeconds": 90,
+  "slots": {
+    "f9d1945a-e8ee-4cd6-96c1-6233c7e8317e": 1,
+    "6e1bb869-371f-41ab-82d7-60f9773d5896": 2
+  }
+}

@@ -20,11 +20,11 @@ WifiService wifiService;
 MqttService mqttService;
 
 // Backend command over MQTT: answer with an event so the backend knows the command arrived (or why it did not start).
-void onMqttDispense(const char *commandId)
+void onMqttDispense(const char *commandId, uint8_t column)
 {
     char details[96];
-    snprintf(details, sizeof(details), "{\"commandId\":\"%s\"}", commandId);
-    switch (serialCommands.requestDispense(commandId))
+    snprintf(details, sizeof(details), "{\"commandId\":\"%s\",\"column\":%u}", commandId, column);
+    switch (serialCommands.requestDispense(commandId, column))
     {
     case SerialCommandService::DispenseReply::STARTED:
     case SerialCommandService::DispenseReply::IN_PROGRESS:
@@ -73,7 +73,7 @@ void loop()
     if (dispenser.takeResult(result))
     {
         serialCommands.reportResult(result);
-        char details[80];
+        char details[96];
         snprintf(details, sizeof(details), "{\"commandId\":\"%s\"}", result.commandId);
         mqttService.publishEvent(result.outcome == DispenseOutcome::OK ? "DISPENSE_COMPLETED" : "DISPENSE_ABORTED", details);
     }

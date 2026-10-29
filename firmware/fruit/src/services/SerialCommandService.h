@@ -26,7 +26,7 @@ public:
     explicit SerialCommandService(DispenseController &dispenser);
 
     // Idempotent: the same commandId never dispenses twice (the last REMEMBERED ids are kept).
-    DispenseReply requestDispense(const char *commandId);
+    DispenseReply requestDispense(const char *commandId, uint8_t column = 1);
 
     void begin();
     void loop();
@@ -51,7 +51,7 @@ private:
     size_t nextSlot = 0;
 
     void handleLine(char *text);
-    void handleDispense(const char *commandId);
+    void handleDispense(const char *commandId, uint8_t column = 1);
     void handleServo(char *arguments);
     void handleGate(char *arguments);
     const Completed *findCompleted(const char *commandId) const;

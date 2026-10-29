@@ -10,7 +10,7 @@ class MqttService
 {
 public:
     // Called from loop() with a validated commandId of a DISPENSE command addressed to this machine.
-    using DispenseHandler = void (*)(const char *commandId);
+    using DispenseHandler = void (*)(const char *commandId, uint8_t column);
 
     MqttService();
 

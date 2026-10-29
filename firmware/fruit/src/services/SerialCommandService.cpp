@@ -77,12 +77,19 @@ void SerialCommandService::handleLine(char *text)
     else if (strcmp(command, "DISPENSE") == 0)
     {
         char *id = rest == nullptr ? nullptr : strtok(rest, " \t");
-        if (id == nullptr || strtok(nullptr, " \t") != nullptr || !validCommandId(id))
+        char *colStr = strtok(nullptr, " \t");
+        uint8_t col = 1;
+        if (colStr != nullptr)
+        {
+            int c = atoi(colStr);
+            if (c == 2) col = 2;
+        }
+        if (id == nullptr || !validCommandId(id))
         {
             Serial.println("ERR INVALID_COMMAND_ID");
             return;
         }
-        handleDispense(id);
+        handleDispense(id, col);
     }
     else if (strcmp(command, "STOP") == 0)
     {
@@ -107,7 +114,7 @@ void SerialCommandService::handleLine(char *text)
     }
 }
 
-SerialCommandService::DispenseReply SerialCommandService::requestDispense(const char *commandId)
+SerialCommandService::DispenseReply SerialCommandService::requestDispense(const char *commandId, uint8_t column)
 {
     if (commandId == nullptr || !validCommandId(commandId))
     {
@@ -123,17 +130,17 @@ SerialCommandService::DispenseReply SerialCommandService::requestDispense(const 
     {
         return DispenseReply::IN_PROGRESS;
     }
-    if (!dispenser.start(commandId))
+    if (!dispenser.start(commandId, column))
     {
         return DispenseReply::BUSY;
     }
-    Logger::info("Dispense %s started", commandId);
+    Logger::info("Dispense %s (column %u) started", commandId, column);
     return DispenseReply::STARTED;
 }
 
-void SerialCommandService::handleDispense(const char *commandId)
+void SerialCommandService::handleDispense(const char *commandId, uint8_t column)
 {
-    switch (requestDispense(commandId))
+    switch (requestDispense(commandId, column))
     {
     case DispenseReply::DONE_OK:
         Serial.printf("DONE %s OK\n", commandId);
@@ -189,9 +196,16 @@ void SerialCommandService::handleGate(char *arguments)
 {
     char *gate = arguments == nullptr ? nullptr : strtok(arguments, " \t");
     char *action = strtok(nullptr, " \t");
-    if (gate == nullptr || action == nullptr || strtok(nullptr, " \t") != nullptr)
+    char *colStr = strtok(nullptr, " \t");
+    uint8_t col = 1;
+    if (colStr != nullptr)
     {
-        Serial.println("ERR USAGE GATE <LOWER|UPPER> <OPEN|CLOSE>");
+        int c = atoi(colStr);
+        if (c == 2) col = 2;
+    }
+    if (gate == nullptr || action == nullptr)
+    {
+        Serial.println("ERR USAGE GATE <LOWER|UPPER> <OPEN|CLOSE> [1|2]");
         return;
     }
     for (char *p = gate; *p; p++) *p = static_cast<char>(toupper(static_cast<unsigned char>(*p)));
@@ -200,10 +214,10 @@ void SerialCommandService::handleGate(char *arguments)
     const bool open = strcmp(action, "OPEN") == 0, close = strcmp(action, "CLOSE") == 0;
     if ((!lower && !upper) || (!open && !close))
     {
-        Serial.println("ERR USAGE GATE <LOWER|UPPER> <OPEN|CLOSE>");
+        Serial.println("ERR USAGE GATE <LOWER|UPPER> <OPEN|CLOSE> [1|2]");
         return;
     }
-    if (!dispenser.startGateMove(lower ? Gate::LOWER : Gate::UPPER, open))
+    if (!dispenser.startGateMove(lower ? Gate::LOWER : Gate::UPPER, open, col))
     {
         Serial.printf("ERR BUSY %s\n", dispenser.stateName());
         return;
