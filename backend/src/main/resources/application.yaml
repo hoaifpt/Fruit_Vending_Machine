@@ -81,6 +81,20 @@ app:
       enabled: ${ORDER_EXPIRY_SWEEP_ENABLED:true}
       interval: ${ORDER_EXPIRY_SWEEP_INTERVAL:PT30S}
       batch-size: ${ORDER_EXPIRY_SWEEP_BATCH_SIZE:50}
+  # Dispense commands to machines over MQTT (docs/mqtt-dispense.md). Disabled: commands stay PENDING and time out.
+  mqtt:
+    enabled: ${MQTT_ENABLED:false}
+    broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
+    client-id: ${MQTT_CLIENT_ID:fruit-backend}
+    username: ${MQTT_USERNAME:}
+    password: ${MQTT_PASSWORD:}
+    topic-root: ${MQTT_TOPIC_ROOT:vending}
+  dispense:
+    resend-after: ${DISPENSE_RESEND_AFTER:PT5S}
+    timeout: ${DISPENSE_TIMEOUT:PT60S}
+    sweep:
+      enabled: ${DISPENSE_SWEEP_ENABLED:true}
+      interval: ${DISPENSE_SWEEP_INTERVAL:PT2S}
 
 security:
   jwt:

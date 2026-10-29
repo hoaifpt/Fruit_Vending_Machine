@@ -22,3 +22,7 @@ app:
     expiry-sweep:
       # The sweep is invoked directly by tests with a controlled clock.
       enabled: false
+  dispense:
+    sweep:
+      # Tests call DispenseService.expireOrResend directly.
+      enabled: false

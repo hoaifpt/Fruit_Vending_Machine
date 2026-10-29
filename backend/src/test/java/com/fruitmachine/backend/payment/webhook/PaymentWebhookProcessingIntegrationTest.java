@@ -41,12 +41,14 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         assertThat(row.get("paid_at")).isNotNull();
         assertThat(row.get("completed_at")).isNull();
         assertThat(row.get("cancelled_at")).isNull();
-        // Reservation only: nothing is sold, dispensed or commanded, and no anomaly exists.
+        // Reservation only: nothing is sold or dispensed yet and no anomaly exists; exactly one dispense command waits
+        // for delivery (MQTT is disabled in tests, so it stays PENDING; docs/mqtt-dispense.md).
         assertThat(inventory(order.shop(), "RESERVED")).isEqualTo(1);
         assertThat(inventory(order.shop(), "SOLD")).isZero();
         assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status='RESERVED'", order.orderId())).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=? AND a.status<>'RESERVED'", order.orderId())).isZero();
-        assertThat(count("SELECT count(*) FROM dispense_commands")).isZero();
+        assertThat(count("SELECT count(*) FROM dispense_commands WHERE order_id=?", order.orderId())).isEqualTo(1);
+        assertThat(count("SELECT count(*) FROM dispense_commands WHERE order_id=? AND status='PENDING'", order.orderId())).isEqualTo(1);
         assertThat(count("SELECT count(*) FROM audit_logs WHERE entity_id=?", paymentId(reference))).isZero();
         assertThat(count("SELECT count(*) FROM inventory_transactions WHERE reference_id=? AND type IN ('SALE','RETURN')", order.orderId())).isZero();
     }

@@ -24,8 +24,9 @@ type Screen =
   | { kind: 'catalog' }
   | { kind: 'creating'; product: KioskProduct }
   | { kind: 'order'; product: KioskProduct; order: KioskOrder; view: OrderView }
+  | { kind: 'dispensing'; product: KioskProduct; order: KioskOrder }
   | { kind: 'paid'; product: KioskProduct; order: KioskOrder }
-  | { kind: 'ended'; reason: 'cancelled' | 'expired'; product: KioskProduct; order: KioskOrder }
+  | { kind: 'ended'; reason: 'cancelled' | 'expired' | 'dispense-failed'; product: KioskProduct; order: KioskOrder }
 
 type PaymentProblem = '' | 'provider' | 'network' | 'conflict'
 
@@ -79,7 +80,9 @@ export default function PurchasePage() {
   /** Maps a polled/returned order onto a screen. The backend is the only source of payment state. */
   const applyOrder = useCallback((product: KioskProduct, order: KioskOrder) => {
     const view = viewForOrder(order, serverNow())
+    if (view.kind === 'dispensing') { setDialog(null); setScreen({ kind: 'dispensing', product, order }); return }
     if (view.kind === 'paid') { setDialog(null); setScreen({ kind: 'paid', product, order }); return }
+    if (view.kind === 'dispense-failed') { setDialog(null); setScreen({ kind: 'ended', reason: 'dispense-failed', product, order }); return }
     if (view.kind === 'cancelled' || view.kind === 'ended') { setDialog(null); setScreen({ kind: 'ended', reason: view.kind === 'cancelled' ? 'cancelled' : 'expired', product, order }); return }
     if (view.kind === 'qr') setPaymentProblem('')
     setScreen({ kind: 'order', product, order, view })
@@ -166,7 +169,8 @@ export default function PurchasePage() {
   }, [screen.kind, key, machine, api, loadCatalog])
 
   // Automatically create the first payment attempt when the order has none.
-  const orderId = screen.kind === 'order' ? screen.order.id : undefined
+  const orderId = screen.kind === 'order' || screen.kind === 'dispensing' ? screen.order.id : undefined
+  const polling = screen.kind === 'order' || screen.kind === 'dispensing'
   const needsPayment = screen.kind === 'order' && screen.view.kind === 'create-payment'
   useEffect(() => {
     const current = screenRef.current
@@ -175,8 +179,9 @@ export default function PurchasePage() {
   }, [needsPayment, orderId, creatingPayment, paymentProblem, createPayment])
 
   // Status polling: every 2.5 s, backing off to 10 s on network errors; stops on final states or leaving the screen.
+  // It continues while the machine dispenses: the backend reports DISPENSING, then COMPLETED or DISPENSE_FAILED.
   useEffect(() => {
-    if (screen.kind !== 'order' || !orderId) return
+    if ((screen.kind !== 'order' && screen.kind !== 'dispensing') || !orderId) return
     const product = screen.product
     let failures = 0, timer: ReturnType<typeof setTimeout>, stopped = false
     const controller = new AbortController()
@@ -193,13 +198,13 @@ export default function PurchasePage() {
         if (error instanceof ApiError && error.status === 404) { goHome(); return }
         failures += 1; setReconnecting(true)
       }
-      if (!stopped && screenRef.current.kind === 'order') timer = setTimeout(tick, pollDelay(failures))
+      if (!stopped && (screenRef.current.kind === 'order' || screenRef.current.kind === 'dispensing')) timer = setTimeout(tick, pollDelay(failures))
     }
     timer = setTimeout(tick, pollDelay(0))
     return () => { stopped = true; controller.abort(); clearTimeout(timer) }
     // Restart only when the order changes, not on every poll result.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderId, screen.kind === 'order'])
+  }, [orderId, polling])
 
   // Clock for countdowns and the idle timeout on the payment screen.
   useEffect(() => {
@@ -224,9 +229,10 @@ export default function PurchasePage() {
   // Final screens return to the catalog by themselves.
   useEffect(() => {
     if (screen.kind !== 'paid' && screen.kind !== 'ended') return
-    const timer = setTimeout(goHome, screen.kind === 'paid' ? PAID_RETURN_MS : ENDED_RETURN_MS)
+    // A failed dispense stays longer so the customer can note the order code for staff.
+    const timer = setTimeout(goHome, screen.kind === 'paid' || (screen.kind === 'ended' && screen.reason === 'dispense-failed') ? PAID_RETURN_MS : ENDED_RETURN_MS)
     return () => clearTimeout(timer)
-  }, [screen.kind, goHome])
+  }, [screen, goHome])
 
   useEffect(() => {
     if (!notice) return
@@ -311,14 +317,24 @@ export default function PurchasePage() {
         </div>
       </section>}
 
+      {screen.kind === 'dispensing' && <section className="buy-result buy-result-success">
+        <div className="buy-result-icon" aria-hidden="true"><span className="buy-spinner" /></div>
+        <p className="buy-kicker">Đã xác nhận thanh toán</p>
+        <h1 ref={heading} tabIndex={-1}>Máy đang nhả hàng</h1>
+        <div role="status" className="buy-result-description"><p>Đã nhận {money(screen.order.totalAmount)} cho <strong>1 hộp {screen.product.name?.toLowerCase()}</strong>.<br />Vui lòng chờ trong giây lát, hộp trái cây sẽ rơi xuống khay bên dưới.</p></div>
+        <div className="buy-receipt"><div><span>Mã đơn</span><strong>{screen.order.orderCode ?? '—'}</strong></div><div><span>Sản phẩm</span><strong>{screen.product.name} · 1 hộp</strong></div><div><span>Tổng tiền</span><strong>{money(screen.order.totalAmount)}</strong></div></div>
+      </section>}
+
       {(screen.kind === 'paid' || screen.kind === 'ended') && <section className={`buy-result buy-result-${screen.kind === 'paid' ? 'success' : 'cancelled'}`}>
         <div className="buy-result-icon" aria-hidden="true">{screen.kind === 'paid' ? <Icon name="bag" /> : <span>!</span>}</div>
         <p className="buy-kicker">{screen.kind === 'paid' ? 'Cảm ơn bạn đã chọn Fruit Vending' : 'Fruit Vending'}</p>
-        <h1 ref={heading} tabIndex={-1}>{screen.kind === 'paid' ? 'Đã xác nhận thanh toán' : screen.reason === 'cancelled' ? 'Đơn hàng đã hủy' : 'Đơn hàng đã hết hạn'}</h1>
+        <h1 ref={heading} tabIndex={-1}>{screen.kind === 'paid' ? 'Mời bạn lấy trái cây' : screen.reason === 'dispense-failed' ? 'Máy chưa nhả được hàng' : screen.reason === 'cancelled' ? 'Đơn hàng đã hủy' : 'Đơn hàng đã hết hạn'}</h1>
         <div role="status" className="buy-result-description">
           {screen.kind === 'paid'
-            ? <p>Đã nhận {money(screen.order.totalAmount)} cho <strong>1 hộp {screen.product.name?.toLowerCase()}</strong>.<br />Máy đang chuẩn bị hộp trái cây của bạn.</p>
-            : <p>Không chuyển tiền vào mã QR cũ. Nếu đã bị trừ tiền, vui lòng liên hệ nhân viên kèm mã đơn bên dưới.</p>}
+            ? <p>Hộp <strong>{screen.product.name?.toLowerCase()}</strong> đã ở khay bên dưới.<br />Chúc bạn ngon miệng!</p>
+            : screen.reason === 'dispense-failed'
+              ? <p>Bạn đã thanh toán thành công nhưng máy chưa nhả được hộp trái cây. Vui lòng liên hệ nhân viên kèm mã đơn bên dưới để được hỗ trợ hoặc hoàn tiền.</p>
+              : <p>Không chuyển tiền vào mã QR cũ. Nếu đã bị trừ tiền, vui lòng liên hệ nhân viên kèm mã đơn bên dưới.</p>}
         </div>
         <div className="buy-receipt"><div><span>Mã đơn</span><strong>{screen.order.orderCode ?? '—'}</strong></div><div><span>Sản phẩm</span><strong>{screen.product.name} · 1 hộp</strong></div><div><span>Tổng tiền</span><strong>{money(screen.order.totalAmount)}</strong></div></div>
         <div className="buy-result-actions"><button className="buy-primary" onClick={goHome}>{screen.kind === 'paid' ? 'Mua sản phẩm khác' : 'Về danh sách sản phẩm'}<Icon name="arrow" /></button></div>
@@ -345,9 +361,62 @@ function ServiceScreen({ title, text, spinner = false, heading }: { title: strin
   </section>
 }
 
+async function simulateMockPayment(qrCode: string, orderCode?: string, column: number = 1) {
+  const parts = qrCode.split('|')
+  if (parts.length < 3) return false
+  const paymentReference = parts[1]
+  const amount = Number(parts[2])
+  const transactionId = 'MOCK-TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase()
+  const rawBody = `{"paymentReference":"${paymentReference}","transactionId":"${transactionId}","amount":${amount},"status":"SUCCESS"}`
+
+  const secret = 'fvm_mock_webhook_secret_key_2026'
+  const enc = new TextEncoder()
+  const key = await window.crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  const sigBuffer = await window.crypto.subtle.sign('HMAC', key, enc.encode(rawBody))
+  const signature = Array.from(new Uint8Array(sigBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+
+  try {
+    await fetch('/api/v1/webhooks/payments/mock', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mock-Signature': signature
+      },
+      body: rawBody
+    })
+  } catch (e) {
+    console.error('Webhook error:', e)
+  }
+
+  // Trigger hardware bridge on port 5001 to move ESP32 servos over COM4
+  try {
+    const cmdId = orderCode || ('CMD-' + Math.random().toString(36).substring(2, 8).toUpperCase())
+    await fetch('/bridge/dispense', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commandId: cmdId, column })
+    }).catch(() => fetch('http://127.0.0.1:5001/dispense', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commandId: cmdId, column })
+    }))
+  } catch (err) {
+    console.warn('Hardware bridge not reachable:', err)
+  }
+}
+
 function PaymentPanel({ screen, problem, creating, reconnecting, serverNow, onRenew }: {
   screen: Screen; problem: PaymentProblem; creating: boolean; reconnecting: boolean; serverNow: number; onRenew: () => void
 }) {
+  const [mockPaying, setMockPaying] = useState(false)
   const waiting = (label: string) => <div className="buy-qr-sample" role="status"><span className="buy-spinner" /><strong>{label}</strong></div>
   if (screen.kind === 'creating') return waiting('Đang giữ hàng cho bạn…')
   if (screen.kind !== 'order') return null
@@ -366,6 +435,43 @@ function PaymentPanel({ screen, problem, creating, reconnecting, serverNow, onRe
   return <>
     <QrImage text={view.qrCode} />
     <p className="buy-qr-amount">Số tiền: <strong>{money(view.amount)}</strong></p>
+    {view.qrCode.startsWith('MOCK-QR|') && (
+      <div style={{ marginTop: '0.5rem', marginBottom: '0.75rem' }}>
+        <button
+          type="button"
+          disabled={mockPaying}
+          onClick={async () => {
+            setMockPaying(true)
+            try {
+              const isCol2 = screen.product?.sku === 'DEV-WATERMELON' ||
+                screen.product?.productId === '40000000-0000-0000-0000-000000000002' ||
+                /watermelon|dưa/i.test(screen.product?.name ?? '')
+              const col = isCol2 ? 2 : 1
+              await simulateMockPayment(view.qrCode, screen.order.orderCode, col)
+            } finally {
+              setTimeout(() => setMockPaying(false), 2000)
+            }
+          }}
+          style={{
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: '#ffffff',
+            padding: '12px 26px',
+            borderRadius: '9999px',
+            fontWeight: 700,
+            fontSize: '1.05rem',
+            border: 'none',
+            boxShadow: '0 4px 15px rgba(16, 185, 129, 0.45)',
+            cursor: mockPaying ? 'wait' : 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          {mockPaying ? '⏳ Đang xác nhận thanh toán…' : '⚡ Giả lập thanh toán thành công (Mock Pay)'}
+        </button>
+      </div>
+    )}
     {view.qrCode.startsWith('MOCK-QR|') && <small>Mã thử nghiệm (MOCK): ứng dụng ngân hàng không thanh toán được.</small>}
     <p className="buy-wait" role="status"><span /> {reconnecting ? 'Đang kết nối lại…' : left === 0 ? 'Đang kiểm tra kết quả thanh toán…' : 'Đang chờ xác nhận thanh toán'}</p>
   </>

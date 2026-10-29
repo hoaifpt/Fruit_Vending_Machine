@@ -2,6 +2,7 @@ package com.fruitmachine.backend.payment.service;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fruitmachine.backend.dispense.service.DispenseService;
 import com.fruitmachine.backend.order.entity.Order;
 import com.fruitmachine.backend.order.enums.OrderStatus;
 import com.fruitmachine.backend.order.repository.OrderRepository;
@@ -37,6 +38,7 @@ public class PaymentConfirmationService {
     private final OrderRepository orders;
     private final PaymentAnomalyRecorder anomalies;
     private final ApplicationEventPublisher events;
+    private final DispenseService dispense;
     private final Clock clock;
 
     @Transactional
@@ -108,6 +110,8 @@ public class PaymentConfirmationService {
                 }
                 orders.flush();
                 payments.flush();
+                // Only a verified payment authorizes dispensing; the command is delivered after this transaction commits.
+                dispense.createForPaidOrder(order);
                 return Outcome.SUCCESS_APPLIED;
             }
             case CANCELLED -> {

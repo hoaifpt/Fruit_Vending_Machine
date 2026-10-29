@@ -21,12 +21,12 @@ API vị trí slot, sức chứa và trạng thái slot theo máy: [Machine Slot
 Người dùng
     │ chạm màn hình / quét QR
     ▼
-Kiosk (Electron + React) ── Serial/USB ──> ESP32 ──> Motor, cảm biến
+Kiosk (web /buy) ── REST ──> Backend ── MQTT ──> ESP32 ──> Servo, cảm biến
     │ REST / kênh trạng thái backend
     └──────────────────> Backend (Spring Boot)
                                │
                                ├── PostgreSQL
-                               ├── MQTT telemetry/events (tích hợp tương lai)
+                               ├── MQTT: lệnh nhả hàng, sự kiện, trạng thái máy (docs/mqtt-dispense.md)
                                ├── Cổng thanh toán QR
                                └── Web quản trị (React)
 ```
@@ -38,16 +38,16 @@ Kiosk (Electron + React) ── Serial/USB ──> ESP32 ──> Motor, cảm bi
 3. Backend tạo QR payment; kiosk hiển thị QR.
 4. Khách thanh toán; provider gửi webhook về backend.
 5. Backend verify payment và chuyển Order = PAID.
-6. Backend tạo/lưu DispenseCommand; kiosk nhận PAID cùng commandId/slot được backend cấp.
-7. Kiosk gửi `DISPENSE <commandId> <slot=A2>` tới **ESP32** qua Serial/USB.
-8. ESP32 điều khiển motor, xác nhận kết quả vật lý và trả `DISPENSE_SUCCESS <commandId>` cho kiosk.
-9. Kiosk báo kết quả tương ứng lên backend.
-10. Backend kiểm tra quyền máy/command/trạng thái, xử lý idempotent: command SUCCESS,
-    allocation DISPENSED, item SOLD; Order COMPLETED khi tất cả phần hàng đã nhả thành công.
+6. Backend tạo DispenseCommand (mã `D-…`) trong cùng transaction và gửi lệnh qua MQTT
+   `vending/<mãMáy>/commands` sau khi commit.
+7. ESP32 nhận lệnh, báo `DISPENSE_ACCEPTED`; backend chuyển Order = DISPENSING.
+8. ESP32 điều khiển servo và báo `DISPENSE_COMPLETED` hoặc `DISPENSE_ABORTED` qua `vending/<mãMáy>/events`.
+9. Backend kiểm tra máy/lệnh/trạng thái, xử lý idempotent: command SUCCESS, allocation DISPENSED, item SOLD,
+   Order COMPLETED; thất bại hoặc hết giờ thì Order/item DISPENSE_FAILED để nhân viên xử lý.
+10. Kiosk poll trạng thái đơn và hiển thị "Máy đang nhả hàng", "Mời lấy trái cây" hoặc báo lỗi kèm mã đơn.
 
-Trong lúc nhả hàng dùng trạng thái DISPENSING. Kiosk không tự tạo command hay đánh dấu PAID.
-Mất kết nối/timeout/kết quả không rõ phải đối soát, không gửi lại mù quáng gây nhả hàng hai lần.
-MQTT không thay thế đường Serial/USB cho dispense trong flow đã thống nhất.
+Kiosk và ESP32 không bao giờ tự đánh dấu PAID. Lệnh chưa có phản hồi được gửi lại cùng mã; firmware không nhả
+hai lần cho một mã. Chi tiết topic, envelope và cách chạy local: [docs/mqtt-dispense.md](docs/mqtt-dispense.md).
 
 Backend là nguồn dữ liệu chính. Kiosk không duy trì hàng đợi đồng bộ giao dịch khi mất điện/mất mạng.
 

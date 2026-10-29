@@ -13,17 +13,22 @@ export type OrderView =
   | { kind: 'waiting-qr' }
   | { kind: 'qr'; qrCode: string; amount: number | undefined; deadline: number | undefined }
   | { kind: 'qr-expired'; canRenew: boolean }
+  | { kind: 'dispensing' }
   | { kind: 'paid' }
+  | { kind: 'dispense-failed' }
   | { kind: 'cancelled' }
   | { kind: 'ended' }
 
-const PAID_STATES = new Set(['PAID', 'DISPENSING', 'COMPLETED'])
+// After payment the backend sends the dispense command to the machine (MQTT) and reports the outcome on the order.
+const DISPENSING_STATES = new Set(['PAID', 'DISPENSING'])
 const time = (value: string | undefined) => { const parsed = value ? Date.parse(value) : NaN; return Number.isFinite(parsed) ? parsed : undefined }
 
 /** Screen for a polled order. `serverNow` is the client clock corrected by the server offset. */
 export function viewForOrder(order: KioskOrder, serverNow: number): OrderView {
   const status = order.status
-  if (status && PAID_STATES.has(status)) return { kind: 'paid' }
+  if (status && DISPENSING_STATES.has(status)) return { kind: 'dispensing' }
+  if (status === 'COMPLETED') return { kind: 'paid' }
+  if (status === 'DISPENSE_FAILED') return { kind: 'dispense-failed' }
   if (status === 'CANCELLED') return { kind: 'cancelled' }
   if (status !== 'PENDING_PAYMENT') return { kind: 'ended' }
   const payment = order.currentPayment
