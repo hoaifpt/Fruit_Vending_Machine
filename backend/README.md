@@ -7,7 +7,8 @@ Common foundation gồm JPA auditing, chuẩn response/exception, Jakarta Valida
 - Migration: `src/main/resources/db/migration/` (V1–V8).
 - Môi trường database local: `db/compose.yaml`.
 - Kết nối database local: `.env` ở root repository (Git ignore); mẫu `.env.example`.
-- Seed development: `db/dev/seed.sql`, phải chạy thủ công.
+- Seed development: `db/dev/seed.sql`, phải chạy thủ công (chạy lại an toàn; không tạo tài khoản hay kiosk key).
+  Trên VM: `docker compose exec -T db psql -U fruit_machine -d fruit_machine < backend/db/dev/seed.sql`.
 - Kiểm tra và truy vấn mẫu: `db/verify/`.
 - Thiết kế, ERD và hướng dẫn: [database-migration.md](../docs/database-migration.md).
 - Mapping JPA, khóa kép và kiểm thử: [jpa-entities.md](../docs/jpa-entities.md).
