@@ -39,9 +39,17 @@ services:
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
       INITIAL_ADMIN_FULL_NAME: ${INITIAL_ADMIN_FULL_NAME:-Initial Administrator}
 
-      PAYMENT_PROVIDER: MOCK
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-MOCK}
+      PAYMENT_MOCK_WEBHOOK_SECRET: ${PAYMENT_MOCK_WEBHOOK_SECRET:-}
+      PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
+      PAYOS_API_KEY: ${PAYOS_API_KEY:-}
+      PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-}
       MQTT_ENABLED: "false"
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+      # Trust X-Forwarded-* from Caddy so generated URLs (Swagger) use the public https origin.
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
     ports:
       - "8080:8080"
     depends_on:
@@ -50,8 +58,28 @@ services:
     networks:
       - backend
 
+  # HTTPS reverse proxy; set PUBLIC_DOMAIN in root .env and open ports 80/443 on the VM.
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    networks:
+      - backend
+
 volumes:
   postgres_data:
+  caddy_data:
+  caddy_config:
 
 networks:
   backend:

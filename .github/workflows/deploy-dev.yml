@@ -38,7 +38,7 @@ jobs:
             git checkout -B dev origin/dev
             git reset --hard origin/dev
 
-            docker compose up -d --build app
+            docker compose up -d --build app caddy
 
             for i in $(seq 1 30); do
               if curl -fsS \

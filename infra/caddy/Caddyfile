@@ -1,0 +1,6 @@
+# Public HTTPS entry point for the backend (payOS webhooks require HTTPS).
+# PUBLIC_DOMAIN must resolve to this host; Caddy obtains and renews the certificate automatically.
+{$PUBLIC_DOMAIN} {
+	encode gzip
+	reverse_proxy app:8080
+}
