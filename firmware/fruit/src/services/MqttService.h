@@ -21,11 +21,14 @@ private:
     void handleMessage(char *topic, uint8_t *payload, unsigned int length);
     bool connect();
     void publishStatus(const char *message);
+    void publishHeartbeat();
 
     DispenseController &dispenseController;
     WiFiClient networkClient;
     PubSubClient mqttClient;
     char commandTopic[96] = {};
     char statusTopic[96] = {};
+    char heartbeatTopic[96] = {};
     unsigned long lastAttemptAt = 0;
+    unsigned long lastHeartbeatAt = 0;
 };

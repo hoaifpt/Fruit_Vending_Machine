@@ -28,11 +28,16 @@ bool MqttService::begin()
         sizeof(statusTopic),
         "fruit-vending/%s/status",
         AppConfig::MACHINE_ID);
+    snprintf(
+        heartbeatTopic,
+        sizeof(heartbeatTopic),
+        "fruit-vending/%s/heartbeat",
+        AppConfig::MACHINE_ID);
 
     activeInstance = this;
     mqttClient.setServer(AppConfig::MQTT_HOST, AppConfig::MQTT_PORT);
     mqttClient.setCallback(MqttService::onMessage);
-    mqttClient.setBufferSize(128);
+    mqttClient.setBufferSize(256);
     return true;
 }
 
@@ -55,6 +60,13 @@ void MqttService::loop()
     }
 
     mqttClient.loop();
+
+    const unsigned long now = millis();
+    if (now - lastHeartbeatAt >= AppConfig::MQTT_HEARTBEAT_INTERVAL_MS)
+    {
+        lastHeartbeatAt = now;
+        publishHeartbeat();
+    }
 }
 
 bool MqttService::connect()
@@ -92,7 +104,9 @@ bool MqttService::connect()
 
     Serial.println(" connected");
     mqttClient.subscribe(commandTopic);
+    lastHeartbeatAt = millis();
     publishStatus("online");
+    publishHeartbeat();
     Serial.print("Subscribed to: ");
     Serial.println(commandTopic);
     return true;
@@ -103,6 +117,31 @@ void MqttService::publishStatus(const char *message)
     if (mqttClient.connected())
     {
         mqttClient.publish(statusTopic, message, true);
+    }
+}
+
+void MqttService::publishHeartbeat()
+{
+    if (!mqttClient.connected())
+    {
+        return;
+    }
+
+    char payload[256];
+    snprintf(
+        payload,
+        sizeof(payload),
+        "{\"machineId\":\"%s\",\"status\":\"ONLINE\","
+        "\"uptimeSeconds\":%lu,\"wifiRssi\":%d,\"freeHeap\":%lu,"
+        "\"temperatureC\":null,\"temperatureStatus\":\"SENSOR_ERROR\"}",
+        AppConfig::MACHINE_ID,
+        millis() / 1000UL,
+        WiFi.RSSI(),
+        static_cast<unsigned long>(ESP.getFreeHeap()));
+
+    if (!mqttClient.publish(heartbeatTopic, payload))
+    {
+        Serial.println("Failed to publish MQTT heartbeat");
     }
 }
 

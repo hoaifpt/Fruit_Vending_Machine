@@ -38,6 +38,7 @@ namespace AppConfig
     constexpr uint8_t SENSOR_ACTIVE_LEVEL = LOW;
     constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 10000;
     constexpr unsigned long MQTT_RETRY_INTERVAL_MS = 5000;
+    constexpr unsigned long MQTT_HEARTBEAT_INTERVAL_MS = 30000;
 
     constexpr int SERVO_STOP_US = 1500;
     constexpr int SERVO_OPEN_US = 2000;
