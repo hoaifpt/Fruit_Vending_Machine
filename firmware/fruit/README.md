@@ -42,7 +42,7 @@ Send one command per line (`\n`). Lines starting with `# ` are logs. At boot the
 | --- | --- | --- |
 | `PING` | `PONG` | link check |
 | `STATUS` | `STATE <state> [<commandId>]` | IDLE, OPENING_LOWER, HOLD_LOWER, CLOSING_LOWER, OPENING_UPPER, HOLD_UPPER, CLOSING_UPPER, MANUAL_MOVE, FAULT |
-| `DISPENSE <commandId>` | `ACK <id>` then `DONE <id> OK` | one full cycle (about 3.9 s): lower opens → bowl falls out → lower closes → upper opens → next bowl falls into position → upper closes. The two gates are never open together |
+| `DISPENSE <commandId> [A\|B]` | `ACK <id>` then `DONE <id> OK` | one full cycle (about 3.9 s) on the selected column: lower opens → bowl falls out → lower closes → upper opens → next bowl falls into position → upper closes. Omitting the column keeps the Serial compatibility default `A`. |
 | | `BUSY <id> <state>` | another cycle/test is running or the controller is in FAULT |
 | | `DONE <id> OK\|ABORTED` (again) | the same commandId was already executed: nothing moves (idempotent, last 8 ids) |
 | `STOP` | `STOPPED` (+ `DONE <id> ABORTED`) | stops every servo; an interrupted cycle puts the controller in FAULT |
@@ -72,3 +72,35 @@ Backend repo: create machine `FV-DEV-001`, start the broker (`infra/mosquitto`, 
 and the machine broker password. Expected: `# MQTT connected as FV-DEV-001`; the backend receives `status` ONLINE at every connect,
 `events` DISPENSE_COMPLETED / DISPENSE_ABORTED / BOWL_SENSOR_TRIGGERED, and `status` OFFLINE (Last Will) when the board loses power.
 Telemetry starts once a temperature/humidity sensor is added (`MqttService::publishTelemetry`).
+
+## Maintenance operations
+
+Maintenance is separate from `DISPENSE` and supports two operations on the
+selected column (`A` or `B`):
+
+- `MAINTENANCE_REMOVE_ITEM`: opens the lower gate briefly so staff can remove
+  one item, then opens and closes the upper gate to move the next item into
+  position.
+- `MAINTENANCE_EMPTY_COLUMN`: opens the lower gate for the configured
+  whole-column hold time so staff can remove all items. The upper gate is not
+  opened because the column is intentionally emptied.
+
+Both commands use the same MQTT topic and require `commandId` and `columnCode`.
+The firmware publishes operation-specific `ACCEPTED`, `REJECTED`,
+`COMPLETED`, or `ABORTED` events. Repeating a completed commandId publishes
+the result again without moving the servos. A column operation is rejected
+while the controller is busy or faulted.
+
+MQTT `DISPENSE` also requires `columnCode`:
+
+```json
+{
+  "type": "DISPENSE",
+  "commandId": "ORDER-001",
+  "columnCode": "B"
+}
+```
+
+Column A maps to the lower/upper servo masks `0b0001`/`0b0010`; column B maps
+to `0b0100`/`0b1000`. The firmware rejects a MQTT dispense command without a
+single-character column code.

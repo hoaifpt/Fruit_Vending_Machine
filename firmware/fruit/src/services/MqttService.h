@@ -10,7 +10,8 @@ class MqttService
 {
 public:
     // Called from loop() with a validated commandId of a DISPENSE command addressed to this machine.
-    using DispenseHandler = void (*)(const char *commandId);
+    using DispenseHandler = void (*)(const char *commandId, char columnCode);
+    using MaintenanceHandler = void (*)(const char *commandId, char columnCode, const char *operation);
 
     MqttService();
 
@@ -18,6 +19,7 @@ public:
     void loop();
     bool connected();
     void onDispense(DispenseHandler handler) { dispenseHandler = handler; }
+    void onMaintenance(MaintenanceHandler handler) { maintenanceHandler = handler; }
 
     // payloadJson must be a JSON object built from trusted values (numbers, validated ids).
     bool publishTelemetry(float temperatureC, float humidityPercent);
@@ -25,6 +27,7 @@ public:
 
 private:
     bool connect();
+    bool publishHeartbeat();
     bool publish(const char *channel, const char *payloadJson);
     void buildEnvelope(char *out, size_t size, const char *messageId, const char *payloadJson);
     void topicFor(char *out, size_t size, const char *channel);
@@ -38,6 +41,8 @@ private:
     char bootId[9] = {};
     unsigned long sequence = 0;
     unsigned long lastAttemptAt = 0;
+    unsigned long lastHeartbeatAt = 0;
     bool configured = false;
     DispenseHandler dispenseHandler = nullptr;
+    MaintenanceHandler maintenanceHandler = nullptr;
 };

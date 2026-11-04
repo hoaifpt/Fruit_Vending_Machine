@@ -77,12 +77,16 @@ void SerialCommandService::handleLine(char *text)
     else if (strcmp(command, "DISPENSE") == 0)
     {
         char *id = rest == nullptr ? nullptr : strtok(rest, " \t");
-        if (id == nullptr || strtok(nullptr, " \t") != nullptr || !validCommandId(id))
+        char *column = strtok(nullptr, " \t");
+        const char columnCode = column == nullptr ? 'A' : column[0];
+        if (id == nullptr || strtok(nullptr, " \t") != nullptr || !validCommandId(id) ||
+            (column != nullptr && column[1] != '\0') ||
+            (columnCode != 'A' && columnCode != 'B'))
         {
-            Serial.println("ERR INVALID_COMMAND_ID");
+            Serial.println("ERR USAGE DISPENSE <commandId> [A|B]");
             return;
         }
-        handleDispense(id);
+        handleDispense(id, columnCode);
     }
     else if (strcmp(command, "STOP") == 0)
     {
@@ -107,23 +111,25 @@ void SerialCommandService::handleLine(char *text)
     }
 }
 
-SerialCommandService::DispenseReply SerialCommandService::requestDispense(const char *commandId)
+SerialCommandService::DispenseReply SerialCommandService::requestDispense(const char *commandId, char columnCode)
 {
-    if (commandId == nullptr || !validCommandId(commandId))
+    if (commandId == nullptr || !validCommandId(commandId) ||
+        (columnCode != 'A' && columnCode != 'B'))
     {
         return DispenseReply::INVALID;
     }
     // Retry of a finished command: answer again, never dispense a second bowl.
-    if (const Completed *done = findCompleted(commandId))
+    if (const Completed *done = findCompleted(commandId, columnCode))
     {
         return done->outcome == DispenseOutcome::OK ? DispenseReply::DONE_OK : DispenseReply::DONE_ABORTED;
     }
     // Retry of the command in progress.
-    if (dispenser.cycleActive() && strcmp(dispenser.activeCommandId(), commandId) == 0)
+    if (dispenser.cycleActive() && strcmp(dispenser.activeCommandId(), commandId) == 0 &&
+        dispenser.dispenseColumnCode() == columnCode)
     {
         return DispenseReply::IN_PROGRESS;
     }
-    if (!dispenser.start(commandId))
+    if (!dispenser.start(commandId, columnCode))
     {
         return DispenseReply::BUSY;
     }
@@ -131,9 +137,9 @@ SerialCommandService::DispenseReply SerialCommandService::requestDispense(const 
     return DispenseReply::STARTED;
 }
 
-void SerialCommandService::handleDispense(const char *commandId)
+void SerialCommandService::handleDispense(const char *commandId, char columnCode)
 {
-    switch (requestDispense(commandId))
+    switch (requestDispense(commandId, columnCode))
     {
     case DispenseReply::DONE_OK:
         Serial.printf("DONE %s OK\n", commandId);
@@ -217,18 +223,20 @@ void SerialCommandService::reportResult(const DispenseController::Result &result
     strncpy(slot.commandId, result.commandId, DispenseController::COMMAND_ID_SIZE);
     slot.outcome = result.outcome;
     nextSlot = (nextSlot + 1) % REMEMBERED;
-    Serial.printf("DONE %s %s\n", result.commandId, outcomeName(result.outcome));
+    slot.columnCode = result.columnCode;
+    Serial.printf("DONE %s %c %s\n", result.commandId, result.columnCode, outcomeName(result.outcome));
     if (result.outcome == DispenseOutcome::ABORTED)
     {
         Logger::info("Dispense %s aborted: check both gates, then send RESET", result.commandId);
     }
 }
 
-const SerialCommandService::Completed *SerialCommandService::findCompleted(const char *commandId) const
+const SerialCommandService::Completed *SerialCommandService::findCompleted(const char *commandId, char columnCode) const
 {
     for (const Completed &entry : completed)
     {
-        if (entry.commandId[0] != '\0' && strcmp(entry.commandId, commandId) == 0)
+        if (entry.commandId[0] != '\0' && strcmp(entry.commandId, commandId) == 0 &&
+            entry.columnCode == columnCode)
         {
             return &entry;
         }

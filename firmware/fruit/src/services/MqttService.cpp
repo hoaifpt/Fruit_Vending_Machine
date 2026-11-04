@@ -52,6 +52,13 @@ void MqttService::loop()
     }
 
     mqttClient.loop();
+
+    const unsigned long now = millis();
+    if (now - lastHeartbeatAt >= AppConfig::MQTT_HEARTBEAT_INTERVAL_MS)
+    {
+        publishHeartbeat();
+        lastHeartbeatAt = now;
+    }
 }
 
 bool MqttService::connected()
@@ -82,6 +89,8 @@ bool MqttService::connect()
     snprintf(payload, sizeof(payload), "{\"state\":\"ONLINE\",\"firmwareVersion\":\"%s\",\"uptimeSeconds\":%lu}",
              AppConfig::FIRMWARE_VERSION, millis() / 1000UL);
     publish("status", payload);
+    lastHeartbeatAt = millis();
+    publishHeartbeat();
     // Clean session: subscribe again after every (re)connect.
     if (!mqttClient.subscribe(commandTopic, 1))
     {
@@ -91,9 +100,21 @@ bool MqttService::connect()
     return true;
 }
 
+bool MqttService::publishHeartbeat()
+{
+    char payload[192];
+    snprintf(payload, sizeof(payload),
+             "{\"state\":\"ONLINE\",\"uptimeSeconds\":%lu,\"wifiRssi\":%d,\"freeHeap\":%lu,\"firmwareVersion\":\"%s\"}",
+             millis() / 1000UL,
+             WiFi.RSSI(),
+             static_cast<unsigned long>(ESP.getFreeHeap()),
+             AppConfig::FIRMWARE_VERSION);
+    return publish("heartbeat", payload);
+}
+
 void MqttService::handleMessage(char *topic, uint8_t *payload, unsigned int length)
 {
-    if (strcmp(topic, commandTopic) != 0 || dispenseHandler == nullptr)
+    if (strcmp(topic, commandTopic) != 0)
     {
         return;
     }
@@ -103,10 +124,11 @@ void MqttService::handleMessage(char *topic, uint8_t *payload, unsigned int leng
         Logger::info("MQTT command ignored: invalid JSON");
         return;
     }
-    const char *machine = doc["machineCode"] | AppConfig::MACHINE_CODE;
+    const char *machine = doc["machineCode"] | "";
     const char *type = doc["payload"]["type"] | "";
     const char *id = doc["payload"]["commandId"] | "";
-    if (strcmp(machine, AppConfig::MACHINE_CODE) != 0 || strcmp(type, "DISPENSE") != 0)
+    const char *column = doc["payload"]["columnCode"] | "";
+    if (strcmp(machine, AppConfig::MACHINE_CODE) != 0)
     {
         Logger::info("MQTT command ignored: type %s for machine %s", type, machine);
         return;
@@ -115,7 +137,40 @@ void MqttService::handleMessage(char *topic, uint8_t *payload, unsigned int leng
     char commandId[48];
     strncpy(commandId, id, sizeof(commandId) - 1);
     commandId[sizeof(commandId) - 1] = '\0';
-    dispenseHandler(commandId);
+    if (strcmp(type, "DISPENSE") == 0 && dispenseHandler != nullptr)
+    {
+        char col = column[0];
+        if (col == '\0')
+        {
+            col = 'A';
+        }
+        else if (column[1] != '\0' || (col != 'A' && col != 'B'))
+        {
+            Logger::info("MQTT dispense ignored: invalid columnCode");
+            return;
+        }
+        dispenseHandler(commandId, col);
+    }
+    else if ((strcmp(type, "MAINTENANCE_REMOVE_ITEM") == 0 ||
+              strcmp(type, "MAINTENANCE_EMPTY_COLUMN") == 0 ||
+              strcmp(type, "MAINTENANCE_OPEN_REFILL") == 0 ||
+              strcmp(type, "MAINTENANCE_CLOSE_REFILL") == 0) &&
+             maintenanceHandler != nullptr)
+    {
+        if (column[0] == '\0' || column[1] != '\0')
+        {
+            Logger::info("MQTT maintenance command ignored: invalid columnCode");
+            return;
+        }
+        const char *operation = strcmp(type, "MAINTENANCE_OPEN_REFILL") == 0
+                                    ? "OPEN_REFILL"
+                                    : strcmp(type, "MAINTENANCE_CLOSE_REFILL") == 0
+                                          ? "CLOSE_REFILL"
+                                          : strcmp(type, "MAINTENANCE_EMPTY_COLUMN") == 0
+                                                ? "EMPTY_COLUMN"
+                                                : "REMOVE_ITEM";
+        maintenanceHandler(commandId, column[0], operation);
+    }
 }
 
 bool MqttService::publishTelemetry(float temperatureC, float humidityPercent)

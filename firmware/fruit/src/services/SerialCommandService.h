@@ -5,7 +5,7 @@
 #include "application/DispenseController.h"
 
 // Line protocol on USB Serial (115200, '\n'), DRAFT until the kiosk/tablet dispense channel issue fixes it.
-// Requests:  PING | STATUS | DISPENSE <commandId> | STOP | RESET | GATE <LOWER|UPPER> <OPEN|CLOSE> | SERVO <1-4> <pulseUs> <ms>
+// Requests:  PING | STATUS | DISPENSE <commandId> [A|B] | STOP | RESET | GATE <LOWER|UPPER> <OPEN|CLOSE> | SERVO <1-4> <pulseUs> <ms>
 // Replies:   READY <fw> <machineCode> | PONG | STATE <state> [<commandId>] | ACK <id> | BUSY <id> <state> |
 //            DONE <id> OK|ABORTED | STOPPED | RESET OK | OK GATE | OK SERVO | ERR <reason>
 // Lines starting with "# " are logs, not replies. DISPENSE is idempotent: a repeated commandId never moves a servo again.
@@ -26,7 +26,7 @@ public:
     explicit SerialCommandService(DispenseController &dispenser);
 
     // Idempotent: the same commandId never dispenses twice (the last REMEMBERED ids are kept).
-    DispenseReply requestDispense(const char *commandId);
+    DispenseReply requestDispense(const char *commandId, char columnCode = 'A');
 
     void begin();
     void loop();
@@ -41,6 +41,7 @@ private:
     {
         char commandId[DispenseController::COMMAND_ID_SIZE];
         DispenseOutcome outcome;
+        char columnCode = 'A';
     };
 
     DispenseController &dispenser;
@@ -51,10 +52,10 @@ private:
     size_t nextSlot = 0;
 
     void handleLine(char *text);
-    void handleDispense(const char *commandId);
+    void handleDispense(const char *commandId, char columnCode);
     void handleServo(char *arguments);
     void handleGate(char *arguments);
-    const Completed *findCompleted(const char *commandId) const;
+    const Completed *findCompleted(const char *commandId, char columnCode) const;
     static bool validCommandId(const char *commandId);
     static const char *outcomeName(DispenseOutcome outcome);
 };

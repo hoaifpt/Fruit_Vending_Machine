@@ -49,20 +49,27 @@ namespace AppConfig
     constexpr unsigned long SERVO_TEST_MAX_MS = 15000;
 
     // Gates, as a bit mask of servo numbers (bit 0 = servo 1 on GPIO 18, bit 1 = servo 2 on GPIO 19, bit 2 = servo 3, bit 3 = servo 4).
-    // LOWER gate holds the bowl in dispensing position; UPPER gate holds the rest of the column. Change to match the wiring.
+    // The maintenance clear mask contains both servos attached to the same column gate.
     constexpr uint8_t LOWER_GATE_SERVOS = 0b0001;
     constexpr uint8_t UPPER_GATE_SERVOS = 0b0010;
+    constexpr uint8_t COLUMN_A_LOWER_SERVOS = 0b0001;
+    constexpr uint8_t COLUMN_A_UPPER_SERVOS = 0b0010;
+    constexpr uint8_t COLUMN_B_LOWER_SERVOS = 0b0100;
+    constexpr uint8_t COLUMN_B_UPPER_SERVOS = 0b1000;
 
     // Dispense cycle (never both gates open): lower opens -> bowl falls out -> lower closes ->
     // upper opens -> next bowl falls into position -> upper closes.
     constexpr unsigned long DISPENSE_HOLD_MS = 700;      // lower gate kept open while the bowl falls out
     constexpr unsigned long REFILL_HOLD_MS = 700;        // upper gate kept open while the next bowl falls into position
+    constexpr unsigned long MAINTENANCE_REMOVE_ITEM_HOLD_MS = 1200; // allow staff to remove one item
+    constexpr unsigned long MAINTENANCE_EMPTY_COLUMN_HOLD_MS = 5000; // allow the whole column to be removed
 
     constexpr unsigned long SENSOR_DEBOUNCE_MS = 30;
     constexpr uint8_t SENSOR_ACTIVE_LEVEL = LOW;
 
     constexpr unsigned long WIFI_RETRY_INTERVAL_MS = 20000;
     constexpr unsigned long MQTT_RETRY_INTERVAL_MS = 5000;
+    constexpr unsigned long MQTT_HEARTBEAT_INTERVAL_MS = 30000;
     constexpr uint16_t MQTT_BUFFER_SIZE = 1024;
     constexpr uint16_t MQTT_KEEP_ALIVE_SECONDS = 30;
     constexpr char MQTT_TOPIC_ROOT[] = "vending";
