@@ -22,6 +22,29 @@ npm run dev
 
 Mở địa chỉ Vite in trong terminal, thường là `http://localhost:5173`. Nếu đang ở `apps/web`, bỏ qua lệnh `cd`.
 
+### Chạy không cần backend (mock)
+
+```powershell
+npm run dev:mock
+```
+
+Toàn bộ web (admin, đăng nhập, kiosk) chạy trên dữ liệu giả trong bộ nhớ, dựng từ seed dev; tải lại trang là về dữ liệu ban đầu. Đăng nhập bằng `admin@freshvend.test` / `mock-admin-password` hoặc `staff@freshvend.test` / `mock-staff-password` (giá trị giả, chỉ dùng cho mock). Kiosk `/buy` tự xác nhận thanh toán sau 15 giây.
+
+Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,payments,webhook-logs,kiosk`), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ.
+
+Thêm `?scenario=<tên>` vào URL trang để ép trạng thái, ví dụ `/admin/products?scenario=empty`:
+
+| Tên | Tác dụng |
+| --- | --- |
+| `empty` | Danh sách rỗng |
+| `slow` | Mọi phản hồi chậm 3 giây |
+| `error500`, `network` | Lỗi hệ thống, mất mạng |
+| `401`, `403` | Hết phiên, không có quyền |
+| `400`, `409` | Lỗi khi ghi (POST/PUT/PATCH), trang vẫn tải được để gửi biểu mẫu |
+| `pending` | Kiosk: mã QR không tự được thanh toán |
+
+Kịch bản giữ nguyên khi chuyển trang cho tới khi đóng tab hoặc mở `?scenario=none`. Có thể giới hạn theo nhóm hoặc đường dẫn: `?scenario=403:orders,payments`, `?scenario=409:/inventory/load`; khi có giới hạn thì `400`/`409` áp dụng cho cả GET. Khi kịch bản được mang từ trang trước, đăng nhập vẫn hoạt động để quay lại được.
+
 ## Các màn hình
 
 | Đường dẫn | Nội dung |
@@ -84,6 +107,7 @@ Copy-Item .env.example .env.local
 | `DEV_API_PROXY_TARGET` | Chỉ cho `npm run dev`: Vite proxy `/api` tới backend, mặc định `http://localhost:8080` |
 | `VITE_KIOSK_API_KEY` | Khóa API của máy (ADMIN cấp ở Máy bán hàng → Khóa API kiosk). Chỉ đặt trong `.env.local` của máy kiosk |
 | `VITE_KIOSK_PAYMENT_IDLE_SECONDS` | Số giây không chạm màn hình thanh toán trước khi tự hủy đơn (mặc định 120) |
+| `VITE_API_MOCK` | `all` hoặc danh sách nhóm API dùng mock; để trống thì gọi API thật. Xem mục mock ở trên |
 | `VITE_PARTNERSHIP_EMAIL` | Email liên hệ hợp tác công khai |
 | `VITE_PARTNERSHIP_PHONE` | Số điện thoại liên hệ hợp tác công khai |
 
@@ -112,7 +136,9 @@ Chạy các lệnh trong `apps/web`:
 | `npm run preview` | Xem bản build local sau khi build |
 | `npm run lint` | Kiểm tra mã nguồn với Oxlint |
 | `npm test` | Chạy kiểm thử API client, phiên, phân quyền, định dạng và kiosk |
+| `npm run dev:mock` | Khởi chạy web với API giả, không cần backend |
 | `npm run gen:api` | Sinh lại `src/api/schema.d.ts` từ `../../api-contract/api.yaml` |
+| `npm run gen:api:drafts` | Sinh `src/api/drafts/*.d.ts` từ `../../api-contract/drafts/*.yaml` |
 
 Chạy `npm run gen:api` mỗi khi contract thay đổi và commit file kết quả. Các tương tác vuốt, bố cục responsive và tự chuyển trang của kiosk cần kiểm tra thêm trên trình duyệt.
 
