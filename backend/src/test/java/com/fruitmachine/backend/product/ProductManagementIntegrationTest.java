@@ -430,7 +430,7 @@ class ProductManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_ADMIN", "PRODUCT_READ", "PRODUCT_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidatesPositivePriceAndStrictMoneyPrecisionOutsideMvc() {
         assertThatThrownBy(() -> service.createProduct(new CreateProductRequest("BAD", "Name", null, BigDecimal.ZERO, null)))
                 .isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -442,7 +442,7 @@ class ProductManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_STAFF", "PRODUCT_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWriteBoundaryAlsoEnforcesAdminWhenNotInvokedThroughController() {
         assertThatThrownBy(() -> service.createProduct(new CreateProductRequest("DENIED", "Name", null, BigDecimal.ONE, null)))
                 .isInstanceOf(AccessDeniedException.class);

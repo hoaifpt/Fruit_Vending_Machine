@@ -13,6 +13,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,7 +29,7 @@ public class MachineSlotService {
     private final MachineSlotMapper mapper;
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     public MachineSlotPageResponse listSlots(UUID machineId, int page, int size, SlotStatus status, String sort) {
         if (page < 0 || size < 1 || size > 100)
             throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
@@ -40,14 +41,14 @@ public class MachineSlotService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     public MachineSlotResponse getSlot(UUID machineId, UUID slotId) {
         requireMachine(machineId);
         return mapper.toResponse(slots.findByIdAndMachineId(slotId, machineId).orElseThrow(this::slotNotFound));
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineSlotResponse createSlot(UUID machineId, @Valid CreateMachineSlotRequest request) {
         var machine = machines.findById(machineId).orElseThrow(this::machineNotFound);
         if (slots.existsByMachineIdAndSlotCode(machineId, request.slotCode()))
@@ -61,7 +62,7 @@ public class MachineSlotService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineSlotResponse updateSlot(UUID machineId, UUID slotId, @Valid UpdateMachineSlotRequest request) {
         requireMachine(machineId);
         var slot = slots.findForUpdateByIdAndMachineId(slotId, machineId).orElseThrow(this::slotNotFound);
@@ -71,7 +72,7 @@ public class MachineSlotService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineSlotResponse updateStatus(UUID machineId, UUID slotId, @Valid UpdateMachineSlotStatusRequest request) {
         requireMachine(machineId);
         var slot = slots.findForUpdateByIdAndMachineId(slotId, machineId).orElseThrow(this::slotNotFound);

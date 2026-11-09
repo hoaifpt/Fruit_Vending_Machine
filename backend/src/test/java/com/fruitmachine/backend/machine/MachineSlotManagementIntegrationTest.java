@@ -357,7 +357,7 @@ class MachineSlotManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_ADMIN", "MACHINE_READ", "MACHINE_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidatesRequestsOutsideMvc() {
         assertThatThrownBy(() -> service.createSlot(parent.getId(), new CreateMachineSlotRequest("BAD", 0))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
         assertThatThrownBy(() -> service.updateSlot(parent.getId(), a1.getId(), new UpdateMachineSlotRequest(-1))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -365,7 +365,7 @@ class MachineSlotManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_STAFF", "MACHINE_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWritesRequireAdminOutsideController() {
         assertThatThrownBy(() -> service.createSlot(parent.getId(), new CreateMachineSlotRequest("DENIED", 6))).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> service.updateSlot(parent.getId(), a1.getId(), new UpdateMachineSlotRequest(8))).isInstanceOf(AccessDeniedException.class);

@@ -1,18 +1,18 @@
-# Chat handoff - Issue #35, 2026-10-18
+# Chat handoff - Issue #48, 2026-11-09
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/35, [BE] Update orders (one bowl per order, slot-head reservation).
-Branch feature/35-single-bowl-orders from origin/dev 903b4af (includes #33 via PR#34).
-Git delivery: see the final report; do not assume commit/push/PR/merge happened.
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/48, [BE] Implement Permission-based Authorization.
+Branch feature/48-permission-authorization from origin/dev 27874b5. Git delivery: see the final report; do not assume commit/push/PR/merge happened.
 
-Delivered: kiosk order request is `{ "productId" }` only (breaking, strict DTO; CreateOrderItemRequest and OrderQuantityDeserializer deleted), one item of quantity 1 per order;
-reservation of the sellable slot head only (locks Product share -> Machine share -> candidate Slots FOR UPDATE by id -> head item FOR UPDATE), FEFO between heads
-(head expiry, head loaded_at, slot_code, slot id), at most one RESERVED bowl per slot; catalog via one DISTINCT ON aggregate listing only products with a sellable head;
-`app.order.max-total-quantity` / ORDER_MAX_TOTAL_QUANTITY / catalog maxTotalQuantity removed; optional section 9 done: inventory summary headStatus/headExpired
-(REPEATABLE READ). Management order APIs unchanged; historical multi-line orders readable. No schema change, migrations untouched.
-Docs: .ai PROJECT/ARCHITECTURE/DATABASE, docs/order-management.md, Swagger (tag changelog) and api-contract/api.yaml; scripts/payment_test_data.py sends the new body.
+Delivered: V13 `permissions` (15 codes, fixed UUIDs 20000000-...-0000000000NN) and `role_permissions` (ADMIN all, STAFF PRODUCT_READ, MACHINE_READ,
+BATCH_READ, BATCH_CREATE, INVENTORY_READ, INVENTORY_WRITE, ORDER_READ = previous access). Permission / RolePermission entities, Role.getPermissions().
+Authorities = ROLE_* + permission codes, loaded per request in one SQL statement (UserRepository.findWithAuthorities*); JWT `roles` claim still ROLE_* only.
+All 50 ADMIN/STAFF role checks replaced by `Permissions.HAS_*` (URL rules in SecurityConfig + @PreAuthorize, read/write split per method); kiosk keeps hasRole('KIOSK').
+APIs (PERMISSION_MANAGE): GET /api/v1/permissions, GET /api/v1/roles, GET /api/v1/roles/{id}, PUT /api/v1/roles/{id}/permissions
+(400 unknown/duplicate, 404, 409 when ADMIN would lose PERMISSION_MANAGE or USER_WRITE, PESSIMISTIC_WRITE on the role row, audit ROLE_PERMISSIONS_CHANGED).
+Swagger `x-required-permission` per operation (OperationCustomizer reading @PreAuthorize); api-contract/api.yaml synced. Docs: docs/permission-authorization.md, .ai ARCHITECTURE §23, DATABASE §16.
 
-Verification: `mvn clean verify` 628 tests, 0 failures, Flyway validated 12 migrations, no real payOS call (JDK 21.0.10, PostgreSQL 18.6 Testcontainers).
-After that run only a test-only assertion block (summary head fields) was added to KioskCatalogIntegrationTest; that class and InventoryManagementIntegrationTest were rerun (43 tests, 0 failures).
-Open: hardware team must confirm the head assumption (columns refilled from the top, earlier loaded_at = lower position); kiosk developer must switch to the new request shape.
+Verification: `mvn clean verify` 655 tests, 0 failures. AuthorizationMatrixIntegrationTest compares every api.yaml operation x {anon, STAFF, ADMIN, KIOSK}
+with src/test/resources/security/authorization-matrix-baseline.tsv recorded on the old code (`-Dmatrix.record=true` rewrites it: only on purpose).
+Open: #47 JMeter suite is in `git stash@{0}`; its finding (connection-pool deadlock under burst webhooks: AFTER_COMMIT listener -> REQUIRES_NEW needs a 2nd connection) awaits the recreated issue.
 Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...`.

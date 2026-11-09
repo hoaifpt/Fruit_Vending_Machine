@@ -107,10 +107,10 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(12);
+                .isEqualTo(13);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
-        assertThat(entities).hasSize(20);
+        assertThat(entities).hasSize(22);
         Set<String> tables = jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -122,6 +122,7 @@ class EntityMappingTest {
         var sessionFactory = entityManagerFactory.unwrap(SessionFactoryImplementor.class);
         Map<String, String> tableFeatures = Map.ofEntries(
                 Map.entry("users", "user"), Map.entry("roles", "user"), Map.entry("user_roles", "user"),
+                Map.entry("permissions", "user"), Map.entry("role_permissions", "user"),
                 Map.entry("machines", "machine"), Map.entry("machine_slots", "machine"),
                 Map.entry("machine_events", "machine"), Map.entry("products", "product"),
                 Map.entry("product_batches", "product"), Map.entry("inventory_items", "inventory"),
@@ -304,6 +305,14 @@ class EntityMappingTest {
         assertThat(loaded.getInventoryItem().getBatch().getProduct().getId()).isEqualTo(product.getId());
         assertThat(loaded.getStatus()).isEqualTo(DispenseStatus.PENDING);
         assertThat(entityManager.find(UserRole.class, membershipId).getRole().getName()).isEqualTo("ADMIN");
+        // Issue #48: Role.permissions through the RolePermission join entity (seeded by V13, read only here).
+        Role reloadedAdmin = entityManager.find(Role.class, membership.getRole().getId());
+        assertThat(reloadedAdmin.getPermissions()).extracting(com.fruitmachine.backend.user.entity.Permission::getCode)
+                .containsExactlyInAnyOrderElementsOf(com.fruitmachine.backend.security.permission.Permissions.ALL);
+        var grant = reloadedAdmin.getPermissionGrants().iterator().next();
+        assertThat(grant.getId().getRoleId()).isEqualTo(reloadedAdmin.getId());
+        assertThat(grant.getId().getPermissionId()).isEqualTo(grant.getPermission().getId());
+        assertThat(entityManager.find(com.fruitmachine.backend.user.entity.Permission.class, grant.getPermission().getId()).getCreatedAt()).isNotNull();
         assertThat(entityManager.find(User.class, user.getId()).getRoleMemberships()).hasSize(1);
         var reloadedCredential = entityManager.find(com.fruitmachine.backend.machine.kiosk.entity.KioskCredential.class, credentialId);
         assertThat(reloadedCredential.getMachine().getId()).isEqualTo(machine.getId());

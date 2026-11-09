@@ -1,105 +1,98 @@
-# Issue #35 — [BE] Update orders (single bowl per order, slot-head reservation)
+# Issue #48 — [BE] Implement Permission-based Authorization
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/35
-Branch: feature/35-single-bowl-orders (from origin/dev 903b4af, includes #33 via PR#34)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/48
+Branch: feature/48-permission-authorization (from origin/dev 27874b5)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking the
 GitHub checkboxes of this issue is allowed after verification (AGENTS.md section 14).
-Note: the issue text refers to #13/#14/#16; in this repository order management is #27 and payments are #29/#31/#33.
 
 ## Scope
-- Breaking kiosk request: `POST /api/v1/kiosk/orders` takes `{ "productId": "<uuid>" }` only (strict DTO); every new order has one item, quantity 1.
-  Response shape and management order APIs unchanged (itemCount/totalQuantity stay, always 1 for new orders).
-- Remove `app.order.max-total-quantity` (ORDER_MAX_TOTAL_QUANTITY) and the catalog field `maxTotalQuantity`.
-- Slot head = physically present item (AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED) with the earliest loaded_at, tie-break id.
-  Only a sellable head can be reserved (head AVAILABLE, batch outlives the hold deadline, product/slot/machine ACTIVE, same machine, same product),
-  so at most one RESERVED bowl per slot. FEFO only between slot heads (head expiry, head loaded_at, slot_code, slot id).
-- Reservation in one transaction with locks Product (share) -> Machine (share) -> candidate Slots (update, sorted by id) -> head Item (update).
-- Catalog lists only products with a sellable head; availableQuantity counts AVAILABLE bowls of that product, outliving the hold deadline,
-  in slots whose head is sellable for that product (aggregate SQL with DISTINCT ON).
-- Optional section 9: headStatus / headExpired on the slot inventory summary.
+V13 (permissions, role_permissions, fixed-UUID seed of the 15-code catalog and the ADMIN/STAFF mapping), Permission entity and
+RolePermission join entity (UserRole style), authorities = ROLE_* + permission codes loaded per request in one query,
+JWT unchanged (roles claim keeps ROLE_* only), every ADMIN/STAFF role check replaced by hasAuthority(<permission>) at URL and method
+level, role/permission APIs (list permissions, list/get roles, replace a role's permissions with lockout guard, row lock and audit),
+Swagger x-required-permission + api-contract, docs.
+
+## Mapping check (issue §3 vs current code)
+Every existing @PreAuthorize and URL rule was compared with §3: no difference. Class-level annotations (User, Inventory, ProductBatch,
+Order, Payment, PaymentWebhookLog, KioskCredential) are split per method (read vs write). Methods that do not exist on a protected
+path keep their current status (for example 405) because every method of the path still needs a permission both roles have.
 
 ## Non-goals
-Multi-bowl carts, slot position sensors, automatic EXPIRED transitions or blocked-slot alerts, inventory load/remove rule changes,
-dispense commands (Milestone 3), kiosk UI, schema changes.
+Creating/renaming/deleting roles or permissions, direct user permissions, row-level access, kiosk permissions, permissions for
+unbuilt features, caching, web UI, refresh tokens.
 
 ## Database / API impact
-No schema change; V1-V12 untouched; no CHECK quantity = 1 (historical rows keep many lines). API: request shape of the kiosk order
-endpoint changes, catalog loses maxTotalQuantity, inventory summary gains headStatus/headExpired.
+New V13 (V1-V12 untouched). New endpoints: GET /api/v1/permissions, GET /api/v1/roles, GET /api/v1/roles/{id},
+PUT /api/v1/roles/{id}/permissions (tag "Roles & Permissions").
 
-## Status and verification (2026-10-18)
-Implemented and locally verified; see HANDOFF.md for Git delivery status.
-- `mvn --batch-mode --no-transfer-progress clean verify` (JDK 21.0.10, PostgreSQL 18.6 Testcontainers): 628 tests, 0 failures/errors/skips, BUILD SUCCESS,
-  Flyway validated 12 migrations, Hibernate validate passed, zero mentions of api-merchant.payos.vn. A later test-only assertion (summary head fields) was rerun with its classes: 43 tests, 0 failures.
-- Evidence: OrderCreationIntegrationTest (request contract, head selection, slot choice), OrderCancelExpiryIntegrationTest (release keeps the head), OrderConcurrencyIntegrationTest
-  (one reservation per slot, several columns, race with load and with head removal), KioskCatalogIntegrationTest (blocked heads, counting, maxTotalQuantity gone, summary head fields),
-  OrderManagementReadIntegrationTest (historical multi-line orders), payment/webhook suites on one-bowl orders, OrderManagementDocumentationTest and InventoryManagementDocumentationTest (contract).
-- Assumption to confirm with the hardware team: columns are refilled from the top (earlier loaded_at = lower position).
+## Status and verification
+Done locally, not committed. The authorization matrix baseline (192 rows) was recorded on the unchanged code (dev 27874b5) before any
+change; after the change every existing operation returns the same status, new APIs: anonymous 401, kiosk 401, STAFF 403, ADMIN allowed.
+`mvn clean verify` (JDK 21.0.10, PostgreSQL 18 Testcontainers): 655 tests, 0 failures, BUILD SUCCESS; Flyway validates V1-V13.
+"Application starts" is covered by the Spring Boot context tests (InitialAdminStartupTest and every integration test), not by a
+deployed run. Existing tests updated for intended changes: migration counts/version 13, new paths in Swagger path lists, principals
+now carry permission codes (hand-built test principals use SeededAuthorities). CoreManagementFlowIntegrationTest now expires the batch
+one minute in the past (DB clock vs JVM clock skew made it flaky; unrelated to #48).
 
 # Testing
 
-## 11. Request Contract Tests
+## 9. Authorization Matrix (NFR-03)
 
-- [x] `{ "productId": ... }` creates an order with one item, quantity 1
-- [x] Missing / invalid `productId` → `400`
-- [x] Old shape `{ "items": [...] }` → `400`
-- [x] Extra fields (`quantity`, `price`, `machineId`, `status`) → `400`
-- [x] Response has exactly one item; `subtotal = totalAmount = unitPrice`
+- [x] Parameterized test over **every operation in `api-contract/api.yaml`** × {anonymous, STAFF, ADMIN, KIOSK} with the expected status (`401`/`403`/allowed)
+- [x] Matrix results are identical before and after the change (except new role/permission APIs)
+- [x] For every endpoint, URL rule and `@PreAuthorize` require the same permission
+- [x] Unauthorized request with an invalid body still gets `403`, not `400`
 
-## 12. Head Selection Tests
+## 10. Migration / Mapping
 
-- [x] Column with bowls loaded at t1 < t2 < t3 → bowl loaded at t1 is reserved
-- [x] Fresher bowl deeper in the column is NOT reserved before the head
-- [x] Head RESERVED → slot skipped; second order uses another slot or gets `409`
-- [x] Head EXPIRED status → slot blocked, `409` if no other slot
-- [x] Head AVAILABLE but batch expired → slot blocked
-- [x] Head expiring before `order.expiresAt` → slot blocked
-- [x] Head DISPENSE_FAILED → slot blocked
-- [x] Slot INACTIVE / ERROR → skipped
-- [x] Several sellable slots → slot with earliest head expiry chosen
-- [x] SOLD / REMOVED items are ignored when computing the head
-- [x] Bowls of the same load (same `loaded_at`) handled deterministically
+- [x] V13 applies on clean PostgreSQL 18; Flyway + Hibernate validation pass
+- [x] Seed contains exactly the catalog of §2 and mapping of §3
+- [x] Invalid code format rejected by CHECK
+- [x] Deleting a permission referenced by a role is rejected (RESTRICT)
+- [x] `EntityMappingTest` covers `Permission` and `Role.permissions`
 
-## 13. Release Tests
+## 11. Authorities
 
-- [x] Cancel / expiry returns head to AVAILABLE; it is still the head
-- [x] Next order reserves that same bowl again
+- [x] Principal contains `ROLE_*` and permission codes
+- [x] Roles + permissions loaded in one query (query count assertion)
+- [x] Removing `PRODUCT_WRITE` from ADMIN → next request on product create gets `403` with the same JWT
+- [x] Kiosk principal unchanged (`ROLE_KIOSK` only)
 
-## 14. Concurrency Tests (real PostgreSQL)
+## 12. Role & Permission APIs
 
-- [x] Two concurrent orders, one slot with ≥ 2 bowls → one `201`, one `409` (one reservation per slot)
-- [x] Two concurrent orders, two sellable slots → both succeed on different slots
-- [x] Order vs concurrent inventory load into the same slot → consistent head
-- [x] Order vs concurrent removal of the head → never reserves a removed bowl
+- [x] ADMIN lists permissions and roles
+- [x] ADMIN replaces STAFF permissions; effect visible on STAFF's next request
+- [x] Unknown / duplicate codes → `400`
+- [x] Removing `PERMISSION_MANAGE` or `USER_WRITE` from ADMIN → `409`
+- [x] Missing role → `404`
+- [x] STAFF → `403`; anonymous → `401`; kiosk key → `401`
+- [x] Audit row written with old/new sorted codes and actor
+- [x] Concurrent replacements on one role → no lost update
 
-## 15. Catalog Tests
+## 13. Regression
 
-- [x] Product listed only with a sellable head
-- [x] Product whose only slot has an expired head is not listed
-- [x] `availableQuantity` counts only bowls in slots with sellable heads
-- [x] `maxTotalQuantity` no longer present
-
-## 16. Regression / Documentation Tests
-
-- [x] Management order list/detail unchanged in shape; historical multi-item orders still readable
-- [x] Inventory load/remove/summary behavior unchanged (except optional §9 fields)
-- [x] Payment flow (#14/#16, if delivered) works with single-bowl orders
-- [x] `ORDER_MAX_TOTAL_QUANTITY` removed from config and `.env.example`
-- [x] Swagger and `api-contract/api.yaml` consistent (documentation test)
+- [x] No `hasRole('ADMIN')` / `hasAnyRole('ADMIN','STAFF')` left (grep check in test or CI)
 - [x] All existing tests pass (`mvn clean verify`)
-- [x] Flyway / Hibernate validation pass
+- [x] Swagger and `api-contract/api.yaml` consistent (documentation test)
+- [x] Application starts successfully
+
+---
 
 # Acceptance Criteria
 
-- [x] Kiosk order request accepts exactly one `productId`
-- [x] Every new order has exactly one item with quantity 1
-- [x] Only the head bowl of a slot can be reserved
-- [x] At most one RESERVED bowl per slot
-- [x] Blocked heads (reserved, expired, dispense-failed, expiring during hold) block their slot
-- [x] FEFO applied between slot heads only
-- [x] Reservation is atomic and concurrency-safe with slot-level locking
-- [x] Catalog lists only products with a sellable head
-- [x] `max-total-quantity` config and `maxTotalQuantity` field removed
-- [x] Management order APIs unchanged in shape
-- [x] No schema change; applied migrations unchanged
-- [x] `.ai/` docs, `docs/order-management.md`, Swagger and api-contract updated
+- [x] V13 adds `permissions` and `role_permissions` with seeded catalog and mapping
+- [x] `Permission` entity and `Role.permissions` mapped
+- [x] Authorities include permission codes, loaded per request in one query
+- [x] All ADMIN/STAFF role checks replaced by permission checks (URL + method)
+- [x] Access behavior identical to before for every existing endpoint
+- [x] `403` still precedes `400` for unauthorized requests
+- [x] Role & permission APIs implemented with lockout guard and audit log
+- [x] Permission change applies on the next request without re-login
+- [x] Kiosk and webhook access unchanged
+- [x] Authorization matrix test covers every contract operation (NFR-03)
+- [x] Swagger, `api-contract/api.yaml`, `.ai/` docs and `docs/permission-authorization.md` updated
 - [x] Tests pass (`mvn clean verify`)
+- [x] Flyway / Hibernate validation pass
+- [x] Existing applied migrations unchanged
+
+---

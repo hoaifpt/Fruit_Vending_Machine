@@ -34,11 +34,14 @@ tags:
     description: Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.
   - name: Products
     description: Management catalog. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: Roles & Permissions
+    description: "Roles are sets of permissions; every protected endpoint checks a permission. An account with PERMISSION_MANAGE views roles and the catalog and replaces a role's permission set; changes apply on each member's next request. Roles and permissions cannot be created, renamed or deleted here."
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
 paths:
   "/api/v1/inventory/transactions":
     "get":
+      "x-required-permission": "INVENTORY_READ"
       "tags":
         - "Inventory"
       "summary": "List append-only per-item inventory history"
@@ -209,6 +212,7 @@ paths:
           "bearerAuth": []
   "/api/v1/inventory/{id}":
     "get":
+      "x-required-permission": "INVENTORY_READ"
       "tags":
         - "Inventory"
       "summary": "Get physical item details"
@@ -323,6 +327,7 @@ paths:
           "bearerAuth": []
   "/api/v1/inventory":
     "get":
+      "x-required-permission": "INVENTORY_READ"
       "tags":
         - "Inventory"
       "summary": "List/filter physical inventory"
@@ -509,6 +514,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/inventory":
     "get":
+      "x-required-permission": "INVENTORY_READ"
       "tags":
         - "Inventory"
       "summary": "List inventory in a machine"
@@ -667,6 +673,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary":
     "get":
+      "x-required-permission": "INVENTORY_READ"
       "tags":
         - "Inventory"
       "summary": "Get physical/available/sellable slot counts"
@@ -783,6 +790,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/slots/{slotId}/inventory":
     "get":
+      "x-required-permission": "INVENTORY_READ"
       "tags":
         - "Inventory"
       "summary": "List inventory in a scoped slot"
@@ -947,6 +955,7 @@ paths:
           "bearerAuth": []
   "/api/v1/inventory/load":
     "post":
+      "x-required-permission": "INVENTORY_WRITE"
       "tags":
         - "Inventory"
       "summary": "Record physically confirmed stock loading"
@@ -1078,6 +1087,7 @@ paths:
           "bearerAuth": []
   "/api/v1/inventory/{id}/remove":
     "post":
+      "x-required-permission": "INVENTORY_WRITE"
       "tags":
         - "Inventory"
       "summary": "Record confirmed physical removal"
@@ -1213,6 +1223,7 @@ paths:
           "bearerAuth": []
   "/api/v1/product-batches/{id}":
     "get":
+      "x-required-permission": "BATCH_READ"
       "tags":
         - "Product Batches"
       "summary": "Get product batch details"
@@ -1323,6 +1334,7 @@ paths:
           "bearerAuth": []
   "/api/v1/product-batches":
     "get":
+      "x-required-permission": "BATCH_READ"
       "tags":
         - "Product Batches"
       "summary": "List product batches"
@@ -1455,6 +1467,7 @@ paths:
         -
           "bearerAuth": []
     "post":
+      "x-required-permission": "BATCH_CREATE"
       "tags":
         - "Product Batches"
       "summary": "Register immutable product batch"
@@ -1584,6 +1597,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/slots/{slotId}":
     "get":
+      "x-required-permission": "MACHINE_READ"
       "tags":
         - "Machine Slots"
       "summary": "Get a slot in the specified machine"
@@ -1698,6 +1712,7 @@ paths:
         -
           "bearerAuth": []
     "put":
+      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machine Slots"
       "summary": "Replace slot capacity"
@@ -1821,6 +1836,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/slots":
     "get":
+      "x-required-permission": "MACHINE_READ"
       "tags":
         - "Machine Slots"
       "summary": "List slots belonging to a machine"
@@ -1973,6 +1989,7 @@ paths:
         -
           "bearerAuth": []
     "post":
+      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machine Slots"
       "summary": "Configure a new machine slot"
@@ -2105,6 +2122,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/slots/{slotId}/status":
     "patch":
+      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machine Slots"
       "summary": "Change slot status"
@@ -2228,6 +2246,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{id}":
     "get":
+      "x-required-permission": "MACHINE_READ"
       "tags":
         - "Machines"
       "summary": "Get machine details"
@@ -2339,6 +2358,7 @@ paths:
         -
           "bearerAuth": []
     "put":
+      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machines"
       "summary": "Replace machine configuration"
@@ -2464,6 +2484,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines":
     "get":
+      "x-required-permission": "MACHINE_READ"
       "tags":
         - "Machines"
       "summary": "List/search machines"
@@ -2610,6 +2631,7 @@ paths:
         -
           "bearerAuth": []
     "post":
+      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machines"
       "summary": "Register machine"
@@ -2731,6 +2753,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{id}/status":
     "patch":
+      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machines"
       "summary": "Change administrative machine status"
@@ -2927,6 +2950,7 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
   /api/v1/users:
     get:
+      "x-required-permission": "USER_READ"
       tags: [Users]
       operationId: listUsers
       summary: List management users
@@ -2998,6 +3022,7 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
               example: {"timestamp":"2026-10-06T00:00:00Z","status":500,"error":"Internal Server Error","message":"An unexpected error occurred","path":"/api/v1/users"}
     post:
+      "x-required-permission": "USER_WRITE"
       tags: [Users]
       operationId: createStaff
       summary: Create an operational STAFF account
@@ -3066,6 +3091,7 @@ paths:
               example: {"timestamp":"2026-10-06T00:00:00Z","status":409,"error":"Conflict","message":"Email is already in use","path":"/api/v1/users"}
   /api/v1/users/{id}:
     get:
+      "x-required-permission": "USER_READ"
       tags: [Users]
       operationId: getUser
       summary: Get management user details
@@ -3129,6 +3155,7 @@ paths:
                 $ref: '#/components/schemas/ApiErrorResponse'
               example: {"timestamp":"2026-10-06T00:00:00Z","status":404,"error":"Not Found","message":"User not found","path":"/api/v1/users/{id}"}
     put:
+      "x-required-permission": "USER_WRITE"
       tags: [Users]
       operationId: updateUser
       summary: Update management user profile
@@ -3200,6 +3227,7 @@ paths:
               example: {"timestamp":"2026-10-06T00:00:00Z","status":404,"error":"Not Found","message":"User not found","path":"/api/v1/users/{id}"}
   /api/v1/users/{id}/status:
     patch:
+      "x-required-permission": "USER_WRITE"
       tags: [Users]
       operationId: updateUserStatus
       summary: Change management user status
@@ -3278,6 +3306,7 @@ paths:
               example: {"timestamp":"2026-10-06T00:00:00Z","status":409,"error":"Conflict","message":"You cannot disable or lock your own account","path":"/api/v1/users/{id}/status"}
   "/api/v1/products/{id}":
     get:
+      "x-required-permission": "PRODUCT_READ"
       tags:
         - "Products"
       summary: "Get catalog product details"
@@ -3386,6 +3415,7 @@ paths:
         -
           bearerAuth: []
     put:
+      "x-required-permission": "PRODUCT_WRITE"
       tags:
         - "Products"
       summary: "Replace catalog product fields"
@@ -3506,6 +3536,7 @@ paths:
           bearerAuth: []
   "/api/v1/products/{id}/status":
     patch:
+      "x-required-permission": "PRODUCT_WRITE"
       tags:
         - "Products"
       summary: "Activate/deactivate catalog product"
@@ -3623,6 +3654,7 @@ paths:
           bearerAuth: []
   "/api/v1/products":
     get:
+      "x-required-permission": "PRODUCT_READ"
       tags:
         - "Products"
       summary: "List/search catalog products"
@@ -3765,6 +3797,7 @@ paths:
         -
           bearerAuth: []
     post:
+      "x-required-permission": "PRODUCT_WRITE"
       tags:
         - "Products"
       summary: "Create catalog product"
@@ -3881,6 +3914,7 @@ paths:
           bearerAuth: []
   "/api/v1/machines/{machineId}/kiosk-credentials":
     "get":
+      "x-required-permission": "KIOSK_CREDENTIAL_MANAGE"
       "tags":
         - "Kiosk Credentials"
       "summary": "List kiosk credential metadata of a machine"
@@ -3976,6 +4010,7 @@ paths:
         -
           "bearerAuth": []
     "post":
+      "x-required-permission": "KIOSK_CREDENTIAL_MANAGE"
       "tags":
         - "Kiosk Credentials"
       "summary": "Issue (rotate) the kiosk credential of a machine"
@@ -4070,6 +4105,7 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke":
     "post":
+      "x-required-permission": "KIOSK_CREDENTIAL_MANAGE"
       "tags":
         - "Kiosk Credentials"
       "summary": "Revoke a kiosk credential"
@@ -4323,6 +4359,7 @@ paths:
           "kioskKey": []
   "/api/v1/orders":
     "get":
+      "x-required-permission": "ORDER_READ"
       "tags":
         - "Orders"
       "summary": "List and filter orders"
@@ -4496,6 +4533,7 @@ paths:
           "bearerAuth": []
   "/api/v1/payments/{id}":
     "get":
+      "x-required-permission": "PAYMENT_READ"
       "tags":
         - "Payments"
       "summary": "Get payment attempt details"
@@ -4962,6 +5000,7 @@ paths:
           "kioskKey": []
   "/api/v1/orders/{id}":
     "get":
+      "x-required-permission": "ORDER_READ"
       "tags":
         - "Orders"
       "summary": "Get order details"
@@ -5363,6 +5402,7 @@ paths:
       "security": []
   "/api/v1/payment-webhook-logs":
     "get":
+      "x-required-permission": "PAYMENT_WEBHOOK_LOG_READ"
       "tags":
         - "Payment Webhook Logs"
       "summary": "List webhook attempts"
@@ -5521,6 +5561,7 @@ paths:
           "bearerAuth": []
   "/api/v1/payment-webhook-logs/{id}":
     "get":
+      "x-required-permission": "PAYMENT_WEBHOOK_LOG_READ"
       "tags":
         - "Payment Webhook Logs"
       "summary": "Get a webhook attempt with its evidence"
@@ -5650,6 +5691,7 @@ paths:
           "bearerAuth": []
   "/api/v1/payments":
     "get":
+      "x-required-permission": "PAYMENT_READ"
       "tags":
         - "Payments"
       "summary": "List and filter payment attempts"
@@ -5834,6 +5876,205 @@ paths:
       "security":
         -
           "bearerAuth": []
+  "/api/v1/permissions":
+    "get":
+      "tags":
+        - "Roles & Permissions"
+      "summary": "List all permissions"
+      "description": "Requires PERMISSION_MANAGE. The full catalog (code, description) sorted by code. Permissions are added by migrations only."
+      "operationId": "listPermissions"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks PERMISSION_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server/configuration error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Permission catalog"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseListPermissionResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "PERMISSION_MANAGE"
+  "/api/v1/roles":
+    "get":
+      "tags":
+        - "Roles & Permissions"
+      "summary": "List roles with their permissions"
+      "description": "Requires PERMISSION_MANAGE. Every role with its sorted permission codes."
+      "operationId": "listRoles"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks PERMISSION_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server/configuration error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Roles"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseListRoleResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "PERMISSION_MANAGE"
+  "/api/v1/roles/{id}":
+    "get":
+      "tags":
+        - "Roles & Permissions"
+      "summary": "Get a role"
+      "description": "Requires PERMISSION_MANAGE. The role with its sorted permission codes."
+      "operationId": "getRole"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Role UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Role"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRoleResponse"
+        "400":
+          "description": "Malformed role UUID"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "404":
+          "description": "Role not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks PERMISSION_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server/configuration error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "PERMISSION_MANAGE"
+  "/api/v1/roles/{id}/permissions":
+    "put":
+      "tags":
+        - "Roles & Permissions"
+      "summary": "Replace the permission set of a role"
+      "description": "Requires PERMISSION_MANAGE. Replaces the whole set (an empty list leaves the role without access). Unknown or duplicate codes are rejected (400, codes listed in fieldErrors). The ADMIN role must keep PERMISSION_MANAGE and USER_WRITE (409). The role row is locked while replacing, so concurrent changes never lose an update. One audit_logs row ROLE_PERMISSIONS_CHANGED records the old and new sorted codes and the actor. Members get the new permissions on their next request; the JWT does not change."
+      "operationId": "replaceRolePermissions"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Role UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReplaceRolePermissionsRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Role with its new permission set"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRoleResponse"
+        "400":
+          "description": "Validation failure, unknown or duplicate codes, unknown JSON fields"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "404":
+          "description": "Role not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Would remove PERMISSION_MANAGE or USER_WRITE from ADMIN"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks PERMISSION_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server/configuration error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "PERMISSION_MANAGE"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -7717,3 +7958,92 @@ components:
         "expiredAt":
           "type": "string"
           "format": "date-time"
+    "ApiResponseListPermissionResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PermissionResponse"
+    "PermissionResponse":
+      "type": "object"
+      "description": "A permission of the catalog. Permissions are reference data added by migrations, never through the API."
+      "properties":
+        "code":
+          "type": "string"
+          "description": "Stable permission code checked by the backend."
+          "example": "PRODUCT_WRITE"
+        "description":
+          "type": "string"
+          "description": "What the permission allows."
+          "example": "Create and update products and change product status"
+    "ApiResponseListRoleResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/RoleResponse"
+    "RoleResponse":
+      "type": "object"
+      "description": "A role and the permission codes it grants. Roles cannot be created, renamed or deleted through the API."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "name":
+          "type": "string"
+          "description": "Role name (uppercase)."
+          "example": "STAFF"
+        "description":
+          "type":
+            - "string"
+            - "null"
+          "description": "Role description."
+          "example": "Machine operations and inventory staff"
+        "permissions":
+          "type": "array"
+          "description": "Granted permission codes, sorted."
+          "example":
+            - "BATCH_CREATE"
+            - "BATCH_READ"
+            - "INVENTORY_READ"
+          "items":
+            "type": "string"
+    "ApiResponseRoleResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/RoleResponse"
+    "ReplaceRolePermissionsRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "The complete new permission set of the role (replaces the old one). An empty list is allowed (role without access). Unknown or duplicate codes are rejected; the ADMIN role must keep PERMISSION_MANAGE and USER_WRITE."
+      "properties":
+        "permissions":
+          "type": "array"
+          "description": "Permission codes; no duplicates."
+          "items":
+            "type": "string"
+            "description": "Permission code from GET /api/v1/permissions."
+            "example": "PRODUCT_READ"
+            "minLength": 1
+          "maxItems": 200
+          "minItems": 0
+      "required":
+        - "permissions"
