@@ -10,6 +10,7 @@ import type { DataTableColumn } from '../components/ui/data-table.tsx'
 import { FilterBar } from '../components/ui/filter-bar.tsx'
 import { FormField } from '../components/ui/form-field.tsx'
 import { Input, NativeSelect } from '../components/ui/input.tsx'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../components/ui/sheet.tsx'
 import { Skeleton } from '../components/ui/skeleton.tsx'
 import { StatusBadge } from '../components/ui/status-badge.tsx'
 import { cn } from '../lib/cn.ts'
@@ -24,6 +25,7 @@ import { homeFor } from './routes.ts'
 import { errorMessage } from './useApi.ts'
 import type { ApiState } from './useApi.ts'
 import { useSession } from './useSession.ts'
+import { useReturnFocus } from './return-focus.ts'
 
 /** Labels of the few values that are not backend statuses: roles and the batch expiry hint. Statuses come from STATUS_CATALOG. */
 export const LABELS: Record<string, string> = {
@@ -143,7 +145,7 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
 export type Column<T> = DataTableColumn<T>
 
 export function DataTable<T>({ columns, rows, rowKey, state, empty = 'Không có kết quả phù hợp.', sort, onSort, caption }: {
-  columns: Column<T>[]; rows: T[] | undefined; rowKey: (row: T) => string; state: Pick<ApiState<unknown>, 'loading' | 'error' | 'reload'>; empty?: string
+  columns: Column<T>[]; rows: T[] | undefined; rowKey: (row: T) => string; state: Pick<ApiState<unknown>, 'loading' | 'error' | 'reload'>; empty?: ReactNode
   /** Current server sort; columns with a `sortKey` become sortable when `onSort` is set. */
   sort?: SortState; onSort?: (sort: SortState) => void; caption?: string
 }) {
@@ -211,7 +213,9 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
   const id = useId()
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
-  useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => dialog?.close() }, [])
+  const { restore } = useReturnFocus()
+  // Opened from state, not from a trigger: give focus back to the opener when the dialog goes away.
+  useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => { dialog?.close(); restore() } }, [restore])
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (pending) return
@@ -242,6 +246,72 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
   </dialog>
 }
 
+/**
+ * Create/edit form in a side Sheet (keeps the list in view). Same contract as `FormDialog`: `onSubmit` resolves to
+ * close, or throws; field errors go to `onFieldErrors` and the form-level alert follows `describeFormFailure`.
+ * It closes with Hủy, × or Esc only (a click outside would lose what was typed), none of them while a request runs.
+ * Focus goes back to the control that opened it.
+ */
+export function FormSheet({ title, description, submitLabel = 'Lưu', successMessage, close, onSubmit, children, onFieldErrors }: {
+  title: string; description?: ReactNode; submitLabel?: string
+  /** Toast after success; defaults to "Đã <submitLabel>". */
+  successMessage?: string
+  close: () => void
+  onSubmit: () => Promise<void>
+  children: ReactNode
+  onFieldErrors?: (fieldErrors: Record<string, string>) => void
+}) {
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState('')
+  const messageRef = useRef<HTMLParagraphElement>(null)
+  const formRef = useRef<HTMLFormElement>(null)
+  const [failures, setFailures] = useState(0)
+  const { onCloseAutoFocus } = useReturnFocus()
+  // After a failed submit has rendered its errors, move focus to the first marked field (else the form-level alert),
+  // so keyboard and screen-reader users land on what needs fixing.
+  useEffect(() => {
+    if (!failures) return
+    const invalid = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
+    if (invalid) invalid.focus(); else messageRef.current?.focus()
+  }, [failures])
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (pending) return
+    setPending(true); setMessage('')
+    try {
+      await onSubmit(); close()
+      toast.success(successMessage ?? `Đã ${submitLabel.charAt(0).toLowerCase()}${submitLabel.slice(1)}`, { description: title })
+    } catch (error) {
+      const failure = describeFormFailure(error)
+      if (failure.fieldErrors) onFieldErrors?.(failure.fieldErrors)
+      setMessage(failure.message)
+      setPending(false)
+      setFailures(count => count + 1)
+    }
+  }
+  const block = (event: Event) => { if (pending) event.preventDefault() }
+  return <Sheet open onOpenChange={open => { if (!open && !pending) close() }}>
+    <SheetContent aria-busy={pending} closeDisabled={pending} onEscapeKeyDown={block} onInteractOutside={event => event.preventDefault()} onCloseAutoFocus={onCloseAutoFocus}
+      {...(description ? {} : { 'aria-describedby': undefined })}
+      className="gap-0 p-0 motion-reduce:animate-none!">
+      <form ref={formRef} onSubmit={submit} noValidate className="flex h-full min-h-0 flex-col">
+        <header className="border-b px-5 py-4 pr-12">
+          <SheetTitle className="text-lg">{title}</SheetTitle>
+          {description && <SheetDescription className="mt-1">{description}</SheetDescription>}
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {children}
+          {message && <p ref={messageRef} tabIndex={-1} className={ERROR_BOX} role="alert">{message}</p>}
+        </div>
+        <footer className="flex justify-end gap-2 border-t bg-muted/50 px-5 py-3.5">
+          <Button type="button" variant="outline" disabled={pending} onClick={close}>Hủy</Button>
+          <Button type="submit" disabled={pending}>{pending ? 'Đang xử lý…' : submitLabel}</Button>
+        </footer>
+      </form>
+    </SheetContent>
+  </Sheet>
+}
+
 export { ValidationError }
 
 /** Asks before an action that cannot be undone. Stays open while it runs; a failure is shown inside, so the user can retry. */
@@ -250,6 +320,7 @@ export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, 
 }) {
   const [pending, setPending] = useState(false)
   const [failure, setFailure] = useState('')
+  const { onCloseAutoFocus } = useReturnFocus()
   async function confirm() {
     if (pending) return
     setPending(true); setFailure('')
@@ -258,7 +329,7 @@ export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, 
     }
   }
   return <AlertDialog open onOpenChange={open => { if (!open && !pending) close() }}>
-    <AlertDialogContent aria-busy={pending} onEscapeKeyDown={event => { if (pending) event.preventDefault() }}>
+    <AlertDialogContent aria-busy={pending} onEscapeKeyDown={event => { if (pending) event.preventDefault() }} onCloseAutoFocus={onCloseAutoFocus}>
       <AlertDialogTitle>{title}</AlertDialogTitle>
       <AlertDialogDescription asChild><div>{message}</div></AlertDialogDescription>
       {failure && <p className={ERROR_BOX} role="alert">{failure}</p>}

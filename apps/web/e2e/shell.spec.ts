@@ -52,7 +52,7 @@ async function submitNewUser(page: Page, scenario: string) {
   const dialog = page.getByRole('dialog', { name: 'Tạo tài khoản nhân viên' })
   await dialog.getByLabel('Họ tên').fill('Nhân viên Mới')
   await dialog.getByLabel('Email').fill('moi@freshvend.test')
-  await dialog.getByLabel('Mật khẩu').fill('mat-khau-tam-thoi')
+  await dialog.getByRole('textbox', { name: 'Mật khẩu', exact: true }).fill('mat-khau-tam-thoi')
   await dialog.getByRole('button', { name: 'Tạo tài khoản' }).click()
   return dialog
 }

@@ -12,6 +12,8 @@ body { margin: 0; min-width: 0; }
 button:not([data-slot]), input:not([data-slot]) { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: wait; }
+/* Focusable but refused (aria-disabled, e.g. a lock button with a reason): beats the pointer cursor above. */
+button[aria-disabled='true'] { cursor: not-allowed; }
 /* #admin-main is focused by script after each admin navigation (AdminApp); it is a whole region, not a Tab stop, so it
    gets no ring (this unlayered rule would otherwise beat its `outline-none` utility). Kiosk/landing headings keep theirs. */
 button:focus-visible, [tabindex='-1']:not(#admin-main):focus-visible { outline: 3px solid var(--brand); outline-offset: 5px; }

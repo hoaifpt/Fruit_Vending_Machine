@@ -216,12 +216,16 @@ export const routes: Route[] = [
   // ---- users
   route('GET', '/users', 'admin', ctx => {
     const { query } = ctx
-    const rows = ctx.store.users.filter(user => eq(query, 'status', user.status) && (!query.get('role') || user.roles.includes(query.get('role')!)))
+    const status = query.get('status'), role = query.get('role')
+    if (status && !(USER_STATUSES as readonly string[]).includes(status)) throw new MockHttpError(400, 'Tham số lọc không hợp lệ.', { status: `Phải là một trong: ${USER_STATUSES.join(', ')}.` })
+    if (role && role !== 'ADMIN' && role !== 'STAFF') throw new MockHttpError(400, 'Tham số lọc không hợp lệ.', { role: 'Phải là ADMIN hoặc STAFF.' })
+    const rows = ctx.store.users.filter(user => eq(query, 'status', user.status) && (!role || user.roles.includes(role)))
     return ok(paginate(rows.map(userView), query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc', fixedSort: true }))
   }),
   route('POST', '/users', 'admin', ctx => {
     const form = new Form(ctx.body, ['email', 'password', 'fullName', 'phone'])
-    const email = form.email('email'), password = form.password('password', 12), fullName = form.text('fullName'), phone = form.optionalText('phone', 32)
+    const email = form.email('email'), password = form.password('password', 12), fullName = form.text('fullName', 200), phone = form.optionalText('phone', 32)
+    if (password && new TextEncoder().encode(password).length > 72) form.reject('password', 'Tối đa 72 byte.')
     form.done()
     if (ctx.store.users.some(user => user.email === email)) throw conflict('Email này đã được sử dụng.')
     const at = iso(ctx.now)
@@ -232,7 +236,7 @@ export const routes: Route[] = [
   route('PUT', '/users/:id', 'admin', ctx => {
     const user = findUser(ctx)
     const form = new Form(ctx.body, ['fullName', 'phone'])
-    const fullName = form.text('fullName'), phone = form.optionalText('phone', 32)
+    const fullName = form.text('fullName', 200), phone = form.optionalText('phone', 32)
     form.done()
     Object.assign(user, { fullName, phone, updatedAt: iso(ctx.now) })
     return ok(userView(user))

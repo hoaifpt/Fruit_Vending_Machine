@@ -52,6 +52,12 @@ export function createStore(nowMs: number): MockStore {
     { id: uuid('10000000', 2), email: MOCK_ACCOUNTS.staff, fullName: 'Nhân viên vận hành', phone: '0900000002', status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
     { id: uuid('10000000', 3), email: 'staff.inactive@freshvend.test', fullName: 'Nhân viên đã nghỉ', phone: null, status: 'INACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
     { id: uuid('10000000', 4), email: 'staff.locked@freshvend.test', fullName: 'Nhân viên bị khóa', phone: null, status: 'LOCKED', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
+    // Screen A2 needs a second ACTIVE admin (so it can be locked, leaving the signed-in admin as the last one), a LOCKED
+    // admin (not counted as active) and a few more staff. Same fake passwords; only the first admin/staff are documented.
+    { id: uuid('10000000', 5), email: 'admin.ca2@freshvend.test', fullName: 'Trần Thị Quản Lý', phone: '0900000005', status: 'ACTIVE', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, createdAt: iso(-20 * DAY), updatedAt: iso(-2 * DAY) },
+    { id: uuid('10000000', 6), email: 'admin.locked@freshvend.test', fullName: 'Quản trị viên cũ', phone: null, status: 'LOCKED', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, createdAt: iso(-60 * DAY), updatedAt: iso(-10 * DAY) },
+    { id: uuid('10000000', 7), email: 'kho.quan1@freshvend.test', fullName: 'Lê Văn Nạp Hàng', phone: '0900000007', status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, createdAt: iso(-5 * DAY), updatedAt: iso(-5 * DAY) },
+    { id: uuid('10000000', 8), email: 'ca.dem@freshvend.test', fullName: 'Phạm Thị Ca Đêm', phone: null, status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, createdAt: iso(-3 * DAY), updatedAt: iso(-3 * DAY) },
   ]
   const adminId = users[0].id
   const staffId = users[1].id
