@@ -1,7 +1,7 @@
 # MQTT Contract — Backend ↔ Vending Machines
 
 ```text
-Contract version:        1.0.0
+Contract version:        1.1.0
 Envelope schemaVersion:  1
 Source of truth for:     topics, envelope, commands, events, payloads, timings, error codes, broker security
 Examples (fixtures):     api-contract/mqtt/examples/*.json
@@ -29,6 +29,7 @@ in its firmware; until it is merged into `dev` those items stay pending here.
 | Version | Date | Change |
 | --- | --- | --- |
 | 1.0.0 | 2026-11-09 | First publication (issue #49). Replaces the message definitions in `docs/`. |
+| 1.1.0 | 2026-11-10 | Issue #52: the backend sends `columnCode` and handles `details.reason` / `details.bowlCount`; separate result and pending timeouts; one in-flight command per machine; late-result rule. No message shape changed. |
 
 ## Versioning rules
 
@@ -104,7 +105,7 @@ Gate timings (`include/app_config.h`): open 600 ms, close 700 ms; the two gates 
 
 | Command type | Payload | Status |
 | --- | --- | --- |
-| `DISPENSE` | `{"type":"DISPENSE","commandId":"D-…","columnCode":"B"}` | IMPLEMENTED; `columnCode` PLANNED (backend 3.3; firmware on `dev` reads `column`/`slot`) |
+| `DISPENSE` | `{"type":"DISPENSE","commandId":"D-…","columnCode":"B"}` | IMPLEMENTED; `columnCode` FIRMWARE_PENDING (backend sends it since #52; firmware on `dev` reads `column`/`slot`) |
 | `MAINTENANCE_REMOVE_ITEM` | `{"type":"MAINTENANCE_REMOVE_ITEM","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
 | `MAINTENANCE_EMPTY_COLUMN` | `{"type":"MAINTENANCE_EMPTY_COLUMN","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
 | `MAINTENANCE_OPEN_REFILL` | `{"type":"MAINTENANCE_OPEN_REFILL","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
@@ -115,9 +116,12 @@ Gate timings (`include/app_config.h`): open 600 ms, close 700 ms; the two gates 
 
 ```text
 commandId   backend format D-<16 uppercase hex>, one per paid bowl
-columnCode  "A" | "B"; today the backend omits it (3.3). The firmware on dev reads payload.column (1 | 2) or
-            payload.slot ("B" or "2" → column 2) instead, and uses column 1 (A) when none is given (columnCode: FIRMWARE_PENDING)
-            an invalid columnCode will be rejected with INVALID_COLUMN (PLANNED)
+columnCode  "A" | "B" = slot code of the reserved bowl (slot codes are restricted to A/B since V14). The backend sends it
+            on every publish (#52). The firmware on dev still reads payload.column (1 | 2) or payload.slot ("B" or "2" →
+            column 2) and uses column 1 (A) when neither is given (columnCode: FIRMWARE_PENDING)
+            an invalid columnCode will be rejected with INVALID_COLUMN (PLANNED in firmware; handled by the backend)
+publish     only while the machine and the slot are ACTIVE and no other command of the machine is SENT/ACKNOWLEDGED;
+            otherwise the command waits PENDING (not counted as a delivery attempt)
 cycle       (dev) upper gate locked 250 ms → lower opens 600 ms → hold 700 ms (bowl falls out) → lower closes 700 ms
             → pause 3000 ms → upper opens 600 ms → hold 700 ms (next bowl falls into position) → upper closes 700 ms   ≈ 7.3 s
 ```
@@ -180,14 +184,23 @@ of a finished one with its remembered result (last 8 command IDs, in RAM).
 
 `operation` is the command type without `MAINTENANCE_` (`REMOVE_ITEM`, `EMPTY_COLUMN`, `OPEN_REFILL`, `CLOSE_REFILL`).
 
-Backend handling of the dispense lifecycle (implemented):
+Backend handling of the dispense lifecycle (implemented, #52):
 
 ```text
 DISPENSE_ACCEPTED   command SENT → ACKNOWLEDGED, order DISPENSING
-DISPENSE_COMPLETED  command SUCCESS, bowl SOLD, order COMPLETED (also after TIMEOUT: the machine witnessed the bowl)
-DISPENSE_ABORTED    command FAILED, bowl DISPENSE_FAILED (blocks its column), order DISPENSE_FAILED
-DISPENSE_REJECTED   command stays open and is resent until it times out
+DISPENSE_COMPLETED  command SUCCESS, bowl SOLD, order COMPLETED
+                    bowlCount > 1 or reason MULTIPLE_BOWLS_DETECTED → also machine MAINTENANCE (other bowls are not guessed)
+DISPENSE_REJECTED   no reason, BUSY or an unknown reason → command stays open and is resent (firmware v0.3.0 compatible)
+                    CONTROLLER_FAULT, INVALID_COMMAND_ID, INVALID_COLUMN, UNSUPPORTED_SCHEMA → safe failure: command FAILED,
+                    bowl AVAILABLE again (RETURN history), allocation RELEASED, order DISPENSE_FAILED;
+                    CONTROLLER_FAULT also puts the machine in MAINTENANCE, the others are logged as backend ERROR
+                    (after ACCEPTED, "not started" contradicts the machine: treated as unsafe)
+DISPENSE_ABORTED    any reason or none → unsafe failure: command FAILED (reason, else ABORTED_UNSPECIFIED),
+                    bowl DISPENSE_FAILED (blocks its column), order DISPENSE_FAILED, machine MAINTENANCE, never resent
 ```
+
+`dispense_commands.failure_reason` stores the reason of every FAILED/TIMEOUT command: the machine reasons above, or the backend
+values `RESULT_TIMEOUT`, `NOT_DELIVERED` and `LEGACY_UNKNOWN` (rows from before V14).
 
 ### 4.2 Other events
 
@@ -247,15 +260,15 @@ not send `reason`, `FAULT` or `BOOT` yet (today a rejection carries only the con
 
 | Reason | Catalog | When | Backend action (issue) |
 | --- | --- | --- | --- |
-| `BUSY` | PROPOSED — awaiting firmware sign-off | another command is running | keep the command open and resend (implemented, today inferred from `REJECTED`) |
-| `CONTROLLER_FAULT` | PROPOSED — awaiting firmware sign-off | controller in FAULT | stop resending; HARDWARE_FAULT alert (3.3, 3.6) |
-| `INVALID_COMMAND_ID` | PROPOSED — awaiting firmware sign-off | commandId empty, too long or bad characters | log ERROR, no resend (3.3) |
-| `INVALID_COLUMN` | PROPOSED — awaiting firmware sign-off | columnCode not A/B | log ERROR, no resend (3.3) |
-| `UNSUPPORTED_SCHEMA` | PROPOSED — awaiting firmware sign-off | unknown schemaVersion | log ERROR, no resend (3.3) |
-| `MANUAL_STOP` | PROPOSED — awaiting firmware sign-off | technician STOP over Serial | command FAILED, reconcile (3.3) |
-| `NO_BOWL_DETECTED` | PROPOSED — awaiting firmware sign-off | cycle done, IR counted 0 bowls | FAILED; order DISPENSE_FAILED; machine MAINTENANCE (3.3) |
-| `MULTIPLE_BOWLS_DETECTED` | PROPOSED — awaiting firmware sign-off | IR counted more than 1 bowl | SUCCESS for this bowl; CRITICAL alert; machine MAINTENANCE; reconcile stock (3.3, 3.6) |
-| `INTERRUPTED_BY_REBOOT` | PROPOSED — awaiting firmware sign-off | reboot during a command (from NVS) | ambiguous → reconcile, never resend (3.3) |
+| `BUSY` | PROPOSED — awaiting firmware sign-off | another command is running | keep the command open and resend (implemented) |
+| `CONTROLLER_FAULT` | PROPOSED — awaiting firmware sign-off | controller in FAULT | REJECTED: bowl returned, machine MAINTENANCE (implemented #52); HARDWARE_FAULT alert (3.6) |
+| `INVALID_COMMAND_ID` | PROPOSED — awaiting firmware sign-off | commandId empty, too long or bad characters | REJECTED: bowl returned, log ERROR, no resend (implemented #52) |
+| `INVALID_COLUMN` | PROPOSED — awaiting firmware sign-off | columnCode not A/B | REJECTED: bowl returned, log ERROR, no resend (implemented #52) |
+| `UNSUPPORTED_SCHEMA` | PROPOSED — awaiting firmware sign-off | unknown schemaVersion | REJECTED: bowl returned, log ERROR, no resend (implemented #52) |
+| `MANUAL_STOP` | PROPOSED — awaiting firmware sign-off | technician STOP over Serial | ABORTED: command FAILED, bowl DISPENSE_FAILED, machine MAINTENANCE (implemented #52) |
+| `NO_BOWL_DETECTED` | PROPOSED — awaiting firmware sign-off | cycle done, IR counted 0 bowls | ABORTED: FAILED; order DISPENSE_FAILED; machine MAINTENANCE (implemented #52) |
+| `MULTIPLE_BOWLS_DETECTED` | PROPOSED — awaiting firmware sign-off | IR counted more than 1 bowl | COMPLETED: SUCCESS for this bowl; machine MAINTENANCE (implemented #52); CRITICAL alert (3.6); staff reconciles stock |
+| `INTERRUPTED_BY_REBOOT` | PROPOSED — awaiting firmware sign-off | reboot during a command (from NVS) | ABORTED: unsafe failure, never resent (implemented #52) |
 
 ### 6.2 `FAULT` event `details.code`
 
@@ -299,12 +312,13 @@ Wi-Fi / MQTT connection loss → inferred by the backend (no message for 180 s, 
 | Machine → backend QoS | 0 today (PubSubClient publishes QoS 0); 1 when the library allows it; Last Will QoS 1 |
 | Backend subscription QoS | 1 |
 | Dispense resend | same commandId every 5 s (`DISPENSE_RESEND_AFTER`) while PENDING/SENT without an answer |
-| Dispense timeout | 60 s (`DISPENSE_TIMEOUT`) → TIMEOUT, bowl DISPENSE_FAILED, order DISPENSE_FAILED |
+| Dispense result timeout | 60 s (`DISPENSE_TIMEOUT`) after the **first delivery** (`sent_at`; resends do not move it) → TIMEOUT `RESULT_TIMEOUT`, bowl DISPENSE_FAILED, order DISPENSE_FAILED, machine MAINTENANCE |
+| Dispense pending timeout | 120 s (`DISPENSE_PENDING_TIMEOUT`) after creation without any delivery → FAILED `NOT_DELIVERED`, bowl AVAILABLE again, order DISPENSE_FAILED |
 | Maintenance timeouts | ACCEPTED within 30 s, COMPLETED within 90 s (4.2) |
-| One command per machine | firmware runs one command and rejects others; backend serialization per machine in 3.3 |
+| One command per machine | firmware runs one command and rejects others; the backend publishes a command only when no other command of the machine is SENT/ACKNOWLEDGED, under a per-machine advisory lock (implemented #52) |
 | Duplicate commands | the firmware never runs a commandId twice: last 8 IDs in RAM today; persisting done IDs in **NVS** is FIRMWARE_PENDING |
 | Duplicate events | the backend processes events idempotently by commandId + state (`DUPLICATE`) |
-| Late `DISPENSE_COMPLETED` after TIMEOUT | implemented: SUCCESS, bowl SOLD, order COMPLETED. Planned (3.3): if the order was refunded meanwhile, bowl SOLD, order stays REFUNDED, flagged for Admin |
+| Late `DISPENSE_COMPLETED` after FAILED/TIMEOUT | implemented (#52), only while the bowl is still DISPENSE_FAILED: order DISPENSE_FAILED → SUCCESS, bowl SOLD, order COMPLETED, machine stays MAINTENANCE; order REFUNDED → bowl SOLD, order stays REFUNDED, audit `DISPENSE_SUCCESS_AFTER_REFUND`; otherwise (bowl returned, removed or sold) nothing changes, audit `DISPENSE_LATE_RESULT_CONFLICT` |
 | Success confirmation | `DISPENSE_COMPLETED` only when the IR sensor counted exactly one bowl (FIRMWARE_PENDING) |
 | Heartbeat interval | 30 s |
 | Offline threshold | 180 s without status, heartbeat or event (3.4) |
@@ -337,7 +351,7 @@ Backend tests parse every example on each build; the firmware team may use them 
 
 | File | Message | Status |
 | --- | --- | --- |
-| `command-dispense.json` | DISPENSE with `columnCode` | IMPLEMENTED (`columnCode` PLANNED) |
+| `command-dispense.json` | DISPENSE with `columnCode` | IMPLEMENTED (`columnCode` FIRMWARE_PENDING) |
 | `command-maintenance-remove-item.json` | MAINTENANCE_REMOVE_ITEM | PLANNED |
 | `event-dispense-accepted.json` | DISPENSE_ACCEPTED | IMPLEMENTED |
 | `event-dispense-completed.json` | DISPENSE_COMPLETED | IMPLEMENTED |

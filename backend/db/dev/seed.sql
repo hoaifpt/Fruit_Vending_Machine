@@ -4,7 +4,8 @@
 -- Accounts and kiosk keys are intentionally absent: use INITIAL_ADMIN_* and the API so no shared secret is committed.
 BEGIN;
 
--- DEV-MACHINE-01 A1/A2 are the two physical columns of the ESP32 test rig; B1 holds an expired head (not sellable).
+-- A slot is one physical column (A or B). DEV-MACHINE-01 A/B are the two columns of the ESP32 test rig;
+-- DEV-MACHINE-02 B holds an expired head (not sellable).
 INSERT INTO machines (id, code, name, location, status, last_seen_at) VALUES
     ('20000000-0000-0000-0000-000000000001', 'DEV-MACHINE-01', 'Development fruit machine', 'Local development', 'ACTIVE', CURRENT_TIMESTAMP),
     ('20000000-0000-0000-0000-000000000002', 'DEV-MACHINE-02', 'Maintenance test machine', 'Local development', 'MAINTENANCE', NULL)
@@ -13,11 +14,10 @@ ON CONFLICT DO NOTHING;
 INSERT INTO machine_slots (id, machine_id, slot_code, capacity)
 SELECT v.id::UUID, m.id, v.slot_code, v.capacity
 FROM (VALUES
-    ('30000000-0000-0000-0000-000000000001', 'DEV-MACHINE-01', 'A1', 10),
-    ('30000000-0000-0000-0000-000000000002', 'DEV-MACHINE-01', 'A2', 10),
-    ('30000000-0000-0000-0000-000000000003', 'DEV-MACHINE-01', 'B1', 10),
-    ('30000000-0000-0000-0000-000000000004', 'DEV-MACHINE-02', 'A1', 8),
-    ('30000000-0000-0000-0000-000000000005', 'DEV-MACHINE-02', 'A2', 8)) AS v(id, machine_code, slot_code, capacity)
+    ('30000000-0000-0000-0000-000000000001', 'DEV-MACHINE-01', 'A', 10),
+    ('30000000-0000-0000-0000-000000000002', 'DEV-MACHINE-01', 'B', 10),
+    ('30000000-0000-0000-0000-000000000004', 'DEV-MACHINE-02', 'A', 8),
+    ('30000000-0000-0000-0000-000000000005', 'DEV-MACHINE-02', 'B', 8)) AS v(id, machine_code, slot_code, capacity)
 JOIN machines m ON m.code = v.machine_code
 ON CONFLICT DO NOTHING;
 
@@ -29,7 +29,7 @@ INSERT INTO products (id, sku, name, description, price, status) VALUES
     ('40000000-0000-0000-0000-000000000005', 'DEV-PAPAYA', 'Papaya bowl', 'Development sample (inactive)', 28000.00, 'INACTIVE')
 ON CONFLICT DO NOTHING;
 
--- Expiry is relative to the first run; the mango batch is already expired so B1 exercises the expired-head path.
+-- Expiry is relative to the first run; the mango batch is already expired so DEV-MACHINE-02 B exercises the expired-head path.
 INSERT INTO product_batches (id, batch_code, product_id, manufactured_at, expires_at, quantity)
 SELECT v.id::UUID, v.batch_code, p.id, CURRENT_TIMESTAMP + v.made, CURRENT_TIMESTAMP + v.expires, v.quantity
 FROM (VALUES
@@ -48,11 +48,10 @@ SELECT md5('fruit-seed-item:' || v.machine_code || ':' || v.slot_code || ':' || 
        s.id AS slot_id, s.machine_id, b.id AS batch_id,
        CURRENT_TIMESTAMP - v.loaded_ago + n * INTERVAL '1 second' AS loaded_at
 FROM (VALUES
-    ('DEV-MACHINE-01', 'A1', 'SEED-MIXED-01', 8, INTERVAL '1 day'),
-    ('DEV-MACHINE-01', 'A2', 'SEED-WATERMELON-01', 6, INTERVAL '1 day'),
-    ('DEV-MACHINE-01', 'B1', 'SEED-MANGO-EXPIRED', 2, INTERVAL '3 days'),
-    ('DEV-MACHINE-02', 'A1', 'SEED-PINEAPPLE-01', 4, INTERVAL '1 day'),
-    ('DEV-MACHINE-02', 'A2', 'SEED-WATERMELON-01', 1, INTERVAL '1 day'))
+    ('DEV-MACHINE-01', 'A', 'SEED-MIXED-01', 8, INTERVAL '1 day'),
+    ('DEV-MACHINE-01', 'B', 'SEED-WATERMELON-01', 6, INTERVAL '1 day'),
+    ('DEV-MACHINE-02', 'A', 'SEED-PINEAPPLE-01', 4, INTERVAL '1 day'),
+    ('DEV-MACHINE-02', 'B', 'SEED-MANGO-EXPIRED', 2, INTERVAL '3 days'))
     AS v(machine_code, slot_code, batch_code, quantity, loaded_ago)
 JOIN machines m ON m.code = v.machine_code
 JOIN machine_slots s ON s.machine_id = m.id AND s.slot_code = v.slot_code

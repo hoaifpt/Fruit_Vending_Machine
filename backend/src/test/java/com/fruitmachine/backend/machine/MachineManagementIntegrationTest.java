@@ -384,7 +384,7 @@ class MachineManagementIntegrationTest {
     @Test
     void configurationAndDeactivationPreserveRelatedRecordsAndHeartbeat() throws Exception {
         UUID slot = UUID.randomUUID(), product = UUID.randomUUID(), batch = UUID.randomUUID(), item = UUID.randomUUID(), order = UUID.randomUUID();
-        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A1',5)", slot, campus.getId());
+        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A',5)", slot, campus.getId());
         jdbc.update("INSERT INTO products(id,sku,name,price) VALUES (?,'FIXTURE','Fixture',1)", product);
         jdbc.update("INSERT INTO product_batches(id,batch_code,product_id,manufactured_at,expires_at,quantity) VALUES (?,'FIXTURE',?,now(),now()+interval '2 days',1)", batch, product);
         jdbc.update("INSERT INTO inventory_items(id,batch_id,slot_id,loaded_at) VALUES (?,?,?,now())", item, batch, slot);

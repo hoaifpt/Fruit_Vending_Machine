@@ -96,12 +96,17 @@ class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
 
     @Test
     void manyDifferentWebhooksForManyOrdersAllApplyIndependently() throws Exception {
-        var shop = shopWithSlots(6);
+        // Three machines with two columns each: six orders that are PENDING at the same time.
         var orders = new java.util.ArrayList<PlacedOrder>();
-        for (int i = 0; i < 6; i++) {
-            var order = placeOrder(shop);
-            pay(order, 201);
-            orders.add(order);
+        var machines = new java.util.ArrayList<UUID>();
+        for (int machine = 0; machine < 3; machine++) {
+            var shop = shopWithTwoColumns();
+            machines.add(shop.machineId());
+            for (int i = 0; i < 2; i++) {
+                var order = placeOrder(shop);
+                pay(order, 201);
+                orders.add(order);
+            }
         }
         List<Callable<Integer>> tasks = new java.util.ArrayList<>();
         for (int i = 0; i < orders.size(); i++) {
@@ -110,7 +115,7 @@ class PaymentWebhookRaceIntegrationTest extends AbstractWebhookIntegrationTest {
             tasks.add(() -> webhook(WEBHOOK, body, sign(body)).getResponse().getStatus());
         }
         assertThat(parallel(tasks)).containsOnly(200);
-        assertThat(count("SELECT count(*) FROM orders WHERE machine_id=? AND status='PAID'", shop.machineId())).isEqualTo(6);
-        assertThat(count("SELECT count(*) FROM audit_logs a JOIN payments p ON p.id=a.entity_id JOIN orders o ON o.id=p.order_id WHERE o.machine_id=?", shop.machineId())).isZero();
+        assertThat(count("SELECT count(*) FROM orders WHERE machine_id IN (?,?,?) AND status='PAID'", machines.toArray())).isEqualTo(6);
+        assertThat(count("SELECT count(*) FROM audit_logs a JOIN payments p ON p.id=a.entity_id JOIN orders o ON o.id=p.order_id WHERE o.machine_id IN (?,?,?)", machines.toArray())).isZero();
     }
 }

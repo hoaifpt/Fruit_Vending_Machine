@@ -26,6 +26,7 @@ public final class MachineEventType {
     public static final String EVENT_TYPE_FIELD = "eventType";
     public static final String DETAILS_FIELD = "details";
     public static final String REASON_FIELD = "reason";
+    public static final String BOWL_COUNT_FIELD = "bowlCount";
     public static final String CODE_FIELD = "code";
     public static final String RESET_REASON_FIELD = "resetReason";
 

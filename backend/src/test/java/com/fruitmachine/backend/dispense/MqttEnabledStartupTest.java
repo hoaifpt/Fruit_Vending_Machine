@@ -23,6 +23,6 @@ class MqttEnabledStartupTest extends AbstractCoreIntegrationTest {
     @Test
     void theContextStartsWithTheMqttGatewayAndDeliveryFailsSoftWhileDisconnected() {
         assertThat(gateway).isInstanceOf(MqttMachineGateway.class);
-        assertThat(gateway.sendDispense("TEST-MACHINE", "D-0000000000000000")).isFalse();
+        assertThat(gateway.sendDispense("TEST-MACHINE", "D-0000000000000000", "A")).isFalse();
     }
 }

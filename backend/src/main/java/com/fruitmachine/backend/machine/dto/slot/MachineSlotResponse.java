@@ -9,7 +9,7 @@ import java.util.UUID;
 public record MachineSlotResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Slot UUID.") UUID id,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Immutable owning machine UUID.") UUID machineId,
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Immutable code unique within the machine.", example = "A1") String slotCode,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Immutable physical column of the machine: A or B, unique within the machine.", allowableValues = {"A", "B"}, example = "A") String slotCode,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Maximum physical capacity, not inventory quantity.", minimum = "1", maximum = "2147483647") Integer capacity,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Administrative slot status; independent of machine status.") SlotStatus status,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Creation instant, UTC.") Instant createdAt,

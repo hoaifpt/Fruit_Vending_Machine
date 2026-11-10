@@ -83,4 +83,8 @@ public class DispenseCommand extends UpdatedEntity {
 
     @Column(name = "completed_at", columnDefinition = "timestamptz")
     private Instant completedAt;
+
+    /** Set exactly when status is FAILED or TIMEOUT (database CHECK); values: DispenseFailureReason. */
+    @Column(name = "failure_reason", length = 48)
+    private String failureReason;
 }

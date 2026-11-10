@@ -107,7 +107,7 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(13);
+                .isEqualTo(14);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
         assertThat(entities).hasSize(22);
@@ -171,7 +171,7 @@ class EntityMappingTest {
         entityManager.persist(machine);
         MachineSlot slot = new MachineSlot();
         slot.setMachine(machine);
-        slot.setSlotCode("A1");
+        slot.setSlotCode("A");
         slot.setCapacity(10);
         entityManager.persist(slot);
 

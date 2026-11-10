@@ -182,17 +182,17 @@ class MqttContractDocumentationTest {
     }
 
     @Test
-    void dispenseExampleHasExactlyTheKeysTheBackendPublishesPlusThePendingColumnCode() throws IOException {
-        JsonNode produced = JSON.valueToTree(MachineCommands.dispense("FV-DEV-001", "D-7F3A91C2E4B05D18"));
+    void dispenseExampleHasExactlyTheKeysTheBackendPublishes() throws IOException {
+        JsonNode produced = JSON.valueToTree(MachineCommands.dispense("FV-DEV-001", "D-7F3A91C2E4B05D18", "B"));
         JsonNode example = examples().get("command-dispense.json");
         assertThat(produced.fieldNames()).toIterable().containsExactlyInAnyOrderElementsOf(() -> example.fieldNames());
         Set<String> examplePayload = new TreeSet<>();
         example.path(MqttContract.PAYLOAD_FIELD).fieldNames().forEachRemaining(examplePayload::add);
         Set<String> producedPayload = new TreeSet<>();
         produced.path(MqttContract.PAYLOAD_FIELD).fieldNames().forEachRemaining(producedPayload::add);
-        // columnCode is BACKEND_PENDING (3.3): the example already carries it, the backend does not send it yet.
-        examplePayload.remove(MachineCommandType.COLUMN_CODE_FIELD);
+        // Issue #52: the backend sends columnCode, so the published payload has exactly the example's keys.
         assertThat(producedPayload).isEqualTo(examplePayload);
+        assertThat(produced.path(MqttContract.PAYLOAD_FIELD).path(MachineCommandType.COLUMN_CODE_FIELD).asText()).isEqualTo("B");
         assertThat(produced.path(MqttContract.PAYLOAD_FIELD).path(MachineCommandType.TYPE_FIELD).asText()).isEqualTo(MachineCommandType.DISPENSE);
         assertThat(produced.path(MqttContract.SCHEMA_VERSION_FIELD).asInt()).isEqualTo(MqttContract.SCHEMA_VERSION);
         assertThat(produced.path(MqttContract.MESSAGE_ID_FIELD).asText()).hasSizeLessThanOrEqualTo(MqttContract.MESSAGE_ID_MAX_LENGTH);

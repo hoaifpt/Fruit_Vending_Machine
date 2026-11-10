@@ -81,7 +81,7 @@ app:
       enabled: ${ORDER_EXPIRY_SWEEP_ENABLED:true}
       interval: ${ORDER_EXPIRY_SWEEP_INTERVAL:PT30S}
       batch-size: ${ORDER_EXPIRY_SWEEP_BATCH_SIZE:50}
-  # Dispense commands to machines over MQTT (docs/mqtt-dispense.md). Disabled: commands stay PENDING and time out.
+  # Dispense commands to machines over MQTT (api-contract/mqtt-contract.md). Disabled: commands stay PENDING until pending-timeout.
   mqtt:
     enabled: ${MQTT_ENABLED:false}
     broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
@@ -91,7 +91,10 @@ app:
     topic-root: ${MQTT_TOPIC_ROOT:vending}
   dispense:
     resend-after: ${DISPENSE_RESEND_AFTER:PT5S}
+    # Published command without a result, counted from its first delivery: outcome unknown, bowl blocked, machine MAINTENANCE.
     timeout: ${DISPENSE_TIMEOUT:PT60S}
+    # Command that could never be published, counted from its creation: nothing moved, the bowl is available again.
+    pending-timeout: ${DISPENSE_PENDING_TIMEOUT:PT120S}
     sweep:
       enabled: ${DISPENSE_SWEEP_ENABLED:true}
       interval: ${DISPENSE_SWEEP_INTERVAL:PT2S}

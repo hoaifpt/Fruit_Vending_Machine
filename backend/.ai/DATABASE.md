@@ -50,7 +50,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
-| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at |
+| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, failure_reason, created_at, updated_at |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
 | machine_events | id, machine_id, event_type, payload, created_at |
 | kiosk_credentials | id, machine_id, key_prefix, secret_hash, status, created_by, created_at, revoked_by, revoked_at |
@@ -62,7 +62,8 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
   level; role deletion is RESTRICT. Prefer deactivation. JPA does not cascade REMOVE/ALL.
   Seed V8 contains ADMIN/STAFF reference roles only, no accounts or passwords.
 - Machine -> MachineSlot, SensorReading, Alert, MachineEvent and Order.
-  Slots have UNIQUE(machine_id, slot_code), capacity > 0 and UNIQUE(id, machine_id).
+  Slots have UNIQUE(machine_id, slot_code), capacity > 0 and UNIQUE(id, machine_id). Since V14 a slot is a physical
+  column: slot_code IN ('A','B') (ck_machine_slots_column), so a machine has at most two slots.
 - Product -> ProductBatch -> InventoryItem. Batch quantity > 0 and finite
   expires_at > manufactured_at. created_by -> users is nullable.
 - InventoryItem.slot_id -> MachineSlot is nullable before loading. Keep the last slot
@@ -309,3 +310,19 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
 - Mapped by `Permission` and `RolePermission` (EmbeddedId `RolePermissionId`, like `UserRole`); `Role.permissionGrants` without cascade.
 - Role permission replacement locks the `roles` row (PESSIMISTIC_WRITE) and writes `audit_logs` (action ROLE_PERMISSIONS_CHANGED,
   entity_type Role, old/new `{"permissions":[sorted codes]}`, user_id = actor). V1-V12 untouched. ERD: 2 new tables.
+
+## 17. Issue #52 — V14 dispense hardening
+
+- `machine_slots.slot_code` is the physical column: CHECK `slot_code IN ('A','B')`. V14 renamed only unambiguous legacy codes
+  (`A1`/`B1`, any case or spaces -> `A`/`B`) and stops with "V14 stopped ..." (changing nothing) when a code names no column or two
+  slots of a machine would become the same column. Slots keep their ids, so history is unchanged.
+- `dispense_commands.failure_reason` VARCHAR(48): CHECK `(status IN ('FAILED','TIMEOUT')) = (failure_reason IS NOT NULL)` and not blank.
+  Extensible string validated in Java (`DispenseFailureReason`): machine reasons of the MQTT contract §6.1, `ABORTED_UNSPECIFIED`,
+  `RESULT_TIMEOUT`, `NOT_DELIVERED`; rows failed before V14 were backfilled with `LEGACY_UNKNOWN`.
+- Index `ix_dispense_commands_machine_in_flight` (machine_id) WHERE status IN ('SENT','ACKNOWLEDGED').
+- **Lock order for dispense**: machine command advisory lock (`pg_advisory_xact_lock(0x46564D03, hashtext(machine_id))`,
+  `MachineCommandLockRepository`; first delivery uses the try variant and leaves the command to the sweep) -> Machine row (FOR SHARE
+  to publish, FOR UPDATE when the step may put the machine in MAINTENANCE) -> Order -> DispenseCommand -> InventoryItem.
+  The payment webhook creates commands without the machine lock and never publishes. Maintenance commands (4.2) must take the same lock.
+- System maintenance (`MachineService.enterMaintenanceBySystem`) writes `audit_logs` action `MACHINE_MAINTENANCE_AUTO`, user_id NULL.
+  Late dispense results write `DISPENSE_SUCCESS_AFTER_REFUND` / `DISPENSE_LATE_RESULT_CONFLICT` (entity_type DispenseCommand).
