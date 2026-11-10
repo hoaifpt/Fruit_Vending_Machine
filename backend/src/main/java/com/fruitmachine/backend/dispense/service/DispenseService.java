@@ -47,10 +47,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @EnableConfigurationProperties(DispenseProperties.class)
 public class DispenseService {
-    public static final String EVENT_ACCEPTED = "DISPENSE_ACCEPTED";
-    public static final String EVENT_REJECTED = "DISPENSE_REJECTED";
-    public static final String EVENT_COMPLETED = "DISPENSE_COMPLETED";
-    public static final String EVENT_ABORTED = "DISPENSE_ABORTED";
+    public static final String EVENT_ACCEPTED = com.fruitmachine.backend.mqtt.contract.MachineEventType.DISPENSE_ACCEPTED;
+    public static final String EVENT_REJECTED = com.fruitmachine.backend.mqtt.contract.MachineEventType.DISPENSE_REJECTED;
+    public static final String EVENT_COMPLETED = com.fruitmachine.backend.mqtt.contract.MachineEventType.DISPENSE_COMPLETED;
+    public static final String EVENT_ABORTED = com.fruitmachine.backend.mqtt.contract.MachineEventType.DISPENSE_ABORTED;
     static final String REASON_ABORTED = "DISPENSE_ABORTED";
     static final String REASON_TIMEOUT = "DISPENSE_TIMEOUT";
     private static final Set<DispenseStatus> OPEN = EnumSet.of(DispenseStatus.PENDING, DispenseStatus.SENT, DispenseStatus.ACKNOWLEDGED);

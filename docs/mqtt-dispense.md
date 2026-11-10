@@ -4,6 +4,9 @@ Luồng mua hàng đầu-cuối: kiosk `/buy` → backend → broker MQTT → ES
 Quyết định ngày 23/10/2026 (thay cho luồng Kiosk → USB Serial → ESP32 trước đây). USB Serial vẫn còn trong firmware để
 test và hiệu chỉnh servo, cùng lệnh `DISPENSE` và cùng cơ chế chống nhả trùng.
 
+Định dạng message (topic, envelope, lệnh, event, mã lỗi, QoS, thời gian) nằm duy nhất trong
+[api-contract/mqtt-contract.md](../api-contract/mqtt-contract.md); tài liệu này chỉ giải thích luồng và cách chạy.
+
 ## Luồng
 
 ```text
@@ -31,22 +34,15 @@ DISPENSE_FAILED = "Máy chưa nhả được hàng" (khách liên hệ nhân vi�
 
 ## Topic và envelope
 
-Gốc topic `vending` (`MQTT_TOPIC_ROOT`). Mã máy là `code` của máy trong backend và là username của máy trên broker.
-
-| Topic | Chiều | QoS | Nội dung `payload` |
-| --- | --- | --- | --- |
-| `vending/<mãMáy>/commands` | backend → máy | 1 | `{"type":"DISPENSE","commandId":"D-…"}` |
-| `vending/<mãMáy>/events` | máy → backend | 0/1 | `{"eventType":"DISPENSE_ACCEPTED\|DISPENSE_REJECTED\|DISPENSE_COMPLETED\|DISPENSE_ABORTED\|BOWL_SENSOR_TRIGGERED","details":{"commandId":"D-…"}}` |
-| `vending/<mãMáy>/status` | máy → backend | 0/1 | `{"state":"ONLINE\|OFFLINE",…}` (OFFLINE là Last Will) |
-
-Mọi tin dùng envelope `{"schemaVersion":1,"messageId":"…","machineCode":"<mãMáy>","payload":{…}}`.
-Mỗi tin từ máy cập nhật `machines.last_seen_at` ("Lần cuối thấy máy" trên web quản trị).
+Xem [contract](../api-contract/mqtt-contract.md) §1 (topic), §2 (envelope), §3.1 (`DISPENSE`), §4.1 (event của lệnh) và
+ví dụ `api-contract/mqtt/examples/`. Hằng số phía backend: `com.fruitmachine.backend.mqtt.contract`.
+Mỗi tin hợp lệ từ máy cập nhật `machines.last_seen_at` ("Lần cuối thấy máy" trên web quản trị).
 
 ## Chạy local
 
 1. Broker: `docker compose -f infra/docker-compose.yml up -d`. Tạo tài khoản bằng `./infra/mosquitto/add-user.ps1 backend`
    và `./infra/mosquitto/add-user.ps1 <mãMáy>`. File `infra/mosquitto/passwd` không đưa lên Git. ACL `infra/mosquitto/acl`
-   chỉ cho mỗi máy đọc lệnh và ghi sự kiện của chính nó.
+   chỉ cho mỗi máy đọc lệnh và ghi `events`, `status`, `heartbeat`, `telemetry` của chính nó (contract §8).
 2. Backend: trong `.env` ở gốc repo đặt `MQTT_ENABLED=true`, `MQTT_USERNAME=backend`, `MQTT_PASSWORD=<mật khẩu backend>`.
    Khi `MQTT_ENABLED=false` (mặc định), lệnh vẫn được tạo nhưng không gửi đi và sẽ hết giờ.
 3. Firmware: chép `firmware/fruit/include/secrets.h.example` thành `secrets.h`, điền Wi-Fi 2.4 GHz, IP LAN của máy chạy broker,
@@ -58,6 +54,6 @@ Cấu hình backend: `MQTT_ENABLED`, `MQTT_BROKER_URL`, `MQTT_CLIENT_ID`, `MQTT_
 
 ## Giới hạn hiện tại
 
-- Firmware điều khiển **một cột** (2 cổng); lệnh chưa mang mã ngăn. Máy nhiều ngăn cần thêm tham số ngăn ở firmware.
+- Backend chưa gửi cột trong lệnh, nên máy luôn nhả cột A. Firmware trên `dev` đọc `column`/`slot`; contract thống nhất dùng `columnCode` (3.3, contract §3.1).
 - Bộ đếm gửi lại nằm trong bộ nhớ của một tiến trình backend (chạy một instance).
 - Broker local không dùng TLS; chỉ dùng trong mạng tin cậy.

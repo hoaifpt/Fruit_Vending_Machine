@@ -1,98 +1,72 @@
-# Issue #48 — [BE] Implement Permission-based Authorization
+# Issue #49 — [BE] Publish MQTT Contract & Error Code Catalog
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/48
-Branch: feature/48-permission-authorization (from origin/dev 27874b5)
-Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking the
-GitHub checkboxes of this issue is allowed after verification (AGENTS.md section 14).
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/49
+Branch: feature/49-mqtt-contract, rebuilt 2026-11-10 from origin/dev e2546e9 (includes #48) by cherry-picking the #49 commit
+(user decision; the first version was based on the unmerged firmware branch and is kept locally as backup/49-on-firmware-branch).
+The four MQTT docs to clean up existed only on feature/firmware-staff-refill-and-maintenance; they are added to dev in their #49 form.
+Firmware on dev (b301fd1) is the contract reference: it reads `column`/`slot` (not `columnCode`), sends no heartbeat and has no
+maintenance commands, so those contract items are PLANNED until the firmware branch is merged.
+Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
 
 ## Scope
-V13 (permissions, role_permissions, fixed-UUID seed of the 15-code catalog and the ADMIN/STAFF mapping), Permission entity and
-RolePermission join entity (UserRole style), authorities = ROLE_* + permission codes loaded per request in one query,
-JWT unchanged (roles claim keeps ROLE_* only), every ADMIN/STAFF role check replaced by hasAuthority(<permission>) at URL and method
-level, role/permission APIs (list permissions, list/get roles, replace a role's permissions with lockout guard, row lock and audit),
-Swagger x-required-permission + api-contract, docs.
-
-## Mapping check (issue §3 vs current code)
-Every existing @PreAuthorize and URL rule was compared with §3: no difference. Class-level annotations (User, Inventory, ProductBatch,
-Order, Payment, PaymentWebhookLog, KioskCredential) are split per method (read vs write). Methods that do not exist on a protected
-path keep their current status (for example 405) because every method of the path still needs a permission both roles have.
+`api-contract/mqtt-contract.md` v1.0.0 (topics, envelope, commands, events, status/heartbeat/telemetry, error code catalog,
+delivery semantics, security, implementation status per message), 12 examples in `api-contract/mqtt/examples/`, backend constants
+in `mqtt/contract/` used by the gateway, handler and DispenseService (no behavior change), ACL heartbeat line, docs cleanup.
+Reference firmware: dev (b301fd1); where the contract and that firmware differ, the code is described and the item is marked
+PENDING/PLANNED. Maintenance cycles are documented from the firmware branch 737b7b9.
 
 ## Non-goals
-Creating/renaming/deleting roles or permissions, direct user permissions, row-level access, kiosk permissions, permissions for
-unbuilt features, caching, web UI, refresh tokens.
+Heartbeat/telemetry processing (3.4), event persistence (3.5), alerts (3.6), columnCode/slot A-B/serialization (3.3),
+maintenance + RESET in the backend (4.2), TLS (3.7), firmware changes, AsyncAPI or new dependencies.
 
 ## Database / API impact
-New V13 (V1-V12 untouched). New endpoints: GET /api/v1/permissions, GET /api/v1/roles, GET /api/v1/roles/{id},
-PUT /api/v1/roles/{id}/permissions (tag "Roles & Permissions").
+No schema change, no REST change.
 
 ## Status and verification
-Done locally, not committed. The authorization matrix baseline (192 rows) was recorded on the unchanged code (dev 27874b5) before any
-change; after the change every existing operation returns the same status, new APIs: anonymous 401, kiosk 401, STAFF 403, ADMIN allowed.
-`mvn clean verify` (JDK 21.0.10, PostgreSQL 18 Testcontainers): 655 tests, 0 failures, BUILD SUCCESS; Flyway validates V1-V13.
-"Application starts" is covered by the Spring Boot context tests (InitialAdminStartupTest and every integration test), not by a
-deployed run. Existing tests updated for intended changes: migration counts/version 13, new paths in Swagger path lists, principals
-now carry permission codes (hand-built test principals use SeededAuthorities). CoreManagementFlowIntegrationTest now expires the batch
-one minute in the past (DB clock vs JVM clock skew made it flaky; unrelated to #48).
+Rebuilt on dev 2026-11-10. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 Testcontainers): 665 tests, 0 failures, BUILD SUCCESS.
+New tests: MqttContractDocumentationTest (8), MqttContractExamplesIntegrationTest (2). Existing DispenseFlowIntegrationTest (6) and
+MqttEnabledStartupTest pass unchanged.
+Behavior note: topic parsing now splits with limit -1, so `a/b/c/` counts as 4 levels; such a topic cannot match the
+`vending/+/events|status` subscriptions, so runtime behavior is unchanged.
+2026-11-10 (user permission): firmware/fruit/README.md now links the contract and states the real columnCode fallback ("A");
+MqttContractDocumentationTest (8/8) checks the link; covered by the full verify above.
+Open: firmware owner sign-off (all catalog codes PROPOSED with reason).
 
 # Testing
 
-## 9. Authorization Matrix (NFR-03)
+## 13. Contract Consistency
 
-- [x] Parameterized test over **every operation in `api-contract/api.yaml`** × {anonymous, STAFF, ADMIN, KIOSK} with the expected status (`401`/`403`/allowed)
-- [x] Matrix results are identical before and after the change (except new role/permission APIs)
-- [x] For every endpoint, URL rule and `@PreAuthorize` require the same permission
-- [x] Unauthorized request with an invalid body still gets `403`, not `400`
+- [x] Every example in `api-contract/mqtt/examples/` is valid JSON with a valid envelope
+- [x] Every machine → backend example is accepted by `MachineMessageHandler` without exception (unknown-but-valid types ignored)
+- [x] `command-dispense.json` matches the envelope/payload keys produced by `MqttMachineGateway`
+- [x] Constants (channels, event types, reasons, codes) equal the values listed in the contract (documentation test)
+- [x] Topic parsing rejects 2- and 4-level topics and a topic/envelope machine code mismatch
 
-## 10. Migration / Mapping
+## 14. Documentation
 
-- [x] V13 applies on clean PostgreSQL 18; Flyway + Hibernate validation pass
-- [x] Seed contains exactly the catalog of §2 and mapping of §3
-- [x] Invalid code format rejected by CHECK
-- [x] Deleting a permission referenced by a role is rejected (RESTRICT)
-- [x] `EntityMappingTest` covers `Permission` and `Role.permissions`
+- [x] No remaining `fruit-vending/` topic anywhere in `docs/`
+- [x] Each MQTT doc links to the contract instead of redefining payloads
+- [x] Broker ACL includes `heartbeat` and `telemetry` write topics per machine
 
-## 11. Authorities
+## 15. Sign-off
 
-- [x] Principal contains `ROLE_*` and permission codes
-- [x] Roles + permissions loaded in one query (query count assertion)
-- [x] Removing `PRODUCT_WRITE` from ADMIN → next request on product create gets `403` with the same JWT
-- [x] Kiosk principal unchanged (`ROLE_KIOSK` only)
+- [ ] Firmware owner reviewed the contract — needs the firmware owner in the issue discussion
+- [x] Each catalog entry marked `AGREED` or left `PROPOSED` with a reason
 
-## 12. Role & Permission APIs
+## 16. Regression
 
-- [x] ADMIN lists permissions and roles
-- [x] ADMIN replaces STAFF permissions; effect visible on STAFF's next request
-- [x] Unknown / duplicate codes → `400`
-- [x] Removing `PERMISSION_MANAGE` or `USER_WRITE` from ADMIN → `409`
-- [x] Missing role → `404`
-- [x] STAFF → `403`; anonymous → `401`; kiosk key → `401`
-- [x] Audit row written with old/new sorted codes and actor
-- [x] Concurrent replacements on one role → no lost update
-
-## 13. Regression
-
-- [x] No `hasRole('ADMIN')` / `hasAnyRole('ADMIN','STAFF')` left (grep check in test or CI)
 - [x] All existing tests pass (`mvn clean verify`)
-- [x] Swagger and `api-contract/api.yaml` consistent (documentation test)
-- [x] Application starts successfully
+- [x] Dispense flow unchanged (existing dispense tests)
 
 ---
 
 # Acceptance Criteria
 
-- [x] V13 adds `permissions` and `role_permissions` with seeded catalog and mapping
-- [x] `Permission` entity and `Role.permissions` mapped
-- [x] Authorities include permission codes, loaded per request in one query
-- [x] All ADMIN/STAFF role checks replaced by permission checks (URL + method)
-- [x] Access behavior identical to before for every existing endpoint
-- [x] `403` still precedes `400` for unauthorized requests
-- [x] Role & permission APIs implemented with lockout guard and audit log
-- [x] Permission change applies on the next request without re-login
-- [x] Kiosk and webhook access unchanged
-- [x] Authorization matrix test covers every contract operation (NFR-03)
-- [x] Swagger, `api-contract/api.yaml`, `.ai/` docs and `docs/permission-authorization.md` updated
-- [x] Tests pass (`mvn clean verify`)
-- [x] Flyway / Hibernate validation pass
-- [x] Existing applied migrations unchanged
-
----
+- [x] `api-contract/mqtt-contract.md` v1.0.0 published with topics, envelope, commands, events, payloads, timings, security
+- [x] Error code catalog (reasons, fault codes, reset reasons) included with AGREED/PROPOSED status
+- [x] Implementation status stated for every message
+- [x] Example messages under `api-contract/mqtt/examples/`
+- [x] Backend constants match the contract and are verified by tests
+- [x] Outdated MQTT docs cleaned up and linked to the contract (docs/, .ai, AGENTS, firmware README)
+- [ ] Firmware owner sign-off recorded
+- [x] No runtime behavior change; tests pass (`mvn clean verify`)
