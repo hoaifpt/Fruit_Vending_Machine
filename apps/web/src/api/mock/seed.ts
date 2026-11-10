@@ -148,6 +148,28 @@ export function createStore(nowMs: number): MockStore {
     }
   })
 
+  // Slot heads of the maintenance machine (FE 4.2 inventory map): A1's bottom bowl failed to dispense and blocks the
+  // column; A2's only bowl is held for an order. Machine 1 (the kiosk's) keeps sellable heads, B1 an expired one.
+  // History follows the backend (OrderReservationService RESERVE AVAILABLE→RESERVED, DispenseService ADJUSTMENT
+  // RESERVED→DISPENSE_FAILED, reference = order id). The orders are not in `orders` (the seeded orders all belong to
+  // machine 1 and other screens count them), so these references point at order ids with no order row in the mock.
+  const markHead = (stockIndex: number, steps: { type: MockTransaction['type']; before: MockItem['status']; after: MockItem['status']; reason?: string; ago: number }[], orderN: number) => {
+    const head = items.find(item => item.id === uuid('70000000', stockIndex * 100 + 1))!
+    steps.forEach((step, index) => {
+      transactions.push({
+        id: uuid('71000000', 9000 + stockIndex * 10 + index), inventoryItemId: head.id, batchId: head.batchId, batchCode: head.batchCode, machineId: head.machineId,
+        slotId: head.slotId, type: step.type, referenceId: uuid('93000000', orderN), reason: step.reason, statusBefore: step.before, statusAfter: step.after, createdAt: iso(-step.ago),
+      })
+    })
+    const last = steps[steps.length - 1]
+    Object.assign(head, { status: last.after, updatedAt: iso(-last.ago) })
+  }
+  markHead(3, [
+    { type: 'RESERVE', before: 'AVAILABLE', after: 'RESERVED', ago: 2 * HOUR },
+    { type: 'ADJUSTMENT', before: 'RESERVED', after: 'DISPENSE_FAILED', reason: 'TIMEOUT', ago: 2 * HOUR - 90_000 },
+  ], 1)
+  markHead(4, [{ type: 'RESERVE', before: 'AVAILABLE', after: 'RESERVED', ago: 60_000 }], 2)
+
   const credentials: MockCredential[] = [
     { credentialId: uuid('80000000', 1), machineId: machines[0].id, apiKey: 'fvk_mockrevoked_notasecret', keyPrefix: 'mockrevoked', status: 'REVOKED', createdAt: iso(-20 * DAY), createdBy: adminId, revokedAt: iso(-10 * DAY), revokedBy: adminId },
     { credentialId: uuid('80000000', 2), machineId: machines[0].id, apiKey: 'fvk_mockactive_notasecret', keyPrefix: 'mockactive', status: 'ACTIVE', createdAt: iso(-10 * DAY), createdBy: adminId },

@@ -11,7 +11,7 @@ Phạm vi: `apps/web` cho ADMIN/STAFF, gọi API thật theo `api-contract/api.y
 | `/admin/products` | Xem, tạo, sửa, đổi trạng thái | Chỉ xem |
 | `/admin/machines`, `/admin/machines/:id` | Xem, đăng ký, cấu hình, đổi trạng thái; ngăn chứa; khóa kiosk | Chỉ xem (máy và ngăn) |
 | `/admin/batches` | Tạo và xem (lô không sửa/xóa) | Tạo và xem |
-| `/admin/inventory`, `/admin/inventory/history` | Nạp hộp, gỡ hộp, xem, tóm tắt ngăn, lịch sử | Như ADMIN |
+| `/admin/inventory`, `/admin/inventory/history` | Sơ đồ ngăn theo máy (`?machineId=`, hộp đáy bán tiếp theo, hộp chặn ngăn và nút Rút hộp), danh sách hộp (`?view=list`), nạp hộp, rút hộp, tóm tắt ngăn, lịch sử | Như ADMIN |
 | `/admin/orders`, `/admin/orders/:id` | Chỉ xem | Chỉ xem |
 | `/admin/payments`, `/admin/payments/:id` | Chỉ xem, chế độ "Cần xử lý" | Ẩn |
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Chỉ xem | Ẩn |

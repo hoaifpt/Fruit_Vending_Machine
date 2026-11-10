@@ -60,7 +60,7 @@ Kịch bản giữ nguyên khi chuyển trang cho tới khi đóng tab hoặc m�
 | `/admin/machines`, `/admin/machines/:id` | Máy, cấu hình, ngăn chứa, tóm tắt tồn kho, khóa kiosk (ADMIN) |
 | `/admin/products` | Sản phẩm, SKU, giá, trạng thái |
 | `/admin/batches` | Lô hàng (tạo và xem) |
-| `/admin/inventory`, `/admin/inventory/history` | Từng hộp hàng, nạp/gỡ hộp, lịch sử |
+| `/admin/inventory`, `/admin/inventory/history` | Sơ đồ ngăn theo máy (hộp đáy, hộp đang giữ, hộp chặn ngăn), danh sách hộp, nạp/rút hộp, lịch sử |
 | `/admin/orders`, `/admin/orders/:id` | Đơn hàng (chỉ xem) |
 | `/admin/payments`, `/admin/payments/:id` | Thanh toán và danh sách "Cần xử lý" (ADMIN, chỉ xem) |
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Log webhook thanh toán (ADMIN, chỉ xem) |
