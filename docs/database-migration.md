@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V13 hiện có (22 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V14 hiện có (22 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -119,7 +119,7 @@ erDiagram
     machine_slots {
         uuid id PK "UK (id, machine_id)"
         uuid machine_id FK "UK (machine, slot_code)"
-        varchar slot_code
+        varchar slot_code "A, B (V14)"
         int capacity "> 0"
         varchar status "ACTIVE, INACTIVE, ERROR"
         timestamptz created_at
@@ -269,6 +269,7 @@ erDiagram
         timestamptz sent_at "nullable"
         timestamptz acknowledged_at "nullable"
         timestamptz completed_at "nullable"
+        varchar failure_reason "nullable, set iff FAILED/TIMEOUT (V14)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -356,7 +357,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | permissions — quyền hạn (V13) | id | code UNIQUE, CHECK chữ hoa/số/gạch dưới, không bắt đầu bằng ROLE_; seed 15 code với UUID cố định | code đã có UNIQUE index |
 | role_permissions — role → permission (V13) | (role_id, permission_id); roles CASCADE, permissions RESTRICT | không lặp; xóa permission đang được cấp bị chặn | ix_role_permissions_permission; PK hỗ trợ role_id |
 | machines — máy và ngưỡng | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền | code đã có UNIQUE index |
-| machine_slots — slot vật lý | id; machine_id → machines | UNIQUE(machine_id, slot_code), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
+| machine_slots — slot vật lý = một cột | id; machine_id → machines | UNIQUE(machine_id, slot_code), slot_code A/B (V14), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
 | kiosk_credentials — khóa API của kiosk (V10) | id; machine_id → machines; created_by, revoked_by → users nullable | key_prefix UNIQUE 12 ký tự; secret_hash SHA-256 hex; ACTIVE/REVOKED; REVOKED cần revoked_at ≥ created_at | partial UNIQUE một ACTIVE/máy, machine/time |
 | products — danh mục, giá hiện tại | id | sku UNIQUE; giá không âm hợp lệ; ACTIVE/INACTIVE | sku đã có UNIQUE index |
 | product_batches — lô sản xuất | id; product_id → products; created_by → users nullable | batch_code UNIQUE; quantity > 0; finite expires_at > manufactured_at | product_id, expires_at, creator partial |
@@ -368,7 +369,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
 | payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12) |
 | payment_webhook_logs — callback thô kể cả lỗi | id; không FK order | provider không rỗng; raw_body bắt buộc; JSONB nullable; is_verified mặc định false | order_code/time, provider/time |
-| dispense_commands — lệnh có retry | id; composite FK orders/machine_slots/inventory_items | command_code UNIQUE; status CHECK; SUCCESS cần completed_at; một active/success command/tô | machine/time, order_id, slot_id, status, inventory_item_id, partial UNIQUE live inventory |
+| dispense_commands — lệnh có retry | id; composite FK orders/machine_slots/inventory_items | command_code UNIQUE; status CHECK; SUCCESS cần completed_at; failure_reason có đúng khi FAILED/TIMEOUT (V14); một active/success command/tô | machine/time, order_id, slot_id, status, inventory_item_id, partial UNIQUE live inventory, partial machine in-flight (V14) |
 | inventory_transactions — lịch sử bất biến | id; inventory_item_id → inventory_items; (slot_id, machine_id) → slots; performed_by → users nullable | type CHECK; MATCH FULL snapshot vị trí; append-only trigger | item/time, machine/time, slot_id, created_at, actor partial |
 | machine_events — sự kiện thiết bị | id; machine_id → machines | event_type mở không rỗng; payload JSONB | machine/time, created_at |
 | audit_logs — lịch sử thay đổi | id; user_id → users nullable; entity_id đa hình | action/entity_type không rỗng; old/new JSONB | user/time, entity_type/entity_id/time, created_at |
@@ -397,6 +398,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V11 | orders.expires_at và partial index cho đơn PENDING_PAYMENT |
 | V12 | partial UNIQUE payments(provider, payment_reference) |
 | V13 | permissions, role_permissions và seed mapping ADMIN/STAFF (issue #48, [permission-authorization.md](permission-authorization.md)) |
+| V14 | machine_slots: đổi `A1`/`B1` → `A`/`B` khi không mơ hồ (mơ hồ thì dừng, không đổi gì), CHECK slot_code A/B; dispense_commands.failure_reason (+ CHECK, backfill `LEGACY_UNKNOWN`), index lệnh đang chạy theo máy (issue #52, [mqtt-dispense.md](mqtt-dispense.md)) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)
@@ -435,7 +437,7 @@ dev/migration; production tách migration owner và runtime user quyền tối t
 Flyway clean bị vô hiệu hóa. Dừng container bằng `docker compose --env-file .env -f backend/db/compose.yaml stop`;
 volume giữ dữ liệu. Không reset/xóa volume database đang dùng để sửa checksum.
 
-Migration mới dùng V13 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
+Migration mới dùng V15 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
 Flyway chạy trước ứng dụng. Sau này Maven/Spring Boot dùng flyway-core và module
 flyway-database-postgresql với phiên bản tương thích. Module JPA hiện có pom Java 21,
 Spring Boot 3.5.14 và Flyway 11.20.1 cùng phiên bản đã kiểm chứng bằng Docker.
@@ -447,8 +449,8 @@ docker compose --env-file .env -f backend/db/compose.yaml exec -T postgres sh -c
 ```
 
 Script ngoài classpath migrations, chạy thủ công sau Flyway, không tự chạy production.
-Tạo ADMIN/STAFF nếu thiếu, máy DEV-MACHINE-01, ba slot A1/A2/B1 capacity 10,
-hai sản phẩm giá 35000.00 và 25000.00. Chạy lại không nhân đôi hay ghi đè dữ liệu đã sửa.
+Tạo máy DEV-MACHINE-01 (ACTIVE, cột A/B capacity 10) và DEV-MACHINE-02 (MAINTENANCE, cột B có đầu cột hết hạn),
+các sản phẩm mẫu, lô hàng và tồn kho. Chạy lại không nhân đôi hay ghi đè dữ liệu đã sửa.
 Không tạo account, plaintext password hoặc hash giả.
 
 ## 6. Kiểm chứng

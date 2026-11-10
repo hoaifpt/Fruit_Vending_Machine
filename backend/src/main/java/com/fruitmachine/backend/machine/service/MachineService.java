@@ -1,11 +1,15 @@
 package com.fruitmachine.backend.machine.service;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fruitmachine.backend.audit.entity.AuditLog;
+import com.fruitmachine.backend.audit.repository.AuditLogRepository;
 import com.fruitmachine.backend.common.exception.BadRequestException;
 import com.fruitmachine.backend.common.exception.ConflictException;
 import com.fruitmachine.backend.common.exception.ResourceNotFoundException;
 import com.fruitmachine.backend.machine.dto.*;
 import com.fruitmachine.backend.machine.entity.Machine;
 import com.fruitmachine.backend.machine.enums.MachineStatus;
+import com.fruitmachine.backend.machine.event.MachineMaintenanceEnteredEvent;
 import com.fruitmachine.backend.machine.mapper.MachineMapper;
 import com.fruitmachine.backend.machine.repository.MachineRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -15,11 +19,13 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
@@ -28,8 +34,11 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 public class MachineService {
     private static final Set<String> SORT_FIELDS = Set.of("id", "code", "name", "location", "status", "createdAt", "updatedAt");
+    public static final String AUDIT_MAINTENANCE_AUTO = "MACHINE_MAINTENANCE_AUTO";
     private final MachineRepository machines;
     private final MachineMapper mapper;
+    private final AuditLogRepository audits;
+    private final ApplicationEventPublisher events;
 
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_MACHINE_READ)
@@ -97,6 +106,32 @@ public class MachineService {
         machine.setStatus(request.status());
         machines.flush();
         return mapper.toResponse(machine);
+    }
+
+    /**
+     * Protects customers after a hardware problem: an ACTIVE machine stops selling until an administrator has checked it and
+     * sets it ACTIVE again (status endpoint, MACHINE_WRITE). Idempotent: MAINTENANCE and INACTIVE machines are left as they are.
+     * Called by the system, not by a user, inside the caller's transaction; the caller should already hold the Machine row lock
+     * when it holds Order or InventoryItem locks (lock order: Machine first).
+     *
+     * @return true when the status changed
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean enterMaintenanceBySystem(UUID machineId, String reason) {
+        Machine machine = machines.findForUpdateById(machineId).orElseThrow(this::notFound);
+        if (machine.getStatus() != MachineStatus.ACTIVE) return false;
+        machine.setStatus(MachineStatus.MAINTENANCE);
+        machines.flush();
+        var row = new AuditLog();
+        // user stays NULL: the system made this change.
+        row.setAction(AUDIT_MAINTENANCE_AUTO);
+        row.setEntityType("Machine");
+        row.setEntityId(machineId);
+        row.setOldValue(JsonNodeFactory.instance.objectNode().put("status", MachineStatus.ACTIVE.name()));
+        row.setNewValue(JsonNodeFactory.instance.objectNode().put("status", MachineStatus.MAINTENANCE.name()).put("reason", reason));
+        audits.save(row);
+        events.publishEvent(new MachineMaintenanceEnteredEvent(machineId, machine.getCode(), reason));
+        return true;
     }
 
     private void applyConfiguration(Machine machine, String name, String location,

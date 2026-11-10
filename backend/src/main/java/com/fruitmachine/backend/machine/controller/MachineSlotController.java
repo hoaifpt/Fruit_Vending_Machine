@@ -66,8 +66,8 @@ public class MachineSlotController {
     @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "createMachineSlot", summary = "Configure a new machine slot",
             description = "ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. "
-                    + "Accepts only slotCode (nonblank, stripped/uppercase, at most 32 characters) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). "
-                    + "Code is immutable and unique per machine; another machine may reuse it. DB UNIQUE protects concurrent creates. No fixed slot count/capacity or inventory checks.")
+                    + "Accepts only slotCode (the physical column A or B, stripped and uppercased first) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). "
+                    + "Code is immutable and unique per machine, so a machine has at most two slots; another machine may reuse it. Dispense commands send it as columnCode. DB UNIQUE protects concurrent creates. No fixed capacity or inventory checks.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "ACTIVE slot created; Location points to the scoped slot"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Slot code already exists in this machine or concurrent UNIQUE conflict", content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))

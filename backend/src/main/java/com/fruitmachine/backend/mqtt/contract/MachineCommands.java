@@ -8,14 +8,15 @@ public final class MachineCommands {
     private MachineCommands() {
     }
 
-    /** DISPENSE without {@code columnCode}: the backend adds it in 3.3; until then the firmware falls back to column A. */
-    public static Map<String, Object> dispense(String machineCode, String commandId) {
+    /** @param columnCode slot code of the column that holds the bowl, "A" or "B" */
+    public static Map<String, Object> dispense(String machineCode, String commandId, String columnCode) {
         return Map.of(
                 MqttContract.SCHEMA_VERSION_FIELD, MqttContract.SCHEMA_VERSION,
                 MqttContract.MESSAGE_ID_FIELD, UUID.randomUUID().toString(),
                 MqttContract.MACHINE_CODE_FIELD, machineCode,
                 MqttContract.PAYLOAD_FIELD, Map.of(
                         MachineCommandType.TYPE_FIELD, MachineCommandType.DISPENSE,
-                        MachineCommandType.COMMAND_ID_FIELD, commandId));
+                        MachineCommandType.COMMAND_ID_FIELD, commandId,
+                        MachineCommandType.COLUMN_CODE_FIELD, columnCode));
     }
 }

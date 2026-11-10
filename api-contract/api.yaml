@@ -314,7 +314,7 @@ paths:
                   "createdAt": "2026-10-10T02:00:00Z"
                   "status": "AVAILABLE"
                   "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
-                  "slotCode": "A1"
+                  "slotCode": "A"
                   "loadedAt": "2026-10-10T02:00:00Z"
                   "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
                   "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
@@ -499,7 +499,7 @@ paths:
                       "createdAt": "2026-10-10T02:00:00Z"
                       "status": "AVAILABLE"
                       "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
-                      "slotCode": "A1"
+                      "slotCode": "A"
                       "loadedAt": "2026-10-10T02:00:00Z"
                       "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
                       "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
@@ -658,7 +658,7 @@ paths:
                       "createdAt": "2026-10-10T02:00:00Z"
                       "status": "AVAILABLE"
                       "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
-                      "slotCode": "A1"
+                      "slotCode": "A"
                       "loadedAt": "2026-10-10T02:00:00Z"
                       "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
                       "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
@@ -940,7 +940,7 @@ paths:
                       "createdAt": "2026-10-10T02:00:00Z"
                       "status": "AVAILABLE"
                       "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
-                      "slotCode": "A1"
+                      "slotCode": "A"
                       "loadedAt": "2026-10-10T02:00:00Z"
                       "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
                       "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
@@ -997,7 +997,7 @@ paths:
                       "createdAt": "2026-10-10T02:00:00Z"
                       "status": "AVAILABLE"
                       "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
-                      "slotCode": "A1"
+                      "slotCode": "A"
                       "loadedAt": "2026-10-10T02:00:00Z"
                       "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
                       "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
@@ -1138,7 +1138,7 @@ paths:
                   "removedAt": "2026-10-10T02:00:00Z"
                   "updatedAt": "2026-10-10T02:00:00Z"
                   "status": "REMOVED"
-                  "slotCode": "A1"
+                  "slotCode": "A"
                 "timestamp": "2026-10-10T02:00:00Z"
                 "message": "Inventory removed"
         "409":
@@ -1705,7 +1705,7 @@ paths:
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
                   "updatedAt": "2026-10-10T00:00:00Z"
                   "capacity": 6
-                  "slotCode": "A1"
+                  "slotCode": "A"
                   "status": "ACTIVE"
                 "timestamp": "2026-10-10T00:00:00Z"
       "security":
@@ -1828,7 +1828,7 @@ paths:
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
                   "updatedAt": "2026-10-10T00:00:00Z"
                   "capacity": 8
-                  "slotCode": "A1"
+                  "slotCode": "A"
                   "status": "ACTIVE"
                 "timestamp": "2026-10-10T00:00:00Z"
       "security":
@@ -1979,7 +1979,7 @@ paths:
                     -
                       "updatedAt": "2026-10-10T00:00:00Z"
                       "capacity": 6
-                      "slotCode": "A1"
+                      "slotCode": "A"
                       "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
                       "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
                       "createdAt": "2026-10-10T00:00:00Z"
@@ -1993,7 +1993,7 @@ paths:
       "tags":
         - "Machine Slots"
       "summary": "Configure a new machine slot"
-      "description": "ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. Accepts only slotCode (nonblank, stripped/uppercase, at most 32 characters) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). Code is immutable and unique per machine; another machine may reuse it. DB UNIQUE protects concurrent creates. No fixed slot count/capacity or inventory checks."
+      "description": "ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. Accepts only slotCode (the physical column A or B, stripped and uppercased first) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). Code is immutable and unique per machine, so a machine has at most two slots; another machine may reuse it. Dispense commands send it as columnCode. DB UNIQUE protects concurrent creates. No fixed capacity or inventory checks."
       "operationId": "createMachineSlot"
       "parameters":
         -
@@ -2011,7 +2011,7 @@ paths:
               "$ref": "#/components/schemas/CreateMachineSlotRequest"
             "example":
               "capacity": 6
-              "slotCode": "A1"
+              "slotCode": "A"
         "required": true
       "responses":
         "201":
@@ -2037,7 +2037,7 @@ paths:
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
                   "updatedAt": "2026-10-10T00:00:00Z"
                   "capacity": 6
-                  "slotCode": "A1"
+                  "slotCode": "A"
                   "status": "ACTIVE"
                 "timestamp": "2026-10-10T00:00:00Z"
         "409":
@@ -2238,7 +2238,7 @@ paths:
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
                   "updatedAt": "2026-10-10T00:00:00Z"
                   "capacity": 6
-                  "slotCode": "A1"
+                  "slotCode": "A"
                   "status": "INACTIVE"
                 "timestamp": "2026-10-10T00:00:00Z"
       "security":
@@ -5055,7 +5055,7 @@ paths:
                         -
                           "id": "a110c000-0000-4000-8000-000000000001"
                           "inventoryItemId": "1e000000-0000-4000-8000-000000000001"
-                          "slotCode": "A1"
+                          "slotCode": "A"
                           "batchCode": "B20261014-01"
                           "batchExpiresAt": "2026-10-17T00:00:00Z"
                           "status": "RELEASED"
@@ -6537,8 +6537,11 @@ components:
           "description": "Immutable owning machine UUID."
         "slotCode":
           "type": "string"
-          "description": "Immutable code unique within the machine."
-          "example": "A1"
+          "description": "Immutable physical column of the machine: A or B, unique within the machine."
+          "enum":
+            - "A"
+            - "B"
+          "example": "A"
         "capacity":
           "type": "integer"
           "format": "int32"
@@ -6571,14 +6574,17 @@ components:
     "CreateMachineSlotRequest":
       "type": "object"
       "additionalProperties": false
-      "description": "Configure a slot on an existing machine; initial status ACTIVE."
+      "description": "Configure a slot on an existing machine; initial status ACTIVE. A slot is one physical column of the machine, so a machine has at most two slots."
       "properties":
         "slotCode":
           "type": "string"
-          "description": "Stable code within the parent machine; stripped and uppercased using Locale.ROOT. No hardware naming restriction."
-          "example": "A1"
-          "maxLength": 32
+          "description": "Physical column of the machine: A or B, unique within the parent machine. Stripped and uppercased using Locale.ROOT before validation. Sent to the machine as columnCode of dispense commands."
+          "enum":
+            - "A"
+            - "B"
+          "example": "A"
           "minLength": 1
+          "pattern": "[AB]"
         "capacity":
           "type": "integer"
           "format": "int32"

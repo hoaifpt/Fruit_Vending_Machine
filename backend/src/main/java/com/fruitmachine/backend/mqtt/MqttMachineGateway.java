@@ -98,10 +98,10 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
     }
 
     @Override
-    public boolean sendDispense(String machineCode, String commandCode) {
+    public boolean sendDispense(String machineCode, String commandCode, String columnCode) {
         if (!client.isConnected()) return false;
         try {
-            byte[] body = json.writeValueAsBytes(MachineCommands.dispense(machineCode, commandCode));
+            byte[] body = json.writeValueAsBytes(MachineCommands.dispense(machineCode, commandCode, columnCode));
             var message = new MqttMessage(body);
             message.setQos(QOS);
             message.setRetained(false);

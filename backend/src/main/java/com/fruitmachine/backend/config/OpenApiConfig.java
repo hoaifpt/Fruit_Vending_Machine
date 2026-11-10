@@ -316,13 +316,13 @@ public class OpenApiConfig {
             if (!List.of("/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}",
                     "/api/v1/machines/{machineId}/slots/{slotId}/status").contains(name)) return;
             var slot = Map.of("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                    "machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", "slotCode", "A1", "capacity", 6, "status", "ACTIVE",
+                    "machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", "slotCode", "A", "capacity", 6, "status", "ACTIVE",
                     "createdAt", "2026-10-10T00:00:00Z", "updatedAt", "2026-10-10T00:00:00Z");
             path.readOperations().forEach(operation -> {
                 String id = operation.getOperationId();
                 if (operation.getRequestBody() != null) {
                     Object request = switch (id) {
-                        case "createMachineSlot" -> Map.of("slotCode", "A1", "capacity", 6);
+                        case "createMachineSlot" -> Map.of("slotCode", "A", "capacity", 6);
                         case "updateMachineSlot" -> Map.of("capacity", 8);
                         default -> Map.of("status", "INACTIVE");
                     };
@@ -426,7 +426,7 @@ public class OpenApiConfig {
             String operationId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07", timestamp = "2026-10-10T02:00:00Z";
             var item = Map.ofEntries(Map.entry("id", itemId), Map.entry("batchId", batchId), Map.entry("batchCode", "MANGO-20261010-01"),
                     Map.entry("productId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"), Map.entry("productName", "Mango Fruit Box"),
-                    Map.entry("machineId", machineId), Map.entry("slotId", slotId), Map.entry("slotCode", "A1"), Map.entry("status", "AVAILABLE"),
+                    Map.entry("machineId", machineId), Map.entry("slotId", slotId), Map.entry("slotCode", "A"), Map.entry("status", "AVAILABLE"),
                     Map.entry("expiresAt", "2026-10-12T01:00:00Z"), Map.entry("expired", false), Map.entry("loadedAt", timestamp), Map.entry("createdAt", timestamp), Map.entry("updatedAt", timestamp));
             path.readOperations().forEach(operation -> {
                 String id = operation.getOperationId();
@@ -502,7 +502,7 @@ public class OpenApiConfig {
         summary.put("createdAt", timestamp); summary.put("expiresAt", "2026-10-15T04:05:00Z"); summary.put("cancelledAt", null);
         var allocation = new java.util.LinkedHashMap<String, Object>();
         allocation.put("id", "a110c000-0000-4000-8000-000000000001"); allocation.put("inventoryItemId", "1e000000-0000-4000-8000-000000000001");
-        allocation.put("slotCode", "A1"); allocation.put("batchCode", "B20261014-01"); allocation.put("batchExpiresAt", "2026-10-17T00:00:00Z");
+        allocation.put("slotCode", "A"); allocation.put("batchCode", "B20261014-01"); allocation.put("batchExpiresAt", "2026-10-17T00:00:00Z");
         allocation.put("status", "RELEASED"); allocation.put("releasedAt", "2026-10-15T04:01:00Z");
         var detailLine = new java.util.LinkedHashMap<String, Object>(line);
         detailLine.put("id", "01100000-0000-4000-8000-000000000001"); detailLine.put("allocations", List.of(allocation));

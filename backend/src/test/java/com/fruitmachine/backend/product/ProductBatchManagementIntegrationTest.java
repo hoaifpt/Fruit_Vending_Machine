@@ -241,7 +241,7 @@ class ProductBatchManagementIntegrationTest {
     @Test void noUpdateOrDeleteRoutesAndNoParentOrInventoryModification() throws Exception {
         UUID machine = UUID.randomUUID(), slot = UUID.randomUUID();
         jdbc.update("INSERT INTO machines(id,code,name) VALUES (?,'FIXTURE','Fixture')", machine);
-        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A1',6)", slot, machine);
+        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A',6)", slot, machine);
         var slotBefore = jdbc.queryForList("SELECT * FROM machine_slots");
         UUID id = create("IMMUTABLE", adminToken);
         var batchBefore = jdbc.queryForList("SELECT * FROM product_batches");

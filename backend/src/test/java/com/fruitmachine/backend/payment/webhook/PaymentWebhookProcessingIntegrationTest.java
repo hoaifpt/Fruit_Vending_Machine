@@ -322,25 +322,29 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
 
     @Test
     void requiresAttentionListsLateAndDuplicatePaymentsOnly() throws Exception {
-        var shop = shopWithSlots(4);
+        var shop = shopWithTwoColumns();
         var normal = placeOrder(shop);
         pay(normal, 201);
         var late = placeOrder(shop);
         pay(late, 201);
-        var duplicate = placeOrder(shop);
-        pay(duplicate, 201);
-        var pending = placeOrder(shop);
+        // Both columns of that machine are in use, so the order that stays unpaid lives on another machine.
+        var pending = placeOrder();
         pay(pending, 201);
 
         paid(reference(normal), "TXN-N", orderTotal(normal.orderId()));
         String lateRef = reference(late);
         kioskJson("POST", "/api/v1/kiosk/orders/" + late.orderId() + "/cancel", shop.key(), null, 200);
         paid(lateRef, "TXN-L", orderTotal(late.orderId()));
+        // The cancelled order released its column: the next order takes it.
+        var duplicate = placeOrder(shop);
+        pay(duplicate, 201);
         String firstRef = reference(duplicate);
         paid(firstRef, "TXN-D1", orderTotal(duplicate.orderId()));
         String secondRef = insertPendingAttempt(duplicate.orderId(), "TEST-DUP-2", orderTotal(duplicate.orderId()));
         paid(secondRef, "TXN-D2", orderTotal(duplicate.orderId()));
 
+        var unpaid = fixtures.api("GET", "/api/v1/payments?requiresAttention=true&machineId=" + pending.shop().machineId() + "&size=50", null, admin.token(), 200);
+        assertThat(unpaid.path("totalElements").asInt()).isZero();
         var page = fixtures.api("GET", "/api/v1/payments?requiresAttention=true&machineId=" + shop.machineId() + "&size=50", null, admin.token(), 200);
         Set<String> ids = page.path("content").findValuesAsText("id").stream().collect(Collectors.toSet());
         assertThat(ids).containsExactlyInAnyOrder(paymentId(lateRef).toString(), paymentId(firstRef).toString(), paymentId(secondRef).toString());
