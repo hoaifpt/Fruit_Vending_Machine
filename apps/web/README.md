@@ -141,7 +141,23 @@ Chạy các lệnh trong `apps/web`:
 | `npm run gen:api` | Sinh lại `src/api/schema.d.ts` từ `../../api-contract/api.yaml` |
 | `npm run gen:api:drafts` | Sinh `src/api/drafts/*.d.ts` từ `../../api-contract/drafts/*.yaml` |
 
+| `npm run test:ux` | Bộ test UX/UI tự động (Playwright + axe) trên mock, xuất ảnh chụp và báo cáo |
+
 Chạy `npm run gen:api` mỗi khi contract thay đổi và commit file kết quả. Các tương tác vuốt, bố cục responsive và tự chuyển trang của kiosk cần kiểm tra thêm trên trình duyệt.
+
+### Test UX/UI tự động (Playwright)
+
+```powershell
+npm run test:ux
+```
+
+Một lệnh chạy toàn bộ luồng mẫu trong `e2e/`, không cần backend: Playwright tự khởi động `vite --mode mock` ở cổng `5199` (dùng lại nếu đã có server ở cổng đó; đổi bằng `PW_PORT`).
+
+- Trình duyệt: Microsoft Edge có sẵn trên máy (`channel: 'msedge'`), không cần `npx playwright install`. Trên CI hoặc máy không có Edge: `npx playwright install chromium` rồi đặt `PW_CHANNEL=chromium`. Số worker mặc định 3 (`PW_WORKERS`).
+- Luồng: đăng nhập ADMIN/STAFF bằng bàn phím, sai mật khẩu, bỏ trống; STAFF không thấy mục ADMIN và gặp 403 khi gõ URL ADMIN; `?scenario=expire` về đăng nhập rồi quay lại đúng trang; Đơn hàng lọc/sắp xếp/phân trang trên URL, trạng thái rỗng, 403, lỗi 500.
+- Ảnh và axe: đăng nhập, Đơn hàng, `/admin/_kit`, trang 403 ở 1440/768/390px × sáng/tối; kiosk `/buy` (danh mục và màn QR) ở 1280×800 nền sáng. Mỗi kích thước kiểm không cuộn ngang. axe chạy với tag `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`: vi phạm critical/serious làm test FAIL, moderate/minor chỉ ghi báo cáo. Vi phạm đã biết (ngoài phạm vi, có lý do) khai báo trong `e2e/axe-known.ts`, không tắt rule toàn cục.
+- Kết quả trong `e2e-report/` (không commit): `ux-summary.md` và `ux-summary.json` (ảnh theo màn × kích thước × giao diện, cuộn ngang, vi phạm axe theo mức), `screenshots/`, báo cáo HTML `html/index.html` (`npx playwright show-report e2e-report/html`).
+- Chạy một phần: `npm run test:ux -- e2e/orders.spec.ts` hoặc `npm run test:ux -- --project=kiosk`. Bật trace khi cần gỡ lỗi: `npx playwright test --trace on`.
 
 ## Cấu trúc thư mục
 
@@ -162,7 +178,8 @@ apps/web/
 │   ├── routing.ts
 │   ├── main.tsx
 │   └── index.css
-├── tests/                  # Kiểm thử tự động
+├── tests/                  # Kiểm thử tự động (Node test runner)
+├── e2e/                    # Test UX/UI Playwright + axe (npm run test:ux)
 ├── docs/                   # Thiết kế, nghiệp vụ và tích hợp
 ├── public/                 # Tài nguyên tĩnh
 ├── .env.example            # Mẫu biến môi trường

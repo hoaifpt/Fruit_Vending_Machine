@@ -396,6 +396,23 @@ test('scenario expire rejects the old session once; signing in again works, also
   await assert.doesNotReject(ordersApi.list({}))
 })
 
+test('scenario expire: signing in again within the same second as the expiry still works', async () => {
+  const { state } = setup({ storage: memoryStorage() })
+  state.clock = Math.floor(Date.now() / 1000) * 1000 + 100
+  await signIn(state, 'admin')
+  const oldToken = state.token
+  state.clock += 200
+  state.search = '?scenario=expire'
+  await assert.rejects(ordersApi.list({}), failsWith(401))
+  state.clock += 200 // still the same whole second as the old token's `iat`
+  state.search = '?next=%2Fadmin%2Forders'
+  await signIn(state, 'admin')
+  state.search = '?scenario=expire'
+  await assert.doesNotReject(ordersApi.list({}))
+  state.token = oldToken
+  await assert.rejects(ordersApi.list({}), failsWith(401))
+})
+
 test('mock enforces roles: STAFF gets 403 on ADMIN-only endpoints', async () => {
   const { state } = setup()
   await signIn(state, 'staff')

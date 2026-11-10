@@ -206,7 +206,8 @@ export const routes: Route[] = [
     const user = ctx.store.users.find(candidate => candidate.email === email)
     if (!user || user.password !== password || user.status !== 'ACTIVE') throw new MockHttpError(401, 'Invalid email or password')
     const iat = Math.floor(ctx.now / 1000), expiresIn = 3600
-    const claims = { sub: user.id, email: user.email, roles: user.roles.map(role => `ROLE_${role}`), iat, exp: iat + expiresIn }
+    // `iatMs` (mock only) keeps the exact issue time: `iat` is in whole seconds, too coarse for the `expire` scenario.
+    const claims = { sub: user.id, email: user.email, roles: user.roles.map(role => `ROLE_${role}`), iat, iatMs: ctx.now, exp: iat + expiresIn }
     return ok({ accessToken: `${base64Url(JSON.stringify({ alg: 'none', typ: 'JWT' }))}.${base64Url(JSON.stringify(claims))}.mock`, tokenType: 'Bearer', expiresIn })
   }),
   route('GET', '/auth/me', 'any', ctx => {

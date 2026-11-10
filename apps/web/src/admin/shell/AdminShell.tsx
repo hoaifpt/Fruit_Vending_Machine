@@ -87,8 +87,9 @@ export function AdminShell({ nav, route, email, roles, onLogout, children }: She
           <div className="mx-1 hidden h-5 w-px bg-border sm:block" />
           <Breadcrumb route={route} />
           <div className="ml-auto flex items-center gap-1.5">
-            <Button variant="outline" size="sm" className="w-9 justify-start px-0 text-muted-foreground sm:w-56 sm:px-3" onClick={() => setPalette(true)} aria-label="Tìm kiếm và điều hướng (Ctrl+K)">
-              <Search className="mx-auto sm:mx-0" /><span className="hidden flex-1 text-left font-normal sm:inline">Tìm màn hình…</span><Kbd className="hidden sm:inline-flex">Ctrl K</Kbd>
+            <Button variant="outline" size="sm" className="w-9 justify-start px-0 text-muted-foreground sm:w-56 sm:px-3" onClick={() => setPalette(true)}>
+              {/* Named by its visible text (WCAG 2.5.3); icon-only on phones, where the sr-only copy names it. */}
+              <Search className="mx-auto sm:mx-0" aria-hidden="true" /><span className="sr-only sm:hidden">Tìm màn hình</span><span className="hidden flex-1 text-left font-normal sm:inline">Tìm màn hình…</span><Kbd className="hidden sm:inline-flex">Ctrl K</Kbd>
             </Button>
             <ThemeMenu />
           </div>
@@ -106,9 +107,12 @@ function SidebarBody({ nav, route, collapsed, account }: { nav: NavItem[]; route
   const groups = [...new Set(nav.map(item => item.group))]
   return <>
     <div className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border', collapsed ? 'justify-center px-0' : 'px-4')}>
-      <a href="/" className="flex min-w-0 items-center gap-2.5 rounded-md" aria-label="Fruit Vending, về trang giới thiệu">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"><Leaf className="size-4" /></span>
-        {!collapsed && <span className="min-w-0 leading-tight"><span className="block truncate text-sm font-semibold text-foreground">Fruit Vending</span><span className="block truncate text-xs text-muted-foreground">Quản trị</span></span>}
+      {/* The accessible name starts with the visible text (WCAG 2.5.3); the destination is added for screen readers only. */}
+      <a href="/" className="flex min-w-0 items-center gap-2.5 rounded-md">
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"><Leaf className="size-4" aria-hidden="true" /></span>
+        {collapsed
+          ? <span className="sr-only">Fruit Vending, về trang giới thiệu</span>
+          : <span className="min-w-0 leading-tight"><span className="block truncate text-sm font-semibold text-foreground">Fruit Vending</span><span className="block truncate text-xs text-muted-foreground">Quản trị</span><span className="sr-only">, về trang giới thiệu</span></span>}
       </a>
     </div>
     <nav aria-label="Quản trị" className="flex-1 overflow-y-auto px-2 py-3">
@@ -140,8 +144,9 @@ function AccountMenu({ email, roles, onLogout, collapsed }: { email: string; rol
   const roleText = roles.map(role => ROLE_LABELS[role]).join(' · ')
   return <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <button type="button" className={cn('flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none data-[state=open]:bg-sidebar-accent', collapsed && 'justify-center')} aria-label="Tài khoản">
-        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary">{initial}</span>
+      <button type="button" className={cn('flex w-full items-center gap-2.5 rounded-md p-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none data-[state=open]:bg-sidebar-accent', collapsed && 'justify-center')} aria-label={collapsed ? `Tài khoản ${email}` : undefined}>
+        {!collapsed && <span className="sr-only">Tài khoản: </span>}
+        <span aria-hidden={collapsed || undefined} className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/15 text-sm font-semibold text-primary">{initial}</span>
         {!collapsed && <><span className="min-w-0 flex-1 leading-tight"><span className="block truncate text-sm font-medium text-foreground">{email || 'Tài khoản'}</span><span className="block truncate text-xs text-muted-foreground">{roleText}</span></span><ChevronsUpDown className="size-4 text-muted-foreground" /></>}
       </button>
     </DropdownMenuTrigger>

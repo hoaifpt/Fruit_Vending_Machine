@@ -60,6 +60,8 @@
   --ui-accent: oklch(0.26 0.018 158);
   --ui-accent-foreground: oklch(0.95 0.01 155);
   --ui-destructive: oklch(0.66 0.19 25);
+  /* Dark text on the lighter dark-mode red: white on it is only ~3.6:1 (axe color-contrast), dark text is above 5:1. */
+  --ui-destructive-foreground: oklch(0.17 0.03 25);
   --ui-success: oklch(0.72 0.14 152);
   --ui-warning: oklch(0.78 0.13 80);
   --ui-info: oklch(0.72 0.12 250);

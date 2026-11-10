@@ -27,6 +27,9 @@ logs/
 /.nyc_output/
 /playwright-report/
 /test-results/
+# npm run test:ux (Playwright HTML report, screenshots, ux-summary.md/.json)
+/e2e-report/
+/blob-report/
 
 # Local FK live-session configuration
 /.fk-skills/live/

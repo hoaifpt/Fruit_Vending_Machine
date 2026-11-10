@@ -81,7 +81,7 @@ function simulatedFieldErrors(body: unknown): Record<string, string> | undefined
   return field ? { [field]: 'Giá trị không hợp lệ (mô phỏng).' } : undefined
 }
 
-function decodeClaims(token: string): { sub?: unknown; exp?: unknown; iat?: unknown } | null {
+function decodeClaims(token: string): { sub?: unknown; exp?: unknown; iat?: unknown; iatMs?: unknown } | null {
   try {
     const payload = (token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')
     return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload), char => char.charCodeAt(0))))
@@ -112,7 +112,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     const token = authorization?.replace(/^Bearer\s+/i, '')
     const claims = token ? decodeClaims(token) : null
     const user = store.users.find(candidate => candidate.id === claims?.sub)
-    const issuedAt = typeof claims?.iat === 'number' ? claims.iat * 1000 : 0
+    const issuedAt = typeof claims?.iatMs === 'number' ? claims.iatMs : typeof claims?.iat === 'number' ? claims.iat * 1000 : 0
     if (!user || user.status !== 'ACTIVE' || typeof claims?.exp !== 'number' || claims.exp * 1000 <= options.now() || (expiredBefore !== null && issuedAt < expiredBefore)) {
       throw new MockHttpError(401, 'Authentication required or access token invalid')
     }
