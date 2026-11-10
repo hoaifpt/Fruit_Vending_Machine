@@ -2,7 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { configureClient } from '../src/api/client.ts'
 import { createKioskApi } from '../src/kiosk/api.ts'
-import { clockOffset, configuredSeconds, formatCountdown, pollDelay, secondsLeft, viewForOrder } from '../src/kiosk/flow.ts'
+import { MACHINE_STATE_COPY, chargeOutcome, clockOffset, configuredSeconds, formatCountdown, machineStateOf, pollDelay, secondsLeft, viewForOrder } from '../src/kiosk/flow.ts'
+import { incidentReportConfig, incidentReportUrl } from '../src/kiosk/incident.ts'
 import { resolvePage } from '../src/routing.ts'
 import { jsonResponse } from './helpers.mjs'
 
@@ -61,11 +62,12 @@ test('state table §7 maps polled orders to screens', () => {
   assert.deepEqual(viewForOrder(order('PENDING_PAYMENT', { status: 'PENDING', qrCode: null }), now), { kind: 'waiting-qr' })
   assert.deepEqual(viewForOrder(order('PENDING_PAYMENT', { status: 'EXPIRED' }), now), { kind: 'qr-expired', canRenew: true })
   assert.deepEqual(viewForOrder(order('PENDING_PAYMENT', { status: 'FAILED' }, '2026-10-18T06:59:00Z'), now), { kind: 'qr-expired', canRenew: false })
-  assert.deepEqual(viewForOrder(order('PAID', { status: 'SUCCESS' }), now), { kind: 'dispensing' })
-  assert.deepEqual(viewForOrder(order('DISPENSING', { status: 'SUCCESS' }), now), { kind: 'dispensing' })
+  assert.deepEqual(viewForOrder(order('PAID', { status: 'SUCCESS' }), now), { kind: 'dispensing', phase: 'sending' })
+  assert.deepEqual(viewForOrder(order('DISPENSING', { status: 'SUCCESS' }), now), { kind: 'dispensing', phase: 'dispensing' })
   assert.deepEqual(viewForOrder(order('COMPLETED', { status: 'SUCCESS' }), now), { kind: 'paid' })
   assert.deepEqual(viewForOrder(order('DISPENSE_FAILED', { status: 'SUCCESS' }), now), { kind: 'dispense-failed' })
   assert.deepEqual(viewForOrder(order('CANCELLED', { status: 'PENDING' }), now), { kind: 'cancelled' })
+  assert.deepEqual(viewForOrder(order('CANCELLED', { status: 'EXPIRED' }, '2026-10-18T06:59:59Z'), now), { kind: 'ended' }, 'released by the reservation sweep = expired')
   assert.deepEqual(viewForOrder(order('PAYMENT_FAILED', undefined), now), { kind: 'ended' })
 })
 
@@ -91,4 +93,45 @@ test('polling backs off on failures up to 10 s', () => {
 test('idle timeout configuration falls back to a safe default', () => {
   assert.equal(configuredSeconds('90', 120), 90)
   for (const bad of [undefined, '', '0', '-5', 'abc', '1.5']) assert.equal(configuredSeconds(bad, 120), 120)
+})
+
+test('FE 5.1: every machine state that blocks selling has an explanation and a next step', () => {
+  assert.equal(machineStateOf('ACTIVE', true, 3), null)
+  assert.equal(machineStateOf('ACTIVE', true, 0), 'sold-out')
+  assert.equal(machineStateOf('MAINTENANCE', false, 0), 'maintenance')
+  assert.equal(machineStateOf('INACTIVE', false, 0), 'inactive')
+  assert.equal(machineStateOf('ACTIVE', false, 0), 'paused')
+  assert.equal(machineStateOf(undefined, false, 0), 'paused')
+  // A stale MAINTENANCE from /kiosk/me never hides a catalog that accepts orders.
+  assert.equal(machineStateOf('MAINTENANCE', true, 2), null)
+  for (const [state, copy] of Object.entries(MACHINE_STATE_COPY)) {
+    assert.ok(copy.title && copy.text && copy.next, `${state} needs title, text and next step`)
+  }
+})
+
+test('FE 5.2: an order that ended without a box says whether money was taken', () => {
+  assert.equal(chargeOutcome({ currentPayment: null }), 'not-charged')
+  assert.equal(chargeOutcome({ currentPayment: { status: 'EXPIRED' } }), 'not-charged')
+  assert.equal(chargeOutcome({ currentPayment: { status: 'PENDING' } }), 'not-charged')
+  assert.equal(chargeOutcome({ currentPayment: { status: 'SUCCESS' } }), 'paid-late')
+})
+
+test('FE 5.4: the incident button is off unless configured; the QR opens the report form of this machine', () => {
+  const origin = 'https://kiosk.example'
+  assert.equal(incidentReportConfig({}, origin).enabled, false)
+  assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: 'false' }, origin).enabled, false)
+  for (const on of ['true', '1', 'on', 'ON']) assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: on }, origin).enabled, true)
+  assert.equal(incidentReportConfig({}, `${origin}/`).baseUrl, 'https://kiosk.example/bao-su-co')
+  assert.equal(incidentReportConfig({ VITE_INCIDENT_REPORT_URL: 'https://fv.example/report' }, origin).baseUrl, 'https://fv.example/report')
+  // ?incident= only overrides the flag with the mock API (UX tests), never in a real build.
+  assert.equal(incidentReportConfig({}, origin, 'on').enabled, false)
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'all' }, origin, 'on').enabled, true)
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'all', VITE_KIOSK_INCIDENT_REPORT: 'true' }, origin, 'off').enabled, false)
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'orders,payments' }, origin, 'on').enabled, false, 'the kiosk API itself must be mocked')
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'kiosk' }, origin, 'on').enabled, true)
+  // A relative or broken URL never crashes the kiosk: relative resolves on the origin, junk falls back to the default.
+  assert.equal(incidentReportConfig({ VITE_INCIDENT_REPORT_URL: '/report' }, origin).baseUrl, 'https://kiosk.example/report')
+  for (const bad of ['javascript:alert(1)', 'http://[bad', 'ftp://x.example/r']) assert.equal(incidentReportConfig({ VITE_INCIDENT_REPORT_URL: bad }, origin).baseUrl, 'https://kiosk.example/bao-su-co', bad)
+  assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', 'M 01&x'), 'https://kiosk.example/bao-su-co?machine=M+01%26x')
+  assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', undefined), 'https://kiosk.example/bao-su-co')
 })
