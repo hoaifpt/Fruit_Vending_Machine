@@ -14,7 +14,7 @@ const SORTS = [
 type Target = { kind: 'form'; product?: Product } | { kind: 'status'; product: Product }
 
 function ProductsPage() {
-  const canManage = useSession().can('products:manage')
+  const canManage = useSession().can('PRODUCT_WRITE')
   const { params, update } = useQueryParams()
   const status = params.get('status') ?? '', search = params.get('search') ?? '', sort = params.get('sort') ?? 'name,asc', page = pageParam(params)
   const state = useApi(signal => productsApi.list({ page, size: PAGE_SIZE, status: (status || undefined) as 'ACTIVE' | undefined, search: search || undefined, sort }, signal), params.toString())
@@ -26,14 +26,14 @@ function ProductsPage() {
       actions={canManage ? <button type="button" className="a-primary" onClick={() => dialog.open({ kind: 'form' })}>Thêm sản phẩm</button> : undefined} />
     <Toolbar>
       <SearchFilter label="Tìm theo tên hoặc SKU" value={search} onCommit={value => update({ search: value })} />
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(STATUS_ACTIONS.PRODUCT)} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('product')} />
       <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value })} options={SORTS} empty="Mặc định" />
     </Toolbar>
     <DataTable state={state} rows={state.data?.content} rowKey={product => product.id} columns={[
       { head: 'SKU', cell: product => product.sku },
       { head: 'Tên', cell: product => <>{product.name}{product.description && <small style={{ display: 'block' }}>{product.description}</small>}</> },
       { head: 'Giá', cell: product => formatMoney(product.price) },
-      { head: 'Trạng thái', cell: product => <Badge value={product.status} /> },
+      { head: 'Trạng thái', cell: product => <Badge domain="product" value={product.status} /> },
       { head: 'Cập nhật', cell: product => formatDateTime(product.updatedAt) },
       ...(canManage ? [{ head: 'Thao tác', cell: (product: Product) => <div className="a-actions">
         <button type="button" onClick={() => dialog.open({ kind: 'form', product })}>Sửa</button>
@@ -42,7 +42,7 @@ function ProductsPage() {
     ]} />
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}
     {target?.kind === 'form' && <ProductDialog product={target.product} close={dialog.close} done={state.reload} />}
-    {target?.kind === 'status' && <StatusDialog title={`Trạng thái: ${target.product.name}`} current={target.product.status} options={STATUS_ACTIONS.PRODUCT} close={dialog.close}
+    {target?.kind === 'status' && <StatusDialog title={`Trạng thái: ${target.product.name}`} domain="product" current={target.product.status} options={STATUS_ACTIONS.PRODUCT} close={dialog.close}
       onSubmit={async next => { await productsApi.setStatus(target.product.id, next as 'ACTIVE'); state.reload() }} />}
   </>
 }

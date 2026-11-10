@@ -31,7 +31,8 @@ export interface ClientConfig {
   baseUrl: string
   fetcher: typeof fetch
   getToken: () => string | null
-  onUnauthorized: () => void
+  /** 401 on an authenticated call. `token` is the one that request sent, so a late 401 from an old session can be ignored. */
+  onUnauthorized: (token: string | null) => void
 }
 
 const API_PREFIX = '/api/v1'
@@ -87,8 +88,16 @@ export async function request<T>(method: string, path: string, options: RequestO
   return (await requestWithMeta<T>(method, path, options)).data
 }
 
+/** Signals of background work (polling): requests made with them do not move the top progress bar. */
+const backgroundSignals = new WeakSet<AbortSignal>()
+/** Marks requests made with `signal` as background work the user is not waiting on (no top progress bar). */
+export function markBackground(signal: AbortSignal): AbortSignal {
+  backgroundSignals.add(signal)
+  return signal
+}
+
 export async function requestWithMeta<T>(method: string, path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
-  const done = beginProgress()
+  const done = options.signal && backgroundSignals.has(options.signal) ? () => {} : beginProgress()
   try { return await send<T>(method, path, options) } finally { done() }
 }
 
@@ -96,10 +105,8 @@ async function send<T>(method: string, path: string, options: RequestOptions): P
   const { query, body, signal, auth = true, timeoutMs = TIMEOUT_MS } = options
   const headers: Record<string, string> = { Accept: 'application/json', ...options.headers }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
-  if (auth) {
-    const token = config.getToken()
-    if (token) headers.Authorization = `Bearer ${token}`
-  }
+  const token = auth ? config.getToken() : null
+  if (token) headers.Authorization = `Bearer ${token}`
   const timeout = AbortSignal.timeout(timeoutMs)
   let response: Response
   try {
@@ -115,7 +122,7 @@ async function send<T>(method: string, path: string, options: RequestOptions): P
   }
   if (!response.ok) {
     const error = await readError(response)
-    if (response.status === 401 && auth) config.onUnauthorized()
+    if (response.status === 401 && auth) config.onUnauthorized(token)
     throw error
   }
   if (response.status === 204) return { data: undefined as T, status: 204 }

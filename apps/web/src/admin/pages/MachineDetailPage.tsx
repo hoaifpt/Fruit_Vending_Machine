@@ -19,7 +19,7 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
   if (!data) return <Loading />
   return <>
     <PageHead title={`${data.name} (${data.code})`} back={{ to: '/admin/machines', label: 'Danh sách máy' }}
-      actions={can('machines:manage') ? <>
+      actions={can('MACHINE_WRITE') ? <>
         <button type="button" onClick={() => setDialog('edit')}>Cấu hình</button>
         <button type="button" onClick={() => setDialog('status')}>Đổi trạng thái</button>
       </> : undefined} />
@@ -33,15 +33,15 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
         <dt>Tạo / cập nhật</dt><dd>{formatDateTime(data.createdAt)} / {formatDateTime(data.updatedAt)}</dd>
       </dl>
     </section>
-    <SlotsSection machineId={machineId} canManage={can('slots:manage')} />
-    {can('kiosk-credentials:manage') && <CredentialsSection machineId={machineId} />}
+    <SlotsSection machineId={machineId} canManage={can('MACHINE_WRITE')} canSeeInventory={can('INVENTORY_READ')} />
+    {can('KIOSK_CREDENTIAL_MANAGE') && <CredentialsSection machineId={machineId} />}
     {dialog === 'edit' && <MachineDialog machine={data} close={() => setDialog(null)} done={machine.reload} />}
-    {dialog === 'status' && <StatusDialog title="Trạng thái máy" current={data.status} options={STATUS_ACTIONS.MACHINE} close={() => setDialog(null)}
+    {dialog === 'status' && <StatusDialog title="Trạng thái máy" domain="machine" current={data.status} options={STATUS_ACTIONS.MACHINE} close={() => setDialog(null)}
       onSubmit={async status => { await machinesApi.setStatus(machineId, status as 'ACTIVE'); machine.reload() }} />}
   </>
 }
 
-function SlotsSection({ machineId, canManage }: { machineId: string; canManage: boolean }) {
+function SlotsSection({ machineId, canManage, canSeeInventory }: { machineId: string; canManage: boolean; canSeeInventory: boolean }) {
   const { params, update } = useQueryParams()
   const page = pageParam(params), status = params.get('slotStatus') ?? ''
   const state = useApi(signal => slotsApi.list(machineId, { page, size: PAGE_SIZE, status: (status || undefined) as 'ACTIVE' | undefined, sort: 'slotCode,asc' }, signal), `${machineId}|${params}`)
@@ -52,14 +52,15 @@ function SlotsSection({ machineId, canManage }: { machineId: string; canManage: 
       <div><h2 id="slots-title">Ngăn chứa</h2><p>Mỗi ngăn chứa tối đa theo sức chứa đã cấu hình.</p></div>
       {canManage && <button type="button" className="a-primary" onClick={() => dialog.open({ kind: 'create' })}>Thêm ngăn</button>}
     </div>
-    <Toolbar><SelectFilter label="Trạng thái ngăn" value={status} onChange={value => update({ slotStatus: value })} options={enumOptions(STATUS_ACTIONS.SLOT)} /></Toolbar>
+    <Toolbar><SelectFilter label="Trạng thái ngăn" value={status} onChange={value => update({ slotStatus: value })} options={enumOptions('slot')} /></Toolbar>
     <DataTable state={state} rows={state.data?.content} rowKey={slot => slot.id} columns={[
       { head: 'Mã ngăn', cell: slot => slot.slotCode },
       { head: 'Sức chứa', cell: slot => slot.capacity },
-      { head: 'Tồn kho', cell: slot => <SlotSummary machineId={machineId} slot={slot} /> },
-      { head: 'Trạng thái', cell: slot => <Badge value={slot.status} /> },
+      // Slot inventory summary and the boxes link call inventory endpoints (INVENTORY_READ), not the machine ones.
+      ...(canSeeInventory ? [{ head: 'Tồn kho', cell: (slot: Slot) => <SlotSummary machineId={machineId} slot={slot} /> }] : []),
+      { head: 'Trạng thái', cell: slot => <Badge domain="slot" value={slot.status} /> },
       { head: 'Thao tác', cell: slot => <div className="a-actions">
-        <Link to={`/admin/inventory?machineId=${machineId}&slotId=${slot.id}`}>Xem hộp hàng</Link>
+        {canSeeInventory && <Link to={`/admin/inventory?machineId=${machineId}&slotId=${slot.id}`}>Xem hộp hàng</Link>}
         {canManage && <><button type="button" onClick={() => dialog.open({ kind: 'capacity', slot })}>Sức chứa</button>
           <button type="button" onClick={() => dialog.open({ kind: 'status', slot })}>Đổi trạng thái</button></>}
       </div> },
@@ -67,7 +68,7 @@ function SlotsSection({ machineId, canManage }: { machineId: string; canManage: 
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}
     {target?.kind === 'create' && <SlotDialog machineId={machineId} close={dialog.close} done={state.reload} />}
     {target?.kind === 'capacity' && <SlotDialog machineId={machineId} slot={target.slot} close={dialog.close} done={state.reload} />}
-    {target?.kind === 'status' && <StatusDialog title={`Trạng thái ngăn ${target.slot.slotCode}`} current={target.slot.status} options={STATUS_ACTIONS.SLOT} close={dialog.close}
+    {target?.kind === 'status' && <StatusDialog title={`Trạng thái ngăn ${target.slot.slotCode}`} domain="slot" current={target.slot.status} options={STATUS_ACTIONS.SLOT} close={dialog.close}
       onSubmit={async next => { await slotsApi.setStatus(machineId, target.slot.id, next as 'ACTIVE'); state.reload() }} />}
   </section>
 }
@@ -114,7 +115,7 @@ function CredentialsSection({ machineId }: { machineId: string }) {
     </div>
     <DataTable state={state} rows={state.data} rowKey={credential => credential.credentialId ?? ''} empty="Máy chưa có khóa nào." columns={[
       { head: 'Tiền tố khóa', cell: credential => credential.keyPrefix },
-      { head: 'Trạng thái', cell: credential => <Badge value={credential.status} /> },
+      { head: 'Trạng thái', cell: credential => <Badge domain="kioskCredential" value={credential.status} /> },
       { head: 'Cấp lúc', cell: credential => formatDateTime(credential.createdAt) },
       { head: 'Thu hồi lúc', cell: credential => formatDateTime(credential.revokedAt) },
       { head: 'Thao tác', cell: credential => credential.status === 'ACTIVE'

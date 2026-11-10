@@ -17,7 +17,7 @@ test('role matrix: STAFF cannot see users, payments or webhook logs', () => {
   assert.equal(homeFor(['STAFF']), '/admin/machines')
 })
 test('routes extract ids and reject unknown paths', () => {
-  assert.deepEqual(matchRoute('/admin/machines/m-1/'), { page: 'machine-detail', id: 'm-1', permission: 'machines:read', roles: ['ADMIN', 'STAFF'] })
+  assert.deepEqual(matchRoute('/admin/machines/m-1/'), { page: 'machine-detail', id: 'm-1', permission: 'MACHINE_READ', roles: ['ADMIN', 'STAFF'] })
   assert.equal(matchRoute('/admin/unknown'), undefined)
   assert.equal(matchRoute('/admin/machines/a/b'), undefined)
 })

@@ -13,7 +13,18 @@ export interface DataTableColumn<T> {
   sortKey?: string
   /** Direction used when this column is first pressed (default ascending). */
   firstDirection?: SortDirection
+  /** Codes and amounts that must not break mid-value (order code, machine code): kept on one line in table layout. */
+  nowrap?: boolean
+  /**
+   * Detail that can wait for the record page: hidden while the table is narrow (681–1023px), so many-column tables stay
+   * readable at tablet width. Still shown in the card layout and on wide screens. Never use it for a sortable column.
+   */
+  secondary?: boolean
 }
+
+const SECONDARY = '@min-[681px]:@max-[1023px]:hidden'
+/** Tablet-width tables: slightly tighter cell padding so a row stays on one line. */
+const TIGHT = '@min-[681px]:@max-[1023px]:px-2'
 
 interface DataTableProps<T> {
   columns: DataTableColumn<T>[]
@@ -46,7 +57,11 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
         {sortable.flatMap(column => (['asc', 'desc'] as const).map(direction => <option key={`${column.sortKey},${direction}`} value={`${column.sortKey},${direction}`}>{column.head}: {directionLabel[direction]}</option>))}
       </NativeSelect>
     </FormField>}
-    <div aria-busy={loading} className="w-full overflow-x-auto rounded-xl border bg-card transition-opacity duration-150 ease-out aria-busy:opacity-60 in-[.a-panel]:rounded-none in-[.a-panel]:border-0 in-[.a-panel]:bg-transparent @max-[680px]:overflow-visible @max-[680px]:rounded-none @max-[680px]:border-0 @max-[680px]:bg-transparent">
+    <div aria-busy={loading} className="relative w-full overflow-x-auto rounded-xl border bg-card in-[.a-panel]:rounded-none in-[.a-panel]:border-0 in-[.a-panel]:bg-transparent @max-[680px]:overflow-visible @max-[680px]:rounded-none @max-[680px]:border-0 @max-[680px]:bg-transparent">
+      {/* Reloading over rows already shown: a thin bar on top; the rows keep full contrast (no dimming). */}
+      {loading && rows.length > 0 && <div data-slot="data-table-progress" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-1 h-0.5 overflow-hidden">
+        <div className="h-full w-2/5 animate-progress rounded-full bg-primary motion-reduce:w-full motion-reduce:animate-none" />
+      </div>}
       {error}
       <table role="table" className="w-full border-collapse text-left text-sm @max-[680px]:block">
         {caption && <caption className="sr-only">{caption}</caption>}
@@ -55,7 +70,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
             const active = column.sortKey !== undefined && sort?.field === column.sortKey
             const canSort = !!onSort && !!column.sortKey
             return <th key={column.head} role="columnheader" scope="col" aria-sort={!canSort ? undefined : active && sort ? ariaSort[sort.direction] : 'none'}
-              className="border-b bg-muted px-3 py-2.5 align-bottom text-xs font-medium text-muted-foreground in-[.a-panel]:bg-transparent">
+              className={cn('border-b bg-muted px-3 py-2.5 align-bottom text-xs font-medium text-muted-foreground in-[.a-panel]:bg-transparent', TIGHT, column.secondary && SECONDARY)}>
               {canSort && column.sortKey
                 ? <SortButton head={column.head} direction={active ? sort?.direction : undefined} next={nextSort(sort, column.sortKey, column.firstDirection)} onSort={onSort} />
                 : column.head}
@@ -65,7 +80,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
         <tbody role="rowgroup" className="@max-[680px]:block">
           {rows.map(row => <tr key={rowKey(row)} role="row" className="transition-colors duration-150 ease-out hover:bg-muted/60 [&:last-child>td]:border-b-0 @max-[680px]:mb-2.5 @max-[680px]:block @max-[680px]:rounded-xl @max-[680px]:border @max-[680px]:bg-card @max-[680px]:px-3.5 @max-[680px]:py-2 @max-[680px]:hover:bg-card">
             {columns.map(column => <td key={column.head} role="cell" data-label={column.head}
-              className="border-b px-3 py-3 align-middle wrap-break-word @max-[680px]:wrap-anywhere [&_a]:font-medium [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline @max-[680px]:flex @max-[680px]:justify-between @max-[680px]:gap-3 @max-[680px]:border-0 @max-[680px]:px-0 @max-[680px]:py-1.5 @max-[680px]:text-right @max-[680px]:before:shrink-0 @max-[680px]:before:text-left @max-[680px]:before:text-xs @max-[680px]:before:text-muted-foreground @max-[680px]:before:content-[attr(data-label)]">
+              className={cn(column.nowrap && '@min-[681px]:whitespace-nowrap', column.secondary && SECONDARY, TIGHT, 'border-b px-3 py-3 align-middle wrap-break-word @max-[680px]:wrap-anywhere [&_a]:font-medium [&_a]:text-primary [&_a]:no-underline [&_a:hover]:underline @max-[680px]:flex @max-[680px]:justify-between @max-[680px]:gap-3 @max-[680px]:border-0 @max-[680px]:px-0 @max-[680px]:py-1.5 @max-[680px]:text-right @max-[680px]:before:shrink-0 @max-[680px]:before:text-left @max-[680px]:before:text-xs @max-[680px]:before:text-muted-foreground @max-[680px]:before:content-[attr(data-label)]')}>
               {column.cell(row)}
             </td>)}
           </tr>)}

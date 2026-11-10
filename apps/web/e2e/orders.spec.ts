@@ -60,3 +60,38 @@ test('Đơn hàng lỗi 500 (?scenario=error500) có nút Thử lại', async ({
   await expect(alert).toBeVisible()
   await expect(alert).not.toHaveText('Thử lại')
 })
+
+test('Đơn hàng ở 1440/768/390: mã đơn và mã máy không bị ngắt, bảng không tràn ngang', async ({ page }) => {
+  await page.goto('/admin/orders')
+  for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]]) {
+    await page.setViewportSize({ width, height })
+    await expect(pager(page)).toBeVisible()
+    await page.waitForTimeout(300) // container queries and fonts settle after the resize
+    const layout = await page.evaluate(() => {
+      const table = document.querySelector('[data-slot="data-table"]') as HTMLElement
+      const wrapper = table.querySelector('[aria-busy]') as HTMLElement
+      const row = table.querySelector('tbody tr') as HTMLElement
+      /** Number of text lines the cell's text takes (line boxes of its text nodes only, not the card label). */
+      const lines = (label: string) => {
+        const cell = row.querySelector(`td[data-label="${label}"]`) as HTMLElement
+        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+        const tops = new Set<number>()
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const range = document.createRange()
+          range.selectNodeContents(node)
+          for (const rect of range.getClientRects()) if (rect.width > 0) tops.add(Math.round(rect.top))
+        }
+        return tops.size
+      }
+      return {
+        page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        table: wrapper.scrollWidth - wrapper.clientWidth,
+        orderCode: lines('Mã đơn'), machine: lines('Máy'),
+      }
+    })
+    expect(layout.page, `${width}px: trang cuộn ngang`).toBeLessThanOrEqual(0)
+    expect(layout.table, `${width}px: bảng cuộn ngang`).toBeLessThanOrEqual(0)
+    expect(layout.orderCode, `${width}px: mã đơn bị ngắt dòng`).toBe(1)
+    expect(layout.machine, `${width}px: mã máy bị ngắt dòng`).toBe(1)
+  }
+})

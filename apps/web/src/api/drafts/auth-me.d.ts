@@ -40,7 +40,7 @@ export interface components {
             status: "ACTIVE" | "INACTIVE" | "LOCKED";
             /** @description Role names without the ROLE_ prefix, for example ADMIN. */
             roles: string[];
-            /** @description Proposed resource:action names. ADMIN has users:manage, products:manage, machines:manage, slots:manage, kiosk-credentials:manage, batches:write, inventory:write, orders:read, payments:read, webhook-logs:read. STAFF has products:read, machines:read, slots:read, batches:write, inventory:write, orders:read. */
+            /** @description Effective permission codes of the account's roles, exactly the codes of backend #48 (table `permissions`). A write code does not imply its read code. Seed: ADMIN has all 15; STAFF has PRODUCT_READ, MACHINE_READ, BATCH_READ, BATCH_CREATE, INVENTORY_READ, INVENTORY_WRITE, ORDER_READ. The 15 codes of #48 are USER_READ, USER_WRITE, PERMISSION_MANAGE, PRODUCT_READ, PRODUCT_WRITE, MACHINE_READ, MACHINE_WRITE (machines and slots), KIOSK_CREDENTIAL_MANAGE, BATCH_READ, BATCH_CREATE, INVENTORY_READ, INVENTORY_WRITE, ORDER_READ, PAYMENT_READ, PAYMENT_WEBHOOK_LOG_READ. Later backend migrations may add codes, so this is not an enum; clients ignore codes they do not know. */
             permissions: string[];
         };
         ApiResponseAuthMeResponse: {

@@ -4,6 +4,8 @@ import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from '
 import type { Reply } from './http.ts'
 import type { MockCredential, MockItem, MockOrder, MockPayment, MockStore, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
+import { ROLE_PERMISSIONS } from '../../admin/permissions.ts'
+import type { Role } from '../session.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -27,11 +29,6 @@ const MACHINE_STATUSES = ['ACTIVE', 'INACTIVE', 'MAINTENANCE'] as const
 const SLOT_STATUSES = ['ACTIVE', 'INACTIVE', 'ERROR'] as const
 const PRODUCT_STATUSES = ['ACTIVE', 'INACTIVE'] as const
 
-// Proposed in api-contract/drafts/auth-me.yaml; mirrors the role table in docs/admin-implementation.md.
-const PERMISSIONS: Record<string, string[]> = {
-  ADMIN: ['users:manage', 'products:manage', 'machines:manage', 'slots:manage', 'kiosk-credentials:manage', 'batches:write', 'inventory:write', 'orders:read', 'payments:read', 'webhook-logs:read'],
-  STAFF: ['products:read', 'machines:read', 'slots:read', 'batches:write', 'inventory:write', 'orders:read'],
-}
 
 const iso = (ms: number) => new Date(ms).toISOString()
 const newId = () => crypto.randomUUID()
@@ -212,7 +209,7 @@ export const routes: Route[] = [
   }),
   route('GET', '/auth/me', 'any', ctx => {
     const { id, email, fullName, phone, status, roles } = ctx.user!
-    const data: AuthMe['schemas']['AuthMeResponse'] = { id, email, fullName, phone, status, roles, permissions: [...new Set(roles.flatMap(role => PERMISSIONS[role] ?? []))] }
+    const data: AuthMe['schemas']['AuthMeResponse'] = { id, email, fullName, phone, status, roles, permissions: [...new Set(roles.flatMap(role => ROLE_PERMISSIONS[role as Role] ?? []))] }
     return ok(data)
   }),
 

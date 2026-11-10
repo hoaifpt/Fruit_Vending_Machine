@@ -1,46 +1,43 @@
 // The single place that decides what the web shows to whom. Pages, navigation and route guards ask `can()`;
-// none of them compare roles directly. Permission names follow api-contract/drafts/auth-me.yaml.
+// none of them compare roles directly. Permission codes are the backend's (issue #48, V13__create_permissions.sql):
+// UPPER_SNAKE, one per endpoint group, read and write kept apart exactly as the backend's @PreAuthorize checks them.
 //
-// Today the permissions are derived from the roles in the JWT (the backend has no endpoint returning them yet,
-// BE 3.1). When GET /auth/me ships, pass its `permissions` array as `Subject.permissions` and nothing else changes.
-// This is a UI hint only: the backend remains the authority and every call must still handle 403.
+// Today the permissions are derived from the roles in the JWT (#48 has no endpoint returning them yet, see
+// api-contract/drafts/auth-me.yaml). When GET /auth/me ships, pass its `permissions` array as `Subject.permissions`
+// and nothing else changes. This is a UI hint only: the backend remains the authority and every call must still handle 403.
 import type { Role } from '../api/session.ts'
 
 export const PERMISSIONS = [
-  'users:manage', 'products:read', 'products:manage', 'machines:read', 'machines:manage', 'slots:read', 'slots:manage',
-  'kiosk-credentials:manage', 'batches:write', 'inventory:write', 'orders:read', 'payments:read', 'webhook-logs:read',
+  'USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE',
+  'PRODUCT_READ', 'PRODUCT_WRITE',
+  'MACHINE_READ', 'MACHINE_WRITE', 'KIOSK_CREDENTIAL_MANAGE',
+  'BATCH_READ', 'BATCH_CREATE',
+  'INVENTORY_READ', 'INVENTORY_WRITE',
+  'ORDER_READ', 'PAYMENT_READ', 'PAYMENT_WEBHOOK_LOG_READ',
 ] as const
 export type Permission = (typeof PERMISSIONS)[number]
 
 export const ROLES: readonly Role[] = ['ADMIN', 'STAFF']
 
 /**
- * Role matrix (docs/admin-implementation.md, backend @PreAuthorize). `:manage` implies `:read`.
- * ADMIN: everything. STAFF: read products/machines/slots, create batches, load/remove boxes, read orders.
+ * Role → permission seed of V13 (the backend grants each code separately; a write code does not imply its read code).
+ * ADMIN: every permission. STAFF: read products and machines (with their slots), read and create batches,
+ * read and change inventory, read orders.
  */
-const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
-  ADMIN: ['users:manage', 'products:manage', 'machines:manage', 'slots:manage', 'kiosk-credentials:manage', 'batches:write', 'inventory:write', 'orders:read', 'payments:read', 'webhook-logs:read'],
-  STAFF: ['products:read', 'machines:read', 'slots:read', 'batches:write', 'inventory:write', 'orders:read'],
+export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
+  ADMIN: PERMISSIONS,
+  STAFF: ['PRODUCT_READ', 'MACHINE_READ', 'BATCH_READ', 'BATCH_CREATE', 'INVENTORY_READ', 'INVENTORY_WRITE', 'ORDER_READ'],
 }
 
 /** Who is asking: roles from the session and, once the backend provides them, explicit permissions. */
 export interface Subject { roles: readonly Role[]; permissions?: readonly string[] }
 
-const IMPLIED: Partial<Record<Permission, Permission>> = {
-  'products:manage': 'products:read', 'machines:manage': 'machines:read', 'slots:manage': 'slots:read',
-}
-
-/** Effective permissions of a subject; explicit permissions win over the role table. */
+/** Effective permissions of a subject; explicit permissions win over the role table, unknown codes are ignored. */
 export function permissionsOf(subject: Subject | readonly Role[]): Set<Permission> {
   const { roles, permissions } = Array.isArray(subject) ? { roles: subject as readonly Role[], permissions: undefined } : subject as Subject
   const granted = new Set<Permission>()
   const source = permissions ?? roles.flatMap(role => ROLE_PERMISSIONS[role] ?? [])
-  for (const name of source) {
-    if (!(PERMISSIONS as readonly string[]).includes(name)) continue
-    granted.add(name as Permission)
-    const implied = IMPLIED[name as Permission]
-    if (implied) granted.add(implied)
-  }
+  for (const name of source) if ((PERMISSIONS as readonly string[]).includes(name)) granted.add(name as Permission)
   return granted
 }
 

@@ -18,10 +18,13 @@ export function beginProgress(): () => void {
   }
 }
 
+/** Whether any foreground work is pending right now. */
+export const hasPendingWork = () => pending > 0
+
 export function usePendingWork(): boolean {
   return useSyncExternalStore(
     listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
-    () => pending > 0,
+    hasPendingWork,
     () => false,
   )
 }

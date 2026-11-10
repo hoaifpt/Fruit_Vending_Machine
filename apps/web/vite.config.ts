@@ -2,9 +2,20 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
 
+/**
+ * A production build must never contain the mock API: VITE_API_MOCK left in `.env.local` or a CI variable would ship a
+ * web that answers every call with fake data. `vite build --mode mock` stays possible for local demos (never deployed).
+ */
+export function assertNoMockInProduction(command: string, mode: string, mockValue: string | undefined): void {
+  if (command === 'build' && mode === 'production' && (mockValue ?? '').trim()) {
+    throw new Error(`VITE_API_MOCK="${mockValue}" không được dùng cho bản build production (mock sẽ bị đóng vào dist). Xóa biến này khỏi .env*.local / môi trường CI rồi build lại.`)
+  }
+}
+
 // https://vite.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  assertNoMockInProduction(command, mode, env.VITE_API_MOCK)
   // `--mode mock` (npm run dev:mock) mocks every endpoint and needs no local env file; the kiosk key is a placeholder.
   const mockMode = mode === 'mock'
   return {

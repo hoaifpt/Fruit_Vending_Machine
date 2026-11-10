@@ -27,20 +27,20 @@ function OrdersPage() {
     <PageHead title="Đơn hàng" subtitle="Chỉ xem. Trạng thái đơn do hệ thống xử lý; web không sửa hoặc hủy đơn." />
     <FilterBar activeCount={activeFilterCount([search, status, machineId, from, to])} onClear={() => update(clearFiltersPatch(FILTER_KEYS))}>
       <SearchFilter label="Mã đơn" value={search} onCommit={value => update({ search: value })} />
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(ORDER_STATUSES)} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('order', ORDER_STATUSES)} />
       <SelectFilter label="Máy" value={machineId} onChange={value => update({ machineId: value })} options={machines} />
       <DateFilter label="Từ ngày" value={from} onChange={value => update({ from: value })} />
       <DateFilter label="Đến ngày (gồm cả ngày này)" value={to} onChange={value => update({ to: value })} />
     </FilterBar>
     <DataTable state={state} rows={state.data?.content} rowKey={order => order.id ?? ''} caption="Danh sách đơn hàng" empty="Không có đơn hàng phù hợp. Hãy đổi hoặc xóa bộ lọc."
       sort={sort} onSort={next => update({ sort: sortParam(next, SORT_RULE) })} columns={[
-        { head: 'Mã đơn', sortKey: 'orderCode', cell: order => <Link to={`/admin/orders/${order.id}`}>{order.orderCode}</Link> },
-        { head: 'Máy', cell: order => order.machineCode },
+        { head: 'Mã đơn', sortKey: 'orderCode', nowrap: true, cell: order => <Link to={`/admin/orders/${order.id}`}>{order.orderCode}</Link> },
+        { head: 'Máy', nowrap: true, cell: order => order.machineCode },
         { head: 'Trạng thái', cell: order => <Badge domain="order" value={order.status} /> },
-        { head: 'Số dòng / số hộp', cell: order => `${order.itemCount ?? 0} / ${order.totalQuantity ?? 0}` },
-        { head: 'Tổng tiền', sortKey: 'totalAmount', firstDirection: 'desc', cell: order => formatMoney(order.totalAmount) },
+        { head: 'Số dòng / số hộp', secondary: true, cell: order => `${order.itemCount ?? 0} / ${order.totalQuantity ?? 0}` },
+        { head: 'Tổng tiền', sortKey: 'totalAmount', firstDirection: 'desc', nowrap: true, cell: order => formatMoney(order.totalAmount) },
         { head: 'Tạo lúc', sortKey: 'createdAt', firstDirection: 'desc', cell: order => formatDateTime(order.createdAt) },
-        { head: 'Hết hạn thanh toán', cell: order => formatDateTime(order.expiresAt) },
+        { head: 'Hết hạn thanh toán', secondary: true, cell: order => formatDateTime(order.expiresAt) },
       ]} />
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}
   </>

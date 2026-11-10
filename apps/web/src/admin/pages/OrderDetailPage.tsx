@@ -5,7 +5,7 @@ import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 
 function OrderDetailPage({ orderId }: { orderId: string }) {
-  const canSeePayments = useSession().can('payments:read')
+  const canSeePayments = useSession().can('PAYMENT_READ')
   const order = useApi(signal => ordersApi.get(orderId, signal), orderId)
   const back = { to: '/admin/orders', label: 'Danh sách đơn hàng' }
   if (order.error && !order.data) return <><PageHead title="Đơn hàng" back={back} /><ErrorState error={order.error} retry={order.reload} /></>
@@ -42,7 +42,7 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
         { head: 'Ngăn', cell: allocation => allocation.slotCode },
         { head: 'Lô', cell: allocation => allocation.batchCode },
         { head: 'Hạn lô', cell: allocation => formatDateTime(allocation.batchExpiresAt) },
-        { head: 'Trạng thái', cell: allocation => <Badge value={allocation.status} /> },
+        { head: 'Trạng thái', cell: allocation => <Badge domain="allocation" value={allocation.status} /> },
         { head: 'Nhả giữ chỗ lúc', cell: allocation => formatDateTime(allocation.releasedAt) },
       ]} />
     </section>

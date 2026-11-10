@@ -67,6 +67,38 @@ export const STATUS_CATALOG = {
     WARNING: { label: 'Cảnh báo', tone: 'warning', icon: 'alert', description: 'Cần kiểm tra sớm để tránh ảnh hưởng tới việc bán hàng.' },
     CRITICAL: { label: 'Nghiêm trọng', tone: 'danger', icon: 'critical', description: 'Ảnh hưởng tới việc bán hàng, cần xử lý ngay.' },
   },
+  slot: {
+    ACTIVE: { label: 'Hoạt động', tone: 'success', icon: 'active', description: 'Ngăn đang nhận hàng và bán được.' },
+    INACTIVE: { label: 'Ngừng hoạt động', tone: 'neutral', icon: 'pause', description: 'Ngăn không được dùng để bán. Quản trị viên bật lại khi cần.' },
+    ERROR: { label: 'Lỗi', tone: 'danger', icon: 'failed', description: 'Ngăn đang báo lỗi và không bán được. Kiểm tra ngăn tại máy.' },
+  },
+  product: {
+    ACTIVE: { label: 'Đang bán', tone: 'success', icon: 'active', description: 'Sản phẩm được phép bán trên kiosk.' },
+    INACTIVE: { label: 'Ngừng bán', tone: 'neutral', icon: 'pause', description: 'Sản phẩm không hiện trên kiosk; hộp đã nạp vẫn còn trong ngăn.' },
+  },
+  user: {
+    ACTIVE: { label: 'Hoạt động', tone: 'success', icon: 'active', description: 'Tài khoản đăng nhập được.' },
+    INACTIVE: { label: 'Ngừng hoạt động', tone: 'neutral', icon: 'pause', description: 'Tài khoản không đăng nhập được cho đến khi quản trị viên bật lại.' },
+    LOCKED: { label: 'Đã khóa', tone: 'danger', icon: 'lock', description: 'Tài khoản bị khóa và không đăng nhập được. Liên hệ quản trị viên để mở khóa.' },
+  },
+  kioskCredential: {
+    ACTIVE: { label: 'Đang dùng', tone: 'success', icon: 'active', description: 'Kiosk của máy đang dùng khóa này để gọi hệ thống.' },
+    REVOKED: { label: 'Đã thu hồi', tone: 'neutral', icon: 'ban', description: 'Khóa không còn hiệu lực; kiosk dùng khóa này sẽ bị từ chối.' },
+  },
+  allocation: {
+    RESERVED: { label: 'Đã giữ chỗ', tone: 'warning', icon: 'lock', description: 'Hộp đang được giữ cho đơn này.' },
+    DISPENSED: { label: 'Đã nhả hàng', tone: 'success', icon: 'active', description: 'Máy đã nhả hộp này cho khách.' },
+    RELEASED: { label: 'Đã trả lại ngăn', tone: 'neutral', icon: 'refund', description: 'Đơn không hoàn tất nên hộp được trả lại ngăn để bán tiếp.' },
+  },
+  inventoryTransactionType: {
+    LOAD: { label: 'Nạp hàng', tone: 'success', icon: 'boxOk', description: 'Hộp được nạp vào ngăn.' },
+    RESERVE: { label: 'Giữ chỗ', tone: 'warning', icon: 'lock', description: 'Hộp được giữ cho một đơn.' },
+    SALE: { label: 'Bán', tone: 'info', icon: 'active', description: 'Hộp đã bán và nhả cho khách.' },
+    EXPIRE: { label: 'Hết hạn', tone: 'danger', icon: 'expired', description: 'Hộp quá hạn sử dụng và không được bán nữa.' },
+    REMOVE: { label: 'Gỡ hộp', tone: 'neutral', icon: 'ban', description: 'Hộp được gỡ khỏi ngăn.' },
+    RETURN: { label: 'Trả lại ngăn', tone: 'info', icon: 'refund', description: 'Hộp đang giữ chỗ được trả lại ngăn để bán tiếp.' },
+    ADJUSTMENT: { label: 'Điều chỉnh', tone: 'neutral', icon: 'wrench', description: 'Trạng thái hộp được điều chỉnh thủ công.' },
+  },
   ticket: {
     OPEN: { label: 'Chưa phân công', tone: 'warning', icon: 'dashed', description: 'Phiếu chưa có người phụ trách. Quản trị viên cần phân công.' },
     ASSIGNED: { label: 'Đã phân công', tone: 'info', icon: 'received', description: 'Phiếu đã giao cho một nhân viên và chờ bắt đầu.' },

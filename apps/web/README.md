@@ -32,6 +32,11 @@ Toàn bộ web (admin, đăng nhập, kiosk) chạy trên dữ liệu giả tron
 
 Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,payments,webhook-logs,kiosk`), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ.
 
+Mock chỉ dành cho máy phát triển và demo, **không bao giờ triển khai**:
+
+- `npm run build` (mode `production`) dừng ngay nếu `VITE_API_MOCK` có giá trị (trong `.env*.local` hoặc biến môi trường CI), và sau khi build chạy `scripts/check-dist.mjs` để chắc `dist/` không chứa mã mock (`installMock` và các chuỗi riêng của `src/api/mock`).
+- `vite build --mode mock` vẫn chạy được để demo cục bộ, nhưng bản build đó chứa mock và trang mẫu `/admin/_kit`: **không được đưa lên máy chủ hay kiosk thật**.
+
 Thêm `?scenario=<tên>` vào URL trang để ép trạng thái, ví dụ `/admin/products?scenario=empty`:
 
 | Tên | Tác dụng |
@@ -133,7 +138,7 @@ Chạy các lệnh trong `apps/web`:
 | Lệnh | Tác dụng |
 | --- | --- |
 | `npm run dev` | Khởi chạy máy chủ phát triển Vite (proxy `/api`) |
-| `npm run build` | Kiểm tra TypeScript và tạo bản build trong `dist/` |
+| `npm run build` | Kiểm tra TypeScript, tạo bản build trong `dist/` và kiểm tra `dist/` không chứa mock (dừng nếu đặt `VITE_API_MOCK`) |
 | `npm run preview` | Xem bản build local sau khi build |
 | `npm run lint` | Kiểm tra mã nguồn với Oxlint |
 | `npm test` | Chạy kiểm thử API client, phiên, phân quyền, định dạng và kiosk |

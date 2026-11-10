@@ -4,6 +4,7 @@ import { useQueryParams } from '../../lib/router.ts'
 import { Badge, DataTable, Field, FormDialog, PAGE_SIZE, PageHead, Pagination, SelectFilter, Toolbar, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useProductOptions } from '../options.ts'
 import { useApi } from '../useApi.ts'
+import { useSession } from '../useSession.ts'
 
 const SORTS = [
   { value: 'expiresAt,asc', label: 'Hạn dùng gần nhất' }, { value: 'createdAt,desc', label: 'Mới tạo' },
@@ -16,9 +17,10 @@ function BatchesPage() {
   const products = useProductOptions()
   const state = useApi(signal => batchesApi.list({ page, size: PAGE_SIZE, productId: productId || undefined, sort }, signal), params.toString())
   const dialog = useDialog()
+  const canCreate = useSession().can('BATCH_CREATE')
   return <>
     <PageHead title="Lô hàng" subtitle="Lô hàng không thể sửa hoặc xóa sau khi tạo."
-      actions={<button type="button" className="a-primary" onClick={() => dialog.open()}>Tạo lô hàng</button>} />
+      actions={canCreate ? <button type="button" className="a-primary" onClick={() => dialog.open()}>Tạo lô hàng</button> : undefined} />
     <Toolbar>
       <SelectFilter label="Sản phẩm" value={productId} onChange={value => update({ productId: value })} options={products} />
       <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value })} options={SORTS} empty="Mặc định" />

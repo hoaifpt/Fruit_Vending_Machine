@@ -59,3 +59,21 @@ test('network failure becomes a generic ApiError with status 0', async () => {
   configureClient({ baseUrl: '', fetcher: async () => { throw new TypeError('fetch failed http://secret-host') } })
   await assert.rejects(api.get('/x'), error => error.status === 0 && !/secret-host/.test(error.message))
 })
+
+test('foreground requests run the top progress bar; requests on a background (poll) signal do not', async () => {
+  const { markBackground } = await import('../src/api/client.ts')
+  const { hasPendingWork } = await import('../src/lib/progress.ts')
+  let release
+  const seen = []
+  setup(() => { seen.push(hasPendingWork()); return new Promise(resolve => { release = () => resolve(jsonResponse(200, { data: [] })) }) })
+  const foreground = api.get('/products', undefined, new AbortController().signal)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(seen, [true])
+  release(); await foreground
+  assert.equal(hasPendingWork(), false)
+  const poll = api.get('/products', undefined, markBackground(new AbortController().signal))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(seen, [true, false])
+  release(); await poll
+  assert.equal(hasPendingWork(), false)
+})

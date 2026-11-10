@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { ApiError, api, configureClient, request } from '../src/api/client.ts'
 import { authApi, batchesApi, inventoryApi, kioskCredentialsApi, machinesApi, ordersApi, paymentsApi, productsApi, slotsApi, usersApi, webhookLogsApi } from '../src/api/resources.ts'
 import { parseToken } from '../src/api/session.ts'
+import { ROLE_PERMISSIONS } from '../src/admin/permissions.ts'
 import { createKioskApi } from '../src/kiosk/api.ts'
 import { createMockFetcher, groupOf, isMockEnabled, parseSelection } from '../src/api/mock/fetcher.ts'
 import { installMock } from '../src/api/mock/index.ts'
@@ -78,8 +79,9 @@ test('GET /auth/me follows the draft contract', async () => {
   const me = await api.get('/auth/me')
   assert.equal(me.email, MOCK_ACCOUNTS.staff)
   assert.deepEqual(me.roles, ['STAFF'])
-  assert.ok(me.permissions.includes('inventory:write'))
-  assert.ok(!me.permissions.includes('users:manage'))
+  assert.deepEqual([...me.permissions].sort(), ['BATCH_CREATE', 'BATCH_READ', 'INVENTORY_READ', 'INVENTORY_WRITE', 'MACHINE_READ', 'ORDER_READ', 'PRODUCT_READ'])
+  // The mock reads the same table as the web (src/admin/permissions.ts), so the two cannot drift apart.
+  assert.deepEqual(me.permissions, [...ROLE_PERMISSIONS.STAFF])
 })
 
 test('401 without a token reaches onUnauthorized through the real client', async () => {
@@ -420,14 +422,37 @@ test('mock enforces roles: STAFF gets 403 on ADMIN-only endpoints', async () => 
   await assert.doesNotReject(ordersApi.list({}))
 })
 
-test('scenarios 400 and 409 hit writes only, carry message and fieldErrors, and leave the page loadable', async () => {
+test('scenarios 400 and 409 hit writes only and leave the page loadable; only 400 carries fieldErrors', async () => {
   const { state } = setup()
   await signIn(state)
   for (const status of [400, 409]) {
     state.search = `?scenario=${status}`
     await assert.doesNotReject(productsApi.list({}))
-    await assert.rejects(productsApi.create({ sku: 'A', name: 'A', price: 1000 }), failsWith(status, error => error.message.length > 0 && !!error.fieldErrors.sku))
   }
+  state.search = '?scenario=400'
+  await assert.rejects(productsApi.create({ sku: 'A', name: 'A', price: 1000 }), failsWith(400, error => error.message.length > 0 && !!error.fieldErrors.sku))
+  // GlobalExceptionHandler.handleConflict: business message only, no fieldErrors.
+  state.search = '?scenario=409'
+  await assert.rejects(productsApi.create({ sku: 'A', name: 'A', price: 1000 }), failsWith(409, error => error.message.length > 0 && Object.keys(error.fieldErrors).length === 0))
+})
+
+test('error bodies follow GlobalExceptionHandler: fieldErrors only when present, "Validation Failed" for 400 with fields', async () => {
+  const { state, fetcher } = setup()
+  await signIn(state)
+  const post = (body) => fetcher('/api/v1/products', { method: 'POST', headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  state.search = '?scenario=409'
+  const conflict = await (await post({ sku: 'A', name: 'A', price: 1000 })).json()
+  assert.equal(conflict.status, 409)
+  assert.equal(conflict.error, 'Conflict')
+  assert.equal('fieldErrors' in conflict, false)
+  state.search = '?scenario=400'
+  const invalid = await (await post({ sku: 'A', name: 'A', price: 1000 })).json()
+  assert.equal(invalid.error, 'Validation Failed')
+  assert.deepEqual(Object.keys(invalid.fieldErrors), ['sku'])
+  state.search = ''
+  const duplicate = await (await post({ sku: 'dev-mango', name: 'Copy', price: 1000 })).json()
+  assert.equal(duplicate.status, 409)
+  assert.equal('fieldErrors' in duplicate, false)
 })
 
 test('targeted scenarios only affect the named group or path, on any method', async () => {

@@ -65,7 +65,7 @@ function ListSection() {
   return <Section title="DataTable + FilterBar: có dữ liệu" note="Sắp xếp, phân trang và bộ lọc lưu trên URL (tham số kit_*). Ở trang thật, máy chủ sắp xếp và lọc; tại đây dữ liệu mẫu được xử lý tại chỗ.">
     <FilterBar activeCount={activeFilterCount([search, status])} onClear={() => update(clearFiltersPatch(FILTER_KEYS))}>
       <SearchFilter label="Mã đơn" value={search} onCommit={value => update({ kit_q: value })} />
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ kit_status: value })} options={enumOptions(STATUSES)} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ kit_status: value })} options={enumOptions('order', STATUSES)} />
     </FilterBar>
     <DataTable state={idle} rows={sorted.slice(page * PAGE, page * PAGE + PAGE)} rowKey={order => order.id} columns={COLUMNS} sort={sort} caption="Đơn hàng mẫu"
       onSort={next => update({ kit_sort: sortParam(next, SORT_RULE) })} empty="Không có đơn nào khớp bộ lọc. Hãy xóa bộ lọc để xem lại." />
@@ -130,7 +130,7 @@ function DialogSection() {
       <Field label="Mã ngăn" error={form.errors.code}><input value={form.values.code} onChange={event => form.set('code')(event.target.value)} /></Field>
       <Field label="Ghi chú"><textarea /></Field>
     </FormDialog>}
-    {dialog.value === 'status' && <StatusDialog title="Trạng thái: Kiwi vàng" current="ACTIVE" options={['ACTIVE', 'INACTIVE']} close={close} onSubmit={() => wait(300)} note="Sản phẩm ngừng hoạt động không hiện trên kiosk." />}
+    {dialog.value === 'status' && <StatusDialog title="Trạng thái: Kiwi vàng" domain="product" current="ACTIVE" options={['ACTIVE', 'INACTIVE']} close={close} onSubmit={() => wait(300)} note="Sản phẩm ngừng hoạt động không hiện trên kiosk." />}
   </Section>
 }
 
@@ -169,8 +169,8 @@ function PollingSection() {
 function OthersSection() {
   return <Section title="Thành phần khác">
     <div className="grid gap-4">
-      <Sample label="Toolbar (giữ cho các trang cũ)"><Toolbar><SearchFilter label="Tìm kiếm" value="" onCommit={() => {}} /><SelectFilter label="Trạng thái" value="" onChange={() => {}} options={enumOptions(['ACTIVE', 'INACTIVE'])} /></Toolbar></Sample>
-      <Sample label="Badge"><div className="flex flex-wrap gap-2"><Badge value="ACTIVE" /><Badge value="MAINTENANCE" /><Badge value="LOCKED" /></div></Sample>
+      <Sample label="Toolbar (giữ cho các trang cũ)"><Toolbar><SearchFilter label="Tìm kiếm" value="" onCommit={() => {}} /><SelectFilter label="Trạng thái" value="" onChange={() => {}} options={enumOptions('product')} /></Toolbar></Sample>
+      <Sample label="Badge"><div className="flex flex-wrap gap-2"><Badge domain="machine" value="ACTIVE" /><Badge domain="machine" value="MAINTENANCE" /><Badge domain="user" value="LOCKED" /><Badge value="soon" /></div></Sample>
       <Sample label="Notice"><Notice>Danh sách này chỉ để tham khảo.</Notice><Notice tone="error">Không lưu được thay đổi. Hãy thử lại.</Notice></Sample>
       <Sample label="Pagination"><Pagination page={1} totalPages={4} totalElements={72} onPage={() => {}} /></Sample>
       <Sample label="Nút thường trên nền bảng (kiểu cũ)"><div className="a-actions"><button type="button">Sửa</button><button type="button" className="a-primary">Thêm</button><button type="button" className="a-danger">Thu hồi</button></div></Sample>

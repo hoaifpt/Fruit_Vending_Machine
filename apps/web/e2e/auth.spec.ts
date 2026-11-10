@@ -32,13 +32,47 @@ test('STAFF không thấy mục ADMIN, gõ URL ADMIN thì gặp 403 và vẫn đ
   await expect(page).toHaveURL(/\/admin\/machines$/)
 })
 
-test('Sai mật khẩu hiện thông báo role=alert và ở lại trang đăng nhập', async ({ page }) => {
+test('Sai mật khẩu hiện thông báo role=alert, ô mật khẩu aria-invalid đến khi sửa, ở lại trang đăng nhập', async ({ page }) => {
   await page.goto('/login')
   await typeLogin(page, ACCOUNTS.ADMIN.email, 'sai-mat-khau')
   const alert = page.getByRole('alert')
   await expect(alert).toBeVisible()
   await expect(alert).not.toHaveText('')
   await expect(page).toHaveURL(/\/login$/)
+  const password = page.locator('#login-password')
+  await expect(password).toBeFocused()
+  await expect(password).toHaveAttribute('aria-invalid', 'true')
+  await expect(password).toHaveAttribute('aria-describedby', /login-form-error/)
+  await page.keyboard.type('x')
+  await expect(password).not.toHaveAttribute('aria-invalid', 'true')
+})
+
+test('Trang đăng nhập: chữ tiếng Việt và thứ tự Tab theo thứ tự trên màn hình', async ({ page }) => {
+  await page.goto('/login')
+  await expect(page.getByText('Dành cho quản trị viên và nhân viên')).toBeVisible()
+  await expect(page.getByText(/admin và staff/)).toHaveCount(0)
+  // Email has focus on load (keyboard login); the link and theme button above the form come before it in Tab order.
+  await expect(page.getByLabel('Email')).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(page.getByRole('button', { name: /Dùng giao diện/ })).toBeFocused()
+  await page.keyboard.press('Shift+Tab')
+  await expect(page.getByRole('link', { name: /Về trang giới thiệu/ })).toBeFocused()
+  const order: string[] = []
+  for (let step = 0; step < 6; step += 1) {
+    order.push(await page.evaluate(() => {
+      const element = document.activeElement as HTMLElement
+      return element.id || element.getAttribute('aria-label') || (element.textContent ?? '').replace(/\s+/g, ' ').trim()
+    }))
+    await page.keyboard.press('Tab')
+  }
+  expect(order).toEqual(['← Về trang giới thiệu', 'Dùng giao diện tối', 'login-email', 'login-password', 'Hiện mật khẩu', 'Đăng nhập'])
+})
+
+test('STAFF đăng nhập với next là màn ADMIN thì về màn đầu của mình, không gặp 403', async ({ page }) => {
+  await page.goto('/login?next=%2Fadmin%2Fpayments%3Fstatus%3DSUCCESS')
+  await typeLogin(page, ACCOUNTS.STAFF.email, ACCOUNTS.STAFF.password)
+  await page.waitForURL(url => url.pathname === '/admin/machines')
+  await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toHaveCount(0)
 })
 
 test('Bỏ trống thì báo lỗi ngay tại ô, không gửi yêu cầu', async ({ page }) => {

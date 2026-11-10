@@ -23,6 +23,12 @@ const JAVA_SOURCES = {
   dispense: ['dispense/enums/DispenseStatus.java', 'DispenseStatus'],
   alert: ['alert/enums/AlertStatus.java', 'AlertStatus'],
   alertSeverity: ['alert/enums/AlertSeverity.java', 'AlertSeverity'],
+  slot: ['machine/enums/SlotStatus.java', 'SlotStatus'],
+  product: ['product/enums/ProductStatus.java', 'ProductStatus'],
+  user: ['user/enums/UserStatus.java', 'UserStatus'],
+  kioskCredential: ['machine/kiosk/enums/KioskCredentialStatus.java', 'KioskCredentialStatus'],
+  allocation: ['order/enums/AllocationStatus.java', 'AllocationStatus'],
+  inventoryTransactionType: ['inventory/enums/InventoryTransactionType.java', 'InventoryTransactionType'],
 }
 const keys = domain => Object.keys(STATUS_CATALOG[domain])
 

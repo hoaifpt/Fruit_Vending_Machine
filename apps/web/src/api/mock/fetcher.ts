@@ -75,7 +75,7 @@ function parseBody(init?: RequestInit): unknown {
   try { return JSON.parse(init.body) } catch { throw new MockHttpError(400, 'Nội dung yêu cầu không phải JSON hợp lệ.') }
 }
 
-/** Per-field errors for a simulated 400/409, keyed on the first submitted field so forms can show them. */
+/** Per-field errors for a simulated 400, keyed on the first submitted field so forms can show them. */
 function simulatedFieldErrors(body: unknown): Record<string, string> | undefined {
   const field = body && typeof body === 'object' ? Object.keys(body)[0] : undefined
   return field ? { [field]: 'Giá trị không hợp lệ (mô phỏng).' } : undefined
@@ -163,7 +163,8 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       const body = parseBody(init)
       const simulated = scenario ? SCENARIO_ERRORS[scenario.name] : undefined
       if (simulated) {
-        const fields = simulated.status === 400 || simulated.status === 409 ? simulatedFieldErrors(body) : undefined
+        // Like GlobalExceptionHandler: only validation (400) carries fieldErrors; handleConflict (409) sends the message alone.
+        const fields = simulated.status === 400 ? simulatedFieldErrors(body) : undefined
         return errorResponse(simulated.status, simulated.message, fullPath, now, fields)
       }
       const reply = dispatch(method, path, url.searchParams, new Headers(init?.headers), body, current?.name !== 'pending')

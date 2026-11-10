@@ -2,7 +2,7 @@ import { machinesApi } from '../../api/resources.ts'
 import type { Machine } from '../../api/resources.ts'
 import { formatDateTime, parseDecimal } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
-import { Badge, DataTable, Field, FormDialog, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, STATUS_ACTIONS, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
+import { Badge, DataTable, Field, FormDialog, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 
@@ -14,7 +14,7 @@ const SORTS = [
 export const lastSeen = (machine: Machine) => machine.lastSeenAt ? formatDateTime(machine.lastSeenAt) : 'Chưa từng kết nối'
 
 function MachinesPage() {
-  const canManage = useSession().can('machines:manage')
+  const canManage = useSession().can('MACHINE_WRITE')
   const { params, update } = useQueryParams()
   const status = params.get('status') ?? '', search = params.get('search') ?? '', sort = params.get('sort') ?? 'name,asc', page = pageParam(params)
   const state = useApi(signal => machinesApi.list({ page, size: PAGE_SIZE, status: (status || undefined) as 'ACTIVE' | undefined, search: search || undefined, sort }, signal), params.toString())
@@ -25,7 +25,7 @@ function MachinesPage() {
       actions={canManage ? <button type="button" className="a-primary" onClick={() => dialog.open()}>Đăng ký máy</button> : undefined} />
     <Toolbar>
       <SearchFilter label="Tìm theo mã, tên hoặc vị trí" value={search} onCommit={value => update({ search: value })} />
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(STATUS_ACTIONS.MACHINE)} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('machine')} />
       <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value })} options={SORTS} empty="Mặc định" />
     </Toolbar>
     <DataTable state={state} rows={state.data?.content} rowKey={machine => machine.id} columns={[

@@ -23,13 +23,13 @@ function InventoryHistoryPage() {
     <Toolbar>
       <SelectFilter label="Máy" value={machineId} onChange={value => update({ machineId: value, slotId: '' })} options={machines} />
       <SelectFilter label="Ngăn" value={slotId} onChange={value => update({ slotId: value })} options={slots} empty={machineId ? 'Tất cả ngăn' : 'Chọn máy trước'} />
-      <SelectFilter label="Loại" value={type} onChange={value => update({ type: value })} options={enumOptions(TYPES)} />
+      <SelectFilter label="Loại" value={type} onChange={value => update({ type: value })} options={enumOptions('inventoryTransactionType', TYPES)} />
       <TextInput label="Mã hộp hàng (UUID)" value={inventoryItemId} onCommit={value => update({ inventoryItemId: value })} />
       <TextInput label="Mã tham chiếu (UUID)" value={referenceId} onCommit={value => update({ referenceId: value })} />
     </Toolbar>
     <DataTable state={state} rows={state.data?.content} rowKey={entry => entry.id ?? ''} columns={[
       { head: 'Thời gian', cell: entry => formatDateTime(entry.createdAt) },
-      { head: 'Loại', cell: entry => <Badge value={entry.type} /> },
+      { head: 'Loại', cell: entry => <Badge domain="inventoryTransactionType" value={entry.type} /> },
       { head: 'Lô', cell: entry => entry.batchCode },
       { head: 'Trước → sau', cell: entry => <><Badge domain="box" value={entry.statusBefore} /> → <Badge domain="box" value={entry.statusAfter} /></> },
       { head: 'Lý do', cell: entry => entry.reason || '—' },

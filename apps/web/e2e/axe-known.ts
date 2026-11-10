@@ -18,10 +18,6 @@ export const KNOWN_VIOLATIONS: KnownViolation[] = [
     screen: 'kiosk-catalog', rule: 'label-content-name-mismatch', target: 'button[aria-label=',
     reason: 'Kiosk (ngoài FM2, src/pages/PurchasePage.tsx): nút sản phẩm có aria-label "tên, giá" nhưng chữ hiển thị còn có mô tả; sửa khi làm lại màn kiosk',
   },
-  {
-    screen: 'kit', rule: 'color-contrast', within: '[aria-busy="true"]',
-    reason: 'Mẫu "Đang tải lại" ở /admin/_kit giữ cố định trạng thái DataTable aria-busy (mờ 60% trong lúc làm mới, thường < 1 giây); cần quyết định thiết kế cách báo đang tải lại mà không giảm tương phản',
-  },
 ]
 
 export interface NodeInfo { target: string; within: Record<string, boolean> }

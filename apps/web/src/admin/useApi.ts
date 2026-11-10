@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError } from '../api/client.ts'
+import { ApiError, markBackground } from '../api/client.ts'
 import { createPoller, documentVisibility, normalizeInterval } from '../lib/poller.ts'
 import type { RunKind } from '../lib/poller.ts'
 
@@ -44,6 +44,8 @@ export function useApi<T>(loader: (signal: AbortSignal) => Promise<T>, key: stri
       const own = new AbortController()
       controller = own
       const background = kind !== 'initial'
+      // Polls are not something the user waits on: their requests do not run the top progress bar.
+      if (background) markBackground(own.signal)
       setState(previous => background ? { ...previous, refreshing: true } : { data: previous.data, updatedAt: previous.updatedAt, loading: true, refreshing: false })
       loaderRef.current(own.signal).then(
         data => {

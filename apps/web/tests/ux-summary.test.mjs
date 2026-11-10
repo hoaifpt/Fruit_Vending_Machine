@@ -52,7 +52,18 @@ test('axe known list: every entry has a reason and only matches its own screen, 
   assert.ok(knownViolation('kiosk-catalog', 'label-content-name-mismatch', [node('button[aria-label="Táo, 35.000 ₫"]')]))
   assert.equal(knownViolation('kiosk-catalog', 'label-content-name-mismatch', [node('button[aria-label="Táo"]'), node('.other')]), null, 'one uncovered node keeps it blocking')
   assert.equal(knownViolation('orders', 'label-content-name-mismatch', [node('button[aria-label="x"]')]), null, 'other screens are not covered')
-  assert.deepEqual(withinSelectors('kit', 'color-contrast'), ['[aria-busy="true"]'])
-  assert.ok(knownViolation('kit', 'color-contrast', [node('.badge', { '[aria-busy="true"]': true })]))
-  assert.equal(knownViolation('kit', 'color-contrast', [node('.badge', { '[aria-busy="true"]': false })]), null, 'contrast outside the busy sample still blocks')
+  // The reloading DataTable keeps full contrast now: no contrast finding on the kit is excused any more.
+  assert.deepEqual(withinSelectors('kit', 'color-contrast'), [])
+  assert.equal(knownViolation('kit', 'color-contrast', [node('.badge', { '[aria-busy="true"]': true })]), null)
+})
+
+test('axe known list: a `within` entry covers only nodes inside its container', () => {
+  const node = (target, within = {}) => ({ target, within })
+  const entry = { screen: 'test-screen', rule: 'color-contrast', within: '[data-sample]', reason: 'mục thử cho bài kiểm tra cơ chế within' }
+  KNOWN_VIOLATIONS.push(entry)
+  try {
+    assert.deepEqual(withinSelectors('test-screen', 'color-contrast'), ['[data-sample]'])
+    assert.ok(knownViolation('test-screen', 'color-contrast', [node('.badge', { '[data-sample]': true })]))
+    assert.equal(knownViolation('test-screen', 'color-contrast', [node('.badge', { '[data-sample]': false })]), null, 'outside the container still blocks')
+  } finally { KNOWN_VIOLATIONS.splice(KNOWN_VIOLATIONS.indexOf(entry), 1) }
 })

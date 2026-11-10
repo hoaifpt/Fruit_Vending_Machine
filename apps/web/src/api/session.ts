@@ -76,10 +76,11 @@ export function loginPathFor(pathname: string, search = ''): string {
   return isReturnTarget(target) ? `/login?next=${encodeURIComponent(target)}` : '/login'
 }
 
-const ADMIN_PATH = /^\/admin(?:[/?#]|$)/
+/** /admin and its screens, or the /staff alias that AdminApp sends to the account's first screen. */
+const ADMIN_PATH = /^\/(?:admin(?:[/?#]|$)|staff\/?(?:[?#]|$))/
 /** Backslash, whitespace and control characters (browsers strip or reinterpret them in URLs). */
 const UNSAFE_CHARS = new RegExp('[\\\\\\s\\u0000-\\u001f\\u007f]')
-/** Internal management path only: starts with /admin, no scheme, no `//` or `\`, no control characters or spaces. */
+/** Internal management path only: /admin… or /staff, no scheme, no `//` or `\`, no control characters or spaces. */
 function isReturnTarget(value: string): boolean {
   if (!ADMIN_PATH.test(value) || UNSAFE_CHARS.test(value) || value.includes('//')) return false
   try {
@@ -102,9 +103,14 @@ export function setLoginRedirect(next: Redirect | null) {
 /**
  * Session expired or rejected (401, or the token's exp passed): clears the session and sends the user to login with
  * the current page as `next`. Runs once per session however many requests fail together. Returns the target, or
- * null when nothing was done (already handled, or already on the login page).
+ * null when nothing was done (already handled, already on the login page, or a 401 for an older token).
+ * `rejectedToken`: the token the failed request sent. When it is not the current session's token, the 401 belongs to a
+ * session that has already ended (a slow request answered after signing in again) and is ignored.
  */
-export function expireSession(location: { pathname: string; search: string } = window.location): string | null {
+export function expireSession(location: { pathname: string; search: string } = window.location, rejectedToken?: string | null): string | null {
+  // Compared with the stored token even if it has just expired (getSession would already have dropped it).
+  if (!loaded) { current = readStored(); loaded = true }
+  if (rejectedToken !== undefined && rejectedToken !== (current?.token ?? null)) return null
   if (expiryHandled) return null
   expiryHandled = true
   const target = loginPathFor(location.pathname, location.search)
@@ -116,5 +122,5 @@ export function expireSession(location: { pathname: string; search: string } = w
 
 configureClient({
   getToken: () => getSession()?.token ?? null,
-  onUnauthorized: () => { expireSession() },
+  onUnauthorized: token => { expireSession(window.location, token) },
 })

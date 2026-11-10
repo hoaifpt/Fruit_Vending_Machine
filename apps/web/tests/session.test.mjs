@@ -52,3 +52,43 @@ test('a burst of 401s ends the session and redirects once, back to the same page
   setLoginRedirect(null)
   endSession()
 })
+
+test('a late 401 for an older token does not sign out the session started since', () => {
+  const redirects = []
+  setLoginRedirect(to => redirects.push(to))
+  const here = { pathname: '/admin/orders', search: '' }
+  const oldToken = makeToken({ roles: ['ROLE_STAFF'] })
+  startSession(oldToken)
+  // The old session expires, the user signs in again (a different token), then a slow request made with the old one answers 401.
+  assert.equal(expireSession(here, oldToken), '/login?next=%2Fadmin%2Forders')
+  const newToken = makeToken({ roles: ['ROLE_ADMIN'], iat: Math.floor(Date.now() / 1000) + 1 })
+  assert.notEqual(newToken, oldToken)
+  startSession(newToken)
+  assert.equal(expireSession(here, oldToken), null)
+  assert.equal(getSession()?.token, newToken)
+  assert.equal(redirects.length, 1)
+  // A 401 for the current token still ends it, and so does one sent without a token while signed out.
+  assert.equal(expireSession(here, newToken), '/login?next=%2Fadmin%2Forders')
+  assert.equal(getSession(), null)
+  assert.equal(redirects.length, 2)
+  setLoginRedirect(null)
+  endSession()
+})
+
+test('the client reports the token a failed request sent, so the session can tell old 401s apart', async () => {
+  const { configureClient, request } = await import('../src/api/client.ts')
+  const seen = []
+  let token = 'token-a'
+  configureClient({ baseUrl: '', getToken: () => token, onUnauthorized: used => seen.push(used), fetcher: async () => { token = 'token-b'; return new Response('{}', { status: 401 }) } })
+  await assert.rejects(request('GET', '/orders'))
+  assert.deepEqual(seen, ['token-a'])
+  await assert.rejects(request('POST', '/auth/login', { auth: false }))
+  assert.deepEqual(seen, ['token-a'])
+})
+
+test('the /staff alias is a valid return target; look-alikes are not', () => {
+  assert.equal(safeNext('/staff'), '/staff')
+  assert.equal(safeNext('/staff?x=1'), '/staff?x=1')
+  assert.equal(loginPathFor('/staff'), '/login?next=%2Fstaff')
+  for (const bad of ['/staffx', '/staff/evil', '/staff//evil.test', '//staff']) assert.equal(safeNext(bad), '/admin', bad)
+})

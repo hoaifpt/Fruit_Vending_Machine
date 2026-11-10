@@ -6,6 +6,7 @@ import { useQueryParams } from '../../lib/router.ts'
 import { Badge, DataTable, Field, FormDialog, Link, PAGE_SIZE, PageHead, Pagination, SelectFilter, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useBatchOptions, useMachineOptions, useSlotOptions } from '../options.ts'
 import { useApi } from '../useApi.ts'
+import { useSession } from '../useSession.ts'
 
 export const ITEM_STATUSES = ['AVAILABLE', 'RESERVED', 'SOLD', 'EXPIRED', 'REMOVED', 'DISPENSE_FAILED'] as const
 const REMOVABLE = new Set(['AVAILABLE', 'EXPIRED'])
@@ -30,16 +31,17 @@ function InventoryPage() {
   const dialog = useDialog<'load' | InventoryItem>()
   const target = dialog.value
   const [refresh, setRefresh] = useState(0)
+  const canWrite = useSession().can('INVENTORY_WRITE')
   const changed = () => { state.reload(); setRefresh(count => count + 1) }
 
   return <>
-    <PageHead title="Tồn kho" subtitle="Mỗi hộp là một bản ghi riêng." actions={<button type="button" className="a-primary" onClick={() => dialog.open('load')}>Nạp hàng</button>} />
+    <PageHead title="Tồn kho" subtitle="Mỗi hộp là một bản ghi riêng." actions={canWrite ? <button type="button" className="a-primary" onClick={() => dialog.open('load')}>Nạp hàng</button> : undefined} />
     <InventoryTabs current="items" />
     <Toolbar>
       <SelectFilter label="Máy" value={machineId} onChange={value => update({ machineId: value, slotId: '' })} options={machines} />
       <SelectFilter label="Ngăn" value={slotId} onChange={value => update({ slotId: value })} options={slots} empty={machineId ? 'Tất cả ngăn' : 'Chọn máy trước'} />
       <SelectFilter label="Lô hàng" value={batchId} onChange={value => update({ batchId: value })} options={batches} />
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(ITEM_STATUSES)} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('box', ITEM_STATUSES)} />
       <SelectFilter label="Hạn dùng" value={expired} onChange={value => update({ expired: value })} options={[{ value: 'true', label: 'Đã quá hạn' }, { value: 'false', label: 'Chưa quá hạn' }]} />
       <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value })} options={SORTS} empty="Mặc định" />
     </Toolbar>
@@ -53,7 +55,7 @@ function InventoryPage() {
       { head: 'Nạp lúc', cell: item => formatDateTime(item.loadedAt) },
       { head: 'Thao tác', cell: item => <div className="a-actions">
         <Link to={`/admin/inventory/history?inventoryItemId=${item.id}`}>Lịch sử</Link>
-        <button type="button" className="a-danger" disabled={!REMOVABLE.has(item.status ?? '')} title={REMOVABLE.has(item.status ?? '') ? undefined : 'Chỉ gỡ được hộp Sẵn sàng hoặc Hết hạn'} onClick={() => dialog.open(item)}>Gỡ hộp</button>
+        {canWrite && <button type="button" className="a-danger" disabled={!REMOVABLE.has(item.status ?? '')} title={REMOVABLE.has(item.status ?? '') ? undefined : 'Chỉ gỡ được hộp Sẵn sàng hoặc Hết hạn'} onClick={() => dialog.open(item)}>Gỡ hộp</button>}
       </div> },
     ]} />
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}

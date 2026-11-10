@@ -37,7 +37,9 @@ export function FormField({ label, hint, error, required = false, disabled = fal
       'aria-required': required || control.props['aria-required'],
     }) : children}
     {error
-      ? <small id={messageId} role="alert" className="text-xs font-medium text-destructive">{error}</small>
+      // No role="alert": the message is read with the field through aria-describedby when focus moves there, and a
+      // live region would announce it a second time. Form-level alerts keep role="alert".
+      ? <small id={messageId} className="text-xs font-medium text-destructive">{error}</small>
       : hint && <small id={messageId} className="text-xs font-normal text-muted-foreground">{hint}</small>}
   </div>
 }

@@ -4,7 +4,7 @@ import type { FormEvent } from 'react'
 import { describeLoginError, login, LoginError, returnTarget, validateLogin } from '../features/auth/auth'
 import type { LoginFailure, LoginFieldErrors } from '../features/auth/auth'
 import { getSession } from '../api/session'
-import { homeFor } from '../admin/routes'
+import { landingFor } from '../admin/routes'
 import { navigate } from '../lib/router'
 import { useTheme } from '../lib/theme'
 import { Button } from '../components/ui/button'
@@ -40,6 +40,8 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState<LoginFieldErrors>({})
   const [formError, setFormError] = useState('')
+  /** Email/password pair refused by the server: the password field stays aria-invalid until the user edits it. */
+  const [rejected, setRejected] = useState(false)
   /** Bumped on every failed attempt: re-mounts the alert so an identical message is announced again, and moves focus. */
   const [attempt, setAttempt] = useState(0)
   const [submitted, setSubmitted] = useState(false)
@@ -54,7 +56,7 @@ function LoginPage() {
   useEffect(() => () => requestRef.current?.abort(), [])
   useEffect(() => {
     const session = getSession()
-    if (session) navigate(returnTo ?? homeFor(session.user.roles), { replace: true })
+    if (session) navigate(landingFor(session.user.roles, returnTo), { replace: true })
     else emailRef.current?.focus({ preventScroll: true })
   }, [returnTo])
   useEffect(() => {
@@ -70,6 +72,7 @@ function LoginPage() {
   function fail(failure: LoginFailure) {
     setErrors(failure.fieldErrors)
     setFormError(failure.message)
+    setRejected(failure.focus === 'password' && !!failure.message && !failure.fieldErrors.password)
     focusAfter.current = failure.focus
     setAttempt(value => value + 1)
   }
@@ -89,7 +92,7 @@ function LoginPage() {
       const session = await login(email, password, controller.signal)
       if (controller.signal.aborted) return
       setPassword('')
-      navigate(returnTo ?? homeFor(session.user.roles), { replace: true })
+      navigate(landingFor(session.user.roles, returnTo), { replace: true })
     } catch (error) {
       if (!controller.signal.aborted) fail(error instanceof LoginError ? error.failure : describeLoginError(error))
     } finally {
@@ -139,7 +142,7 @@ function LoginPage() {
         <div className="mx-auto w-full max-w-[440px] min-[761px]:max-w-[400px]">
           <div className="mb-[34px] min-[761px]:mb-[38px]">
             <h1 id="login-title" className="text-[32px] leading-[1.2] font-bold tracking-[-1px] min-[761px]:text-[36px]">Đăng nhập</h1>
-            <p className="pt-2.5 text-[17px] leading-normal text-muted-foreground min-[761px]:text-lg">Dành cho admin và staff</p>
+            <p className="pt-2.5 text-[17px] leading-normal text-muted-foreground min-[761px]:text-lg">Dành cho quản trị viên và nhân viên</p>
           </div>
 
           {returnTo && <div className="mb-6 flex gap-3 rounded-lg bg-status-info px-4 py-3 text-sm leading-normal text-status-info-foreground">
@@ -157,8 +160,8 @@ function LoginPage() {
             <FormField label="Mật khẩu" error={errors.password} className={FIELD}>
               <PasswordInput ref={passwordRef} id="login-password" name="password" autoComplete="current-password"
                 readOnly={pending} placeholder="Nhập mật khẩu" value={password} className={CONTROL}
-                aria-describedby={formError ? 'login-form-error' : undefined}
-                onChange={event => { setPassword(event.target.value); setErrors(previous => ({ ...previous, password: undefined })); setFormError('') }}
+                aria-describedby={formError ? 'login-form-error' : undefined} aria-invalid={rejected || undefined}
+                onChange={event => { setPassword(event.target.value); setErrors(previous => ({ ...previous, password: undefined })); setFormError(''); setRejected(false) }}
                 onBlur={() => recheck('password')} />
             </FormField>
 

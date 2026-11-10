@@ -26,9 +26,14 @@ export function successResponse(reply: Reply, nowMs: number): Response {
   return json(reply.status, { timestamp: new Date(nowMs).toISOString(), message: 'Request completed successfully', data: reply.data })
 }
 
+/**
+ * ApiErrorResponse as GlobalExceptionHandler builds it: `fieldErrors` only when not empty (@JsonInclude NON_EMPTY), and a
+ * 400 with field errors is a bean-validation failure, reported as "Validation Failed".
+ */
 export function errorResponse(status: number, message: string, path: string, nowMs: number, fieldErrors?: Record<string, string>): Response {
-  const hasFields = fieldErrors && Object.keys(fieldErrors).length > 0
-  return json(status, { timestamp: new Date(nowMs).toISOString(), status, error: REASONS[status] ?? 'Error', message, path, ...(hasFields ? { fieldErrors } : {}) })
+  const hasFields = !!fieldErrors && Object.keys(fieldErrors).length > 0
+  const error = status === 400 && hasFields ? 'Validation Failed' : REASONS[status] ?? 'Error'
+  return json(status, { timestamp: new Date(nowMs).toISOString(), status, error, message, path, ...(hasFields ? { fieldErrors } : {}) })
 }
 
 type Sortable = string | number | null | undefined

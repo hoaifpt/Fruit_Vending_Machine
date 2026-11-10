@@ -26,7 +26,7 @@ function PaymentsPage() {
     </nav>
     {attention && <Notice>Các khoản thanh toán thành công cần người kiểm tra: thanh toán đến muộn sau khi đơn đã hủy, hoặc đơn có nhiều khoản thành công. Đây là danh sách ứng viên hoàn tiền.</Notice>}
     <Toolbar>
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(STATUSES)} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('payment', STATUSES)} />
       <SearchFilter label="Nhà cung cấp" value={provider} onCommit={value => update({ provider: value })} placeholder="Ví dụ: PAYOS" />
       <SelectFilter label="Máy" value={machineId} onChange={value => update({ machineId: value })} options={machines} />
       <SearchFilter label="Mã đơn (UUID)" value={orderId} onCommit={value => update({ orderId: value })} />

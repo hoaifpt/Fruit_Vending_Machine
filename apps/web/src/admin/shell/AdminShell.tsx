@@ -11,6 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '../../compone
 import { Toaster } from '../../components/ui/sonner.tsx'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../components/ui/tooltip.tsx'
 import { cn } from '../../lib/cn.ts'
+import { commandScore } from '../../lib/command-filter.ts'
 import { linkHandler, navigate } from '../../lib/router.ts'
 import { useTheme } from '../../lib/theme.ts'
 import type { ThemeChoice } from '../../lib/theme.ts'
@@ -24,9 +25,6 @@ const ROLE_LABELS: Record<Role, string> = { ADMIN: 'Quản trị viên', STAFF: 
 const THEMES: { value: ThemeChoice; label: string; icon: typeof Sun }[] = [
   { value: 'light', label: 'Sáng', icon: Sun }, { value: 'dark', label: 'Tối', icon: Moon }, { value: 'system', label: 'Theo hệ thống', icon: Monitor },
 ]
-
-/** Vietnamese without diacritics, so typing "may ban" finds "Máy bán hàng". */
-const plain = (text: string) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/đ/g, 'd').replace(/Đ/g, 'D')
 
 function readCollapsed() {
   try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
@@ -202,21 +200,22 @@ function CommandPalette({ open, onOpenChange, nav, onLogout }: { open: boolean; 
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-w-xl p-0" aria-describedby={undefined}>
       <DialogTitle className="sr-only">Tìm kiếm và điều hướng</DialogTitle>
-      <Command loop>
+      {/* Ranked on the visible label (commandScore), with or without diacritics; group names are secondary keywords. */}
+      <Command loop filter={commandScore}>
         <CommandInput autoFocus placeholder="Nhập tên màn hình hoặc thao tác…" />
         <CommandList>
           <CommandEmpty>Không tìm thấy kết quả.</CommandEmpty>
           {groups.map(group => <CommandGroup key={group} heading={group}>
             {nav.filter(item => item.group === group).map(item => {
               const Icon = NAV_ICONS[item.to]
-              return <CommandItem key={item.to} value={item.to} keywords={[item.label, plain(item.label), item.group, plain(item.group)]} onSelect={() => run(() => navigate(item.to))}>{Icon && <Icon />}{item.label}</CommandItem>
+              return <CommandItem key={item.to} value={item.label} keywords={[item.group]} onSelect={() => run(() => navigate(item.to))}>{Icon && <Icon />}{item.label}</CommandItem>
             })}
           </CommandGroup>)}
           <CommandGroup heading="Giao diện">
-            {THEMES.map(theme => <CommandItem key={theme.value} value={`theme-${theme.value}`} keywords={['Giao diện', 'giao dien', theme.label, plain(theme.label), theme.value]} onSelect={() => run(() => setTheme(theme.value))}><theme.icon />Giao diện: {theme.label}</CommandItem>)}
+            {THEMES.map(theme => <CommandItem key={theme.value} value={`Giao diện: ${theme.label}`} keywords={['theme', theme.value]} onSelect={() => run(() => setTheme(theme.value))}><theme.icon />Giao diện: {theme.label}</CommandItem>)}
           </CommandGroup>
           <CommandGroup heading="Tài khoản">
-            <CommandItem value="logout" keywords={['Đăng xuất', 'dang xuat']} onSelect={() => run(onLogout)}><LogOut />Đăng xuất</CommandItem>
+            <CommandItem value="Đăng xuất" keywords={['logout']} onSelect={() => run(onLogout)}><LogOut />Đăng xuất</CommandItem>
           </CommandGroup>
         </CommandList>
       </Command>

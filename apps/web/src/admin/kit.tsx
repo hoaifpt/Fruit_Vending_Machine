@@ -14,8 +14,10 @@ import { Skeleton } from '../components/ui/skeleton.tsx'
 import { StatusBadge } from '../components/ui/status-badge.tsx'
 import { cn } from '../lib/cn.ts'
 import { linkHandler } from '../lib/router.ts'
+import { STATUS_CATALOG, statusMeta } from '../lib/status.ts'
 import type { StatusDomain } from '../lib/status.ts'
 import type { SortState } from '../lib/table-query.ts'
+import { describeFormFailure, ValidationError } from './form-error.ts'
 import { rolesWith } from './permissions.ts'
 import type { Permission } from './permissions.ts'
 import { homeFor } from './routes.ts'
@@ -23,27 +25,25 @@ import { errorMessage } from './useApi.ts'
 import type { ApiState } from './useApi.ts'
 import { useSession } from './useSession.ts'
 
+/** Labels of the few values that are not backend statuses: roles and the batch expiry hint. Statuses come from STATUS_CATALOG. */
 export const LABELS: Record<string, string> = {
-  ACTIVE: 'Hoạt động', INACTIVE: 'Ngừng hoạt động', LOCKED: 'Đã khóa', MAINTENANCE: 'Bảo trì', ERROR: 'Lỗi',
-  AVAILABLE: 'Sẵn sàng', RESERVED: 'Đã giữ chỗ', SOLD: 'Đã bán', EXPIRED: 'Hết hạn', REMOVED: 'Đã gỡ', DISPENSE_FAILED: 'Nhả hàng thất bại',
-  PENDING_PAYMENT: 'Chờ thanh toán', PAID: 'Đã thanh toán', DISPENSING: 'Đang nhả hàng', COMPLETED: 'Hoàn tất', CANCELLED: 'Đã hủy', PAYMENT_FAILED: 'Thanh toán thất bại', REFUNDED: 'Đã hoàn tiền',
-  PENDING: 'Đang chờ', SUCCESS: 'Thành công', FAILED: 'Thất bại', REVOKED: 'Đã thu hồi', DISPENSED: 'Đã nhả hàng', RELEASED: 'Đã nhả giữ chỗ',
-  LOAD: 'Nạp hàng', RESERVE: 'Giữ chỗ', SALE: 'Bán', EXPIRE: 'Hết hạn', REMOVE: 'Gỡ', RETURN: 'Hoàn trả', ADJUSTMENT: 'Điều chỉnh',
   ADMIN: 'Quản trị viên', STAFF: 'Nhân viên', fresh: 'Còn hạn', soon: 'Sắp hết hạn', expired: 'Đã hết hạn',
 }
-const BAD = new Set(['LOCKED', 'ERROR', 'EXPIRED', 'REMOVED', 'DISPENSE_FAILED', 'PAYMENT_FAILED', 'FAILED', 'REVOKED', 'CANCELLED', 'expired'])
-const WARN = new Set(['MAINTENANCE', 'INACTIVE', 'PENDING', 'PENDING_PAYMENT', 'RESERVED', 'soon', 'REFUNDED'])
+const PLAIN_TONES: Record<string, string> = { expired: 'bg-status-danger text-status-danger-foreground', soon: 'bg-status-warning text-status-warning-foreground' }
 
 // Unlayered global rules (index.css, admin.css) beat Tailwind utilities, so margins on <p> and sizes on plain controls need `!`.
 const ERROR_BOX = 'my-3.5! rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-destructive'
 const HINT = 'mt-3! mb-4.5! text-[13px] leading-[1.7] text-muted-foreground'
 const SMALL_PLAIN_BUTTONS = '[&_button]:min-h-8! [&_button]:px-2.5! [&_button]:text-[13px]!'
 
-/** With `domain` the value is read in that vocabulary (icon, explanation); without it the legacy label-only pill is kept. */
+/**
+ * With `domain` the value is a backend status read in that vocabulary (icon, explanation). Without it the value is a
+ * role or an expiry hint (`LABELS`) shown as a plain pill; backend statuses must always pass their domain.
+ */
 export function Badge({ value, domain, explain }: { value: string | undefined; domain?: StatusDomain; explain?: boolean }) {
   if (domain) return <StatusBadge domain={domain} value={value} explain={explain} />
   if (!value) return <>—</>
-  const tone = BAD.has(value) ? 'bg-status-danger text-status-danger-foreground' : WARN.has(value) ? 'bg-status-warning text-status-warning-foreground' : 'bg-status-success text-status-success-foreground'
+  const tone = PLAIN_TONES[value] ?? 'bg-status-success text-status-success-foreground'
   return <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current', tone)}>{LABELS[value] ?? value}</span>
 }
 
@@ -171,7 +171,10 @@ export function SelectFilter({ label, value, onChange, options, empty = 'Tất c
     <option value="">{empty}</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
   </NativeSelect></Field>
 }
-export function enumOptions(values: readonly string[]) { return values.map(value => ({ value, label: LABELS[value] ?? value })) }
+/** Filter options of a status domain, labelled from STATUS_CATALOG (all values in catalog order unless `values` narrows them). */
+export function enumOptions(domain: StatusDomain, values: readonly string[] = Object.keys(STATUS_CATALOG[domain])) {
+  return values.map(value => ({ value, label: statusMeta(domain, value).label }))
+}
 
 /** Text filter committed to the URL after a short pause, so each keystroke does not call the API. */
 export function SearchFilter({ label, value, onCommit, placeholder }: { label: string; value: string; onCommit: (value: string) => void; placeholder?: string }) {
@@ -194,8 +197,8 @@ export function DateFilter({ label, value, onChange }: { label: string; value: s
 export function Toolbar({ children }: { children: ReactNode }) { return <FilterBar>{children}</FilterBar> }
 
 /**
- * Modal form. `onSubmit` resolves to close the dialog, or throws: ApiError `fieldErrors` go to `onFieldErrors`
- * (shown beside the fields) and any other message becomes a form-level alert.
+ * Modal form. `onSubmit` resolves to close the dialog, or throws: field errors go to `onFieldErrors` (shown beside the
+ * fields) and the form-level alert follows `describeFormFailure` (a 409 keeps its business message).
  */
 export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, children, onFieldErrors, danger = false, wide = false }: {
   title: string; submitLabel?: string; close: () => void
@@ -214,9 +217,9 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
     if (pending) return
     setPending(true); setMessage('')
     try { await onSubmit(); close(); toast.success(`Đã ${submitLabel.charAt(0).toLowerCase()}${submitLabel.slice(1)}`, { description: title }) } catch (error) {
-      if (error instanceof ApiError && Object.keys(error.fieldErrors).length) { onFieldErrors?.(error.fieldErrors); setMessage('Vui lòng kiểm tra các trường được đánh dấu.') }
-      else if (error instanceof ValidationError) { onFieldErrors?.(error.fieldErrors); setMessage('Vui lòng kiểm tra các trường được đánh dấu.') }
-      else setMessage(errorMessage(error))
+      const failure = describeFormFailure(error)
+      if (failure.fieldErrors) onFieldErrors?.(failure.fieldErrors)
+      setMessage(failure.message)
       setPending(false)
     }
   }
@@ -239,11 +242,7 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
   </dialog>
 }
 
-/** Thrown by client-side validation before any request is sent. */
-export class ValidationError extends Error {
-  readonly fieldErrors: Record<string, string>
-  constructor(fieldErrors: Record<string, string>) { super('Dữ liệu chưa hợp lệ.'); this.name = 'ValidationError'; this.fieldErrors = fieldErrors }
-}
+export { ValidationError }
 
 /** Asks before an action that cannot be undone. Stays open while it runs; a failure is shown inside, so the user can retry. */
 export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, danger }: {
@@ -299,14 +298,14 @@ export const PAGE_SIZE = 20
 export const STATUS_ACTIONS = { USER: ['ACTIVE', 'INACTIVE', 'LOCKED'], PRODUCT: ['ACTIVE', 'INACTIVE'], MACHINE: ['ACTIVE', 'INACTIVE', 'MAINTENANCE'], SLOT: ['ACTIVE', 'INACTIVE', 'ERROR'] } as const
 
 /** Dialog that moves a record to another status through its dedicated status endpoint. */
-export function StatusDialog({ title, current, options, close, onSubmit, note }: {
-  title: string; current: string | undefined; options: readonly string[]; close: () => void; onSubmit: (status: string) => Promise<unknown>; note?: string
+export function StatusDialog({ title, domain, current, options, close, onSubmit, note }: {
+  title: string; domain: StatusDomain; current: string | undefined; options: readonly string[]; close: () => void; onSubmit: (status: string) => Promise<unknown>; note?: string
 }) {
   const [status, setStatus] = useState(options.find(option => option !== current) ?? options[0])
   return <FormDialog title={title} submitLabel="Cập nhật trạng thái" close={close} onSubmit={async () => { await onSubmit(status) }}>
-    <p className={HINT}>Trạng thái hiện tại: <Badge value={current} /></p>
+    <p className={HINT}>Trạng thái hiện tại: <Badge domain={domain} value={current} /></p>
     <Field label="Trạng thái mới"><NativeSelect value={status} onChange={event => setStatus(event.target.value)}>
-      {options.map(option => <option key={option} value={option} disabled={option === current}>{LABELS[option] ?? option}</option>)}
+      {options.map(option => <option key={option} value={option} disabled={option === current}>{statusMeta(domain, option).label}</option>)}
     </NativeSelect></Field>
     {note && <p className={HINT}>{note}</p>}
   </FormDialog>
