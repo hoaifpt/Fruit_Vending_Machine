@@ -31,7 +31,7 @@ function InventoryHistoryPage() {
       { head: 'Thời gian', cell: entry => formatDateTime(entry.createdAt) },
       { head: 'Loại', cell: entry => <Badge value={entry.type} /> },
       { head: 'Lô', cell: entry => entry.batchCode },
-      { head: 'Trước → sau', cell: entry => <><Badge value={entry.statusBefore} /> → <Badge value={entry.statusAfter} /></> },
+      { head: 'Trước → sau', cell: entry => <><Badge domain="box" value={entry.statusBefore} /> → <Badge domain="box" value={entry.statusAfter} /></> },
       { head: 'Lý do', cell: entry => entry.reason || '—' },
       { head: 'Hộp hàng', cell: entry => <small>{entry.inventoryItemId}</small> },
     ]} />

@@ -38,7 +38,7 @@ function PaymentsPage() {
       { head: 'Đơn hàng', cell: payment => <Link to={`/admin/orders/${payment.orderId}`}>{payment.orderCode}</Link> },
       { head: 'Máy', cell: payment => payment.machineCode },
       { head: 'Nhà cung cấp', cell: payment => <Link to={`/admin/payments/${payment.id}`}>{payment.provider}</Link> },
-      { head: 'Trạng thái', cell: payment => <Badge value={payment.status} /> },
+      { head: 'Trạng thái', cell: payment => <Badge domain="payment" value={payment.status} /> },
       { head: 'Số tiền', cell: payment => formatMoney(payment.amount) },
       { head: 'Tạo lúc', cell: payment => formatDateTime(payment.createdAt) },
       { head: 'Thanh toán lúc', cell: payment => formatDateTime(payment.paidAt) },

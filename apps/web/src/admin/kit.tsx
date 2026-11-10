@@ -3,7 +3,9 @@ import type { FormEvent, ReactNode } from 'react'
 import { ApiError } from '../api/client.ts'
 import { toast } from 'sonner'
 import { Skeleton } from '../components/ui/skeleton.tsx'
+import { StatusBadge } from '../components/ui/status-badge.tsx'
 import { linkHandler } from '../lib/router.ts'
+import type { StatusDomain } from '../lib/status.ts'
 import { errorMessage } from './useApi.ts'
 import type { ApiState } from './useApi.ts'
 
@@ -18,7 +20,9 @@ export const LABELS: Record<string, string> = {
 const BAD = new Set(['LOCKED', 'ERROR', 'EXPIRED', 'REMOVED', 'DISPENSE_FAILED', 'PAYMENT_FAILED', 'FAILED', 'REVOKED', 'CANCELLED', 'expired'])
 const WARN = new Set(['MAINTENANCE', 'INACTIVE', 'PENDING', 'PENDING_PAYMENT', 'RESERVED', 'soon', 'REFUNDED'])
 
-export function Badge({ value }: { value: string | undefined }) {
+/** With `domain` the value is read in that vocabulary (icon, explanation); without it the legacy label-only pill is kept. */
+export function Badge({ value, domain, explain }: { value: string | undefined; domain?: StatusDomain; explain?: boolean }) {
+  if (domain) return <StatusBadge domain={domain} value={value} explain={explain} />
   if (!value) return <>—</>
   const tone = BAD.has(value) ? 'a-expired' : WARN.has(value) ? 'a-warning' : ''
   return <span className={`a-badge ${tone}`}>{LABELS[value] ?? value}</span>

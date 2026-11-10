@@ -31,7 +31,7 @@ function OrdersPage() {
     <DataTable state={state} rows={state.data?.content} rowKey={order => order.id ?? ''} columns={[
       { head: 'Mã đơn', cell: order => <Link to={`/admin/orders/${order.id}`}>{order.orderCode}</Link> },
       { head: 'Máy', cell: order => order.machineCode },
-      { head: 'Trạng thái', cell: order => <Badge value={order.status} /> },
+      { head: 'Trạng thái', cell: order => <Badge domain="order" value={order.status} /> },
       { head: 'Số dòng / số hộp', cell: order => `${order.itemCount ?? 0} / ${order.totalQuantity ?? 0}` },
       { head: 'Tổng tiền', cell: order => formatMoney(order.totalAmount) },
       { head: 'Tạo lúc', cell: order => formatDateTime(order.createdAt) },

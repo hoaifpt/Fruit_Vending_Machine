@@ -23,7 +23,7 @@ function MachineDetailPage({ machineId, isAdmin }: { machineId: string; isAdmin:
       </> : undefined} />
     <section className="a-panel" aria-label="Thông tin máy">
       <dl className="a-dl">
-        <dt>Trạng thái (quản trị)</dt><dd><Badge value={data.status} /></dd>
+        <dt>Trạng thái (quản trị)</dt><dd><Badge domain="machine" explain value={data.status} /></dd>
         <dt>Vị trí</dt><dd>{data.location || '—'}</dd>
         <dt>Nhiệt độ cho phép</dt><dd>{data.minTemperature} – {data.maxTemperature} °C</dd>
         <dt>Độ ẩm cho phép</dt><dd>{data.minHumidity} – {data.maxHumidity} %</dd>

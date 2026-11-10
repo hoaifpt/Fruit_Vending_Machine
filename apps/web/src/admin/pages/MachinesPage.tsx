@@ -30,7 +30,7 @@ function MachinesPage({ isAdmin }: { isAdmin: boolean }) {
       { head: 'Mã máy', cell: machine => <Link to={`/admin/machines/${machine.id}`}>{machine.code}</Link> },
       { head: 'Tên', cell: machine => machine.name },
       { head: 'Vị trí', cell: machine => machine.location || '—' },
-      { head: 'Trạng thái', cell: machine => <Badge value={machine.status} /> },
+      { head: 'Trạng thái', cell: machine => <Badge domain="machine" value={machine.status} /> },
       { head: 'Lần cuối thấy máy', cell: lastSeen },
     ]} />
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}

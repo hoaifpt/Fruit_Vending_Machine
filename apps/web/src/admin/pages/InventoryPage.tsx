@@ -48,7 +48,7 @@ function InventoryPage() {
       { head: 'Sản phẩm', cell: item => item.productName },
       { head: 'Lô', cell: item => item.batchCode },
       { head: 'Ngăn', cell: item => item.slotCode },
-      { head: 'Trạng thái', cell: item => <Badge value={item.status} /> },
+      { head: 'Trạng thái', cell: item => <Badge domain="box" value={item.status} /> },
       { head: 'Hết hạn', cell: item => <>{formatDateTime(item.expiresAt)}{item.expired && <> <Badge value="expired" /></>}</> },
       { head: 'Nạp lúc', cell: item => formatDateTime(item.loadedAt) },
       { head: 'Thao tác', cell: item => <div className="a-actions">

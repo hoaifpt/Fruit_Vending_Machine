@@ -13,7 +13,7 @@ function PaymentDetailPage({ paymentId }: { paymentId: string }) {
     <PageHead title={`Thanh toán ${data.provider ?? ''}`} back={back} />
     <section className="a-panel" aria-label="Chi tiết thanh toán">
       <dl className="a-dl">
-        <dt>Trạng thái</dt><dd><Badge value={data.status} /></dd>
+        <dt>Trạng thái</dt><dd><Badge domain="payment" explain value={data.status} /></dd>
         <dt>Đơn hàng</dt><dd><Link to={`/admin/orders/${data.orderId}`}>{data.orderCode}</Link> · máy {data.machineCode}</dd>
         <dt>Số tiền</dt><dd>{formatMoney(data.amount)}</dd>
         <dt>Mã tham chiếu</dt><dd>{data.paymentReference || '—'}</dd>

@@ -16,7 +16,7 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
     <PageHead title={`Đơn ${data.orderCode}`} back={back} />
     <section className="a-panel" aria-label="Thông tin đơn">
       <dl className="a-dl">
-        <dt>Trạng thái</dt><dd><Badge value={data.status} /></dd>
+        <dt>Trạng thái</dt><dd><Badge domain="order" explain value={data.status} /></dd>
         <dt>Máy</dt><dd>{data.machineCode}</dd>
         <dt>Tạm tính / Tổng tiền</dt><dd>{formatMoney(data.subtotal)} / {formatMoney(data.totalAmount)}</dd>
         <dt>Tạo lúc</dt><dd>{formatDateTime(data.createdAt)}</dd>
@@ -50,7 +50,7 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
       <h2 id="pay-title">Thanh toán</h2>
       <DataTable state={none} rows={data.payments} rowKey={payment => payment.id ?? ''} empty="Chưa có lần thanh toán nào." columns={[
         { head: 'Nhà cung cấp', cell: payment => isAdmin ? <Link to={`/admin/payments/${payment.id}`}>{payment.provider}</Link> : payment.provider },
-        { head: 'Trạng thái', cell: payment => <Badge value={payment.status} /> },
+        { head: 'Trạng thái', cell: payment => <Badge domain="payment" value={payment.status} /> },
         { head: 'Số tiền', cell: payment => formatMoney(payment.amount) },
         { head: 'Tạo lúc', cell: payment => formatDateTime(payment.createdAt) },
         { head: 'Thanh toán lúc', cell: payment => formatDateTime(payment.paidAt) },

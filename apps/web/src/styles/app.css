@@ -33,6 +33,17 @@
   --ui-sidebar-foreground: oklch(0.3 0.02 162);
   --ui-sidebar-accent: oklch(0.94 0.008 160);
   --ui-sidebar-border: oklch(0.915 0.007 160);
+  /* Status badges: opaque pairs so contrast never depends on the surface below (locked by tests/status.test.mjs). */
+  --ui-status-success: oklch(0.95 0.04 152);
+  --ui-status-success-foreground: oklch(0.36 0.09 152);
+  --ui-status-warning: oklch(0.95 0.06 85);
+  --ui-status-warning-foreground: oklch(0.4 0.09 70);
+  --ui-status-danger: oklch(0.95 0.03 27);
+  --ui-status-danger-foreground: oklch(0.42 0.17 27);
+  --ui-status-info: oklch(0.95 0.03 240);
+  --ui-status-info-foreground: oklch(0.4 0.11 250);
+  --ui-status-neutral: oklch(0.94 0.005 160);
+  --ui-status-neutral-foreground: oklch(0.38 0.02 160);
 }
 
 .dark {
@@ -59,6 +70,16 @@
   --ui-sidebar-foreground: oklch(0.86 0.01 160);
   --ui-sidebar-accent: oklch(0.24 0.012 162);
   --ui-sidebar-border: oklch(1 0 0 / 0.08);
+  --ui-status-success: oklch(0.3 0.06 152);
+  --ui-status-success-foreground: oklch(0.9 0.1 152);
+  --ui-status-warning: oklch(0.32 0.06 75);
+  --ui-status-warning-foreground: oklch(0.9 0.1 85);
+  --ui-status-danger: oklch(0.32 0.09 27);
+  --ui-status-danger-foreground: oklch(0.9 0.06 27);
+  --ui-status-info: oklch(0.31 0.07 250);
+  --ui-status-info-foreground: oklch(0.9 0.06 240);
+  --ui-status-neutral: oklch(0.3 0.01 160);
+  --ui-status-neutral-foreground: oklch(0.9 0.01 160);
 }
 
 @theme inline {
@@ -86,6 +107,16 @@
   --color-success: var(--ui-success);
   --color-warning: var(--ui-warning);
   --color-info: var(--ui-info);
+  --color-status-success: var(--ui-status-success);
+  --color-status-success-foreground: var(--ui-status-success-foreground);
+  --color-status-warning: var(--ui-status-warning);
+  --color-status-warning-foreground: var(--ui-status-warning-foreground);
+  --color-status-danger: var(--ui-status-danger);
+  --color-status-danger-foreground: var(--ui-status-danger-foreground);
+  --color-status-info: var(--ui-status-info);
+  --color-status-info-foreground: var(--ui-status-info-foreground);
+  --color-status-neutral: var(--ui-status-neutral);
+  --color-status-neutral-foreground: var(--ui-status-neutral-foreground);
   --color-border: var(--ui-border);
   --color-input: var(--ui-input);
   --color-ring: var(--ui-ring);
