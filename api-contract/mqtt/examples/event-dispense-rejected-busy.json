@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-20",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "eventType": "DISPENSE_REJECTED",
+    "details": {
+      "commandId": "D-5B9D3F7A1C2E4680",
+      "columnCode": "A",
+      "state": "HOLD_LOWER",
+      "reason": "BUSY"
+    }
+  }
+}

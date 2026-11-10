@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * Broker connection for dispense commands and machine events (docs/mqtt-dispense.md). Disabled by default: without a broker
+ * Broker connection for dispense commands and machine events (api-contract/mqtt-contract.md). Disabled by default: without a broker
  * the backend still creates dispense commands, which stay PENDING and time out.
  */
 @ConfigurationProperties("app.mqtt")
@@ -22,6 +22,6 @@ public record MqttProperties(
     }
 
     public String commandTopic(String machineCode) {
-        return topicRoot + "/" + machineCode + "/commands";
+        return com.fruitmachine.backend.mqtt.contract.MachineTopic.of(topicRoot, machineCode, com.fruitmachine.backend.mqtt.contract.MachineChannel.COMMANDS);
     }
 }

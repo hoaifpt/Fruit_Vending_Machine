@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "messageId": "lwt-a1b2c3d4",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "state": "OFFLINE"
+  }
+}

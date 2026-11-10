@@ -446,7 +446,10 @@ Update Order
 
 ## 10. MQTT Architecture
 
-MQTT is an integration boundary.
+MQTT is an integration boundary. Topics, envelope, commands, events, payloads, timings, error codes and broker ACL are
+defined only in `api-contract/mqtt-contract.md` (examples in `api-contract/mqtt/examples/`); the wire values live in
+`mqtt/contract/` (`MachineChannel`, `MachineCommandType`, `MachineEventType`, `MachineErrorCode`) and
+`MqttContractDocumentationTest` keeps code, contract, examples, docs and ACL aligned. Do not hard-code topic or event strings.
 
 Preferred flow:
 
@@ -464,16 +467,16 @@ Repository
 
 Do not implement business workflows directly inside MQTT callbacks.
 
-Future outbound telemetry/event integration (not a dispense transport):
+Outbound commands (dispense today, maintenance/reset later):
 
 ```text
 Application Service
      ↓
-MQTT Publisher
+MachineCommandGateway (MqttMachineGateway)
      ↓
-Broker
+Broker: vending/{machineCode}/commands
      ↓
-Authenticated machine/kiosk integration
+Machine (broker account = machine code, ACL per machine)
 ```
 
 ---

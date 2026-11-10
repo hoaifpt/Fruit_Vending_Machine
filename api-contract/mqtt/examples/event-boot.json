@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-1",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "eventType": "BOOT",
+    "details": {
+      "resetReason": "POWERON",
+      "firmwareVersion": "0.3.0"
+    }
+  }
+}

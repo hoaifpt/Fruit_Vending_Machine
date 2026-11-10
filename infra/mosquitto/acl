@@ -2,8 +2,9 @@
 user backend
 topic readwrite vending/#
 
-# Machine accounts: username = machine code; each machine only touches its own topics.
+# Machine accounts: username = machine code; each machine only touches its own topics (api-contract/mqtt-contract.md §8).
 pattern read vending/%u/commands
 pattern write vending/%u/events
 pattern write vending/%u/status
+pattern write vending/%u/heartbeat
 pattern write vending/%u/telemetry

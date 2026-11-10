@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-5",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "temperature": 4.7,
+    "humidity": 68.2
+  }
+}

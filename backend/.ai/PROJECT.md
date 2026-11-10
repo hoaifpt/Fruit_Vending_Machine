@@ -224,22 +224,19 @@ Important rules:
 
 ## 9. IoT Communication
 
-Dispense commands/results use kiosk Serial/USB with ESP32 and kiosk/backend communication.
-MQTT may be used in future telemetry/status/event integrations, but is not a parallel
-dispense-command path. Direct ESP32 MQTT connectivity is not required for purchase.
-
-Conceptual topics:
+Dispense commands and results use Backend -> MQTT broker -> ESP32 (decision of 2026-10-23); USB Serial is a
+firmware test/calibration channel only. The MQTT contract is `api-contract/mqtt-contract.md` (v1.0.0, issue #49):
 
 ```text
-vending/{machineId}/telemetry
-vending/{machineId}/status
-vending/{machineId}/events
+vending/{machineCode}/commands    backend -> machine   (machineCode = machines.code = broker username)
+vending/{machineCode}/events      machine -> backend
+vending/{machineCode}/status      machine -> backend
+vending/{machineCode}/heartbeat   machine -> backend   (backend handling: 3.4)
+vending/{machineCode}/telemetry   machine -> backend   (firmware sensor pending)
 ```
 
-Final MQTT contracts must be documented before production implementation.
-
-Specify whether topic identifiers are machine UUIDs or machine codes. Serial examples
-above describe the approved flow, not a finalized framing/checksum/security protocol.
+Every message and error code carries an implementation status in the contract; later machine issues
+(3.3-3.7, 4.2) and firmware changes are built against it. Serial examples above are not part of the contract.
 
 ---
 

@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fruitmachine.backend.dispense.service.DispenseService;
 import com.fruitmachine.backend.machine.repository.MachineRepository;
+import com.fruitmachine.backend.mqtt.contract.MachineChannel;
+import com.fruitmachine.backend.mqtt.contract.MachineCommandType;
+import com.fruitmachine.backend.mqtt.contract.MachineEventType;
+import com.fruitmachine.backend.mqtt.contract.MqttContract;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 import lombok.RequiredArgsConstructor;
@@ -11,7 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
- * Parses machine messages ({@code <root>/<machineCode>/events|status}, envelope of docs/mqtt-dispense.md) and routes them.
+ * Parses machine messages ({@code <root>/<machineCode>/events|status}, envelope of api-contract/mqtt-contract.md) and routes them.
  * Messages are untrusted input: malformed ones are logged and dropped, never retried.
  */
 @Slf4j
@@ -32,17 +36,17 @@ public class MachineMessageHandler {
             log.warn("Unreadable MQTT {} message from {} dropped", channel, topicMachineCode);
             return;
         }
-        String declared = envelope.path("machineCode").asText(topicMachineCode);
+        String declared = envelope.path(MqttContract.MACHINE_CODE_FIELD).asText(topicMachineCode);
         if (!declared.equals(topicMachineCode)) {
             log.warn("MQTT message on {}'s topic declares machine {}; dropped", topicMachineCode, declared);
             return;
         }
         machines.touchLastSeen(topicMachineCode, clock.instant().truncatedTo(ChronoUnit.MICROS));
-        if (!"events".equals(channel)) return;
-        JsonNode payload = envelope.path("payload");
-        String eventType = payload.path("eventType").asText("");
-        String commandId = payload.path("details").path("commandId").asText(null);
-        if (eventType.startsWith("DISPENSE_")) {
+        if (!MachineChannel.EVENTS.equals(channel)) return;
+        JsonNode payload = envelope.path(MqttContract.PAYLOAD_FIELD);
+        String eventType = payload.path(MachineEventType.EVENT_TYPE_FIELD).asText("");
+        String commandId = payload.path(MachineEventType.DETAILS_FIELD).path(MachineCommandType.COMMAND_ID_FIELD).asText(null);
+        if (eventType.startsWith(MachineEventType.DISPENSE_PREFIX)) {
             var outcome = dispense.handleMachineEvent(topicMachineCode, eventType, commandId);
             log.info("Machine {} reported {} for {}: {}", topicMachineCode, eventType, commandId, outcome);
         }
