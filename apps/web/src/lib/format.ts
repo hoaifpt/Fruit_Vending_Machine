@@ -5,7 +5,7 @@ const OFFSET = '+07:00'
 const DAY_MS = 86_400_000
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 })
-const dateTime = new Intl.DateTimeFormat('vi-VN', { timeZone: TIME_ZONE, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+const dateTime = new Intl.DateTimeFormat('vi-VN', { timeZone: TIME_ZONE, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 
 export function formatMoney(value: number | null | undefined): string {
   return typeof value === 'number' && Number.isFinite(value) ? money.format(value) : '—'
@@ -13,7 +13,9 @@ export function formatMoney(value: number | null | undefined): string {
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '—' : dateTime.format(date)
+  if (Number.isNaN(date.getTime())) return '—'
+  const part = Object.fromEntries(dateTime.formatToParts(date).map(item => [item.type, item.value]))
+  return `${part.day}/${part.month}/${part.year} ${part.hour}:${part.minute}`
 }
 
 /** `YYYY-MM-DD` (Vietnam local date) → UTC instant of that day's start. */

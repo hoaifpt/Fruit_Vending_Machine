@@ -23,6 +23,8 @@ const PaymentsPage = lazy(() => import('./pages/PaymentsPage.tsx'))
 const PaymentDetailPage = lazy(() => import('./pages/PaymentDetailPage.tsx'))
 const WebhookLogsPage = lazy(() => import('./pages/WebhookLogsPage.tsx'))
 const WebhookLogDetailPage = lazy(() => import('./pages/WebhookLogDetailPage.tsx'))
+// Component reference at /admin/_kit: the literal condition drops this chunk from production builds.
+const KitPage = import.meta.env.DEV || import.meta.env.MODE === 'mock' ? lazy(() => import('./pages/KitPage.tsx')) : null
 
 const NO_ROLES: Role[] = []
 
@@ -42,7 +44,8 @@ function AdminApp() {
   if (!session) return <main className="route-message" role="status"><p>Đang chuyển đến trang đăng nhập…</p></main>
 
   let content: ReactNode
-  if (!route) content = pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff' ? <PageSkeleton /> : <NotFound />
+  if (KitPage && pathname.replace(/\/+$/, '') === '/admin/_kit') content = <KitPage />
+  else if (!route) content = pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff' ? <PageSkeleton /> : <NotFound />
   else if (!canAccess(roles, route.roles)) content = <Forbidden />
   else {
     const id = route.id ?? ''

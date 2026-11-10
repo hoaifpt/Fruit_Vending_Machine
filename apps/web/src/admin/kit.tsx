@@ -2,10 +2,19 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ApiError } from '../api/client.ts'
 import { toast } from 'sonner'
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '../components/ui/alert-dialog.tsx'
+import { Button } from '../components/ui/button.tsx'
+import { DataTable as Table } from '../components/ui/data-table.tsx'
+import type { DataTableColumn } from '../components/ui/data-table.tsx'
+import { FilterBar } from '../components/ui/filter-bar.tsx'
+import { FormField } from '../components/ui/form-field.tsx'
+import { Input, NativeSelect } from '../components/ui/input.tsx'
 import { Skeleton } from '../components/ui/skeleton.tsx'
 import { StatusBadge } from '../components/ui/status-badge.tsx'
+import { cn } from '../lib/cn.ts'
 import { linkHandler } from '../lib/router.ts'
 import type { StatusDomain } from '../lib/status.ts'
+import type { SortState } from '../lib/table-query.ts'
 import { errorMessage } from './useApi.ts'
 import type { ApiState } from './useApi.ts'
 
@@ -20,12 +29,17 @@ export const LABELS: Record<string, string> = {
 const BAD = new Set(['LOCKED', 'ERROR', 'EXPIRED', 'REMOVED', 'DISPENSE_FAILED', 'PAYMENT_FAILED', 'FAILED', 'REVOKED', 'CANCELLED', 'expired'])
 const WARN = new Set(['MAINTENANCE', 'INACTIVE', 'PENDING', 'PENDING_PAYMENT', 'RESERVED', 'soon', 'REFUNDED'])
 
+// Unlayered global rules (index.css, admin.css) beat Tailwind utilities, so margins on <p> and sizes on plain controls need `!`.
+const ERROR_BOX = 'my-3.5! rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-destructive'
+const HINT = 'mt-3! mb-4.5! text-[13px] leading-[1.7] text-muted-foreground'
+const SMALL_PLAIN_BUTTONS = '[&_button]:min-h-8! [&_button]:px-2.5! [&_button]:text-[13px]!'
+
 /** With `domain` the value is read in that vocabulary (icon, explanation); without it the legacy label-only pill is kept. */
 export function Badge({ value, domain, explain }: { value: string | undefined; domain?: StatusDomain; explain?: boolean }) {
   if (domain) return <StatusBadge domain={domain} value={value} explain={explain} />
   if (!value) return <>—</>
-  const tone = BAD.has(value) ? 'a-expired' : WARN.has(value) ? 'a-warning' : ''
-  return <span className={`a-badge ${tone}`}>{LABELS[value] ?? value}</span>
+  const tone = BAD.has(value) ? 'bg-status-danger text-status-danger-foreground' : WARN.has(value) ? 'bg-status-warning text-status-warning-foreground' : 'bg-status-success text-status-success-foreground'
+  return <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current', tone)}>{LABELS[value] ?? value}</span>
 }
 
 export function Link({ to, children, className }: { to: string; children: ReactNode; className?: string }) {
@@ -33,22 +47,24 @@ export function Link({ to, children, className }: { to: string; children: ReactN
 }
 
 export function PageHead({ title, subtitle, actions, back }: { title: string; subtitle?: string; actions?: ReactNode; back?: { to: string; label: string } }) {
-  return <header className="a-page-head">
+  return <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
     <div>
-      {back && <p className="a-breadcrumb"><Link to={back.to}>← {back.label}</Link></p>}
+      {back && <p className="mb-1.5! text-[13px]"><Link to={back.to} className="text-muted-foreground no-underline transition-colors hover:text-foreground">← {back.label}</Link></p>}
       <h1>{title}</h1>
-      {subtitle && <p>{subtitle}</p>}
+      {subtitle && <p className="mt-1! max-w-[70ch] text-muted-foreground">{subtitle}</p>}
     </div>
-    {actions && <div className="a-actions">{actions}</div>}
+    {actions && <div className={cn('flex flex-wrap items-center gap-1.5', SMALL_PLAIN_BUTTONS)}>{actions}</div>}
   </header>
 }
 
+/** Admin form field: the label, hint and error are linked to its single control; stacks with a bottom margin in forms. */
 export function Field({ label, error, hint, children }: { label: string; error?: string; hint?: string; children: ReactNode }) {
-  return <label className="a-field"><span>{label}</span>{children}{hint && !error && <small>{hint}</small>}{error && <small className="a-field-error" role="alert">{error}</small>}</label>
+  return <FormField label={label} error={error} hint={hint} className="mb-4">{children}</FormField>
 }
 
 export function Notice({ children, tone = 'info' }: { children: ReactNode; tone?: 'info' | 'error' }) {
-  return <p className={tone === 'error' ? 'a-error' : 'a-notice'} role={tone === 'error' ? 'alert' : 'status'}>{children}</p>
+  if (tone === 'error') return <p className={ERROR_BOX} role="alert">{children}</p>
+  return <p role="status" className="mb-4.5! flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/8 px-3.5 py-2.5">{children}</p>
 }
 
 /** First load of a block: shimmering placeholder rows; the label is announced to screen readers only. */
@@ -61,7 +77,7 @@ export function Loading({ label = 'Đang tải dữ liệu…', rows = 4 }: { la
 
 /** Table-shaped placeholder used while a list loads for the first time. */
 export function TableSkeleton({ columns = 5, rows = 6 }: { columns?: number; rows?: number }) {
-  return <div role="status" className="a-table-wrap">
+  return <div role="status" className="w-full overflow-hidden rounded-xl border bg-card in-[.a-panel]:rounded-none in-[.a-panel]:border-0 in-[.a-panel]:bg-transparent">
     <span className="sr-only">Đang tải dữ liệu…</span>
     <div className="flex gap-6 border-b bg-muted px-3.5 py-3">{Array.from({ length: columns }, (_, index) => <Skeleton key={index} className="h-3 flex-1 opacity-70" />)}</div>
     {Array.from({ length: rows }, (_, row) => <div key={row} className="flex items-center gap-6 border-b px-3.5 py-4 last:border-b-0">
@@ -79,39 +95,37 @@ export function PageSkeleton() {
   </div>
 }
 
-/** Query failure: 403 explains the missing permission without logging out; others offer a retry. */
+/** Query failure with the next step: 403 says who can grant access, 401 is on its way to login, others offer a retry. */
 export function ErrorState({ error, retry }: { error: unknown; retry?: () => void }) {
-  const forbidden = error instanceof ApiError && error.status === 403
-  return <div className="a-empty" role="alert">
+  const status = error instanceof ApiError ? error.status : undefined
+  return <div className="px-4 py-10 text-center text-muted-foreground" role="alert">
     <p>{errorMessage(error)}</p>
-    {!forbidden && retry && <p><button type="button" onClick={retry}>Thử lại</button></p>}
+    {status === 403 && <p className="mt-1.5! text-[13px]">Nếu cần xem mục này, hãy liên hệ quản trị viên để được cấp quyền.</p>}
+    {status === 401 && <p className="mt-1.5! text-[13px]">Đang chuyển đến trang đăng nhập…</p>}
+    {status !== 403 && status !== 401 && retry && <p className="mt-3!"><Button type="button" variant="outline" size="sm" onClick={retry}>Thử lại</Button></p>}
   </div>
 }
 
-export interface Column<T> { head: string; cell: (row: T) => ReactNode }
+export type Column<T> = DataTableColumn<T>
 
-export function DataTable<T>({ columns, rows, rowKey, state, empty = 'Không có kết quả phù hợp.' }: {
+export function DataTable<T>({ columns, rows, rowKey, state, empty = 'Không có kết quả phù hợp.', sort, onSort, caption }: {
   columns: Column<T>[]; rows: T[] | undefined; rowKey: (row: T) => string; state: Pick<ApiState<unknown>, 'loading' | 'error' | 'reload'>; empty?: string
+  /** Current server sort; columns with a `sortKey` become sortable when `onSort` is set. */
+  sort?: SortState; onSort?: (sort: SortState) => void; caption?: string
 }) {
   if (state.error && !rows) return <ErrorState error={state.error} retry={state.reload} />
   if (!rows) return <TableSkeleton columns={Math.min(columns.length, 6)} />
-  return <div className="a-table-wrap" aria-busy={state.loading}>
-    {state.error && <ErrorState error={state.error} retry={state.reload} />}
-    <table>
-      <thead><tr>{columns.map(column => <th key={column.head}>{column.head}</th>)}</tr></thead>
-      <tbody>{rows.map(row => <tr key={rowKey(row)}>{columns.map(column => <td key={column.head} data-label={column.head}>{column.cell(row)}</td>)}</tr>)}</tbody>
-    </table>
-    {!rows.length && !state.loading && <p className="a-empty">{empty}</p>}
-  </div>
+  return <Table columns={columns} rows={rows} rowKey={rowKey} loading={state.loading} empty={empty} sort={sort} onSort={onSort} caption={caption}
+    error={state.error ? <ErrorState error={state.error} retry={state.reload} /> : undefined} />
 }
 
 export function Pagination({ page, totalPages, totalElements, onPage }: { page: number; totalPages: number; totalElements: number; onPage: (page: number) => void }) {
   if (!totalElements) return null
-  return <nav className="a-pagination" aria-label="Phân trang">
+  return <nav className="mt-3.5 flex flex-wrap items-center justify-between gap-2.5 text-[13px] text-muted-foreground" aria-label="Phân trang">
     <span>Trang {page + 1} / {Math.max(totalPages, 1)} · {totalElements} bản ghi</span>
-    <div>
-      <button type="button" disabled={page <= 0} onClick={() => onPage(page - 1)}>Trước</button>
-      <button type="button" disabled={page + 1 >= totalPages} onClick={() => onPage(page + 1)}>Sau</button>
+    <div className="flex gap-2">
+      <Button type="button" variant="outline" disabled={page <= 0} onClick={() => onPage(page - 1)}>Trước</Button>
+      <Button type="button" variant="outline" disabled={page + 1 >= totalPages} onClick={() => onPage(page + 1)}>Sau</Button>
     </div>
   </nav>
 }
@@ -119,9 +133,9 @@ export function Pagination({ page, totalPages, totalElements, onPage }: { page: 
 export function SelectFilter({ label, value, onChange, options, empty = 'Tất cả' }: {
   label: string; value: string; onChange: (value: string) => void; options: { value: string; label: string }[]; empty?: string
 }) {
-  return <Field label={label}><select value={value} onChange={event => onChange(event.target.value)}>
+  return <Field label={label}><NativeSelect value={value} onChange={event => onChange(event.target.value)}>
     <option value="">{empty}</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-  </select></Field>
+  </NativeSelect></Field>
 }
 export function enumOptions(values: readonly string[]) { return values.map(value => ({ value, label: LABELS[value] ?? value })) }
 
@@ -134,15 +148,16 @@ export function SearchFilter({ label, value, onCommit, placeholder }: { label: s
     const timer = setTimeout(() => onCommit(text.trim()), 350)
     return () => clearTimeout(timer)
   }, [text, value, onCommit])
-  return <Field label={label}><input className="a-search" type="search" value={text} maxLength={200} placeholder={placeholder} onChange={event => setText(event.target.value)} /></Field>
+  return <Field label={label}><Input type="search" value={text} maxLength={200} placeholder={placeholder} onChange={event => setText(event.target.value)} /></Field>
 }
 /** Free-text filter committed to the URL after a short pause (alias of SearchFilter for non-search fields such as ids). */
 export const TextInput = SearchFilter
 export function DateFilter({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <Field label={label}><input type="date" value={value} onChange={event => onChange(event.target.value)} /></Field>
+  return <Field label={label}><Input type="date" value={value} onChange={event => onChange(event.target.value)} /></Field>
 }
 
-export function Toolbar({ children }: { children: ReactNode }) { return <div className="a-toolbar">{children}</div> }
+/** Filter row of the screens that have no "clear filters" yet; see `FilterBar`. */
+export function Toolbar({ children }: { children: ReactNode }) { return <FilterBar>{children}</FilterBar> }
 
 /**
  * Modal form. `onSubmit` resolves to close the dialog, or throws: ApiError `fieldErrors` go to `onFieldErrors`
@@ -171,16 +186,20 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
       setPending(false)
     }
   }
-  return <dialog ref={ref} className="a-modal admin-app" style={wide ? { width: 'min(820px, calc(100vw - 24px))' } : undefined} aria-labelledby={id} onCancel={event => { if (pending) event.preventDefault(); else close() }}>
+  return <dialog ref={ref} aria-labelledby={id} onCancel={event => { if (pending) event.preventDefault(); else close() }}
+    className={cn('m-auto max-h-[calc(100dvh-32px)] rounded-[14px] border bg-popover p-0 text-foreground shadow-2xl open:animate-in open:fade-in-0 open:zoom-in-95 backdrop:bg-black/40 motion-reduce:animate-none!', wide ? 'w-[min(820px,calc(100vw-24px))]' : 'w-[min(560px,calc(100vw-24px))]')}>
     <form onSubmit={submit} noValidate aria-busy={pending}>
-      <header><h2 id={id}>{title}</h2><button type="button" aria-label="Đóng" disabled={pending} onClick={close}>×</button></header>
-      <div className="a-modal-body">
+      <header className="flex items-center justify-between gap-3 border-b px-5 py-4 max-[680px]:px-4 max-[680px]:py-3.5">
+        <h2 id={id}>{title}</h2>
+        <Button type="button" variant="ghost" size="icon-sm" className="text-xl font-normal text-muted-foreground" aria-label="Đóng" disabled={pending} onClick={close}>×</Button>
+      </header>
+      <div className="p-5 max-[680px]:px-4 max-[680px]:py-3.5 [&_textarea]:min-h-25! [&_textarea]:resize-y!">
         {children}
-        {message && <p className="a-error" role="alert">{message}</p>}
+        {message && <p className={ERROR_BOX} role="alert">{message}</p>}
       </div>
-      <footer>
-        <button type="button" disabled={pending} onClick={close}>Hủy</button>
-        <button type="submit" className={danger ? 'a-danger' : 'a-primary'} disabled={pending}>{pending ? 'Đang xử lý…' : submitLabel}</button>
+      <footer className="flex justify-end gap-2 border-t bg-muted/50 px-5 py-3.5 max-[680px]:px-4">
+        <Button type="button" variant="outline" disabled={pending} onClick={close}>Hủy</Button>
+        <Button type="submit" variant={danger ? 'destructive' : 'default'} disabled={pending}>{pending ? 'Đang xử lý…' : submitLabel}</Button>
       </footer>
     </form>
   </dialog>
@@ -192,10 +211,30 @@ export class ValidationError extends Error {
   constructor(fieldErrors: Record<string, string>) { super('Dữ liệu chưa hợp lệ.'); this.name = 'ValidationError'; this.fieldErrors = fieldErrors }
 }
 
+/** Asks before an action that cannot be undone. Stays open while it runs; a failure is shown inside, so the user can retry. */
 export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, danger }: {
   title: string; message: ReactNode; confirmLabel: string; close: () => void; onConfirm: () => Promise<void>; danger?: boolean
 }) {
-  return <FormDialog title={title} submitLabel={confirmLabel} close={close} onSubmit={onConfirm} danger={danger}><p>{message}</p></FormDialog>
+  const [pending, setPending] = useState(false)
+  const [failure, setFailure] = useState('')
+  async function confirm() {
+    if (pending) return
+    setPending(true); setFailure('')
+    try { await onConfirm(); close(); toast.success(`Đã ${confirmLabel.charAt(0).toLowerCase()}${confirmLabel.slice(1)}`, { description: title }) } catch (error) {
+      setFailure(errorMessage(error)); setPending(false)
+    }
+  }
+  return <AlertDialog open onOpenChange={open => { if (!open && !pending) close() }}>
+    <AlertDialogContent aria-busy={pending} onEscapeKeyDown={event => { if (pending) event.preventDefault() }}>
+      <AlertDialogTitle>{title}</AlertDialogTitle>
+      <AlertDialogDescription asChild><div>{message}</div></AlertDialogDescription>
+      {failure && <p className={ERROR_BOX} role="alert">{failure}</p>}
+      <AlertDialogFooter>
+        <AlertDialogCancel disabled={pending}>Hủy</AlertDialogCancel>
+        <Button type="button" variant={danger ? 'destructive' : 'default'} disabled={pending} onClick={confirm}>{pending ? 'Đang xử lý…' : confirmLabel}</Button>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 }
 
 export function useDialog<T = true>() {
@@ -231,10 +270,10 @@ export function StatusDialog({ title, current, options, close, onSubmit, note }:
 }) {
   const [status, setStatus] = useState(options.find(option => option !== current) ?? options[0])
   return <FormDialog title={title} submitLabel="Cập nhật trạng thái" close={close} onSubmit={async () => { await onSubmit(status) }}>
-    <p className="a-hint">Trạng thái hiện tại: <Badge value={current} /></p>
-    <Field label="Trạng thái mới"><select value={status} onChange={event => setStatus(event.target.value)}>
+    <p className={HINT}>Trạng thái hiện tại: <Badge value={current} /></p>
+    <Field label="Trạng thái mới"><NativeSelect value={status} onChange={event => setStatus(event.target.value)}>
       {options.map(option => <option key={option} value={option} disabled={option === current}>{LABELS[option] ?? option}</option>)}
-    </select></Field>
-    {note && <p className="a-hint">{note}</p>}
+    </NativeSelect></Field>
+    {note && <p className={HINT}>{note}</p>}
   </FormDialog>
 }
