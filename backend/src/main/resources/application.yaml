@@ -95,6 +95,14 @@ app:
     timeout: ${DISPENSE_TIMEOUT:PT60S}
     # Command that could never be published, counted from its creation: nothing moved, the bowl is available again.
     pending-timeout: ${DISPENSE_PENDING_TIMEOUT:PT120S}
+  # Connectivity from machines.last_seen_at: 2 missed heartbeats (30 s each) = WARNING, 180 s = OFFLINE (MQTT contract §7).
+  machine-health:
+    warning-after: ${MACHINE_WARNING_AFTER:PT60S}
+    offline-after: ${MACHINE_OFFLINE_AFTER:PT180S}
+  # Telemetry intake (in memory, one backend instance): readings closer than min-interval and repeated messageIds are dropped.
+  telemetry:
+    min-interval: ${TELEMETRY_MIN_INTERVAL:PT10S}
+    duplicate-window: ${TELEMETRY_DUPLICATE_WINDOW:PT10M}
     sweep:
       enabled: ${DISPENSE_SWEEP_ENABLED:true}
       interval: ${DISPENSE_SWEEP_INTERVAL:PT2S}

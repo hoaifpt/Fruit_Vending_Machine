@@ -24,7 +24,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void v13AppliesAndSeedsExactlyTheCatalogWithFixedIds() {
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("14");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
         var rows = jdbc.queryForList("SELECT id, code, description FROM permissions ORDER BY id");
         assertThat(rows).extracting(r -> r.get("code")).containsExactlyElementsOf(Permissions.ALL);
         for (int n = 0; n < rows.size(); n++) {

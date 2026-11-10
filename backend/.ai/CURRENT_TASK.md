@@ -1,112 +1,107 @@
-# Issue #52 — [BE] Harden Dispense Command Flow
+# Issue #53 — [BE] Implement Machine Heartbeat & Telemetry
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/52
-Branch: feature/52-harden-dispense-flow (from origin/dev 8ac9c00, includes #48 and #49)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/53
+Branch: feature/53-machine-heartbeat-telemetry (from origin/dev 719c4ed, includes #48, #49, #52)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
 
 ## Scope
-V14 (slot code = physical column A/B with safe normalization, `dispense_commands.failure_reason` + CHECK + legacy backfill,
-in-flight index), `columnCode` in DISPENSE, publish preconditions (machine and slot ACTIVE, no other in-flight command of the
-machine) under a per-machine advisory lock, result timeout from first delivery + separate pending timeout, safe vs unsafe failures,
-`details.reason` / `details.bowlCount`, late COMPLETED hybrid rule, multi-bowl, `MachineService.enterMaintenanceBySystem`,
+Heartbeat + telemetry subscriptions, strict envelope validation for every channel, V15 presence/diagnostic columns (read-only on
+Machine), forward-only presence updates, derived connectivity (60 s / 180 s), reboot detection and recovery log, telemetry
+validation/dedup/throttle/storage, Machine API fields + connectivity filter, latest and history telemetry APIs (tag Machine Health),
 domain events (published + logged only).
 
 ## Non-goals
-Alerts/notifications (3.6), machine event persistence (3.5), maintenance commands and RESET (4.2), refunds (5.1), automatic stock
-reconciliation after multi-bowl, firmware changes (columnCode reading, NVS, IR confirmation, reasons), kiosk UI.
+Alerts and automatic MAINTENANCE (3.6), status/heartbeat history in machine_events (3.5), dashboards (6.1), reading retention,
+push updates, multi-instance dedup, firmware changes.
 
 ## Database / API impact
-New V14 (V1-V13 untouched). REST: `POST /api/v1/machines/{id}/slots` accepts slotCode A or B only (400 otherwise); Swagger and
-api.yaml updated; order/dispense responses unchanged. MQTT contract 1.1.0 (statuses; no message shape change).
+New V15 (V1-V14 untouched). Machine responses + connectivity, lastHeartbeatAt, firmwareVersion, uptimeSeconds, wifiRssi,
+freeHeapBytes; `GET /api/v1/machines?connectivity=`; new `GET /api/v1/machines/{machineId}/telemetry/latest` and
+`GET /api/v1/machines/{machineId}/telemetry`. Swagger tag Machine Health, api.yaml synced, MQTT contract 1.2.0.
 
 ## Status and verification
-Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 Testcontainers): 690 tests, 0 failures, BUILD SUCCESS.
-New: DispenseFlowIntegrationTest rewritten (29 tests), DispenseHardeningMigrationTest (2, disposable databases at V13).
-`db/dev/seed.sql` (run twice) and `db/verify/constraints.sql` were run on a throwaway PostgreSQL 18 with V1-V14 applied: both pass.
+Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 730 tests, 0 failures, BUILD SUCCESS.
+New: MachineHealthIntegrationTest (35), MqttHealthEndToEndTest (2, real broker with the repo's mosquitto.conf and ACL, real Last Will),
+MachineHealthPropertiesTest (2), MachineHealthDocumentationTest (1).
 
-Risks / open points:
-- **Existing databases with the old dev seed stop at V14** (DEV-MACHINE-01 has A1, A2, B1; A2 names no column). This is the rule of
-  the issue (ambiguous data -> stop and report, nothing changed). Before deploying, the owner of that database must rename or remove
-  those slots (for example keep A1 -> A, B1 -> B and retire A2 after moving its stock). Dev/staging data was not inspected from here.
-- Firmware on dev still reads `column`/`slot`, not `columnCode`: until firmware reads it, every dispense uses column A
-  (contract: columnCode FIRMWARE_PENDING).
-- BM04 is not in this repository; the new F-03 wording is recorded in docs/mqtt-dispense.md.
-- `scripts/payment_test_data.py` now seeds columns A/B (2000/5000 VND; `--fractional` puts 35000.50 in B).
+Notes:
+- "Heartbeat updates ... in one statement" is shown by the code (one UPDATE ... RETURNING old.* per message) and the tests check
+  every field changes together; statements are not counted by a test.
+- Payload size: the whole MQTT message (envelope included) is limited to 8 KB.
+- PaymentWebhookProcessingIntegrationTest: test-only fix for DB-vs-JVM clock skew (paid_at = GREATEST(now(), created_at));
+  it failed once in the full run and passed twice alone; unrelated to #53.
+- The Mosquitto image eclipse-mosquitto:2.0.20 (same tag as infra/docker-compose.yml) is pulled by Testcontainers on first run.
 
 # Testing
 
-## 13. Slot / Migration
+## 9. Envelope
 
-- [x] V14 normalizes `A1`/`B1` and adds the CHECK; Flyway + Hibernate validation pass
-- [x] Migration stops with a clear error on ambiguous data (test with a disposable DB)
-- [x] Creating slot `C` or `A1` → `400`; `a` → normalized `A`
-- [x] Legacy FAILED/TIMEOUT rows backfilled; CHECK enforced for new rows
+- [x] Every machine → backend example in `api-contract/mqtt/examples/` is accepted
+- [x] Missing / wrong `schemaVersion`, missing `messageId`, missing or mismatched `machineCode`, non-object `payload`, > 8 KB → dropped, no DB change
+- [x] Unknown machine code → dropped
+- [x] Dispense events still processed (3.3 regression)
 
-## 14. Command Payload
+## 10. Presence
 
-- [x] Published payload contains `columnCode` equal to the slot code (A and B)
-- [x] Payload matches `api-contract/mqtt/examples/command-dispense.json` keys
+- [x] Heartbeat updates last_seen_at, last_heartbeat_at and diagnostics in one statement
+- [x] Missing wifiRssi / freeHeap stored as NULL
+- [x] Invalid heartbeat → nothing updated
+- [x] status ONLINE updates presence; status OFFLINE sets last_offline_at only
+- [x] last_seen_at never moves backward
+- [x] machines.updated_at unchanged
+- [x] Concurrent Admin machine update + heartbeat → no lost configuration change, no deadlock
 
-## 15. Preconditions / Serialization
+## 11. Connectivity (fixed Clock)
 
-- [x] Machine MAINTENANCE or slot INACTIVE → command stays PENDING, not published
-- [x] Machine back ACTIVE within window → command published
-- [x] Two paid orders on one machine → second published only after first ends
-- [x] Concurrent sweeps/first-sends never publish two commands of one machine at once
+- [x] NEVER_SEEN, ONLINE (≤ 60 s), WARNING (60–180 s), OFFLINE (> 180 s)
+- [x] Last Will OFFLINE → OFFLINE immediately; next heartbeat → ONLINE
+- [x] Invalid durations fail startup
+- [x] Connectivity filter (if implemented) uses SQL and paginates correctly
 
-## 16. Timeouts
+## 12. Reboot / Recovery
 
-- [x] Never published for `pending-timeout` → FAILED NOT_DELIVERED, bowl AVAILABLE, allocation RELEASED, order DISPENSE_FAILED, RETURN history
-- [x] Published, no result for `timeout` after `sent_at` → TIMEOUT RESULT_TIMEOUT, bowl DISPENSE_FAILED, machine MAINTENANCE
-- [x] Resends do not move `sent_at`
-- [x] No resend after TIMEOUT/FAILED
+- [x] Uptime decrease publishes MachineRebootDetectedEvent once
+- [x] Recovery after > 180 s logged once
 
-## 17. Reasons
+## 13. Telemetry
 
-- [x] REJECTED BUSY / no reason → resent (backward compatible)
-- [x] REJECTED CONTROLLER_FAULT → safe failure + machine MAINTENANCE
-- [x] REJECTED INVALID_COLUMN → safe failure, ERROR log, machine unchanged
-- [x] ABORTED with each reason / no reason → unsafe failure + machine MAINTENANCE
-- [x] Unknown reason value → treated as ABORTED_UNSPECIFIED / BUSY as documented
+- [x] Valid reading stored with 2-decimal precision and server time
+- [x] Temperature-only and humidity-only readings accepted
+- [x] Both missing, NaN, out of range → dropped
+- [x] Duplicate messageId dropped; readings closer than min-interval dropped
+- [x] TelemetryRecordedEvent published after commit
 
-## 18. Late Result
+## 14. Read APIs
 
-- [x] Late COMPLETED, order DISPENSE_FAILED → COMPLETED, bowl SOLD, machine stays MAINTENANCE
-- [x] Late COMPLETED, order REFUNDED → bowl SOLD, order REFUNDED, audit row
-- [x] Late COMPLETED, bowl REMOVED → nothing changes, audit row
-- [x] Late COMPLETED after NOT_DELIVERED → nothing changes, audit row
-- [x] Duplicate COMPLETED → no second history row
+- [x] Machine list/detail include connectivity + diagnostics
+- [x] Latest reading with LOW / NORMAL / HIGH; null when no reading
+- [x] History: validation (`400`), DB paging, DESC order, `404` for missing machine
+- [x] ADMIN, STAFF allowed; anonymous `401`; kiosk key `401`; role without MACHINE_READ `403`
 
-## 19. Multi-bowl
+## 15. End-to-End (Testcontainers Mosquitto + PostgreSQL)
 
-- [x] COMPLETED with bowlCount 2 → order COMPLETED, machine MAINTENANCE, event published, no other bowl changed
+- [x] Publish heartbeat example → machine ONLINE with diagnostics
+- [x] Publish Last Will → OFFLINE
+- [x] Publish telemetry example → latest API returns it
 
-## 20. Machine Maintenance by System
+## 16. Regression
 
-- [x] Idempotent; INACTIVE untouched; audit row written
-- [x] Kiosk catalog `acceptingOrders=false` afterwards; order creation `409`
-- [x] STAFF cannot reactivate (403); ADMIN can
-
-## 21. Regression
-
-- [x] Existing `DispenseFlowIntegrationTest`, payment webhook and order tests pass (fixtures updated to A/B)
 - [x] All tests pass (`mvn clean verify`)
 - [x] Swagger, `api.yaml`, `mqtt-contract.md` consistent
+- [x] Flyway / Hibernate validation pass
 
 ---
 
 # Acceptance Criteria
 
-- [x] Slots restricted to columns A/B; existing data migrated safely
-- [x] Commands carry `columnCode`
-- [x] Commands published only when machine and slot are ACTIVE
-- [x] At most one in-flight command per machine
-- [x] Result timeout measured from first delivery; separate pending timeout
-- [x] Safe failures return the bowl; unsafe failures block it and put the machine in MAINTENANCE
-- [x] `details.reason` handled per contract; missing reason backward compatible
-- [x] `failure_reason` stored on every FAILED/TIMEOUT command
-- [x] Late COMPLETED follows the hybrid rule
-- [x] Multi-bowl release puts the machine in MAINTENANCE
-- [x] Domain events published for 3.5 / 3.6
-- [x] Docs and contracts updated; tests pass (`mvn clean verify`)
-- [x] Flyway / Hibernate validation pass; applied migrations unchanged
+- [x] Heartbeat and telemetry topics subscribed
+- [x] Envelope validated strictly per contract; dispense flow unaffected
+- [x] V15 presence/diagnostic columns added and mapped (read-only)
+- [x] Heartbeat/status update presence forward-only; Last Will sets OFFLINE immediately
+- [x] Connectivity derived (ONLINE / WARNING / OFFLINE / NEVER_SEEN) with 60 s / 180 s thresholds
+- [x] Reboot detection event published
+- [x] Telemetry validated, deduplicated, throttled and stored
+- [x] Machine APIs show connectivity and diagnostics; latest + history telemetry APIs work
+- [x] No alerts or automatic status changes in this issue
+- [x] Swagger, `api.yaml`, `mqtt-contract.md`, `.ai/` docs updated
+- [x] Tests pass (`mvn clean verify`); Flyway / Hibernate validation pass; applied migrations unchanged

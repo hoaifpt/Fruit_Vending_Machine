@@ -1,5 +1,9 @@
 # Backend implementation: machine health and heartbeat
 
+> **Trạng thái (2026-11-10):** phần heartbeat/presence/kết nối/telemetry đã được triển khai trong issue #53, xem
+> [machine-health.md](machine-health.md). Tài liệu này giữ yêu cầu gốc; chỗ nào khác với code thì code và
+> machine-health.md là đúng. Cảnh báo (3.6) và lịch sử sự kiện (3.5) vẫn chưa làm.
+
 Hướng dẫn triển khai backlog 3.4 phía backend. Định dạng message (topic, envelope, payload `status` và `heartbeat`,
 trường bắt buộc/tùy chọn, chu kỳ 30 giây, ngưỡng offline 180 giây) **chỉ** được định nghĩa trong
 [api-contract/mqtt-contract.md](../api-contract/mqtt-contract.md) §1, §2, §5 và §7; ví dụ đầy đủ ở

@@ -231,8 +231,8 @@ firmware test/calibration channel only. The MQTT contract is `api-contract/mqtt-
 vending/{machineCode}/commands    backend -> machine   (machineCode = machines.code = broker username)
 vending/{machineCode}/events      machine -> backend
 vending/{machineCode}/status      machine -> backend
-vending/{machineCode}/heartbeat   machine -> backend   (backend handling: 3.4)
-vending/{machineCode}/telemetry   machine -> backend   (firmware sensor pending)
+vending/{machineCode}/heartbeat   machine -> backend   (backend: presence + diagnostics, #53)
+vending/{machineCode}/telemetry   machine -> backend   (backend stores readings, #53; firmware sensor pending)
 ```
 
 Every message and error code carries an implementation status in the contract; later machine issues

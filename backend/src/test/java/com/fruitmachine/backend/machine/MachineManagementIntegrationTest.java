@@ -138,8 +138,12 @@ class MachineManagementIntegrationTest {
                 .andReturn().getResponse();
         var data = mapper.readTree(response.getContentAsString()).path("data");
         assertThat(data.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "code", "name", "location", "status",
-                "minTemperature", "maxTemperature", "minHumidity", "maxHumidity", "lastSeenAt", "createdAt", "updatedAt");
+                "minTemperature", "maxTemperature", "minHumidity", "maxHumidity", "connectivity", "lastSeenAt", "lastHeartbeatAt",
+                "firmwareVersion", "uptimeSeconds", "wifiRssi", "freeHeapBytes", "createdAt", "updatedAt");
         assertThat(data.path("lastSeenAt").isNull()).isTrue();
+        assertThat(data.path("connectivity").asText()).isEqualTo("NEVER_SEEN");
+        for (String diagnostic : List.of("lastHeartbeatAt", "firmwareVersion", "uptimeSeconds", "wifiRssi", "freeHeapBytes"))
+            assertThat(data.path(diagnostic).isNull()).as(diagnostic).isTrue();
         UUID id = UUID.fromString(data.path("id").asText());
         assertThat(response.getHeader("Location")).isEqualTo("/api/v1/machines/" + id);
         var saved = machines.findById(id).orElseThrow();

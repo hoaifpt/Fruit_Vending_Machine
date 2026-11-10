@@ -18,6 +18,8 @@ tags:
     description: "Kiosk order creation with atomic reservation of exactly one bowl, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; payment attempts are in Kiosk Payments and there is no dispensing. Changelog (issue #35, breaking): the create request is now {\"productId\"} only; the former items[]/quantity shape is rejected with 400."
   - name: Kiosk Payments
     description: "Kiosk payment attempts (QR) for its own PENDING_PAYMENT orders. This API never reports payment success; only a verified provider webhook (a later issue) can do that."
+  - name: "Machine Health"
+    description: "Temperature/humidity readings sent by the machines over MQTT (telemetry channel), for ADMIN/STAFF with MACHINE_READ. Machine connectivity and controller diagnostics are part of the Machines responses. Display only: no alerts."
   - name: Machine Slots
     description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
@@ -2246,7 +2248,6 @@ paths:
           "bearerAuth": []
   "/api/v1/machines/{id}":
     "get":
-      "x-required-permission": "MACHINE_READ"
       "tags":
         - "Machines"
       "summary": "Get machine details"
@@ -2277,14 +2278,20 @@ paths:
                 "data":
                   "maxTemperature": 8.0
                   "lastSeenAt": null
-                  "createdAt": "2026-10-10T00:00:00Z"
                   "code": "FV-HCM-001"
+                  "freeHeapBytes": null
+                  "lastHeartbeatAt": null
+                  "uptimeSeconds": null
+                  "minHumidity": 40.0
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "connectivity": "NEVER_SEEN"
                   "minTemperature": 2.0
                   "name": "Fruit Machine - Campus A"
                   "location": "Building A - Ground Floor"
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
                   "maxHumidity": 80.0
-                  "minHumidity": 40.0
+                  "wifiRssi": null
+                  "firmwareVersion": null
                   "status": "INACTIVE"
                   "updatedAt": "2026-10-10T00:00:00Z"
                 "message": "Machine retrieved"
@@ -2296,11 +2303,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Not Found"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Machine not found"
                 "status": 404
                 "path": "/api/v1/machines/{id}"
-                "error": "Not Found"
         "400":
           "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
           "content":
@@ -2308,11 +2315,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Bad Request"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Request body is missing or malformed"
                 "status": 400
                 "path": "/api/v1/machines/{id}"
-                "error": "Bad Request"
         "401":
           "description": "Missing/invalid/expired Bearer token or unavailable account"
           "headers":
@@ -2325,11 +2332,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Unauthorized"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Authentication required or access token invalid"
                 "status": 401
                 "path": "/api/v1/machines/{id}"
-                "error": "Unauthorized"
         "403":
           "description": "Authenticated account lacks the required role"
           "content":
@@ -2337,11 +2344,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Forbidden"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Access denied"
                 "status": 403
                 "path": "/api/v1/machines/{id}"
-                "error": "Forbidden"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -2349,16 +2356,16 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Internal Server Error"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "An unexpected error occurred"
                 "status": 500
                 "path": "/api/v1/machines/{id}"
-                "error": "Internal Server Error"
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "MACHINE_READ"
     "put":
-      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machines"
       "summary": "Replace machine configuration"
@@ -2402,14 +2409,20 @@ paths:
                 "data":
                   "maxTemperature": 8.0
                   "lastSeenAt": null
-                  "createdAt": "2026-10-10T00:00:00Z"
                   "code": "FV-HCM-001"
+                  "freeHeapBytes": null
+                  "lastHeartbeatAt": null
+                  "uptimeSeconds": null
+                  "minHumidity": 40.0
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "connectivity": "NEVER_SEEN"
                   "minTemperature": 2.0
                   "name": "Updated Campus Machine"
                   "location": "Building A - Ground Floor"
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
                   "maxHumidity": 80.0
-                  "minHumidity": 40.0
+                  "wifiRssi": null
+                  "firmwareVersion": null
                   "status": "INACTIVE"
                   "updatedAt": "2026-10-10T00:00:00Z"
                 "message": "Machine updated"
@@ -2421,11 +2434,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Not Found"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Machine not found"
                 "status": 404
                 "path": "/api/v1/machines/{id}"
-                "error": "Not Found"
         "400":
           "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
           "content":
@@ -2433,11 +2446,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Bad Request"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Request body is missing or malformed"
                 "status": 400
                 "path": "/api/v1/machines/{id}"
-                "error": "Bad Request"
         "401":
           "description": "Missing/invalid/expired Bearer token or unavailable account"
           "headers":
@@ -2450,11 +2463,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Unauthorized"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Authentication required or access token invalid"
                 "status": 401
                 "path": "/api/v1/machines/{id}"
-                "error": "Unauthorized"
         "403":
           "description": "Authenticated account lacks the required role"
           "content":
@@ -2462,11 +2475,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Forbidden"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Access denied"
                 "status": 403
                 "path": "/api/v1/machines/{id}"
-                "error": "Forbidden"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -2474,21 +2487,21 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Internal Server Error"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "An unexpected error occurred"
                 "status": 500
                 "path": "/api/v1/machines/{id}"
-                "error": "Internal Server Error"
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "MACHINE_WRITE"
   "/api/v1/machines":
     "get":
-      "x-required-permission": "MACHINE_READ"
       "tags":
         - "Machines"
       "summary": "List/search machines"
-      "description": "ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on code/name/location. Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. All three statuses are visible by default; out-of-range pages are empty."
+      "description": "ADMIN or STAFF. Database pagination with combined optional status, connectivity and case-insensitive literal substring search on code/name/location. Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. All three statuses are visible by default; out-of-range pages are empty."
       "operationId": "listMachines"
       "parameters":
         -
@@ -2524,6 +2537,18 @@ paths:
               - "INACTIVE"
               - "MAINTENANCE"
         -
+          "name": "connectivity"
+          "in": "query"
+          "description": "Optional ONLINE, WARNING, OFFLINE or NEVER_SEEN filter, evaluated in SQL with the same rules as the connectivity field."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "ONLINE"
+              - "WARNING"
+              - "OFFLINE"
+              - "NEVER_SEEN"
+        -
           "name": "search"
           "in": "query"
           "description": "Optional literal substring of code/name/location, case-insensitive, stripped; blank means no filter. Maximum 200 characters."
@@ -2548,11 +2573,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Bad Request"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Request body is missing or malformed"
                 "status": 400
                 "path": "/api/v1/machines"
-                "error": "Bad Request"
         "401":
           "description": "Missing/invalid/expired Bearer token or unavailable account"
           "headers":
@@ -2565,11 +2590,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Unauthorized"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Authentication required or access token invalid"
                 "status": 401
                 "path": "/api/v1/machines"
-                "error": "Unauthorized"
         "403":
           "description": "Authenticated account lacks the required role"
           "content":
@@ -2577,11 +2602,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Forbidden"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Access denied"
                 "status": 403
                 "path": "/api/v1/machines"
-                "error": "Forbidden"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -2589,11 +2614,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Internal Server Error"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "An unexpected error occurred"
                 "status": 500
                 "path": "/api/v1/machines"
-                "error": "Internal Server Error"
         "200":
           "description": "Paginated machines"
           "headers":
@@ -2615,14 +2640,20 @@ paths:
                     -
                       "maxTemperature": 8.0
                       "lastSeenAt": null
-                      "createdAt": "2026-10-10T00:00:00Z"
                       "code": "FV-HCM-001"
+                      "freeHeapBytes": null
+                      "lastHeartbeatAt": null
+                      "uptimeSeconds": null
+                      "minHumidity": 40.0
+                      "createdAt": "2026-10-10T00:00:00Z"
+                      "connectivity": "NEVER_SEEN"
                       "minTemperature": 2.0
                       "name": "Fruit Machine - Campus A"
                       "location": "Building A - Ground Floor"
                       "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
                       "maxHumidity": 80.0
-                      "minHumidity": 40.0
+                      "wifiRssi": null
+                      "firmwareVersion": null
                       "status": "INACTIVE"
                       "updatedAt": "2026-10-10T00:00:00Z"
                 "message": "Machines retrieved"
@@ -2630,8 +2661,8 @@ paths:
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "MACHINE_READ"
     "post":
-      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machines"
       "summary": "Register machine"
@@ -2671,14 +2702,20 @@ paths:
                 "data":
                   "maxTemperature": 8.0
                   "lastSeenAt": null
-                  "createdAt": "2026-10-10T00:00:00Z"
                   "code": "FV-HCM-001"
+                  "freeHeapBytes": null
+                  "lastHeartbeatAt": null
+                  "uptimeSeconds": null
+                  "minHumidity": 40.0
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "connectivity": "NEVER_SEEN"
                   "minTemperature": 2.0
                   "name": "Fruit Machine - Campus A"
                   "location": "Building A - Ground Floor"
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
                   "maxHumidity": 80.0
-                  "minHumidity": 40.0
+                  "wifiRssi": null
+                  "firmwareVersion": null
                   "status": "INACTIVE"
                   "updatedAt": "2026-10-10T00:00:00Z"
                 "message": "Machine created"
@@ -2690,11 +2727,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Conflict"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Machine code is already in use"
                 "status": 409
                 "path": "/api/v1/machines"
-                "error": "Conflict"
         "400":
           "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
           "content":
@@ -2702,11 +2739,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Bad Request"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Request body is missing or malformed"
                 "status": 400
                 "path": "/api/v1/machines"
-                "error": "Bad Request"
         "401":
           "description": "Missing/invalid/expired Bearer token or unavailable account"
           "headers":
@@ -2719,11 +2756,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Unauthorized"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Authentication required or access token invalid"
                 "status": 401
                 "path": "/api/v1/machines"
-                "error": "Unauthorized"
         "403":
           "description": "Authenticated account lacks the required role"
           "content":
@@ -2731,11 +2768,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Forbidden"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Access denied"
                 "status": 403
                 "path": "/api/v1/machines"
-                "error": "Forbidden"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -2743,17 +2780,17 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Internal Server Error"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "An unexpected error occurred"
                 "status": 500
                 "path": "/api/v1/machines"
-                "error": "Internal Server Error"
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "MACHINE_WRITE"
   "/api/v1/machines/{id}/status":
     "patch":
-      "x-required-permission": "MACHINE_WRITE"
       "tags":
         - "Machines"
       "summary": "Change administrative machine status"
@@ -2792,14 +2829,20 @@ paths:
                 "data":
                   "maxTemperature": 8.0
                   "lastSeenAt": null
-                  "createdAt": "2026-10-10T00:00:00Z"
                   "code": "FV-HCM-001"
+                  "freeHeapBytes": null
+                  "lastHeartbeatAt": null
+                  "uptimeSeconds": null
+                  "minHumidity": 40.0
+                  "createdAt": "2026-10-10T00:00:00Z"
+                  "connectivity": "NEVER_SEEN"
                   "minTemperature": 2.0
                   "name": "Fruit Machine - Campus A"
                   "location": "Building A - Ground Floor"
                   "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
                   "maxHumidity": 80.0
-                  "minHumidity": 40.0
+                  "wifiRssi": null
+                  "firmwareVersion": null
                   "status": "MAINTENANCE"
                   "updatedAt": "2026-10-10T00:00:00Z"
                 "message": "Machine status updated"
@@ -2811,11 +2854,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Not Found"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Machine not found"
                 "status": 404
                 "path": "/api/v1/machines/{id}/status"
-                "error": "Not Found"
         "400":
           "description": "Invalid parameters, validation failure or malformed/unknown JSON fields"
           "content":
@@ -2823,11 +2866,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Bad Request"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Request body is missing or malformed"
                 "status": 400
                 "path": "/api/v1/machines/{id}/status"
-                "error": "Bad Request"
         "401":
           "description": "Missing/invalid/expired Bearer token or unavailable account"
           "headers":
@@ -2840,11 +2883,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Unauthorized"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Authentication required or access token invalid"
                 "status": 401
                 "path": "/api/v1/machines/{id}/status"
-                "error": "Unauthorized"
         "403":
           "description": "Authenticated account lacks the required role"
           "content":
@@ -2852,11 +2895,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Forbidden"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "Access denied"
                 "status": 403
                 "path": "/api/v1/machines/{id}/status"
-                "error": "Forbidden"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -2864,14 +2907,15 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Internal Server Error"
                 "timestamp": "2026-10-10T00:00:00Z"
                 "message": "An unexpected error occurred"
                 "status": 500
                 "path": "/api/v1/machines/{id}/status"
-                "error": "Internal Server Error"
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "MACHINE_WRITE"
   /api/v1/auth/login:
     post:
       tags: [Auth]
@@ -6074,6 +6118,264 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "PERMISSION_MANAGE"
+  "/api/v1/machines/{machineId}/telemetry":
+    "get":
+      "tags":
+        - "Machine Health"
+      "summary": "Telemetry history of a machine"
+      "description": "MACHINE_READ. Readings with from <= recordedAt < to, newest first (recordedAt DESC, id DESC), paged in the database. from and to are required ISO-8601 instants, to must be after from and the range at most 31 days; page >= 0, size 1 to 500 (default 100). Invalid parameters are 400 before the machine is looked up; a missing machine is 404."
+      "operationId": "listTelemetry"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "Required. Start of the range, inclusive, ISO-8601 instant."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-10T00:00:00Z"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Required. End of the range, exclusive, ISO-8601 instant; after from, at most 31 days later."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-11T00:00:00Z"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 500."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 100
+      "responses":
+        "400":
+          "description": "Malformed machine UUID, missing/invalid time range or invalid paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Bad Request"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "The time range must not exceed 31 days"
+                "status": 400
+                "path": "/api/v1/machines/{machineId}/telemetry"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unauthorized"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines/{machineId}/telemetry"
+        "403":
+          "description": "Authenticated account lacks MACHINE_READ"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Forbidden"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines/{machineId}/telemetry"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Not Found"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Machine not found"
+                "status": 404
+                "path": "/api/v1/machines/{machineId}/telemetry"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Internal Server Error"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines/{machineId}/telemetry"
+        "200":
+          "description": "Page of readings"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseTelemetryPageResponse"
+              "example":
+                "data":
+                  "size": 100
+                  "page": 0
+                  "totalPages": 1
+                  "totalElements": 2
+                  "content":
+                    -
+                      "recordedAt": "2026-11-10T13:05:00Z"
+                      "temperature": 4.7
+                      "humidity": 68.2
+                    -
+                      "recordedAt": "2026-11-10T13:04:00Z"
+                      "temperature": 4.6
+                      "humidity": 68.0
+                "message": "Telemetry retrieved"
+                "timestamp": "2026-11-10T13:05:12Z"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MACHINE_READ"
+  "/api/v1/machines/{machineId}/telemetry/latest":
+    "get":
+      "tags":
+        - "Machine Health"
+      "summary": "Latest telemetry reading of a machine"
+      "description": "MACHINE_READ. Latest reading by receive time (recordedAt, then id), each value compared with the machine thresholds: below the minimum LOW, above the maximum HIGH, otherwise NORMAL; a missing value has a null status. No reading yet: 200 with null reading fields. Includes the derived connectivity. Display only, not an alert."
+      "operationId": "getLatestTelemetry"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "400":
+          "description": "Malformed machine UUID, missing/invalid time range or invalid paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Bad Request"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Invalid parameter"
+                "status": 400
+                "path": "/api/v1/machines/{machineId}/telemetry/latest"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Unauthorized"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Authentication required or access token invalid"
+                "status": 401
+                "path": "/api/v1/machines/{machineId}/telemetry/latest"
+        "403":
+          "description": "Authenticated account lacks MACHINE_READ"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Forbidden"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Access denied"
+                "status": 403
+                "path": "/api/v1/machines/{machineId}/telemetry/latest"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Not Found"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "Machine not found"
+                "status": 404
+                "path": "/api/v1/machines/{machineId}/telemetry/latest"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "error": "Internal Server Error"
+                "timestamp": "2026-11-10T13:05:12Z"
+                "message": "An unexpected error occurred"
+                "status": 500
+                "path": "/api/v1/machines/{machineId}/telemetry/latest"
+        "200":
+          "description": "Latest reading, or null reading fields"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseTelemetryLatestResponse"
+              "example":
+                "data":
+                  "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "recordedAt": "2026-11-10T13:05:00Z"
+                  "temperature": 4.7
+                  "humidity": 68.2
+                  "temperatureStatus": "NORMAL"
+                  "humidityStatus": "NORMAL"
+                  "connectivity": "ONLINE"
+                "message": "Latest telemetry retrieved"
+                "timestamp": "2026-11-10T13:05:12Z"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MACHINE_READ"
 
 components:
   securitySchemes:
@@ -6720,7 +7022,7 @@ components:
           "$ref": "#/components/schemas/MachineResponse"
     "MachineResponse":
       "type": "object"
-      "description": "Machine identity, administrative status and environmental configuration; no slot/inventory/telemetry collections."
+      "description": "Machine identity, administrative status, environmental configuration, derived connectivity and the latest controller diagnostics; no slot/inventory/telemetry collections."
       "properties":
         "id":
           "type": "string"
@@ -6757,12 +7059,53 @@ components:
         "maxHumidity":
           "type": "number"
           "description": "Configured maximum humidity percentage."
+        "connectivity":
+          "type": "string"
+          "description": "Derived from presence, never stored: NEVER_SEEN (no message yet), OFFLINE (Last Will after the last message, or silent more than 180 s), WARNING (silent more than 60 s), otherwise ONLINE. Independent of status; does not block sales."
+          "enum":
+            - "ONLINE"
+            - "WARNING"
+            - "OFFLINE"
+            - "NEVER_SEEN"
         "lastSeenAt":
           "type":
             - "string"
             - "null"
           "format": "date-time"
-          "description": "System-managed last communication instant, UTC; null until heartbeat exists. Read-only."
+          "description": "System-managed instant of the last valid MQTT message except the OFFLINE Last Will, UTC; null until the machine was heard from. Read-only."
+        "lastHeartbeatAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "System-managed instant of the last valid heartbeat, UTC; null until the first heartbeat. Read-only."
+        "firmwareVersion":
+          "type":
+            - "string"
+            - "null"
+          "description": "Firmware version last reported by the machine (heartbeat or status ONLINE). Read-only."
+          "example": "0.3.0"
+        "uptimeSeconds":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int64"
+          "description": "Controller uptime in seconds last reported by the machine. Read-only."
+          "example": 12345
+        "wifiRssi":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+          "description": "Wi-Fi signal in dBm (-127 to 0) from the last heartbeat; null when not reported, never 0 by default. Read-only."
+          "example": -55
+        "freeHeapBytes":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int64"
+          "description": "Free controller heap in bytes from the last heartbeat; null when not reported. Read-only."
+          "example": 18240
         "createdAt":
           "type": "string"
           "format": "date-time"
@@ -6773,6 +7116,7 @@ components:
           "description": "Modification instant, UTC."
       "required":
         - "code"
+        - "connectivity"
         - "createdAt"
         - "id"
         - "maxHumidity"
@@ -8053,3 +8397,131 @@ components:
           "minItems": 0
       "required":
         - "permissions"
+    "ApiResponseTelemetryPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/TelemetryPageResponse"
+    "TelemetryPageResponse":
+      "type": "object"
+      "description": "Database page of telemetry readings, newest first (recordedAt DESC, then id DESC)."
+      "properties":
+        "content":
+          "type": "array"
+          "description": "Readings of this page."
+          "items":
+            "$ref": "#/components/schemas/TelemetryReadingResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Readings in the time range."
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Pages in the time range."
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+    "TelemetryReadingResponse":
+      "type": "object"
+      "description": "One stored telemetry reading; at least one value is present."
+      "properties":
+        "recordedAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Backend receive instant, UTC."
+        "temperature":
+          "type":
+            - "number"
+            - "null"
+          "description": "Temperature in Celsius, 2 decimals; null when not reported."
+          "example": 4.7
+        "humidity":
+          "type":
+            - "number"
+            - "null"
+          "description": "Relative humidity in percent, 2 decimals; null when not reported."
+          "example": 68.2
+      "required":
+        - "recordedAt"
+    "ApiResponseTelemetryLatestResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/TelemetryLatestResponse"
+    "TelemetryLatestResponse":
+      "type": "object"
+      "description": "Latest telemetry reading of a machine with its status against the machine thresholds, and the machine connectivity. Reading fields are null when the machine has no reading yet. Display only, not an alert."
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+          "description": "Machine UUID."
+        "recordedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "Backend receive instant of the reading, UTC; null when there is no reading."
+        "temperature":
+          "type":
+            - "number"
+            - "null"
+          "description": "Temperature in Celsius, 2 decimals; null when not reported."
+          "example": 4.7
+        "humidity":
+          "type":
+            - "number"
+            - "null"
+          "description": "Relative humidity in percent, 2 decimals; null when not reported."
+          "example": 68.2
+        "temperatureStatus":
+          "type":
+            - "string"
+            - "null"
+          "description": "Temperature against minTemperature/maxTemperature of the machine; null when there is no temperature."
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+        "humidityStatus":
+          "type":
+            - "string"
+            - "null"
+          "description": "Humidity against minHumidity/maxHumidity of the machine; null when there is no humidity."
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+        "connectivity":
+          "type": "string"
+          "description": "Derived connectivity of the machine now."
+          "enum":
+            - "ONLINE"
+            - "WARNING"
+            - "OFFLINE"
+            - "NEVER_SEEN"
+      "required":
+        - "connectivity"
+        - "machineId"

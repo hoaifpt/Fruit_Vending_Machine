@@ -8,14 +8,13 @@ public final class MachineChannel {
     public static final String COMMANDS = "commands";
     public static final String EVENTS = "events";
     public static final String STATUS = "status";
-    /** Sent by the firmware; the backend subscribes in 3.4. */
     public static final String HEARTBEAT = "heartbeat";
-    /** FIRMWARE_PENDING. */
+    /** The backend handles it (#53); the firmware sends it once a sensor exists. */
     public static final String TELEMETRY = "telemetry";
 
     public static final List<String> ALL = List.of(COMMANDS, EVENTS, STATUS, HEARTBEAT, TELEMETRY);
-    /** Machine-to-backend channels the backend subscribes to today. */
-    public static final List<String> SUBSCRIBED = List.of(EVENTS, STATUS);
+    /** Machine-to-backend channels the backend subscribes to (every machine-to-backend channel since #53). */
+    public static final List<String> SUBSCRIBED = List.of(EVENTS, STATUS, HEARTBEAT, TELEMETRY);
 
     private MachineChannel() {
     }

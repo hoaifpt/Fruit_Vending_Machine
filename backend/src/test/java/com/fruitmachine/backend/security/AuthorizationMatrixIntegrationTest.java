@@ -29,6 +29,8 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
     static final Path BASELINE = Path.of("src/test/resources/security/authorization-matrix-baseline.tsv");
     static final Set<String> NEW_OPERATIONS = Set.of("GET /api/v1/permissions", "GET /api/v1/roles", "GET /api/v1/roles/{id}",
             "PUT /api/v1/roles/{id}/permissions");
+    /** Added by #53: MACHINE_READ, so ADMIN and STAFF are allowed; anonymous and kiosk keys are unauthenticated here. */
+    static final Set<String> NEW_READ_OPERATIONS = Set.of("GET /api/v1/machines/{machineId}/telemetry", "GET /api/v1/machines/{machineId}/telemetry/latest");
     static final List<String> IDENTITIES = List.of("ANONYMOUS", "STAFF", "ADMIN", "KIOSK");
 
     record Operation(String method, String path) {
@@ -76,7 +78,7 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
         if (Boolean.getBoolean("matrix.record")) {
             var lines = new ArrayList<String>();
             lines.add("# operation\tidentity\tstatus  (recorded by AuthorizationMatrixIntegrationTest; see its javadoc)");
-            actual.forEach((key, code) -> { if (!NEW_OPERATIONS.contains(key.split("\t")[0])) lines.add(key + "\t" + code); });
+            actual.forEach((key, code) -> { if (!NEW_OPERATIONS.contains(key.split("\t")[0]) && !NEW_READ_OPERATIONS.contains(key.split("\t")[0])) lines.add(key + "\t" + code); });
             Files.createDirectories(BASELINE.getParent());
             Files.write(BASELINE, lines, StandardCharsets.UTF_8);
             return;
@@ -88,10 +90,14 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             expected.put(cells[0] + "\t" + cells[1], Integer.parseInt(cells[2]));
         }
         Map<String, Integer> existing = new TreeMap<>(actual);
-        existing.keySet().removeIf(key -> NEW_OPERATIONS.contains(key.split("\t")[0]));
+        existing.keySet().removeIf(key -> NEW_OPERATIONS.contains(key.split("\t")[0]) || NEW_READ_OPERATIONS.contains(key.split("\t")[0]));
         assertThat(existing).as("access behaviour of every pre-#48 operation").isEqualTo(expected);
 
         // Role & permission APIs: ADMIN only (PERMISSION_MANAGE); anonymous and kiosk keys are unauthenticated here.
+        for (String operation : NEW_READ_OPERATIONS) {
+            assertThat(actual).as(operation).containsEntry(operation + "\tANONYMOUS", 401).containsEntry(operation + "\tKIOSK", 401);
+            for (String role : List.of("STAFF", "ADMIN")) assertThat(actual.get(operation + "\t" + role)).as(operation + " " + role).isNotIn(401, 403);
+        }
         for (String operation : NEW_OPERATIONS) {
             assertThat(actual).as(operation).containsEntry(operation + "\tANONYMOUS", 401).containsEntry(operation + "\tKIOSK", 401)
                     .containsEntry(operation + "\tSTAFF", 403);

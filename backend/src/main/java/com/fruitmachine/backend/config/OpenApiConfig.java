@@ -246,7 +246,13 @@ public class OpenApiConfig {
             machine.put("maxTemperature", new java.math.BigDecimal("8.00"));
             machine.put("minHumidity", new java.math.BigDecimal("40.00"));
             machine.put("maxHumidity", new java.math.BigDecimal("80.00"));
+            machine.put("connectivity", "NEVER_SEEN");
             machine.put("lastSeenAt", null);
+            machine.put("lastHeartbeatAt", null);
+            machine.put("firmwareVersion", null);
+            machine.put("uptimeSeconds", null);
+            machine.put("wifiRssi", null);
+            machine.put("freeHeapBytes", null);
             machine.put("createdAt", "2026-10-10T00:00:00Z");
             machine.put("updatedAt", "2026-10-10T00:00:00Z");
             path.readOperations().forEach(operation -> {
@@ -310,6 +316,56 @@ public class OpenApiConfig {
             });
         });
     }
+    @Bean
+    public OpenApiCustomizer telemetryDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!List.of("/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest").contains(name)) return;
+            path.readOperations().forEach(operation -> operation.getResponses().forEach((code, response) -> {
+                Object example;
+                if (code.startsWith("2")) {
+                    response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    Object data;
+                    if (name.endsWith("/latest")) {
+                        var latest = new java.util.LinkedHashMap<String, Object>();
+                        latest.put("machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03");
+                        latest.put("recordedAt", "2026-11-10T13:05:00Z");
+                        latest.put("temperature", new java.math.BigDecimal("4.70"));
+                        latest.put("humidity", new java.math.BigDecimal("68.20"));
+                        latest.put("temperatureStatus", "NORMAL");
+                        latest.put("humidityStatus", "NORMAL");
+                        latest.put("connectivity", "ONLINE");
+                        data = latest;
+                    } else {
+                        data = Map.of("content", List.of(
+                                        Map.of("recordedAt", "2026-11-10T13:05:00Z", "temperature", new java.math.BigDecimal("4.70"), "humidity", new java.math.BigDecimal("68.20")),
+                                        Map.of("recordedAt", "2026-11-10T13:04:00Z", "temperature", new java.math.BigDecimal("4.60"), "humidity", new java.math.BigDecimal("68.00"))),
+                                "page", 0, "size", 100, "totalElements", 2, "totalPages", 1);
+                    }
+                    example = Map.of("timestamp", "2026-11-10T13:05:12Z",
+                            "message", name.endsWith("/latest") ? "Latest telemetry retrieved" : "Telemetry retrieved", "data", data);
+                } else {
+                    if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    String error = switch (code) {
+                        case "400" -> "Bad Request";
+                        case "401" -> "Unauthorized";
+                        case "403" -> "Forbidden";
+                        case "404" -> "Not Found";
+                        default -> "Internal Server Error";
+                    };
+                    String message = switch (code) {
+                        case "400" -> name.endsWith("/latest") ? "Invalid parameter" : "The time range must not exceed 31 days";
+                        case "401" -> "Authentication required or access token invalid";
+                        case "403" -> "Access denied";
+                        case "404" -> "Machine not found";
+                        default -> "An unexpected error occurred";
+                    };
+                    example = Map.of("timestamp", "2026-11-10T13:05:12Z", "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                }
+                response.getContent().get("application/json").setExample(example);
+            }));
+        });
+    }
+
     @Bean
     public OpenApiCustomizer machineSlotDocumentation() {
         return api -> api.getPaths().forEach((name, path) -> {
