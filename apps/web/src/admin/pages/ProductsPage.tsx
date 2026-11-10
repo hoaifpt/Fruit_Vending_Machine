@@ -131,7 +131,7 @@ function ProductSheet({ product, close, done }: { product?: Product; close: () =
       try {
         if (product) await productsApi.update(product.id, updateProductBody(values))
         else await productsApi.create(createProductBody(values))
-      } catch (error) { throw describeSaveError(error) }
+      } catch (error) { throw describeSaveError(error, mode) }
       done()
     }}>
     {editing

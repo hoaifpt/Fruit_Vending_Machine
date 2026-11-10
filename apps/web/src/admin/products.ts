@@ -70,6 +70,8 @@ export function parsePriceInput(raw: string): PriceResult {
   const negative = text.startsWith('-')
   const body = negative ? text.slice(1) : text
   let integer: string, fraction: string
+  // "35,000" is thousands grouping written the English way, not 35 with three decimals: ask for the Vietnamese form.
+  if (/^\d{1,3}(?:,\d{3})+$/.test(body)) return fail(negative ? 'notPositive' : 'format')
   const grouped = /^(\d{1,3}(?:\.\d{3})+)(?:,(\d+))?$/.exec(body)
   const plain = /^(\d+)(?:[.,](\d+))?$/.exec(body)
   if (grouped) { integer = grouped[1].replace(/\./g, ''); fraction = grouped[2] ?? '' }
@@ -143,7 +145,8 @@ export function statusAction(status: ProductStatus): { next: ProductStatus; labe
 }
 
 export const SKU_TAKEN = 'SKU này đã được dùng cho một sản phẩm khác (không phân biệt hoa thường). Hãy nhập SKU khác.'
-const SKU_CONFLICT = /sku/i
+/** Any other 409 of PUT /products/{id} (the backend's generic "Request conflicts with existing data" is English). */
+export const PRODUCT_CONFLICT = 'Máy chủ từ chối vì dữ liệu sản phẩm vừa bị thay đổi ở nơi khác. Hãy tải lại danh sách rồi thử lại.'
 const FORM_FIELDS = ['sku', 'name', 'description', 'price', 'imageUrl'] as const
 
 /** Bean-validation messages of the backend (English) in Vietnamese, per field; an unknown message is kept as is. */
@@ -163,14 +166,17 @@ export function translateFieldError(field: string, message: string): string {
 
 /**
  * Errors of POST/PUT shown where they belong:
- * - 409 duplicate SKU: once, in Vietnamese, under the SKU field (the form shows its usual "check the marked fields").
+ * - 409 on create: SKU is the only unique column of products, so both the service check ("SKU is already in use") and
+ *   the database constraint hit by two simultaneous creates ("Request conflicts with existing data") mean a taken SKU:
+ *   shown once, in Vietnamese, under the SKU field (the form shows its usual "check the marked fields").
+ * - 409 on edit (SKU is not sent): a Vietnamese form-level message instead of the backend's English text.
  * - 400 with field errors: under the matching fields in Vietnamese; a field the form does not have (for example a
  *   rejected unknown property) is named in the form-level message instead, so nothing is reported against nothing.
  * Anything else is returned unchanged.
  */
-export function describeSaveError(error: unknown): unknown {
+export function describeSaveError(error: unknown, mode: 'create' | 'edit' = 'create'): unknown {
   if (!(error instanceof ApiError)) return error
-  if (error.status === 409 && SKU_CONFLICT.test(error.message)) return new ValidationError({ sku: SKU_TAKEN })
+  if (error.status === 409) return mode === 'create' ? new ValidationError({ sku: SKU_TAKEN }) : new ApiError(409, PRODUCT_CONFLICT)
   if (error.status !== 400) return error
   const entries = Object.entries(error.fieldErrors)
   if (!entries.length) return error

@@ -6,7 +6,7 @@ import { authApi, productsApi } from '../src/api/resources.ts'
 import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import {
-  PRICE_TEXT, PRODUCT_SORT, SKU_TAKEN, createProductBody, describeSaveError, formatPrice, parsePriceInput, priceInputValue,
+  PRICE_TEXT, PRODUCT_CONFLICT, PRODUCT_SORT, SKU_TAKEN, createProductBody, describeSaveError, formatPrice, parsePriceInput, priceInputValue,
   productListQuery, readProductFilters, statusAction, translateFieldError, updateProductBody, validateProduct,
 } from '../src/admin/products.ts'
 
@@ -96,14 +96,25 @@ test('status action: stop selling an active product, sell an inactive one again 
   assert.deepEqual(statusAction('INACTIVE'), { next: 'ACTIVE', label: 'Mở bán lại' })
 })
 
+test('price input: "35,000" (English grouping) is a format error, not a decimals error', () => {
+  assert.deepEqual(parsePriceInput('35,000'), parsePriceInput('abc'))
+  assert.deepEqual(parsePriceInput('35,5'), { ok: true, value: 35.5 })
+  assert.deepEqual(parsePriceInput('-35,000'), parsePriceInput('-5'), 'a negative price says it must be above 0')
+})
+
 test('save errors: duplicate SKU once under the SKU field; 400 field errors in Vietnamese under their fields', () => {
   const duplicate = describeSaveError(new ApiError(409, 'SKU is already in use'))
   assert.ok(duplicate instanceof ValidationError)
   assert.deepEqual(duplicate.fieldErrors, { sku: SKU_TAKEN })
   assert.deepEqual(describeFormFailure(duplicate), { message: CHECK_FIELDS, fieldErrors: { sku: SKU_TAKEN } })
 
-  const other = new ApiError(409, 'Database conflict')
-  assert.equal(describeSaveError(other), other, 'another conflict keeps its own message')
+  // Two admins creating the same SKU at once: the loser hits the unique constraint and gets the generic English 409.
+  const race = describeSaveError(new ApiError(409, 'Request conflicts with existing data'), 'create')
+  assert.ok(race instanceof ValidationError, 'a simultaneous duplicate is reported under the SKU field too')
+  assert.deepEqual(race.fieldErrors, { sku: SKU_TAKEN })
+  const edited = describeSaveError(new ApiError(409, 'Request conflicts with existing data'), 'edit')
+  assert.ok(edited instanceof ApiError)
+  assert.equal(edited.message, PRODUCT_CONFLICT, 'an edit conflict is a Vietnamese form-level message, never under SKU')
   const server = new ApiError(500, 'boom')
   assert.equal(describeSaveError(server), server)
 
