@@ -114,6 +114,9 @@ export function createStore(nowMs: number): MockStore {
     product(3, 'DEV-PINEAPPLE', 'Pineapple bowl', 30000),
     product(4, 'DEV-MANGO', 'Mango bowl', 40000),
     product(5, 'DEV-PAPAYA', 'Papaya bowl', 28000, 'INACTIVE'),
+    // Catalog-only rows (no batch or stock): one more of each status for the Products screen.
+    product(6, 'DEV-GUAVA', 'Guava bowl', 22000),
+    product(7, 'DEV-DRAGON-FRUIT', 'Dragon fruit bowl', 32000, 'INACTIVE'),
   ]
 
   const batch = (n: number, batchCode: string, productIndex: number, made: number, expires: number, quantity: number): MockBatch => ({

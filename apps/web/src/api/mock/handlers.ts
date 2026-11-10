@@ -206,7 +206,8 @@ const MACHINE_FIELDS = ['name', 'location', 'minTemperature', 'maxTemperature', 
 
 function productForm(body: unknown, allowed: readonly string[]) {
   const form = new Form(body, allowed)
-  const name = form.text('name', 255), description = form.optionalText('description', 2000), imageUrl = form.optionalText('imageUrl', 2048)
+  // Contract limits: name 1–200, description unbounded TEXT, imageUrl up to 2048.
+  const name = form.text('name', 200), description = form.optionalText('description', Infinity), imageUrl = form.optionalText('imageUrl', 2048)
   const price = form.decimal('price', 0.01, 9_999_999_999.99)
   return { form, values: { name, description, price, imageUrl } }
 }
@@ -307,14 +308,14 @@ export const routes: Route[] = [
   // ---- products
   route('GET', '/products', 'any', ctx => {
     const { query } = ctx
-    const rows = ctx.store.products.filter(product => eq(query, 'status', product.status) && contains(query.get('search'), product.sku, product.name, product.description))
+    const rows = ctx.store.products.filter(product => eq(query, 'status', product.status) && contains(query.get('search')?.trim() ?? null, product.sku, product.name))
     return ok(paginate(rows, query, { sorts: { id: row => row.id, sku: row => row.sku, name: row => row.name, price: row => row.price, status: row => row.status, createdAt: row => row.createdAt, updatedAt: row => row.updatedAt }, defaultSort: 'createdAt,desc' }))
   }),
   route('POST', '/products', 'admin', ctx => {
     const { form, values } = productForm(ctx.body, ['sku', ...PRODUCT_FIELDS])
     const sku = form.text('sku', 64).toUpperCase()
     form.done()
-    if (ctx.store.products.some(product => product.sku === sku)) throw conflict('SKU này đã tồn tại.')
+    if (ctx.store.products.some(product => product.sku === sku)) throw conflict('SKU is already in use') // the backend's message (contract example)
     const at = iso(ctx.now)
     const product = { id: newId(), sku, ...values, status: 'ACTIVE' as const, createdAt: at, updatedAt: at }
     ctx.store.products.push(product)
