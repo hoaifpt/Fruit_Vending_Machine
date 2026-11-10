@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { activeFilterCount, clearFiltersPatch, formatSort, nextSort, oneOf, parseSort, sortParam, uuidParam } from '../src/lib/table-query.ts'
+import { activeFilterCount, clearFiltersPatch, formatSort, nextSort, oneOf, parseSort, sortParam, sortSelectValue, uuidParam } from '../src/lib/table-query.ts'
 import { formatDateTime } from '../src/lib/format.ts'
 
 const rule = { fields: ['createdAt', 'totalAmount', 'orderCode'], fallback: 'createdAt,desc' }
@@ -53,4 +53,12 @@ test('/admin/_kit stays out of production and is loaded lazily', () => {
 })
 test('no delete action in the shared kit or its reference page', () => {
   for (const path of ['../src/admin/kit.tsx', '../src/admin/pages/KitPage.tsx']) assert.doesNotMatch(read(path), /Xóa(?! bộ lọc)|api\.delete|method: 'DELETE'/i, path)
+})
+
+test('narrow-screen sort select: a default no column shows reads "Mặc định" (empty value), a column sort is selected', () => {
+  const columns = ['code', 'name', 'location', 'status']
+  assert.equal(sortSelectValue({ field: 'createdAt', direction: 'desc' }, columns), '')
+  assert.equal(sortSelectValue(undefined, columns), '')
+  assert.equal(sortSelectValue({ field: 'code', direction: 'asc' }, columns), 'code,asc')
+  assert.equal(sortSelectValue({ field: 'status', direction: 'desc' }, columns), 'status,desc')
 })

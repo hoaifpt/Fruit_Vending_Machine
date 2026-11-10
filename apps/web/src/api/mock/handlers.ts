@@ -195,12 +195,20 @@ function sellableHeads(ctx: HandlerContext, machineId: string) {
 
 function machineForm(body: unknown, allowed: readonly string[]) {
   const form = new Form(body, allowed)
-  const name = form.text('name', 255), location = form.text('location', 255)
+  // Contract limits: name 1–200, location 1–500.
+  const name = form.text('name', 200), location = form.text('location', 500)
   const minTemperature = form.decimal('minTemperature', -100, 100), maxTemperature = form.decimal('maxTemperature', -100, 100)
   const minHumidity = form.decimal('minHumidity', 0, 100), maxHumidity = form.decimal('maxHumidity', 0, 100)
-  if (!form.errors.minTemperature && !form.errors.maxTemperature && minTemperature >= maxTemperature) form.reject('minTemperature', 'Phải nhỏ hơn nhiệt độ tối đa.')
-  if (!form.errors.minHumidity && !form.errors.maxHumidity && minHumidity >= maxHumidity) form.reject('minHumidity', 'Phải nhỏ hơn độ ẩm tối đa.')
   return { form, values: { name, location, minTemperature, maxTemperature, minHumidity, maxHumidity } }
+}
+/**
+ * After bean validation passed, the backend service checks min < max and answers a plain 400 without field errors
+ * (MachineService), so the mock does the same.
+ */
+function checkThresholdOrder(values: { minTemperature: number; maxTemperature: number; minHumidity: number; maxHumidity: number }) {
+  if (values.minTemperature >= values.maxTemperature || values.minHumidity >= values.maxHumidity) {
+    throw new MockHttpError(400, 'Minimum environmental thresholds must be strictly below maximum thresholds')
+  }
 }
 const MACHINE_FIELDS = ['name', 'location', 'minTemperature', 'maxTemperature', 'minHumidity', 'maxHumidity'] as const
 
@@ -345,6 +353,7 @@ export const routes: Route[] = [
     const { form, values } = machineForm(ctx.body, ['code', ...MACHINE_FIELDS])
     const code = form.text('code', 64).toUpperCase()
     form.done()
+    checkThresholdOrder(values)
     if (ctx.store.machines.some(machine => machine.code === code)) throw conflict('Mã máy này đã tồn tại.')
     const at = iso(ctx.now)
     const machine = { id: newId(), code, ...values, status: 'INACTIVE' as const, lastSeenAt: null, createdAt: at, updatedAt: at }
@@ -355,6 +364,7 @@ export const routes: Route[] = [
     const machine = findMachine(ctx)
     const { form, values } = machineForm(ctx.body, MACHINE_FIELDS)
     form.done()
+    checkThresholdOrder(values)
     Object.assign(machine, values, { updatedAt: iso(ctx.now) })
     return ok(machine)
   }),

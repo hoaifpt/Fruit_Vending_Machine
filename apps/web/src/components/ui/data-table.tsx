@@ -1,7 +1,7 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { cn } from '../../lib/cn.ts'
-import { formatSort, nextSort } from '../../lib/table-query.ts'
+import { nextSort, sortSelectValue } from '../../lib/table-query.ts'
 import type { SortDirection, SortState } from '../../lib/table-query.ts'
 import { FormField } from './form-field.tsx'
 import { NativeSelect } from './input.tsx'
@@ -50,10 +50,12 @@ const directionLabel = { asc: 'tăng dần', desc: 'giảm dần' } as const
  */
 export function DataTable<T>({ columns, rows, rowKey, loading = false, error, empty = 'Không có kết quả phù hợp.', sort, onSort, caption, className }: DataTableProps<T>) {
   const sortable = onSort ? columns.filter(column => column.sortKey) : []
+  // A sort no column shows (the endpoint default, e.g. createdAt,desc) reads "Mặc định" so every column option can be picked.
+  const selectValue = sortSelectValue(sort, sortable.map(column => column.sortKey as string))
   return <div data-slot="data-table" className={cn('@container w-full', className)}>
     {onSort && sortable.length > 0 && <FormField label="Sắp xếp" className="mb-3 @min-[681px]:hidden">
-      <NativeSelect value={sort ? formatSort(sort) : ''} onChange={event => { const [field, direction] = event.target.value.split(','); onSort({ field, direction: direction as SortDirection }) }}>
-        {!sort && <option value="">Mặc định</option>}
+      <NativeSelect value={selectValue} onChange={event => { if (!event.target.value) return; const [field, direction] = event.target.value.split(','); onSort({ field, direction: direction as SortDirection }) }}>
+        {!selectValue && <option value="">Mặc định</option>}
         {sortable.flatMap(column => (['asc', 'desc'] as const).map(direction => <option key={`${column.sortKey},${direction}`} value={`${column.sortKey},${direction}`}>{column.head}: {directionLabel[direction]}</option>))}
       </NativeSelect>
     </FormField>}

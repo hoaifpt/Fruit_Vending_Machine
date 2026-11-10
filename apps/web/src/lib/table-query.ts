@@ -18,6 +18,15 @@ export function parseSort(raw: string | null | undefined, rule: SortRule): SortS
 
 export function formatSort(sort: SortState): string { return `${sort.field},${sort.direction}` }
 
+/**
+ * Value of the narrow-screen "Sắp xếp" select: the current sort when one of the sortable columns shows it, otherwise ''
+ * (the "Mặc định" option). An endpoint default on a field without a column (createdAt,desc) must not be shown as the
+ * first column's sort, which would also make that option impossible to pick.
+ */
+export function sortSelectValue(sort: SortState | undefined, columnFields: readonly string[]): string {
+  return sort && columnFields.includes(sort.field) ? formatSort(sort) : ''
+}
+
 /** URL value for a sort: the default is left out so links stay short. */
 export function sortParam(sort: SortState, rule: SortRule): string | undefined {
   const value = formatSort(sort)

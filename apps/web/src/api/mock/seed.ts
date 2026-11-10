@@ -100,6 +100,8 @@ export function createStore(nowMs: number): MockStore {
   const machines = [
     machine(1, 'DEV-MACHINE-01', 'Development fruit machine', 'ACTIVE', iso(0)),
     machine(2, 'DEV-MACHINE-02', 'Maintenance test machine', 'MAINTENANCE', null),
+    // Just registered (FE 3.4): INACTIVE, never changed nor connected, no slots yet.
+    { ...machine(3, 'DEV-MACHINE-03', 'New machine awaiting setup', 'INACTIVE', null), location: 'Warehouse bay 3', createdAt: iso(-2 * DAY), updatedAt: iso(-2 * DAY) },
   ]
 
   const slot = (n: number, machineIndex: number, slotCode: string, capacity: number): S['MachineSlotResponse'] =>

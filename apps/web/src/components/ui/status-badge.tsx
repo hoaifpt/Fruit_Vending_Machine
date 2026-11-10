@@ -27,6 +27,11 @@ interface StatusBadgeProps {
   value: string | null | undefined
   /** Show the explanation as visible text; use it where there is room, such as detail pages. */
   explain?: boolean
+  /**
+   * Compact mode only: set false where the same cell already explains the state in its own words, so the generic
+   * tooltip and hidden text do not repeat or contradict it.
+   */
+  describe?: boolean
   className?: string
 }
 
@@ -34,18 +39,18 @@ interface StatusBadgeProps {
  * Status pill for one backend vocabulary. Meaning never relies on colour alone: every value has its own label and icon.
  * In compact mode the explanation is a mouse tooltip and hidden text for screen readers, so tables gain no tab stops.
  */
-export function StatusBadge({ domain, value, explain = false, className }: StatusBadgeProps) {
+export function StatusBadge({ domain, value, explain = false, describe = true, className }: StatusBadgeProps) {
   if (!value) return <>—</>
   const meta = statusMeta(domain, value)
   const Icon = ICONS[meta.icon]
   const badge = <span
     data-status={value}
-    title={explain ? undefined : meta.description}
+    title={explain || !describe ? undefined : meta.description}
     className={cn('inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap', TONES[meta.tone], !explain && className)}
   >
     <Icon aria-hidden="true" className="size-3.5 shrink-0" />
     {meta.label}
-    {!explain && <span className="sr-only">. {meta.description}</span>}
+    {!explain && describe && <span className="sr-only">. {meta.description}</span>}
   </span>
   if (!explain) return badge
   return <span className={cn('inline-flex flex-col items-start gap-1', className)}>

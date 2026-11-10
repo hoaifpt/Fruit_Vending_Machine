@@ -6,7 +6,8 @@ import { useQueryParams } from '../../lib/router.ts'
 import { Badge, ConfirmDialog, DataTable, ErrorState, Field, FormDialog, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, STATUS_ACTIONS, StatusDialog, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
-import { MachineDialog, lastSeen } from './MachinesPage.tsx'
+import { lastContact } from '../machines.ts'
+import { MachineDialog } from './MachinesPage.tsx'
 
 type SlotTarget = { kind: 'create' } | { kind: 'capacity'; slot: Slot } | { kind: 'status'; slot: Slot }
 
@@ -29,7 +30,7 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
         <dt>Vị trí</dt><dd>{data.location || '—'}</dd>
         <dt>Nhiệt độ cho phép</dt><dd>{data.minTemperature} – {data.maxTemperature} °C</dd>
         <dt>Độ ẩm cho phép</dt><dd>{data.minHumidity} – {data.maxHumidity} %</dd>
-        <dt>Lần cuối thấy máy</dt><dd>{lastSeen(data)}</dd>
+        <dt>Lần cuối thấy máy</dt><dd>{lastContact(data)}</dd>
         <dt>Tạo / cập nhật</dt><dd>{formatDateTime(data.createdAt)} / {formatDateTime(data.updatedAt)}</dd>
       </dl>
     </section>
