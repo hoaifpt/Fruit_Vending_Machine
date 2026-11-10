@@ -6,8 +6,8 @@ import { authApi, machinesApi } from '../src/api/resources.ts'
 import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import {
-  CODE_TAKEN, MACHINE_SORT, NEW_MACHINE, THRESHOLD_ORDER, UNKNOWN_FIELD, createMachineBody, describeSaveError, lastContact, machineListQuery,
-  parseThreshold, readMachineFilters, saleState, translateFieldError, validateMachine,
+  CODE_TAKEN, MACHINE_CONFLICT, MACHINE_NOT_FOUND, MACHINE_SORT, NEW_MACHINE, THRESHOLD_ORDER, UNKNOWN_FIELD, createMachineBody, describeSaveError,
+  lastContact, machineListQuery, machineValues, parseThreshold, readMachineFilters, saleState, translateFieldError, updateMachineBody, validateMachine,
 } from '../src/admin/machines.ts'
 
 const values = (patch = {}) => ({ ...NEW_MACHINE, code: ' fv-hcm-001 ', name: '  Máy sảnh A ', location: ' Tòa A, tầng trệt ', ...patch })
@@ -118,6 +118,31 @@ test('save errors: every 409 of POST /machines is the taken code, in Vietnamese,
   assert.ok(unknown instanceof ApiError)
   assert.match(describeFormFailure(unknown).message, /status: Unknown field/)
   assert.equal(describeFormFailure(unknown).fieldErrors, undefined)
+})
+
+test('edit: form starts from the machine (Vietnamese decimals), code not checked, PUT body has only the six contract fields', () => {
+  const machine = { code: 'FV-HCM-001', name: 'Máy A', location: null, minTemperature: 2.5, maxTemperature: 8, minHumidity: 40, maxHumidity: 80.25 }
+  const start = machineValues(machine)
+  assert.deepEqual(start, { code: 'FV-HCM-001', name: 'Máy A', location: '', minTemperature: '2,5', maxTemperature: '8', minHumidity: '40', maxHumidity: '80,25' })
+  assert.deepEqual(validateMachine({ ...start, code: '', location: 'Tòa A' }, 'edit'), {}, 'the fixed code is never validated when editing')
+  assert.ok(validateMachine({ ...start, code: '' }).code, 'registering still requires it')
+  const body = updateMachineBody({ ...start, location: ' Tòa A ', name: ' Máy A2 ' })
+  assert.deepEqual(body, { name: 'Máy A2', location: 'Tòa A', minTemperature: 2.5, maxTemperature: 8, minHumidity: 40, maxHumidity: 80.25 })
+  assert.equal('code' in body || 'status' in body || 'lastSeenAt' in body, false)
+  assert.throws(() => updateMachineBody({ ...start, location: 'Tòa A', minTemperature: '8' }), ValidationError)
+})
+
+test('edit errors: 400 min ≥ max without field errors is a Vietnamese form message; 409/404 are Vietnamese, never under the code', () => {
+  const order = describeSaveError(new ApiError(400, 'Minimum environmental thresholds must be strictly below maximum thresholds'), 'edit')
+  assert.ok(order instanceof ApiError)
+  assert.deepEqual(describeFormFailure(order), { message: THRESHOLD_ORDER })
+  const conflict = describeSaveError(new ApiError(409, 'Request conflicts with existing data'), 'edit')
+  assert.ok(conflict instanceof ApiError && !(conflict instanceof ValidationError))
+  assert.equal(describeFormFailure(conflict).message, MACHINE_CONFLICT)
+  assert.equal(describeFormFailure(conflict).fieldErrors, undefined)
+  assert.equal(describeSaveError(new ApiError(404, 'Không tìm thấy dữ liệu yêu cầu.'), 'edit').message, MACHINE_NOT_FOUND)
+  const fields = describeSaveError(new ApiError(400, 'Validation Failed', { maxHumidity: 'must be less than or equal to 100' }), 'edit')
+  assert.deepEqual(fields.fieldErrors, { maxHumidity: 'Phải nhỏ hơn hoặc bằng 100.' })
 })
 
 test('mock /machines follows the contract: filters, sort, registration INACTIVE, 409 duplicate code, staff read-only', async () => {

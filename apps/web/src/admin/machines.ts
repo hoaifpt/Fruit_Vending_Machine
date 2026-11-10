@@ -1,6 +1,6 @@
 // Rules of the Machines list (C2) that do not need React: URL filters and sort limited to what GET /machines accepts,
-// why a machine is or is not selling (administrative status, kept apart from connectivity), the registration form
-// (thresholds, request body limited to the contract fields) and Vietnamese wording of backend errors. Unit-tested.
+// why a machine is or is not selling (administrative status, kept apart from connectivity), the registration and edit
+// forms (thresholds, request bodies limited to the contract fields) and Vietnamese wording of backend errors. Unit-tested.
 // Contract: api-contract/api.yaml (listMachines, createMachine); rules: docs/machine-management.md, docs/order-management.md.
 import { ApiError } from '../api/client.ts'
 import { ValidationError } from './form-error.ts'
@@ -12,6 +12,7 @@ import type { SortRule, SortState } from '../lib/table-query.ts'
 type S = components['schemas']
 export type MachineStatus = S['MachineResponse']['status']
 export type CreateMachineBody = S['CreateMachineRequest']
+export type UpdateMachineBody = S['UpdateMachineRequest']
 type MachineLike = Pick<S['MachineResponse'], 'status' | 'lastSeenAt' | 'createdAt' | 'updatedAt'>
 
 export const MACHINE_STATUSES = ['ACTIVE', 'INACTIVE', 'MAINTENANCE'] as const
@@ -111,12 +112,24 @@ export function parseThreshold(raw: string, min: number, max: number): Threshold
   return { ok: true, value: Object.is(value, -0) ? 0 : value }
 }
 
-/** Checks the backend also makes, shown beside the fields without a round trip. */
-export function validateMachine(values: MachineValues): Record<string, string> {
+/** Form values of an existing machine (editing); thresholds written the Vietnamese way, e.g. `2,5`. */
+export function machineValues(machine: Pick<S['MachineResponse'], 'code' | 'name' | 'location' | ThresholdKey>): MachineValues {
+  const text = (value: number) => String(value).replace('.', ',')
+  return {
+    code: machine.code, name: machine.name, location: machine.location ?? '',
+    minTemperature: text(machine.minTemperature), maxTemperature: text(machine.maxTemperature),
+    minHumidity: text(machine.minHumidity), maxHumidity: text(machine.maxHumidity),
+  }
+}
+
+/** Checks the backend also makes, shown beside the fields without a round trip. `code` only when registering. */
+export function validateMachine(values: MachineValues, mode: 'create' | 'edit' = 'create'): Record<string, string> {
   const errors: Record<string, string> = {}
   const code = values.code.trim(), name = values.name.trim(), location = values.location.trim()
-  if (!code) errors.code = 'Vui lòng nhập mã máy.'
-  else if (code.length > LIMITS.code) errors.code = `Mã máy tối đa ${LIMITS.code} ký tự.`
+  if (mode === 'create') {
+    if (!code) errors.code = 'Vui lòng nhập mã máy.'
+    else if (code.length > LIMITS.code) errors.code = `Mã máy tối đa ${LIMITS.code} ký tự.`
+  }
   if (!name) errors.name = 'Vui lòng nhập tên máy.'
   else if (name.length > LIMITS.name) errors.name = `Tên máy tối đa ${LIMITS.name} ký tự.`
   if (!location) errors.location = 'Vui lòng nhập vị trí đặt máy.'
@@ -142,9 +155,20 @@ export function validateMachine(values: MachineValues): Record<string, string> {
 export function createMachineBody(values: MachineValues): CreateMachineBody {
   const errors = validateMachine(values)
   if (Object.keys(errors).length) throw new ValidationError(errors)
+  return { code: values.code.trim().toUpperCase(), ...configuration(values) }
+}
+
+/** PUT /machines/{id} body: name, location and the four thresholds only (never code, status or lastSeenAt). */
+export function updateMachineBody(values: MachineValues): UpdateMachineBody {
+  const errors = validateMachine(values, 'edit')
+  if (Object.keys(errors).length) throw new ValidationError(errors)
+  return configuration(values)
+}
+
+function configuration(values: MachineValues): UpdateMachineBody {
   const number = (key: ThresholdKey) => { const result = parseThreshold(values[key], -Infinity, Infinity); return result.ok ? result.value : NaN }
   return {
-    code: values.code.trim().toUpperCase(), name: values.name.trim(), location: values.location.trim(),
+    name: values.name.trim(), location: values.location.trim(),
     minTemperature: number('minTemperature'), maxTemperature: number('maxTemperature'),
     minHumidity: number('minHumidity'), maxHumidity: number('maxHumidity'),
   }
@@ -153,6 +177,9 @@ export function createMachineBody(values: MachineValues): CreateMachineBody {
 export const CODE_TAKEN = 'Mã máy này đã được dùng cho một máy khác (không phân biệt hoa thường). Hãy nhập mã khác.'
 export const THRESHOLD_ORDER = 'Ngưỡng tối thiểu phải nhỏ hơn ngưỡng tối đa (cả nhiệt độ và độ ẩm).'
 export const UNKNOWN_FIELD = 'Máy chủ từ chối dữ liệu gửi lên. Hãy tải lại trang rồi thử lại.'
+/** Any 409 of PUT /machines/{id} (no unique field is sent; the backend's generic message is English). */
+export const MACHINE_CONFLICT = 'Máy chủ từ chối vì máy vừa được thay đổi ở nơi khác. Hãy tải lại trang rồi thử lại.'
+export const MACHINE_NOT_FOUND = 'Không tìm thấy máy này nữa. Hãy quay lại danh sách máy.'
 const FORM_FIELDS = ['code', 'name', 'location', 'minTemperature', 'maxTemperature', 'minHumidity', 'maxHumidity'] as const
 
 /** Bean-validation messages of the backend (English) in Vietnamese; an unknown message is kept as is. */
@@ -178,11 +205,13 @@ export function translateFieldError(message: string): string {
  * - 400 "Minimum … strictly below maximum …" (no field errors): a Vietnamese form-level message.
  * - 400 "Unknown request field" (no field errors; the request DTO rejects any extra field): a Vietnamese form-level
  *   message asking to reload, since the page is out of date with the server.
+ * - Editing (PUT, code not sent): 409 is a Vietnamese form-level message, 404 says the machine is gone.
  * Anything else is returned unchanged.
  */
-export function describeSaveError(error: unknown): unknown {
+export function describeSaveError(error: unknown, mode: 'create' | 'edit' = 'create'): unknown {
   if (!(error instanceof ApiError)) return error
-  if (error.status === 409) return new ValidationError({ code: CODE_TAKEN })
+  if (error.status === 409) return mode === 'create' ? new ValidationError({ code: CODE_TAKEN }) : new ApiError(409, MACHINE_CONFLICT)
+  if (error.status === 404 && mode === 'edit') return new ApiError(404, MACHINE_NOT_FOUND)
   if (error.status !== 400) return error
   const entries = Object.entries(error.fieldErrors)
   if (!entries.length) {

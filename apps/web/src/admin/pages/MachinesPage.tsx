@@ -13,16 +13,15 @@ import { FormField } from '../../components/ui/form-field.tsx'
 import { Input } from '../../components/ui/input.tsx'
 import { StatusBadge } from '../../components/ui/status-badge.tsx'
 import { cn } from '../../lib/cn.ts'
-import { parseDecimal } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
 import { activeFilterCount, clearFiltersPatch, sortParam } from '../../lib/table-query.ts'
-import { DataTable, Field, FormDialog, FormSheet, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, enumOptions, useDialog, useForm } from '../kit.tsx'
+import { DataTable, FormSheet, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, enumOptions, useDialog, useForm } from '../kit.tsx'
 import type { Column } from '../kit.tsx'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 import {
   LIMITS, MACHINE_FILTER_KEYS, MACHINE_SORT, NEW_MACHINE, THRESHOLDS, createMachineBody, describeSaveError, lastContact,
-  machineListQuery, readMachineFilters, saleState, validateMachine,
+  machineListQuery, machineValues, readMachineFilters, saleState, updateMachineBody, validateMachine,
 } from '../machines.ts'
 import type { MachineValues } from '../machines.ts'
 
@@ -69,7 +68,7 @@ function MachinesPage() {
     <DataTable state={state} rows={data?.content} rowKey={machine => machine.id} columns={columns} caption="Danh sách máy" empty={empty}
       sort={filters.sort} onSort={next => update({ sort: sortParam(next, MACHINE_SORT), page: undefined })} />
     {data && <Pagination page={data.page} totalPages={data.totalPages} totalElements={data.totalElements} onPage={next => update({ page: next ? String(next) : undefined })} />}
-    {dialog.value && <RegisterSheet close={dialog.close} done={state.reload} />}
+    {dialog.value && <MachineSheet close={dialog.close} done={state.reload} />}
   </>
 }
 
@@ -86,65 +85,48 @@ function SaleCell({ machine, canManage }: { machine: Machine; canManage: boolean
   </span>
 }
 
-/** Register a machine: the seven contract fields; the server sets status INACTIVE and lastSeenAt null. */
-function RegisterSheet({ close, done }: { close: () => void; done: () => void }) {
-  const form = useForm<MachineValues>({ ...NEW_MACHINE })
+/**
+ * Register a machine (no `machine`: the seven contract fields; the server sets status INACTIVE and lastSeenAt null) or
+ * edit its configuration (name, location, thresholds; the code is fixed and the status has its own endpoint). Used by
+ * the list (register) and by the detail page (edit).
+ */
+export function MachineSheet({ machine, close, done }: { machine?: Machine; close: () => void; done: () => void }) {
+  const editing = !!machine
+  const form = useForm<MachineValues>(machine ? machineValues(machine) : { ...NEW_MACHINE })
   const { values, errors } = form
-  return <FormSheet title="Đăng ký máy" submitLabel="Đăng ký máy" successMessage="Đã đăng ký máy" close={close} onFieldErrors={form.setErrors}
-    description="Máy mới ở trạng thái Ngừng hoạt động và chưa bán cho tới khi quản trị viên thêm ngăn, cấp khóa kiosk và bật Hoạt động trong chi tiết máy."
+  return <FormSheet title={editing ? 'Sửa cấu hình máy' : 'Đăng ký máy'} submitLabel={editing ? 'Lưu thay đổi' : 'Đăng ký máy'}
+    successMessage={editing ? 'Đã lưu cấu hình máy' : 'Đã đăng ký máy'} close={close} onFieldErrors={form.setErrors}
+    description={editing
+      ? <>{machine.name}. Sửa tên, vị trí và ngưỡng môi trường; mã máy không đổi được. Trạng thái đổi ở thẻ Tổng quan.</>
+      : 'Máy mới ở trạng thái Ngừng hoạt động và chưa bán cho tới khi quản trị viên thêm ngăn, cấp khóa kiosk và bật Hoạt động trong chi tiết máy.'}
     onSubmit={async () => {
-      const problems = validateMachine(values)
+      const mode = editing ? 'edit' : 'create'
+      const problems = validateMachine(values, mode)
       if (Object.keys(problems).length) form.fail(problems)
-      try { await machinesApi.create(createMachineBody(values)) } catch (error) { throw describeSaveError(error) }
+      try {
+        if (machine) await machinesApi.update(machine.id, updateMachineBody(values))
+        else await machinesApi.create(createMachineBody(values))
+      } catch (error) { throw describeSaveError(error, mode) }
       done()
     }}>
-    <FormField label="Mã máy" required error={errors.code} hint={`Mã duy nhất, tự chuyển thành chữ in hoa, ví dụ FV-HCM-001. Tối đa ${LIMITS.code} ký tự; không đổi được sau khi tạo.`} className="mb-4">
-      <Input value={values.code} maxLength={LIMITS.code} autoComplete="off" spellCheck={false} autoCapitalize="characters" className="font-mono" onChange={event => form.set('code')(event.target.value)} /></FormField>
+    {editing
+      ? <FormField label="Mã máy" hint="Mã máy cố định sau khi đăng ký để đơn hàng, ngăn và khóa kiosk luôn trỏ đúng máy." className="mb-4">
+        <Input value={machine.code} readOnly className="font-mono" /></FormField>
+      : <FormField label="Mã máy" required error={errors.code} hint={`Mã duy nhất, tự chuyển thành chữ in hoa, ví dụ FV-HCM-001. Tối đa ${LIMITS.code} ký tự; không đổi được sau khi tạo.`} className="mb-4">
+        <Input value={values.code} maxLength={LIMITS.code} autoComplete="off" spellCheck={false} autoCapitalize="characters" className="font-mono" onChange={event => form.set('code')(event.target.value)} /></FormField>}
     <FormField label="Tên máy" required error={errors.name} className="mb-4">
       <Input value={values.name} maxLength={LIMITS.name} autoComplete="off" onChange={event => form.set('name')(event.target.value)} /></FormField>
     <FormField label="Vị trí đặt máy" required error={errors.location} hint="Ví dụ: Tòa A, tầng trệt, cạnh thang máy." className="mb-4">
       <Input value={values.location} maxLength={LIMITS.location} autoComplete="off" onChange={event => form.set('location')(event.target.value)} /></FormField>
     <fieldset className="mb-2 rounded-lg border px-3.5 pt-2.5 pb-3.5">
       <legend className="px-1 text-[13px] font-medium">Ngưỡng môi trường</legend>
-      <p className="mb-3! text-xs text-muted-foreground">Số thập phân tối đa 2 chữ số, ví dụ 2 hoặc 2,5. Tối thiểu phải nhỏ hơn tối đa. Sửa được sau trong chi tiết máy.</p>
+      <p className="mb-3! text-xs text-muted-foreground">Số thập phân tối đa 2 chữ số, ví dụ 2 hoặc 2,5. Tối thiểu phải nhỏ hơn tối đa.{editing ? '' : ' Sửa được sau trong chi tiết máy.'}</p>
       <div className="grid grid-cols-2 gap-3 max-[420px]:grid-cols-1">
         {THRESHOLDS.map(({ key, label }) => <FormField key={key} label={label} required error={errors[key]}>
           <Input value={values[key]} inputMode="decimal" autoComplete="off" onChange={event => form.set(key)(event.target.value)} /></FormField>)}
       </div>
     </fieldset>
   </FormSheet>
-}
-
-const LEGACY_THRESHOLDS = [['minTemperature', 'Nhiệt độ tối thiểu (°C)'], ['maxTemperature', 'Nhiệt độ tối đa (°C)'], ['minHumidity', 'Độ ẩm tối thiểu (%)'], ['maxHumidity', 'Độ ẩm tối đa (%)']] as const
-
-/** Edit configuration from the detail page (FE 3.5 will rebuild it). The machine code is immutable and status has its own endpoint. */
-export function MachineDialog({ machine, close, done }: { machine: Machine; close: () => void; done: () => void }) {
-  const form = useForm({
-    name: machine.name, location: machine.location ?? '',
-    minTemperature: String(machine.minTemperature), maxTemperature: String(machine.maxTemperature),
-    minHumidity: String(machine.minHumidity), maxHumidity: String(machine.maxHumidity),
-  })
-  const { values, errors } = form
-  return <FormDialog title="Cấu hình máy" submitLabel="Lưu" close={close} onFieldErrors={form.setErrors} onSubmit={async () => {
-    const problems: Record<string, string> = {}
-    if (!values.name.trim()) problems.name = 'Vui lòng nhập tên máy.'
-    if (!values.location.trim()) problems.location = 'Vui lòng nhập vị trí.'
-    const numbers: Record<string, number> = {}
-    for (const [key] of LEGACY_THRESHOLDS) {
-      const parsed = parseDecimal(values[key])
-      if (parsed === undefined) problems[key] = 'Nhập một số hợp lệ.'; else numbers[key] = parsed
-    }
-    if (Object.keys(problems).length) return form.fail(problems)
-    await machinesApi.update(machine.id, { name: values.name.trim(), location: values.location.trim(), minTemperature: numbers.minTemperature, maxTemperature: numbers.maxTemperature, minHumidity: numbers.minHumidity, maxHumidity: numbers.maxHumidity })
-    done()
-  }}>
-    <Field label="Mã máy" hint="Mã máy không thể thay đổi."><input value={machine.code} readOnly /></Field>
-    <Field label="Tên máy" error={errors.name}><input value={values.name} onChange={event => form.set('name')(event.target.value)} /></Field>
-    <Field label="Vị trí" error={errors.location}><input value={values.location} onChange={event => form.set('location')(event.target.value)} /></Field>
-    <div className="a-field-row">
-      {LEGACY_THRESHOLDS.map(([key, label]) => <Field key={key} label={label} error={errors[key]}><input inputMode="decimal" value={values[key]} onChange={event => form.set(key)(event.target.value)} /></Field>)}
-    </div>
-  </FormDialog>
 }
 
 export default MachinesPage

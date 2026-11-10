@@ -39,6 +39,20 @@ function byKey(doc: DocumentLike, key: string): FocusableLike | null {
   return null
 }
 
+/** Focuses the first usable element with this `data-focus-key` (scrolling it into view); false when there is none. */
+export function focusByKey(doc: DocumentLike, key: string): boolean {
+  const target = byKey(doc, key)
+  if (!target) return false
+  target.focus()
+  return true
+}
+
+/** True when keyboard focus is nowhere useful: on <body>, on nothing, or on an element that left the page. */
+export function focusLost(doc: DocumentLike): boolean {
+  const active = doc.activeElement as FocusableLike | null
+  return !active || active === doc.body || !active.isConnected
+}
+
 export type FocusReturn = 'origin' | 'key' | 'main' | 'none'
 
 /** Focuses the opener, else its stand-in with the same key, else the page region. Returns which one was used. */

@@ -252,10 +252,12 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
  * It closes with Hủy, × or Esc only (a click outside would lose what was typed), none of them while a request runs.
  * Focus goes back to the control that opened it.
  */
-export function FormSheet({ title, description, submitLabel = 'Lưu', successMessage, close, onSubmit, children, onFieldErrors }: {
+export function FormSheet({ title, description, submitLabel = 'Lưu', successMessage, successDescription, close, onSubmit, children, onFieldErrors }: {
   title: string; description?: ReactNode; submitLabel?: string
   /** Toast after success; defaults to "Đã <submitLabel>". */
   successMessage?: string
+  /** Second line of that toast (what changed); defaults to the title, `null` for none. */
+  successDescription?: string | null
   close: () => void
   onSubmit: () => Promise<void>
   children: ReactNode
@@ -280,7 +282,7 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
     setPending(true); setMessage('')
     try {
       await onSubmit(); close()
-      toast.success(successMessage ?? `Đã ${submitLabel.charAt(0).toLowerCase()}${submitLabel.slice(1)}`, { description: title })
+      toast.success(successMessage ?? `Đã ${submitLabel.charAt(0).toLowerCase()}${submitLabel.slice(1)}`, toastDetail(successDescription, title))
     } catch (error) {
       const failure = describeFormFailure(error)
       if (failure.fieldErrors) onFieldErrors?.(failure.fieldErrors)
@@ -314,9 +316,19 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
 
 export { ValidationError }
 
+/** Toast options of a success: the given description, else the dialog title; `null` shows none. */
+function toastDetail(description: string | null | undefined, title: string) {
+  const text = description === undefined ? title : description
+  return text ? { description: text } : undefined
+}
+
 /** Asks before an action that cannot be undone. Stays open while it runs; a failure is shown inside, so the user can retry. */
-export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, danger }: {
+export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, danger, successMessage, successDescription }: {
   title: string; message: ReactNode; confirmLabel: string; close: () => void; onConfirm: () => Promise<void>; danger?: boolean
+  /** Toast after success; defaults to "Đã <confirmLabel>". */
+  successMessage?: string
+  /** Second line of that toast (what happened, not the question); defaults to the title, `null` for none. */
+  successDescription?: string | null
 }) {
   const [pending, setPending] = useState(false)
   const [failure, setFailure] = useState('')
@@ -324,7 +336,10 @@ export function ConfirmDialog({ title, message, confirmLabel, close, onConfirm, 
   async function confirm() {
     if (pending) return
     setPending(true); setFailure('')
-    try { await onConfirm(); close(); toast.success(`Đã ${confirmLabel.charAt(0).toLowerCase()}${confirmLabel.slice(1)}`, { description: title }) } catch (error) {
+    try {
+      await onConfirm(); close()
+      toast.success(successMessage ?? `Đã ${confirmLabel.charAt(0).toLowerCase()}${confirmLabel.slice(1)}`, toastDetail(successDescription, title))
+    } catch (error) {
       setFailure(errorMessage(error)); setPending(false)
     }
   }

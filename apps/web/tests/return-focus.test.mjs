@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { captureFocus, restoreFocus } from '../src/admin/return-focus.ts'
+import { captureFocus, focusByKey, focusLost, restoreFocus } from '../src/admin/return-focus.ts'
 
 /** Tiny fake DOM: elements with attributes, connection state and a focus log. */
 function setup() {
@@ -39,4 +39,27 @@ test('nothing to return to: the page region gets focus instead of <body>', () =>
   const gone = element('gone', {}, { isConnected: false })
   assert.equal(restoreFocus({ element: gone, key: null }, doc), 'main')
   assert.deepEqual(log, ['main'])
+})
+
+test('focusByKey: a jump to another tab lands on its main button when it is there, else reports false', () => {
+  const { log, element, doc, all } = setup()
+  assert.equal(focusByKey(doc, 'slot-create'), false)
+  const disabled = element('disabled-create', { 'data-focus-key': 'slot-create' }, { disabled: true })
+  all.push(disabled)
+  assert.equal(focusByKey(doc, 'slot-create'), false, 'a disabled control is skipped')
+  all.push(element('create', { 'data-focus-key': 'slot-create' }))
+  assert.equal(focusByKey(doc, 'slot-create'), true)
+  assert.deepEqual(log, ['create'])
+})
+
+test('focusLost: body, nothing or a removed element count as lost focus', () => {
+  const { element, doc } = setup()
+  assert.equal(focusLost(doc), true, 'body')
+  doc.activeElement = null
+  assert.equal(focusLost(doc), true, 'nothing')
+  const button = element('status')
+  doc.activeElement = button
+  assert.equal(focusLost(doc), false)
+  button.isConnected = false
+  assert.equal(focusLost(doc), true, 'removed after a reload')
 })

@@ -42,10 +42,11 @@ function byId<T extends { id: string }>(rows: T[], id: string, message: string):
 }
 const findUser = (ctx: HandlerContext) => byId(ctx.store.users, ctx.params.id, 'Không tìm thấy tài khoản.')
 const findProduct = (ctx: HandlerContext) => byId(ctx.store.products, ctx.params.id, 'Không tìm thấy sản phẩm.')
-const findMachine = (ctx: HandlerContext, id = ctx.params.machineId) => byId(ctx.store.machines, id, 'Không tìm thấy máy.')
+const findMachine = (ctx: HandlerContext, id = ctx.params.machineId) => byId(ctx.store.machines, id, 'Machine not found') // MachineService, English as the backend sends it
 function findSlot(ctx: HandlerContext) {
-  const slot = byId(ctx.store.slots, ctx.params.slotId, 'Không tìm thấy ngăn.')
-  if (slot.machineId !== decode(ctx.params.machineId)) throw notFound('Không tìm thấy ngăn.')
+  findMachine(ctx)
+  const slot = byId(ctx.store.slots, ctx.params.slotId, 'Slot not found in specified machine')
+  if (slot.machineId !== decode(ctx.params.machineId)) throw notFound('Slot not found in specified machine')
   return slot
 }
 
@@ -385,7 +386,7 @@ export const routes: Route[] = [
     const form = new Form(ctx.body, ['slotCode', 'capacity'])
     const slotCode = form.text('slotCode', 32).toUpperCase(), capacity = form.integer('capacity', 1, 2_147_483_647)
     form.done()
-    if (ctx.store.slots.some(slot => slot.machineId === machine.id && slot.slotCode === slotCode)) throw conflict('Mã ngăn này đã tồn tại trong máy.')
+    if (ctx.store.slots.some(slot => slot.machineId === machine.id && slot.slotCode === slotCode)) throw conflict('Slot code is already in use for this machine') // MachineSlotService, English as the backend sends it
     const at = iso(ctx.now)
     const slot = { id: newId(), machineId: machine.id, slotCode, capacity, status: 'ACTIVE' as const, createdAt: at, updatedAt: at }
     ctx.store.slots.push(slot)
@@ -441,7 +442,7 @@ export const routes: Route[] = [
   route('POST', '/machines/:machineId/kiosk-credentials/:credentialId/revoke', 'admin', ctx => {
     const machine = findMachine(ctx)
     const credential = ctx.store.credentials.find(candidate => candidate.credentialId === decode(ctx.params.credentialId) && candidate.machineId === machine.id)
-    if (!credential) throw notFound('Không tìm thấy khóa kiosk.')
+    if (!credential) throw notFound('Kiosk credential not found')
     if (credential.status === 'ACTIVE') Object.assign(credential, { status: 'REVOKED', revokedAt: iso(ctx.now), revokedBy: ctx.user!.id })
     return ok(credentialView(credential))
   }),
