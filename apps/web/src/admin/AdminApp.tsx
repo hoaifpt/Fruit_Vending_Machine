@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import '@fontsource-variable/inter/wght.css'
 import { endSession, expireSession, loginPathFor, setLoginRedirect } from '../api/session.ts'
 import type { Role } from '../api/session.ts'
-import { navigate, useLocation } from '../lib/router.ts'
+import { confirmLeave, navigate, useLocation } from '../lib/router.ts'
 import { Forbidden, Link, PageSkeleton } from './kit.tsx'
 import { canOpen, homeFor, matchRoute, navFor } from './routes.ts'
 import { AdminShell } from './shell/AdminShell.tsx'
@@ -11,6 +11,7 @@ import { useSession } from './useSession.ts'
 import './admin.css'
 
 const UsersPage = lazy(() => import('./pages/UsersPage.tsx'))
+const RolesPage = lazy(() => import('./pages/RolesPage.tsx'))
 const ProductsPage = lazy(() => import('./pages/ProductsPage.tsx'))
 const MachinesPage = lazy(() => import('./pages/MachinesPage.tsx'))
 const MachineDetailPage = lazy(() => import('./pages/MachineDetailPage.tsx'))
@@ -38,7 +39,8 @@ function AdminApp() {
 
   // Session expiry (401 or token exp) goes through the SPA router: one redirect to /login?next=<this page>.
   useEffect(() => {
-    setLoginRedirect(to => navigate(to, { replace: true }))
+    // Forced: the session is gone, so a screen's unsaved-changes guard cannot keep the user here.
+    setLoginRedirect(to => navigate(to, { replace: true, force: true }))
     return () => setLoginRedirect(null)
   }, [])
   const expiresAt = session?.expiresAt
@@ -49,7 +51,7 @@ function AdminApp() {
   }, [expiresAt])
 
   useEffect(() => {
-    if (!session) navigate(loginPathFor(pathname, search), { replace: true })
+    if (!session) navigate(loginPathFor(pathname, search), { replace: true, force: true })
     else if (pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff') navigate(homeFor(roles), { replace: true })
   }, [session, pathname, search, roles])
   // Move focus to the new screen after client-side navigation, like a full page load would.
@@ -65,6 +67,7 @@ function AdminApp() {
     const id = route.id ?? ''
     content = {
       users: <UsersPage />,
+      roles: <RolesPage />,
       products: <ProductsPage />,
       machines: <MachinesPage />,
       'machine-detail': <MachineDetailPage machineId={id} />,
@@ -81,8 +84,10 @@ function AdminApp() {
   }
 
   function logout() {
+    // Asked before the session ends: a screen with unsaved changes (A3) may keep the user here.
+    if (!confirmLeave()) return
     endSession()
-    navigate('/login', { replace: true })
+    navigate('/login', { replace: true, force: true })
   }
 
   return <AdminShell nav={navFor(roles)} route={route} email={session.user.email} roles={roles} onLogout={logout}>

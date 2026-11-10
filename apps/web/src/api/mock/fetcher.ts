@@ -1,14 +1,14 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceOrders, routes } from './handlers.ts'
-import type { HandlerContext } from './handlers.ts'
+import { advanceOrders, permissionsOfUser, routes } from './handlers.ts'
+import type { HandlerContext, Policy } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
 import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -24,6 +24,7 @@ export const isMockEnabled = (selection: MockSelection) => selection.all || sele
 const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   auth: 'auth', users: 'users', products: 'products', machines: 'machines', 'product-batches': 'batches',
   inventory: 'inventory', orders: 'orders', payments: 'payments', 'payment-webhook-logs': 'webhook-logs', kiosk: 'kiosk',
+  roles: 'roles', permissions: 'roles',
 }
 
 export function groupOf(path: string): MockGroup | null {
@@ -108,7 +109,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
   /** Set per request by the `expire` scenario: tokens issued before this instant are treated as expired. */
   let expiredBefore: number | null = null
 
-  function authenticate(policy: 'any' | 'admin', authorization: string | null): MockUser {
+  function authenticate(policy: Exclude<Policy, 'public' | 'kiosk'>, authorization: string | null): MockUser {
     const token = authorization?.replace(/^Bearer\s+/i, '')
     const claims = token ? decodeClaims(token) : null
     const user = store.users.find(candidate => candidate.id === claims?.sub)
@@ -117,6 +118,8 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       throw new MockHttpError(401, 'Authentication required or access token invalid')
     }
     if (policy === 'admin' && !user.roles.includes('ADMIN')) throw new MockHttpError(403, 'Access denied')
+    // Backend #48: permissions are read from the role table on every request, so a change applies to the next call.
+    if (typeof policy === 'object' && !permissionsOfUser(store, user).includes(policy.permission)) throw new MockHttpError(403, 'Access denied')
     return user
   }
 

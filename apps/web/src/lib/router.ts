@@ -18,10 +18,32 @@ function withTransition(update: () => void, direction: 'forward' | 'back') {
   transition.finished.finally(() => { delete document.documentElement.dataset.nav })
 }
 
+/**
+ * Leave guard of a screen with unsaved changes (one at a time): returns true to let the user leave. Asked only when the
+ * path changes (filters on the same screen are not leaving) and never for forced moves such as a session expiry.
+ */
+type LeaveGuard = () => boolean
+let leaveGuard: LeaveGuard | null = null
+/** Installs the guard (null clears it). The returned function removes it only if it is still the active one. */
+export function setLeaveGuard(guard: LeaveGuard | null): () => void {
+  leaveGuard = guard
+  return () => { if (leaveGuard === guard) leaveGuard = null }
+}
+/** True when nothing blocks leaving the current screen (asks the active guard, if any). */
+export function confirmLeave(): boolean { return leaveGuard ? leaveGuard() : true }
+const pathOf = (to: string) => new URL(to, 'https://web.invalid').pathname
+/** Whether moving from `fromPath` to `to` leaves the screen (and so must ask the guard). */
+export function leavesScreen(fromPath: string, to: string): boolean { return pathOf(to) !== fromPath }
+
 let lastPath = typeof window === 'undefined' ? '/' : window.location.pathname
+let lastUrl = typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search
 function onPopState() {
   const changed = window.location.pathname !== lastPath
+  // Back/forward cannot be cancelled: when the guard says stay, put the screen's URL back. Limitation: this pushes a new
+  // entry, so the entry the user went back to stays in history and "forward" history beyond it is lost.
+  if (changed && !confirmLeave()) { window.history.pushState(null, '', lastUrl); return }
   lastPath = window.location.pathname
+  lastUrl = snapshot()
   if (changed) withTransition(emit, 'back'); else emit()
 }
 
@@ -31,12 +53,15 @@ function subscribe(listener: () => void) {
   return () => { listeners.delete(listener); if (!listeners.size) window.removeEventListener('popstate', onPopState) }
 }
 
-export function navigate(to: string, { replace = false }: { replace?: boolean } = {}) {
+/** `force`: skip the leave guard (session expired, already confirmed). */
+export function navigate(to: string, { replace = false, force = false }: { replace?: boolean; force?: boolean } = {}) {
   if (to === snapshot()) return
+  if (!force && leavesScreen(window.location.pathname, to) && !confirmLeave()) return
   window.history[replace ? 'replaceState' : 'pushState'](null, '', to)
   // Filters and redirects replace the entry in place: no page animation for those.
   const changed = window.location.pathname !== lastPath
   lastPath = window.location.pathname
+  lastUrl = snapshot()
   if (changed && !replace) withTransition(emit, 'forward'); else emit()
 }
 

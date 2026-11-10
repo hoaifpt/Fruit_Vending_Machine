@@ -54,7 +54,7 @@ test.describe('màn Tài khoản', () => {
     await expect(sheet).toHaveCount(0)
     await expect(row(page, 'staff@freshvend.test')).toContainText('Nhân viên Đã Sửa')
 
-    await page.goto('/admin/users?scenario=409:/users/10000000-0000-0000-0000-000000000002/status')
+    await page.goto('/admin/users?scenario=409:/users/11000000-0000-0000-0000-000000000002/status')
     await ready(page)
     await row(page, 'staff@freshvend.test').getByRole('button', { name: /^Khóa/ }).click()
     const dialog = page.getByRole('alertdialog')

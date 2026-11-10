@@ -15,3 +15,4 @@ API mà frontend cần nhưng backend chưa có. Nguồn chính thức vẫn là
 | File | Endpoint | Issue | Trạng thái |
 | --- | --- | --- | --- |
 | `auth-me.yaml` | `GET /api/v1/auth/me` | FE 2.1 | Đề nghị BE thêm mới |
+| `roles-permissions.yaml` | `GET /api/v1/permissions`, `GET /api/v1/roles`, `GET /api/v1/roles/{id}`, `PUT /api/v1/roles/{id}/permissions` | FE 3.2 | Chép nguyên từ nhánh BE #48 (`feature/48-permission-authorization`), chờ merge vào `dev` |

@@ -36,7 +36,39 @@ export interface MockStore {
   orders: MockOrder[]
   payments: MockPayment[]
   webhookLogs: S['PaymentWebhookLogDetailResponse'][]
+  /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
+  permissions: MockPermission[]
+  roles: MockRole[]
 }
+
+export interface MockPermission { code: string; description: string }
+export interface MockRole { id: string; name: string; description: string | null; permissions: string[] }
+
+/** V13__create_permissions.sql, in code order like GET /permissions (descriptions are the backend's, in English). */
+export const SEED_PERMISSIONS: readonly MockPermission[] = [
+  { code: 'BATCH_CREATE', description: 'Create product batches' },
+  { code: 'BATCH_READ', description: 'List and view product batches' },
+  { code: 'INVENTORY_READ', description: 'View inventory items, machine and slot inventory, summaries and history' },
+  { code: 'INVENTORY_WRITE', description: 'Load bowls into slots and remove bowls' },
+  { code: 'KIOSK_CREDENTIAL_MANAGE', description: 'Issue, list and revoke kiosk credentials' },
+  { code: 'MACHINE_READ', description: 'List and view machines and slots' },
+  { code: 'MACHINE_WRITE', description: 'Create and update machines and slots and change their status' },
+  { code: 'ORDER_READ', description: 'List and view orders' },
+  { code: 'PAYMENT_READ', description: 'List and view payments' },
+  { code: 'PAYMENT_WEBHOOK_LOG_READ', description: 'List and view payment webhook logs' },
+  { code: 'PERMISSION_MANAGE', description: "View roles and permissions and change a role's permissions" },
+  { code: 'PRODUCT_READ', description: 'List and view products' },
+  { code: 'PRODUCT_WRITE', description: 'Create and update products and change product status' },
+  { code: 'USER_READ', description: 'List and view management user accounts' },
+  { code: 'USER_WRITE', description: 'Create users, update profiles and change account status' },
+]
+/** V8 role ids (fixed in every environment); V13 maps ADMIN to every permission and STAFF to the operations ones. */
+export const SEED_ROLE_IDS = { ADMIN: '10000000-0000-0000-0000-000000000001', STAFF: '10000000-0000-0000-0000-000000000002' } as const
+export const SEED_STAFF_PERMISSIONS = ['BATCH_CREATE', 'BATCH_READ', 'INVENTORY_READ', 'INVENTORY_WRITE', 'MACHINE_READ', 'ORDER_READ', 'PRODUCT_READ'] as const
+const seedRoles = (): MockRole[] => [
+  { id: SEED_ROLE_IDS.ADMIN, name: 'ADMIN', description: 'System administrator', permissions: SEED_PERMISSIONS.map(permission => permission.code) },
+  { id: SEED_ROLE_IDS.STAFF, name: 'STAFF', description: 'Machine operations and inventory staff', permissions: [...SEED_STAFF_PERMISSIONS] },
+]
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -47,17 +79,18 @@ export function createStore(nowMs: number): MockStore {
   const iso = (offset: number) => new Date(nowMs + offset).toISOString()
   const stamp = { createdAt: iso(-30 * DAY), updatedAt: iso(-DAY) }
 
+  // Account ids use the 11000000 prefix so they never equal the V8 role ids (10000000-…-1/2) used by the roles API.
   const users: MockUser[] = [
-    { id: uuid('10000000', 1), email: MOCK_ACCOUNTS.admin, fullName: 'Quản trị viên', phone: '0900000001', status: 'ACTIVE', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, ...stamp },
-    { id: uuid('10000000', 2), email: MOCK_ACCOUNTS.staff, fullName: 'Nhân viên vận hành', phone: '0900000002', status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
-    { id: uuid('10000000', 3), email: 'staff.inactive@freshvend.test', fullName: 'Nhân viên đã nghỉ', phone: null, status: 'INACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
-    { id: uuid('10000000', 4), email: 'staff.locked@freshvend.test', fullName: 'Nhân viên bị khóa', phone: null, status: 'LOCKED', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
+    { id: uuid('11000000', 1), email: MOCK_ACCOUNTS.admin, fullName: 'Quản trị viên', phone: '0900000001', status: 'ACTIVE', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, ...stamp },
+    { id: uuid('11000000', 2), email: MOCK_ACCOUNTS.staff, fullName: 'Nhân viên vận hành', phone: '0900000002', status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
+    { id: uuid('11000000', 3), email: 'staff.inactive@freshvend.test', fullName: 'Nhân viên đã nghỉ', phone: null, status: 'INACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
+    { id: uuid('11000000', 4), email: 'staff.locked@freshvend.test', fullName: 'Nhân viên bị khóa', phone: null, status: 'LOCKED', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, ...stamp },
     // Screen A2 needs a second ACTIVE admin (so it can be locked, leaving the signed-in admin as the last one), a LOCKED
     // admin (not counted as active) and a few more staff. Same fake passwords; only the first admin/staff are documented.
-    { id: uuid('10000000', 5), email: 'admin.ca2@freshvend.test', fullName: 'Trần Thị Quản Lý', phone: '0900000005', status: 'ACTIVE', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, createdAt: iso(-20 * DAY), updatedAt: iso(-2 * DAY) },
-    { id: uuid('10000000', 6), email: 'admin.locked@freshvend.test', fullName: 'Quản trị viên cũ', phone: null, status: 'LOCKED', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, createdAt: iso(-60 * DAY), updatedAt: iso(-10 * DAY) },
-    { id: uuid('10000000', 7), email: 'kho.quan1@freshvend.test', fullName: 'Lê Văn Nạp Hàng', phone: '0900000007', status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, createdAt: iso(-5 * DAY), updatedAt: iso(-5 * DAY) },
-    { id: uuid('10000000', 8), email: 'ca.dem@freshvend.test', fullName: 'Phạm Thị Ca Đêm', phone: null, status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, createdAt: iso(-3 * DAY), updatedAt: iso(-3 * DAY) },
+    { id: uuid('11000000', 5), email: 'admin.ca2@freshvend.test', fullName: 'Trần Thị Quản Lý', phone: '0900000005', status: 'ACTIVE', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, createdAt: iso(-20 * DAY), updatedAt: iso(-2 * DAY) },
+    { id: uuid('11000000', 6), email: 'admin.locked@freshvend.test', fullName: 'Quản trị viên cũ', phone: null, status: 'LOCKED', roles: ['ADMIN'], password: MOCK_PASSWORDS.admin, createdAt: iso(-60 * DAY), updatedAt: iso(-10 * DAY) },
+    { id: uuid('11000000', 7), email: 'kho.quan1@freshvend.test', fullName: 'Lê Văn Nạp Hàng', phone: '0900000007', status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, createdAt: iso(-5 * DAY), updatedAt: iso(-5 * DAY) },
+    { id: uuid('11000000', 8), email: 'ca.dem@freshvend.test', fullName: 'Phạm Thị Ca Đêm', phone: null, status: 'ACTIVE', roles: ['STAFF'], password: MOCK_PASSWORDS.staff, createdAt: iso(-3 * DAY), updatedAt: iso(-3 * DAY) },
   ]
   const adminId = users[0].id
   const staffId = users[1].id
@@ -160,5 +193,8 @@ export function createStore(nowMs: number): MockStore {
   const completed = orders.find(order => order.status === 'COMPLETED')!
   payments.push({ id: uuid('a0000000', 99), orderId: completed.id, provider: 'MOCK', status: 'SUCCESS', amount: completed.totalAmount, paymentReference: 'MOCKREFDUP001', transactionId: 'TXNDUP000001', createdAt: iso(-2 * HOUR), paidAt: iso(-2 * HOUR), expiredAt: iso(-HOUR) })
 
-  return { users, products, machines, slots, credentials, batches, items, transactions, orders, payments, webhookLogs }
+  return {
+    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, webhookLogs,
+    permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
+  }
 }

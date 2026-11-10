@@ -6,13 +6,14 @@ import type { Permission, Subject } from './permissions.ts'
 
 export type PageKey =
   | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
-  | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail'
+  | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
 
 /** `roles` lists the roles that hold `permission` today (derived, for display and older callers). */
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
 
 const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/users$/, page: 'users', permission: 'USER_READ' },
+  { pattern: /^\/admin\/roles$/, page: 'roles', permission: 'PERMISSION_MANAGE' },
   { pattern: /^\/admin\/products$/, page: 'products', permission: 'PRODUCT_READ' },
   { pattern: /^\/admin\/machines$/, page: 'machines', permission: 'MACHINE_READ' },
   { pattern: /^\/admin\/machines\/([^/]+)$/, page: 'machine-detail', permission: 'MACHINE_READ' },
@@ -48,6 +49,7 @@ export const NAV: NavItem[] = [
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },
   { to: '/admin/users', label: 'Tài khoản', group: 'Hệ thống', permission: 'USER_READ', match: ['users'] },
+  { to: '/admin/roles', label: 'Vai trò & quyền', group: 'Hệ thống', permission: 'PERMISSION_MANAGE', match: ['roles'] },
 ]
 
 /** Breadcrumb trail for a route: group, section (linked) and, on detail screens, the record level. */

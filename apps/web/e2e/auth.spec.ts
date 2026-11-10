@@ -3,7 +3,7 @@
 import { expect, test } from '@playwright/test'
 import { ACCOUNTS, loginAs, typeLogin } from './support.ts'
 
-const ADMIN_ONLY = ['Tài khoản', 'Thanh toán', 'Webhook thanh toán']
+const ADMIN_ONLY = ['Tài khoản', 'Vai trò & quyền', 'Thanh toán', 'Webhook thanh toán']
 const SHARED = ['Máy bán hàng', 'Sản phẩm', 'Lô hàng', 'Tồn kho', 'Đơn hàng']
 
 test('ADMIN đăng nhập bằng bàn phím và thấy đủ menu', async ({ page }) => {

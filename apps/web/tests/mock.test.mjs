@@ -119,7 +119,7 @@ test('every endpoint the web calls has a handler', async () => {
   await signIn(state)
   const notImplemented = failsWith(501)
   const calls = [
-    () => usersApi.list({}), () => usersApi.create({ email: 'n@freshvend.test', password: 'long-enough-password', fullName: 'N' }), () => usersApi.update('10000000-0000-0000-0000-000000000002', { fullName: 'S' }), () => usersApi.setStatus('10000000-0000-0000-0000-000000000002', 'ACTIVE'),
+    () => usersApi.list({}), () => usersApi.create({ email: 'n@freshvend.test', password: 'long-enough-password', fullName: 'N' }), () => usersApi.update('11000000-0000-0000-0000-000000000002', { fullName: 'S' }), () => usersApi.setStatus('11000000-0000-0000-0000-000000000002', 'ACTIVE'),
     () => productsApi.list({}), () => productsApi.create({ sku: 'NEW-1', name: 'N', price: 1000 }), () => productsApi.update(PRODUCT_ID, { name: 'N', price: 1000 }), () => productsApi.setStatus(PRODUCT_ID, 'ACTIVE'),
     () => machinesApi.list({}), () => machinesApi.get(MACHINE_ID), () => machinesApi.create({ code: 'M', name: 'M', location: 'L', minTemperature: 1, maxTemperature: 2, minHumidity: 1, maxHumidity: 2 }), () => machinesApi.update(MACHINE_ID, { name: 'M', location: 'L', minTemperature: 1, maxTemperature: 2, minHumidity: 1, maxHumidity: 2 }), () => machinesApi.setStatus(MACHINE_ID, 'ACTIVE'),
     () => slotsApi.list(MACHINE_ID, {}), () => slotsApi.create(MACHINE_ID, { slotCode: 'Z9', capacity: 3 }), () => slotsApi.update(MACHINE_ID, SLOT_ID, { capacity: 10 }), () => slotsApi.setStatus(MACHINE_ID, SLOT_ID, 'ACTIVE'), () => slotsApi.summary(MACHINE_ID, SLOT_ID),

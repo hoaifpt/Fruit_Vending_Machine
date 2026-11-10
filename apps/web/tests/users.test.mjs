@@ -10,7 +10,7 @@ import {
   lockBlockReason, lockBlocks, readUserFilters, statusAction, updateUserBody, userListQuery, validateCreateUser, validateUpdateUser,
 } from '../src/admin/users.ts'
 
-const ME = { id: '10000000-0000-0000-0000-000000000001', email: 'admin@freshvend.test' }
+const ME = { id: '11000000-0000-0000-0000-000000000001', email: 'admin@freshvend.test' }
 const user = (patch = {}) => ({ id: '10000000-0000-0000-0000-000000000009', email: 'x@freshvend.test', fullName: 'X', phone: null, status: 'ACTIVE', roles: ['STAFF'], createdAt: '', updatedAt: '', ...patch })
 
 test('lock is refused on yourself, with the reason', () => {
@@ -118,7 +118,7 @@ test('mock seed exercises both reasons: two active admins, one locked admin, sev
 
 test('mock status rules match the backend: self is 409, also once the actor is the last active admin', async () => {
   await mockAdmin()
-  const me = '10000000-0000-0000-0000-000000000001', second = '10000000-0000-0000-0000-000000000005'
+  const me = '11000000-0000-0000-0000-000000000001', second = '11000000-0000-0000-0000-000000000005'
   await assert.rejects(usersApi.setStatus(me, 'LOCKED'), conflict)
   await usersApi.setStatus(second, 'LOCKED')
   assert.equal((await usersApi.list(ACTIVE_ADMIN_QUERY)).totalElements, 1)

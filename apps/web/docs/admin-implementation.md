@@ -7,6 +7,7 @@ Phạm vi: `apps/web` cho ADMIN/STAFF, gọi API thật theo `api-contract/api.y
 | Đường dẫn | ADMIN | STAFF |
 | --- | --- | --- |
 | `/admin/users` | Danh sách, tạo STAFF, sửa hồ sơ, đổi trạng thái | Ẩn |
+| `/admin/roles` | Ma trận quyền × vai trò, lưu một lần (cần `PERMISSION_MANAGE`; API #48, đang dùng hợp đồng nháp `api-contract/drafts/roles-permissions.yaml`) | Ẩn |
 | `/admin/products` | Xem, tạo, sửa, đổi trạng thái | Chỉ xem |
 | `/admin/machines`, `/admin/machines/:id` | Xem, đăng ký, cấu hình, đổi trạng thái; ngăn chứa; khóa kiosk | Chỉ xem (máy và ngăn) |
 | `/admin/batches` | Tạo và xem (lô không sửa/xóa) | Tạo và xem |
@@ -16,6 +17,8 @@ Phạm vi: `apps/web` cho ADMIN/STAFF, gọi API thật theo `api-contract/api.y
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Chỉ xem | Ẩn |
 
 Điều hướng và nút thao tác bị ẩn theo vai trò; truy cập thẳng URL không đủ quyền hiện "Không có quyền truy cập". `/admin` và `/staff` chuyển tới màn hình đầu tiên mà vai trò được xem.
+
+Giới hạn hiện tại của màn Vai trò & quyền (`/admin/roles`, FE 3.2): máy chủ (#48) áp dụng thay đổi quyền ngay từ yêu cầu kế tiếp của mọi tài khoản thuộc vai trò, nhưng web vẫn suy menu/route/nút từ vai trò qua bảng tĩnh `ROLE_PERMISSIONS`. Vì vậy cấp thêm quyền cho STAFF chưa làm hiện menu mới, còn quyền bị thu hồi thì menu vẫn hiện và API trả 403 kèm lời giải thích. Hết giới hạn khi có API thông tin phiên (`GET /auth/me`, hợp đồng nháp `auth-me.yaml`); mock `/auth/me` đã đọc quyền từ bảng vai trò trong bộ nhớ nên phản ánh ngay thay đổi trên màn A3. Màn có cảnh báo khi rời trang còn thay đổi chưa lưu (link trong app, Back, Đăng xuất, đóng tab); hết phiên thì chuyển thẳng về đăng nhập, không hỏi.
 
 Quy tắc quyền nằm ở một chỗ: `src/admin/permissions.ts` (`can(subject, permission)`, tên quyền theo `api-contract/drafts/auth-me.yaml`); route, mục điều hướng và nút chỉ hỏi `can`. Hiện quyền suy ra từ vai trò trong JWT; khi backend có `GET /auth/me` (BE 3.1) thì truyền `permissions` của API vào `Subject.permissions`. Truy cập thẳng URL không đủ quyền bị chặn trước khi màn hình gọi API. API trả 403 thì màn hiện cùng khối giải thích (vai trò hiện tại, liên hệ quản trị viên, về trang đầu), không đăng xuất. API trả 401 hoặc token hết hạn: xóa phiên, chuyển một lần tới `/login?next=<trang + query hiện tại>`; `next` chỉ nhận đường dẫn nội bộ bắt đầu bằng `/admin`.
 

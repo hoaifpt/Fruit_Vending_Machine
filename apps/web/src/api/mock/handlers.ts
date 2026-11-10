@@ -2,10 +2,9 @@
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
 import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
-import type { MockCredential, MockItem, MockOrder, MockPayment, MockStore, MockUser } from './seed.ts'
+import type { MockCredential, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
-import { ROLE_PERMISSIONS } from '../../admin/permissions.ts'
-import type { Role } from '../session.ts'
+import { PERMISSIONS } from '../../admin/permissions.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -18,7 +17,8 @@ export interface HandlerContext {
   machineId: string
   options: { autoPayMs: number; dispenseMs: number; autoPay: boolean }
 }
-type Policy = 'public' | 'any' | 'admin' | 'kiosk'
+/** `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now). */
+export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string }
 export interface Route { method: string; pattern: RegExp; policy: Policy; handle: (ctx: HandlerContext) => Reply }
 
 const RESERVATION_MS = 5 * 60_000
@@ -56,6 +56,40 @@ function within(query: URLSearchParams, fromName: string, toName: string, value:
   return (!from || at >= Date.parse(from)) && (!to || at < Date.parse(to))
 }
 const flag = (query: URLSearchParams, name: string, value: boolean) => !query.get(name) || (query.get(name) === 'true') === value
+
+/** Effective permissions of an account: the union of its roles' sets, read from the store on every request (like #48). */
+export function permissionsOfUser(store: MockStore, user: Pick<MockUser, 'roles'>): string[] {
+  const names = new Set(user.roles.map(role => role.replace(/^ROLE_/, '')))
+  return [...new Set(store.roles.filter(role => names.has(role.name)).flatMap(role => role.permissions))].sort()
+}
+
+// Roles & permissions, exactly as RolePermissionService of backend #48 (messages are the backend's, in English).
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Permissions.ADMIN_REQUIRED of #48, same order (it shapes the 409 message). */
+const ADMIN_REQUIRED = ['PERMISSION_MANAGE', 'USER_WRITE'] as const
+const roleView = (role: MockRole) => ({ id: role.id, name: role.name, description: role.description, permissions: [...role.permissions].sort() })
+function findRole(ctx: HandlerContext): MockRole {
+  const id = decode(ctx.params.id)
+  if (!UUID_PATTERN.test(id)) throw new MockHttpError(400, 'Invalid request parameter', { id: 'Must be a valid UUID' })
+  const role = ctx.store.roles.find(candidate => candidate.id.toLowerCase() === id.toLowerCase())
+  if (!role) throw notFound('Role not found')
+  return role
+}
+/** Body checks of ReplaceRolePermissionsRequest: @NotNull, @Size(max = 200), @NotBlank items, no other field. */
+function replaceCodes(ctx: HandlerContext): string[] {
+  const form = new Form(ctx.body, ['permissions'])
+  const value = (ctx.body as Record<string, unknown>).permissions
+  if (!Array.isArray(value)) form.reject('permissions', 'must not be null')
+  else if (value.length > 200) form.reject('permissions', 'size must be between 0 and 200')
+  else if (value.some(code => typeof code !== 'string' || !code.trim())) form.reject('permissions', 'must not be blank')
+  form.done()
+  const codes = value as string[]
+  const duplicates = [...new Set(codes.filter((code, index) => codes.indexOf(code) !== index))].sort()
+  if (duplicates.length) throw new MockHttpError(400, 'Duplicate permission codes', { permissions: `Duplicate codes: ${duplicates.join(', ')}` })
+  const unknown = [...new Set(codes.filter(code => !ctx.store.permissions.some(permission => permission.code === code)))].sort()
+  if (unknown.length) throw new MockHttpError(400, 'Unknown permission codes', { permissions: `Unknown codes: ${unknown.join(', ')}` })
+  return codes
+}
 
 const userView = ({ password: _password, ...user }: MockUser) => user
 const credentialView = ({ apiKey: _apiKey, machineId: _machineId, ...credential }: MockCredential) => credential
@@ -209,8 +243,27 @@ export const routes: Route[] = [
   }),
   route('GET', '/auth/me', 'any', ctx => {
     const { id, email, fullName, phone, status, roles } = ctx.user!
-    const data: AuthMe['schemas']['AuthMeResponse'] = { id, email, fullName, phone, status, roles, permissions: [...new Set(roles.flatMap(role => ROLE_PERMISSIONS[role as Role] ?? []))] }
+    // Read from the store's role table like #48 does per request, so a change on screen A3 shows up here at once.
+    // Listed in catalog order (PERMISSIONS of the web), unknown codes last.
+    const rank = (code: string) => { const index = (PERMISSIONS as readonly string[]).indexOf(code); return index < 0 ? PERMISSIONS.length : index }
+    const permissions = permissionsOfUser(ctx.store, ctx.user!).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, 'en'))
+    const data: AuthMe['schemas']['AuthMeResponse'] = { id, email, fullName, phone, status, roles, permissions }
     return ok(data)
+  }),
+
+  // ---- roles & permissions (backend #48, draft api-contract/drafts/roles-permissions.yaml)
+  route('GET', '/permissions', { permission: 'PERMISSION_MANAGE' }, ctx => ok([...ctx.store.permissions].sort((a, b) => a.code.localeCompare(b.code, 'en')).map(permission => ({ ...permission })))),
+  route('GET', '/roles', { permission: 'PERMISSION_MANAGE' }, ctx => ok([...ctx.store.roles].sort((a, b) => a.name.localeCompare(b.name, 'en')).map(roleView))),
+  route('GET', '/roles/:id', { permission: 'PERMISSION_MANAGE' }, ctx => ok(roleView(findRole(ctx)))),
+  route('PUT', '/roles/:id/permissions', { permission: 'PERMISSION_MANAGE' }, ctx => {
+    // Same order as the backend: body (400), role (404), lockout guard (409).
+    const codes = replaceCodes(ctx)
+    const role = findRole(ctx)
+    if (role.name === 'ADMIN' && ADMIN_REQUIRED.some(code => !codes.includes(code))) {
+      throw conflict(`The ADMIN role must keep ${ADMIN_REQUIRED.join(' and ')}; otherwise nobody could manage users or permissions`)
+    }
+    role.permissions = [...codes].sort()
+    return ok(roleView(role))
   }),
 
   // ---- users

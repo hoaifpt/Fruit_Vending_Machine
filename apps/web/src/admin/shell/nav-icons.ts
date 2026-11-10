@@ -1,4 +1,4 @@
-import { Apple, Boxes, CreditCard, ReceiptText, Refrigerator, UserCog, Warehouse, Webhook } from 'lucide-react'
+import { Apple, Boxes, CreditCard, KeyRound, ReceiptText, Refrigerator, UserCog, Warehouse, Webhook } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export const NAV_ICONS: Record<string, LucideIcon> = {
@@ -10,4 +10,5 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin/payments': CreditCard,
   '/admin/webhook-logs': Webhook,
   '/admin/users': UserCog,
+  '/admin/roles': KeyRound,
 }

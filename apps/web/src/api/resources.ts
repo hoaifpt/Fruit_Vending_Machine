@@ -1,6 +1,7 @@
 // Typed endpoint functions. Types come from schema.d.ts, generated from api-contract/api.yaml (npm run gen:api).
 import { api, request } from './client.ts'
 import type { components, operations } from './schema'
+import type { components as RolesDraft } from './drafts/roles-permissions'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -92,6 +93,21 @@ export const paymentsApi = {
 export const webhookLogsApi = {
   list: (query: Query<'listPaymentWebhookLogs'>, signal?: AbortSignal) => list<WebhookLogSummary>('/payment-webhook-logs', query, signal),
   get: (logId: string, signal?: AbortSignal) => api.get<WebhookLogDetail>(`/payment-webhook-logs/${id(logId)}`, undefined, signal),
+}
+
+// Roles & permissions (screen A3): draft contract copied from backend #48 (api-contract/drafts/roles-permissions.yaml)
+// until that branch is merged and the paths move into api.yaml. Every call needs PERMISSION_MANAGE.
+type R = RolesDraft['schemas']
+export type RoleWithPermissions = R['RoleResponse']
+export type PermissionInfo = R['PermissionResponse']
+export type ReplaceRolePermissionsBody = R['ReplaceRolePermissionsRequest']
+
+export const rolesApi = {
+  permissions: (signal?: AbortSignal) => api.get<PermissionInfo[]>('/permissions', undefined, signal),
+  list: (signal?: AbortSignal) => api.get<RoleWithPermissions[]>('/roles', undefined, signal),
+  get: (roleId: string, signal?: AbortSignal) => api.get<RoleWithPermissions>(`/roles/${id(roleId)}`, undefined, signal),
+  /** Replaces the whole permission set of one role (not a patch): send every code the role keeps. */
+  replacePermissions: (roleId: string, body: ReplaceRolePermissionsBody) => api.put<RoleWithPermissions>(`/roles/${id(roleId)}/permissions`, body),
 }
 
 export type { Q as QueryParams }
