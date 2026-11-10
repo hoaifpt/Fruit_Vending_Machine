@@ -239,6 +239,32 @@ test.describe('Chi tiết máy (Quản trị viên)', () => {
     await expect(dialog).toHaveCount(0)
   })
 
+  test('Khóa đang hiện: nút Quay lại của trình duyệt hỏi trước khi rời, chọn ở lại thì khóa vẫn còn', async ({ page }) => {
+    // Opened from the list inside the app, so "back" is an in-app move (a full reload would ask through beforeunload).
+    await page.goto('/admin/machines')
+    await page.locator(`a[href^="${DEV_03}"]`).first().click()
+    await page.getByRole('tab', { name: 'Khóa kiosk' }).click()
+    await page.getByRole('button', { name: 'Cấp khóa', exact: true }).click()
+    const dialog = page.getByRole('alertdialog')
+    await dialog.getByRole('button', { name: 'Cấp khóa', exact: true }).click()
+    const key = dialog.getByRole('textbox', { name: 'Khóa kiosk' })
+    await expect(key).toHaveValue(/^fvk_/)
+    const questions: string[] = []
+    page.once('dialog', prompt => { questions.push(prompt.message()); void prompt.dismiss() })
+    // The tab switch replaces the entry, so one step back is the list.
+    await page.evaluate(() => history.back())
+    await expect.poll(() => questions.length).toBe(1)
+    expect(questions[0]).toContain('chỉ hiện lần này')
+    await expect(page).toHaveURL(new RegExp(`${DEV_03}`))
+    await expect(key).toHaveValue(/^fvk_/)
+    // Closing the dialog removes the guard: leaving is no longer asked.
+    await dialog.getByRole('button', { name: 'Tôi đã lưu khóa, đóng' }).click()
+    page.once('dialog', prompt => { questions.push(prompt.message()); void prompt.dismiss() })
+    await page.getByRole('link', { name: 'Sản phẩm' }).first().click()
+    await expect(page).toHaveURL(/\/admin\/products/)
+    expect(questions).toHaveLength(1)
+  })
+
   test('Sửa cấu hình trong Sheet: mã khóa cứng, ngưỡng sai báo dưới ô, lưu thì tên mới hiện ngay', async ({ page }) => {
     await page.goto(DEV_03)
     await page.getByRole('button', { name: 'Sửa cấu hình' }).click()

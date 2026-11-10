@@ -159,7 +159,8 @@ test('mock /machines follows the contract: filters, sort, registration INACTIVE,
 
   await assert.rejects(machinesApi.create(createMachineBody(values({ code: 'dev-machine-01' }))), error => {
     const described = describeSaveError(error)
-    return error.status === 409 && described instanceof ValidationError && described.fieldErrors.code === CODE_TAKEN
+    // The backend's own sentence (MachineService), so the form is tested against what the real API sends.
+    return error.status === 409 && error.message === 'Machine code is already in use' && described instanceof ValidationError && described.fieldErrors.code === CODE_TAKEN
   })
   await assert.rejects(machinesApi.create({ ...createMachineBody(values({ code: 'NEW-1' })), location: 'x'.repeat(501) }), error => error.status === 400 && !!error.fieldErrors.location)
   await assert.rejects(machinesApi.create({ ...createMachineBody(values({ code: 'NEW-1' })), status: 'ACTIVE' }), error => error.status === 400)

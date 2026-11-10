@@ -20,7 +20,7 @@ import { StatusBadge } from '../../components/ui/status-badge.tsx'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime } from '../../lib/format.ts'
-import { navigate, useQueryParams } from '../../lib/router.ts'
+import { navigate, setLeaveGuard, useQueryParams } from '../../lib/router.ts'
 import { statusMeta } from '../../lib/status.ts'
 import { activeFilterCount, clearFiltersPatch, sortParam } from '../../lib/table-query.ts'
 import { ConfirmDialog, DataTable, ErrorState, FormSheet, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, enumOptions, useDialog, useForm } from '../kit.tsx'
@@ -32,7 +32,7 @@ import { lastContact, saleState } from '../machines.ts'
 import type { MachineStatus } from '../machines.ts'
 import {
   MACHINE_STATUS_ACTIONS, SLOT_FILTER_KEYS, SLOT_LIMITS, SLOT_SORT, SLOT_STATUSES, SLOT_STATUS_HELP, TAB_LABELS, createSlotBody,
-  KEY_NOT_RETURNED, describeKeyError, describeSlotError, describeSlotStatusError, describeStatusError, hasActiveKey, issuedKey, issuePrompt, maskedKey, missingForSale,
+  KEY_NOT_RETURNED, describeKeyError, keyLeaveQuestion, describeSlotError, describeSlotStatusError, describeStatusError, hasActiveKey, issuedKey, issuePrompt, maskedKey, missingForSale,
   readDetailTab, readSlotFilters, readiness, slotListQuery, statusTargets, tabSearch, updateSlotBody, validateSlot, visibleTabs,
 } from '../machine-detail.ts'
 import type { DetailTab, ReadinessItem, SlotStatus, SlotValues } from '../machine-detail.ts'
@@ -177,6 +177,7 @@ function Overview({ machine, canWrite, canKeys, canInventory, reload, jumpTo }: 
         Còn thiếu: {missing.map(item => item.label.toLowerCase()).join(', ')}. Máy chủ vẫn cho bật Hoạt động ngay, nhưng kiosk chưa bán được cho tới khi đủ.
       </p>}
       <p className="mt-3! text-[13px] text-muted-foreground">
+        {machine.status === 'INACTIVE' && <>Chỉ nạp được hộp khi máy ở trạng thái Hoạt động hoặc Bảo trì, nên hãy chuyển máy sang một trong hai trạng thái đó trước. </>}
         Sau khi có ngăn, nạp hộp vào ngăn{canInventory ? <> ở <Link to={`/admin/inventory?machineId=${machine.id}`}>Tồn kho</Link></> : ' ở màn Tồn kho'} để kiosk có hàng bán.
       </p>
     </section>
@@ -458,6 +459,15 @@ function IssueKeyDialog({ machine, current, listLoading, close, done }: {
   const [openedWith] = useState(() => current?.credentialId ?? null)
   const prompt = issuePrompt(current, openedWith, listLoading)
   useEffect(() => { if (shown) copyRef.current?.focus() }, [shown])
+  // While the key is being issued or shown, leaving the screen (links, back, logout, closing the tab) asks first.
+  const leaveQuestion = keyLeaveQuestion(pending, shown)
+  useEffect(() => {
+    if (!leaveQuestion) return
+    const onBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    const removeGuard = setLeaveGuard(() => window.confirm(leaveQuestion))
+    return () => { removeGuard(); window.removeEventListener('beforeunload', onBeforeUnload) }
+  }, [leaveQuestion])
 
   async function issue() {
     if (pending) return

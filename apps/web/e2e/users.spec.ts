@@ -164,3 +164,26 @@ for (const theme of THEMES) {
     await auditScreen(page, testInfo, 'users', theme, () => ready(page))
   })
 }
+
+// UX FM3 V1: at tablet width (681–1023px of table) the account table fits its frame, so the Thao tác column (buttons and
+// the reason a lock is refused) is never cut off behind a horizontal scroll inside the table.
+test('Bảng Tài khoản vừa khung ở 768 và 1024px: không cuộn ngang trong bảng, cột Thao tác đọc trọn', async ({ page }) => {
+  await loginAs(page, 'ADMIN')
+  for (const width of [768, 1024]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/admin/users')
+    await ready(page)
+    const layout = await page.evaluate(() => {
+      const wrapper = document.querySelector('[data-slot="data-table"] [aria-busy]') as HTMLElement
+      const frame = wrapper.getBoundingClientRect()
+      // Every action button and refusal reason lies inside the visible frame.
+      const cut = [...wrapper.querySelectorAll('td[data-label="Thao tác"] button, td[data-label="Thao tác"] p')]
+        .map(element => element.getBoundingClientRect()).filter(rect => rect.right > frame.right + 0.5).length
+      return { page: document.documentElement.scrollWidth - document.documentElement.clientWidth, table: wrapper.scrollWidth - wrapper.clientWidth, cut }
+    })
+    expect(layout.page, `${width}px: trang cuộn ngang`).toBeLessThanOrEqual(0)
+    expect(layout.table, `${width}px: bảng cuộn ngang`).toBeLessThanOrEqual(0)
+    expect(layout.cut, `${width}px: phần tử cột Thao tác bị cắt`).toBe(0)
+    await expect(row(page, 'admin@freshvend.test').getByText('Không thể khóa chính bạn.')).toBeVisible()
+  }
+})

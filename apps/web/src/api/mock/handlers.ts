@@ -355,7 +355,7 @@ export const routes: Route[] = [
     const code = form.text('code', 64).toUpperCase()
     form.done()
     checkThresholdOrder(values)
-    if (ctx.store.machines.some(machine => machine.code === code)) throw conflict('Mã máy này đã tồn tại.')
+    if (ctx.store.machines.some(machine => machine.code === code)) throw conflict('Machine code is already in use')
     const at = iso(ctx.now)
     const machine = { id: newId(), code, ...values, status: 'INACTIVE' as const, lastSeenAt: null, createdAt: at, updatedAt: at }
     ctx.store.machines.push(machine)

@@ -138,7 +138,6 @@ export function updateUserBody(values: UpdateUserValues): UpdateUserBody {
 
 const SELF_CONFLICT = /own account|chính mình|chính bạn/i
 const LAST_ADMIN_CONFLICT = /last active admin(istrator)?|cuối cùng/i
-const EMAIL_CONFLICT = /email/i
 
 export const STATUS_CONFLICT_TEXT = {
   self: 'Không thể khóa hoặc ngừng hoạt động tài khoản của chính bạn. Hãy nhờ một Quản trị viên khác nếu cần.',
@@ -158,10 +157,13 @@ export function describeStatusError(error: unknown): unknown {
 }
 
 /**
- * A duplicate-email 409 from POST /users, reported once: in Vietnamese under the email field, with the usual
+ * A 409 from POST /users means a taken email, reported once: in Vietnamese under the email field, with the usual
  * "check the marked fields" line at form level (as for a 400), not the same sentence twice.
+ * `email` is the only unique column of `users` the form fills (V1 migration; the role link is set by the server), so
+ * both the service check ("Email is already in use") and the constraint hit by two simultaneous creates ("Request
+ * conflicts with existing data") mean the same thing, as for SKU (products.ts) and machine code (machines.ts).
  */
 export function describeCreateError(error: unknown): unknown {
-  if (!(error instanceof ApiError) || error.status !== 409 || !EMAIL_CONFLICT.test(error.message)) return error
+  if (!(error instanceof ApiError) || error.status !== 409) return error
   return new ValidationError({ email: EMAIL_TAKEN })
 }

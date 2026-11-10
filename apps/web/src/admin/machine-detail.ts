@@ -249,6 +249,16 @@ export const KEY_CHANGED = 'Khóa này vừa bị thay đổi ở nơi khác (c�
 export const KEY_NOT_RETURNED = 'Đã cấp khóa nhưng không nhận được khóa từ máy chủ, nên không hiển thị được. Hãy cấp lại khóa mới; khóa vừa cấp sẽ bị thu hồi.'
 
 /**
+ * Question asked before leaving the screen while a key is being issued or is on screen (the plain key exists only in the
+ * dialog, so leaving loses it for good); null when there is nothing to lose.
+ */
+export function keyLeaveQuestion(pending: boolean, shown: boolean): string | null {
+  if (shown) return 'Khóa kiosk mới chỉ hiện lần này; rời màn hình thì không ai xem lại được. Bạn đã sao chép và lưu khóa chưa? Vẫn rời đi?'
+  if (pending) return 'Đang cấp khóa kiosk. Rời màn hình bây giờ thì khóa mới (nếu cấp xong) sẽ không hiện lại và phải cấp khóa khác. Vẫn rời đi?'
+  return null
+}
+
+/**
  * Errors of issuing/revoking a key in Vietnamese. Issuing locks the machine row (KioskCredentialService.issue), so two
  * admins issuing at once are run one after the other, not refused: the second simply revokes the first one's key. The
  * only 409 the service raises is "Could not allocate a unique credential prefix" (retry). Any other 409 (the generic

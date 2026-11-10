@@ -82,7 +82,9 @@ function simulatedFieldErrors(body: unknown): Record<string, string> | undefined
   return field ? { [field]: 'Giá trị không hợp lệ (mô phỏng).' } : undefined
 }
 
-function decodeClaims(token: string): { sub?: unknown; exp?: unknown; iat?: unknown; iatMs?: unknown } | null {
+interface TokenClaims { sub?: unknown; email?: unknown; roles?: unknown; exp?: unknown; iat?: unknown; iatMs?: unknown }
+
+function decodeClaims(token: string): TokenClaims | null {
   try {
     const payload = (token.split('.')[1] ?? '').replace(/-/g, '+').replace(/_/g, '/')
     return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload), char => char.charCodeAt(0))))
@@ -109,10 +111,27 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
   /** Set per request by the `expire` scenario: tokens issued before this instant are treated as expired. */
   let expiredBefore: number | null = null
 
+  // Sign-in goes to the real backend when `auth` is not mocked (for example VITE_API_MOCK=roles): its tokens name
+  // accounts the mock store does not have.
+  const realSignIn = !selection.all && !enabledGroups.has('auth')
+
+  /**
+   * With a real sign-in, a token whose `sub` is not in the mock store is served as a stand-in account built from its
+   * own claims (id, email, `roles` such as ROLE_ADMIN), so mocking one group does not sign the user out. The stand-in is
+   * not added to the store; the role table of the mock still decides its permissions. Expiry is checked as usual.
+   */
+  function standIn(claims: TokenClaims | null): MockUser | undefined {
+    if (!realSignIn || typeof claims?.sub !== 'string' || !claims.sub || !Array.isArray(claims.roles)) return undefined
+    const roles = claims.roles.filter((role): role is string => typeof role === 'string').map(role => role.replace(/^ROLE_/, ''))
+    const email = typeof claims.email === 'string' ? claims.email : ''
+    const at = new Date(options.now()).toISOString()
+    return { id: claims.sub, email, fullName: email || 'Tài khoản đăng nhập thật', phone: null, status: 'ACTIVE', roles, password: '', createdAt: at, updatedAt: at }
+  }
+
   function authenticate(policy: Exclude<Policy, 'public' | 'kiosk'>, authorization: string | null): MockUser {
     const token = authorization?.replace(/^Bearer\s+/i, '')
     const claims = token ? decodeClaims(token) : null
-    const user = store.users.find(candidate => candidate.id === claims?.sub)
+    const user = store.users.find(candidate => candidate.id === claims?.sub) ?? standIn(claims)
     const issuedAt = typeof claims?.iatMs === 'number' ? claims.iatMs : typeof claims?.iat === 'number' ? claims.iat * 1000 : 0
     if (!user || user.status !== 'ACTIVE' || typeof claims?.exp !== 'number' || claims.exp * 1000 <= options.now() || (expiredBefore !== null && issuedAt < expiredBefore)) {
       throw new MockHttpError(401, 'Authentication required or access token invalid')

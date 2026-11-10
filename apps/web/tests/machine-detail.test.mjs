@@ -8,7 +8,7 @@ import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { NEW_MACHINE, UNKNOWN_FIELD, createMachineBody } from '../src/admin/machines.ts'
 import {
   KEY_CHANGED, KEY_GONE, KEY_NOT_RETURNED, KEY_RACE, MACHINE_GONE, MACHINE_STATUS_ACTIONS, MALFORMED, PREFIX_RETRY, SLOT_CODE_TAKEN, SLOT_CONFLICT, SLOT_GONE, SLOT_SORT,
-  STATUS_CONFLICT, createSlotBody, describeKeyError, describeSlotError, describeSlotStatusError, describeStatusError, hasActiveKey, issuePrompt, issuedKey, maskedKey,
+  STATUS_CONFLICT, createSlotBody, describeKeyError, describeSlotError, describeSlotStatusError, describeStatusError, hasActiveKey, issuePrompt, issuedKey, keyLeaveQuestion, maskedKey,
   missingForSale, parseCapacity, readDetailTab, readSlotFilters, readiness, slotListQuery, statusTargets, tabSearch, updateSlotBody, validateSlot,
   visibleTabs,
 } from '../src/admin/machine-detail.ts'
@@ -188,4 +188,11 @@ test('mock: product → machine → 2 slots → key (shown once) → ACTIVE, wit
   await assert.rejects(slotsApi.create(machine.id, { slotCode: 'B1', capacity: 2 }), error => error.status === 403)
   await assert.rejects(kioskCredentialsApi.list(machine.id), error => error.status === 403)
   await assert.rejects(machinesApi.setStatus(machine.id, 'INACTIVE'), error => error.status === 403)
+})
+
+test('leaving the screen asks first while a kiosk key is being issued or shown, never otherwise', () => {
+  assert.equal(keyLeaveQuestion(false, false), null)
+  assert.match(keyLeaveQuestion(true, false), /Đang cấp khóa kiosk/)
+  assert.match(keyLeaveQuestion(false, true), /chỉ hiện lần này/)
+  assert.equal(keyLeaveQuestion(true, true), keyLeaveQuestion(false, true))
 })

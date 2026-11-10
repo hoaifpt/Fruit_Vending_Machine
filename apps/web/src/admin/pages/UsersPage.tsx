@@ -53,7 +53,9 @@ function UsersPage() {
 
   const columns: Column<User>[] = [
     { head: 'Họ tên', cell: user => <span className="font-medium">{user.fullName}{isSelf(user, actor) && <span className="ml-1.5 text-xs font-normal text-muted-foreground">(Bạn)</span>}</span> },
-    { head: 'Email', cell: user => user.email },
+    // Tablet width (table 681–1023px): a long email may break anywhere and the two action buttons may stack, so the
+    // table fits its frame and the Thao tác column (with the reason a lock is refused) is never cut off (UX FM3 V1).
+    { head: 'Email', cell: user => <span className="@min-[681px]:@max-[1023px]:wrap-anywhere">{emailParts(user.email)}</span> },
     { head: 'Điện thoại', secondary: true, cell: user => user.phone || '—' },
     { head: 'Vai trò', cell: user => <span className="inline-flex flex-wrap gap-1">{user.roles.length ? user.roles.map(role => <Badge key={role} value={role.replace(/^ROLE_/, '')} />) : '—'}</span> },
     { head: 'Trạng thái', cell: user => <Badge domain="user" value={user.status} /> },
@@ -95,6 +97,12 @@ function UsersPage() {
   </>
 }
 
+/** An email with a preferred line break before "@", so a narrow column breaks there rather than mid-name. */
+function emailParts(email: string) {
+  const at = email.lastIndexOf('@')
+  return at > 0 ? <>{email.slice(0, at)}<wbr />{email.slice(at)}</> : email
+}
+
 /** Edit plus one status action. A refused "Khóa" stays focusable (aria-disabled) and says why, as visible text linked to the button. */
 function RowActions({ user, blocks, onEdit, onLock, onActivate }: {
   user: User; blocks: LockBlock[]; onEdit: () => void; onLock: () => void; onActivate: (label: string) => void
@@ -103,7 +111,7 @@ function RowActions({ user, blocks, onEdit, onLock, onActivate }: {
   const action = statusAction(user.status)
   const blocked = blocks.length > 0
   return <div className="flex flex-col items-end gap-1 @min-[681px]:items-start">
-    <div className="flex flex-wrap justify-end gap-1.5 @min-[681px]:flex-nowrap @min-[681px]:justify-start">
+    <div className="flex flex-wrap justify-end gap-1.5 @min-[681px]:justify-start @min-[1024px]:flex-nowrap">
       <Button type="button" size="sm" variant="outline" data-focus-key={`user-edit-${user.id}`} aria-label={`Sửa ${user.fullName}`} onClick={onEdit}><Pencil aria-hidden="true" />Sửa</Button>
       {action.kind === 'lock'
         ? <Button type="button" size="sm" variant="outline" data-focus-key={`user-status-${user.id}`} aria-label={`Khóa ${user.fullName}`}

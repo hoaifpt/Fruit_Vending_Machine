@@ -525,3 +525,34 @@ test('installMock plugs into the client once, logs it, and stays off when empty'
   await assert.rejects(request('GET', '/products'), failsWith(401))
   assert.equal(realCalls, 1)
 })
+
+/** An unsigned token shaped like the backend's (JwtService: sub, email, roles as ROLE_*), for an account the mock store lacks. */
+function realBackendToken({ sub = '99999999-0000-0000-0000-000000000001', roles = ['ROLE_ADMIN'], exp = Math.floor(Date.now() / 1000) + 900 } = {}) {
+  const part = value => Buffer.from(JSON.stringify(value)).toString('base64url')
+  return `${part({ alg: 'HS256', typ: 'JWT' })}.${part({ sub, email: 'real.admin@freshvend.vn', roles, iat: Math.floor(Date.now() / 1000), exp })}.signature`
+}
+
+test('one mocked group with the real sign-in: a real token is served by role instead of signing the user out', async () => {
+  const { fetcher, state } = setup({ mode: 'roles' })
+  const call = (path, token) => fetcher(`/api/v1${path}`, { headers: { Authorization: `Bearer ${token}` } })
+  const admin = await call('/roles', realBackendToken())
+  assert.equal(admin.status, 200)
+  assert.ok((await admin.json()).data.some(role => role.name === 'ADMIN'))
+  // The mock's role table still decides: a real STAFF token is refused like on the backend, not signed out.
+  assert.equal((await call('/roles', realBackendToken({ roles: ['ROLE_STAFF'] }))).status, 403)
+  // Expired, or no roles claim: still 401.
+  assert.equal((await call('/roles', realBackendToken({ exp: Math.floor(Date.now() / 1000) - 10 }))).status, 401)
+  const noRoles = `${realBackendToken().split('.')[0]}.${Buffer.from(JSON.stringify({ sub: 'x', exp: Math.floor(Date.now() / 1000) + 900 })).toString('base64url')}.s`
+  assert.equal((await call('/roles', noRoles)).status, 401)
+  // Groups that are not mocked still go to the real network.
+  await call('/products', realBackendToken())
+  assert.deepEqual(state.realCalls, ['/api/v1/products'])
+})
+
+test('with auth mocked, an account missing from the mock store is still refused', async () => {
+  for (const mode of ['all', 'auth,roles']) {
+    const { fetcher } = setup({ mode })
+    const response = await fetcher('/api/v1/roles', { headers: { Authorization: `Bearer ${realBackendToken()}` } })
+    assert.equal(response.status, 401, mode)
+  }
+})

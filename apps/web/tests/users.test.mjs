@@ -92,8 +92,12 @@ test('409s are explained in Vietnamese; other conflicts keep their message', () 
   const duplicate = describeCreateError(new ApiError(409, 'Email is already in use'))
   assert.ok(duplicate instanceof ValidationError)
   assert.deepEqual(describeFormFailure(duplicate), { message: CHECK_FIELDS, fieldErrors: { email: EMAIL_TAKEN } })
-  const other = new ApiError(409, 'Thao tác xung đột.')
-  assert.equal(describeCreateError(other), other)
+  // Two simultaneous creates hit the database constraint: the backend's generic English sentence is still a taken email.
+  for (const message of ['Request conflicts with existing data', 'Thao tác xung đột.']) {
+    assert.deepEqual(describeFormFailure(describeCreateError(new ApiError(409, message))), { message: CHECK_FIELDS, fieldErrors: { email: EMAIL_TAKEN } })
+  }
+  const notConflictCreate = new ApiError(400, 'Validation failed')
+  assert.equal(describeCreateError(notConflictCreate), notConflictCreate)
 })
 
 /** Real client against a fresh mock store, signed in as the documented mock admin. */

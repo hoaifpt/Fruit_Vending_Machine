@@ -57,11 +57,15 @@ async function submitNewUser(page: Page, scenario: string) {
   return dialog
 }
 
-test('409 khi tạo tài khoản hiện thông điệp nghiệp vụ, không thay bằng câu chung', async ({ page }) => {
+// UX FM3 V2: email is the only unique column of users the form fills, so any 409 of POST /users (also the backend's
+// generic "Request conflicts with existing data" of two simultaneous creates) is a taken email, said under that field.
+test('409 khi tạo tài khoản: báo email đã dùng dưới ô Email bằng tiếng Việt, cấp form là câu chung', async ({ page }) => {
   const dialog = await submitNewUser(page, '409')
-  await expect(dialog.getByRole('alert')).toHaveText('Thao tác xung đột với trạng thái hiện tại của dữ liệu.')
-  await expect(dialog.getByText('Vui lòng kiểm tra các trường được đánh dấu.')).toHaveCount(0)
-  await expect(dialog.getByLabel('Email')).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(dialog.getByRole('alert')).toHaveText('Vui lòng kiểm tra các trường được đánh dấu.')
+  const email = dialog.getByLabel('Email')
+  await expect(email).toHaveAttribute('aria-invalid', 'true')
+  await expect(email).toHaveAccessibleDescription('Email này đã được dùng cho một tài khoản khác. Hãy dùng email khác.')
+  await expect(dialog.getByText('Thao tác xung đột với trạng thái hiện tại của dữ liệu.')).toHaveCount(0)
 })
 
 test('400 khi tạo tài khoản: lỗi tại ô (không phải role=alert) và một câu chung cấp form', async ({ page }) => {

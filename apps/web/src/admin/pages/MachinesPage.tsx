@@ -106,7 +106,11 @@ export function MachineSheet({ machine, close, done }: { machine?: Machine; clos
       try {
         if (machine) await machinesApi.update(machine.id, updateMachineBody(values))
         else await machinesApi.create(createMachineBody(values))
-      } catch (error) { throw describeSaveError(error, mode) }
+      } catch (error) {
+        // Editing a machine that is gone (404) or changed meanwhile (409): reload behind the sheet, as for slots and status.
+        if (editing && error instanceof ApiError && (error.status === 404 || error.status === 409)) done()
+        throw describeSaveError(error, mode)
+      }
       done()
     }}>
     {editing
