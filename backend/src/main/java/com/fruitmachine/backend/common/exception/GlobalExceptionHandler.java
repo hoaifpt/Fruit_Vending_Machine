@@ -44,7 +44,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<Object> handleBadRequest(BadRequestException ex, WebRequest request) {
-        return error(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), Map.of(), request);
+        return error(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), ex.getFieldErrors(), request);
     }
 
     @ExceptionHandler(ConflictException.class)

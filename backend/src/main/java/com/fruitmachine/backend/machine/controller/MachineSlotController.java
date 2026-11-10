@@ -16,6 +16,7 @@ import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,7 +36,7 @@ public class MachineSlotController {
     private final MachineSlotService slots;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     @Operation(operationId = "listMachineSlots", summary = "List slots belonging to a machine",
             description = "ADMIN or STAFF. Parent must exist; all parent machine statuses allow configuration reads. Database pagination with optional ACTIVE/INACTIVE/ERROR filter. "
                     + "Default page 0, size 20; size 1 to 100. Default slotCode,asc with UUID ascending tie-break. Out-of-range pages are empty, missing parent is 404.")
@@ -51,7 +52,7 @@ public class MachineSlotController {
     }
 
     @GetMapping("/{slotId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     @Operation(operationId = "getMachineSlot", summary = "Get a slot in the specified machine",
             description = "ADMIN or STAFF. Looks up both machineId and slotId; cross-machine access returns 404. Returns only slot fields and parent UUID, no nested entities or inventory.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Slot configuration")
@@ -62,7 +63,7 @@ public class MachineSlotController {
     }
 
     @PostMapping(consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "createMachineSlot", summary = "Configure a new machine slot",
             description = "ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. "
                     + "Accepts only slotCode (nonblank, stripped/uppercase, at most 32 characters) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). "
@@ -80,7 +81,7 @@ public class MachineSlotController {
     }
 
     @PutMapping(value = "/{slotId}", consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "updateMachineSlot", summary = "Replace slot capacity",
             description = "ADMIN only. Capacity must be a positive 32-bit JSON integer token; fractional numbers and numeric strings are rejected. "
                     + "slotCode/machineId/status/id/timestamps and unknown fields are rejected. Cross-machine access is 404. Preserves related records. "
@@ -94,7 +95,7 @@ public class MachineSlotController {
     }
 
     @PatchMapping(value = "/{slotId}/status", consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "updateMachineSlotStatus", summary = "Change slot status",
             description = "ADMIN only. Accepts only status string ACTIVE, INACTIVE or ERROR; numeric ordinals are rejected. Cross-machine access is 404. "
                     + "Same-status requests are idempotent. Does not change parent machine status, capacity, identity or related history. No automatic hardware detection or hard deletion.")

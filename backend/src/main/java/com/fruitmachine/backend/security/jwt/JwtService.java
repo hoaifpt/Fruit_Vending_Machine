@@ -1,6 +1,7 @@
 package com.fruitmachine.backend.security.jwt;
 
 import com.fruitmachine.backend.security.user.AuthenticatedUser;
+import com.fruitmachine.backend.security.user.CustomUserDetailsService;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.JOSEException;
@@ -46,7 +47,9 @@ public class JwtService {
         JWTClaimsSet claims = new JWTClaimsSet.Builder().subject(user.getId().toString())
                 .issueTime(Date.from(now)).expirationTime(Date.from(now.plusSeconds(expirationSeconds)))
                 .claim("email", user.getUsername())
-                .claim("roles", user.getAuthorities().stream().map(GrantedAuthority::getAuthority).sorted().toList())
+                // Roles only: permissions are resolved from the database per request and never travel in the token.
+                .claim("roles", user.getAuthorities().stream().map(GrantedAuthority::getAuthority)
+                        .filter(authority -> authority.startsWith(CustomUserDetailsService.ROLE_PREFIX)).sorted().toList())
                 .build();
         SignedJWT jwt = new SignedJWT(new JWSHeader(JWSAlgorithm.HS256), claims);
         try {

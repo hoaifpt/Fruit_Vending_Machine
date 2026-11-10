@@ -402,7 +402,7 @@ class MachineManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_ADMIN", "MACHINE_READ", "MACHINE_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidationAlsoProtectsNonMvcCalls() {
         assertThatThrownBy(() -> service.createMachine(new CreateMachineRequest("BAD", "Name", "Location", new BigDecimal("1.001"), BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.TEN)))
                 .isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -415,7 +415,7 @@ class MachineManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_STAFF", "MACHINE_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWriteBoundaryRequiresAdmin() {
         assertThatThrownBy(() -> service.createMachine(new CreateMachineRequest("DENIED", "Name", "Location", BigDecimal.ONE, BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.TEN)))
                 .isInstanceOf(AccessDeniedException.class);

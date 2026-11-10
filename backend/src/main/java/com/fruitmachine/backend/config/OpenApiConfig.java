@@ -8,6 +8,7 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springdoc.core.customizers.OpenApiCustomizer;
+import org.springdoc.core.customizers.OperationCustomizer;
 import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.media.StringSchema;
 import java.util.Map;
@@ -15,6 +16,30 @@ import java.util.List;
 
 @Configuration(proxyBeanMethods = false)
 public class OpenApiConfig {
+    /** Permission codes named by hasAuthority('...') in a @PreAuthorize expression. */
+    private static final java.util.regex.Pattern REQUIRED_PERMISSION = java.util.regex.Pattern.compile("hasAuthority\\('([A-Z][A-Z0-9_]+)'\\)");
+
+    /**
+     * Issue #48: every protected management operation states the permission it requires as x-required-permission, read from the
+     * @PreAuthorize of the handler method (or its class), so the documentation cannot drift from the code.
+     */
+    @Bean
+    public OperationCustomizer requiredPermissionCustomizer() {
+        return (operation, handler) -> {
+            var annotation = org.springframework.core.annotation.AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(),
+                    org.springframework.security.access.prepost.PreAuthorize.class);
+            if (annotation == null) {
+                annotation = org.springframework.core.annotation.AnnotatedElementUtils.findMergedAnnotation(handler.getBeanType(),
+                        org.springframework.security.access.prepost.PreAuthorize.class);
+            }
+            if (annotation != null) {
+                var matcher = REQUIRED_PERMISSION.matcher(annotation.value());
+                if (matcher.find()) operation.addExtension("x-required-permission", matcher.group(1));
+            }
+            return operation;
+        };
+    }
+
     @Bean
     public OpenApiCustomizer orderedTags() {
         return api -> {

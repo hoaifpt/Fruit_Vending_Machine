@@ -18,6 +18,7 @@ import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,7 +37,7 @@ public class ProductController {
     private final ProductService products;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_PRODUCT_READ)
     @Operation(operationId = "listProducts", summary = "List/search catalog products",
             description = "ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on name/SKU. "
                     + "Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. "
@@ -53,7 +54,7 @@ public class ProductController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_PRODUCT_READ)
     @Operation(operationId = "getProduct", summary = "Get catalog product details",
             description = "ADMIN or STAFF. Returns catalog fields for an existing UUID, including INACTIVE products; no batch/inventory collections.")
     @ApiResponses({
@@ -65,7 +66,7 @@ public class ProductController {
     }
 
     @PostMapping(consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_PRODUCT_WRITE)
     @Operation(operationId = "createProduct", summary = "Create catalog product",
             description = "ADMIN only. Creates ACTIVE product with stripped/uppercased unique SKU and positive BigDecimal price. "
                     + "Only sku/name/description/price/imageUrl are accepted. Status/id/timestamps/batch/inventory fields are rejected. "
@@ -81,7 +82,7 @@ public class ProductController {
     }
 
     @PutMapping(value = "/{id}", consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_PRODUCT_WRITE)
     @Operation(operationId = "updateProduct", summary = "Replace catalog product fields",
             description = "ADMIN only. Replaces name/description/price/imageUrl. Omitted/null description/imageUrl clears them. "
                     + "SKU/status/id/timestamps are rejected. Does not rewrite historical order prices, payments or batches.")
@@ -95,7 +96,7 @@ public class ProductController {
     }
 
     @PatchMapping(value = "/{id}/status", consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_PRODUCT_WRITE)
     @Operation(operationId = "updateProductStatus", summary = "Activate/deactivate catalog product",
             description = "ADMIN only. Sets ACTIVE or INACTIVE, preserving identity and all related history. INACTIVE disables future operational use, not deletion. "
                     + "Same-status requests are idempotent. No inventory/batch/order changes or hard deletion.")

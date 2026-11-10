@@ -31,9 +31,9 @@ class OrderSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void migrationsApplyOnACleanDatabaseAndEarlierMigrationsAreUnchanged() throws Exception {
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("12");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("13");
         assertThat(jdbc.queryForList("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank", String.class))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13");
         for (var entry : APPLIED.entrySet()) {
             String text = Files.readString(Path.of("src/main/resources/db/migration", entry.getKey()), StandardCharsets.UTF_8).replace("\r\n", "\n");
             String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));

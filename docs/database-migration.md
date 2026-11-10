@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V12 hiện có (20 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V13 hiện có (22 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -91,6 +91,16 @@ erDiagram
     user_roles {
         uuid user_id PK, FK
         uuid role_id PK, FK
+    }
+    permissions {
+        uuid id PK
+        varchar code UK "CHECK ^[A-Z][A-Z0-9_]{2,63}$"
+        varchar description
+        timestamptz created_at
+    }
+    role_permissions {
+        uuid role_id PK, FK "CASCADE"
+        uuid permission_id PK, FK "RESTRICT"
     }
     machines {
         uuid id PK
@@ -283,6 +293,8 @@ erDiagram
 
     users ||--o{ user_roles : "has"
     roles ||--o{ user_roles : "granted in"
+    roles ||--o{ role_permissions : "grants"
+    permissions ||--o{ role_permissions : "granted by"
     users |o--o{ kiosk_credentials : "created_by"
     users |o--o{ kiosk_credentials : "revoked_by"
     users |o--o{ product_batches : "created_by"
@@ -341,6 +353,8 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | users — tài khoản quản trị | id | email UNIQUE lowercase/trim; hash/name không rỗng; ACTIVE/INACTIVE/LOCKED | email đã có UNIQUE index |
 | roles — quyền | id | name UNIQUE uppercase/trim; ADMIN/STAFF khởi tạo, cho phép quyền mới | name đã có UNIQUE index |
 | user_roles — membership | (user_id, role_id); users, roles | không lặp membership; cascade chỉ từ user | role_id; PK hỗ trợ user_id |
+| permissions — quyền hạn (V13) | id | code UNIQUE, CHECK chữ hoa/số/gạch dưới, không bắt đầu bằng ROLE_; seed 15 code với UUID cố định | code đã có UNIQUE index |
+| role_permissions — role → permission (V13) | (role_id, permission_id); roles CASCADE, permissions RESTRICT | không lặp; xóa permission đang được cấp bị chặn | ix_role_permissions_permission; PK hỗ trợ role_id |
 | machines — máy và ngưỡng | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền | code đã có UNIQUE index |
 | machine_slots — slot vật lý | id; machine_id → machines | UNIQUE(machine_id, slot_code), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
 | kiosk_credentials — khóa API của kiosk (V10) | id; machine_id → machines; created_by, revoked_by → users nullable | key_prefix UNIQUE 12 ký tự; secret_hash SHA-256 hex; ACTIVE/REVOKED; REVOKED cần revoked_at ≥ created_at | partial UNIQUE một ACTIVE/máy, machine/time |
@@ -382,6 +396,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V10 | kiosk_credentials: khóa API gắn một máy, tối đa một khóa ACTIVE mỗi máy |
 | V11 | orders.expires_at và partial index cho đơn PENDING_PAYMENT |
 | V12 | partial UNIQUE payments(provider, payment_reference) |
+| V13 | permissions, role_permissions và seed mapping ADMIN/STAFF (issue #48, [permission-authorization.md](permission-authorization.md)) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)

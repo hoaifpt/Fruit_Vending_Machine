@@ -106,10 +106,11 @@ Implemented by issue #6:
 
 Issue #10 enables @EnableMethodSecurity in existing SecurityConfig. Reuse the current
 CustomUserDetailsService/AuthenticatedUser mapping and current DB roles for every JWT
-request, no duplicate filter/role model or implicit ADMIN > STAFF hierarchy. Future
-Spring-managed use-case entry points use @PreAuthorize with ADMIN, STAFF, either or
-isAuthenticated; invocation must cross the Spring proxy. No production role-protected
-business operation is invented in this issue. See ../../docs/admin-staff-authorization.md.
+request, no duplicate filter/role model or implicit ADMIN > STAFF hierarchy. Superseded by
+issue #48 (section 23): use-case entry points check a permission with
+@PreAuthorize(Permissions.HAS_<CODE>), never hasRole('ADMIN')/hasAnyRole('ADMIN','STAFF');
+the kiosk keeps hasRole('KIOSK'); invocation must cross the Spring proxy.
+See ../../docs/permission-authorization.md (and ../../docs/admin-staff-authorization.md for history).
 
 ### auth
 
@@ -671,3 +672,18 @@ the hold deadline, of an ACTIVE product in an ACTIVE slot of an ACTIVE machine, 
 `OrderService.createOrder` takes one productId; `OrderReservationService.selectHead` locks candidate slots (FOR UPDATE, id order), recomputes
 heads in SQL (`InventoryItemRepository.findSellableHeadId`, DISTINCT ON) and locks the chosen head. `KioskCatalogService` uses one aggregate
 SQL with the same head rule. `InventoryService.getInventorySummary` adds headStatus/headExpired under REPEATABLE READ. Release is unchanged.
+
+## 23. Permission-based authorization — Issue #48
+
+Roles are sets of permissions (V13 `permissions`, `role_permissions`; entities `user.entity.Permission`, `RolePermission`,
+`Role.permissionGrants`/`getPermissions()`). `CustomUserDetailsService` builds authorities = `ROLE_<name>` + permission codes from one
+entity-graph query on every JWT request (no cache, so a change applies on the next request); the JWT `roles` claim keeps `ROLE_*` only.
+Every protected management endpoint checks one permission at both levels, which must name the same code:
+`SecurityConfig` URL rules (`hasAuthority`, GET = read permission, other methods = write permission of the path, so 403 precedes
+request validation) and `@PreAuthorize(Permissions.HAS_<CODE>)` on controller and service methods (constants in
+`security.permission.Permissions`, so typos fail compilation). The kiosk keeps `hasRole('KIOSK')`; login and the provider webhook stay public.
+`user.service.RolePermissionService` + `RoleController`/`PermissionController` (tag "Roles & Permissions", PERMISSION_MANAGE) list
+permissions/roles and replace a role's set under a role row lock, with the ADMIN lockout guard (must keep PERMISSION_MANAGE and
+USER_WRITE) and one `ROLE_PERMISSIONS_CHANGED` audit row. Swagger adds `x-required-permission` to each operation from the handler's
+@PreAuthorize (OpenApiConfig). Adding a permission later: migration (permission + role_permissions rows, fixed UUIDs), constant,
+URL rule + @PreAuthorize, extend the authorization tests. See [permission-authorization.md](../../docs/permission-authorization.md).

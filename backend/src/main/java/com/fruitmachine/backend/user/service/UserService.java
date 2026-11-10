@@ -19,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -28,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
 public class UserService {
     private final UserRepository users;
     private final RoleRepository roles;
@@ -39,6 +39,7 @@ public class UserService {
     private final UserMapper mapper;
 
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_USER_READ)
     public UserPageResponse listUsers(int page, int size, UserStatus status, RoleName role) {
         if (page < 0 || size < 1 || size > 100) {
             throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
@@ -53,11 +54,13 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_USER_READ)
     public UserResponse getUser(UUID id) {
         return mapper.toResponse(users.findWithRolesById(id).orElseThrow(() -> notFound()));
     }
 
     @Transactional
+    @PreAuthorize(Permissions.HAS_USER_WRITE)
     public UserResponse createStaff(CreateUserRequest request) {
         String email;
         try {
@@ -86,6 +89,7 @@ public class UserService {
     }
 
     @Transactional
+    @PreAuthorize(Permissions.HAS_USER_WRITE)
     public UserResponse updateUser(UUID id, UpdateUserRequest request) {
         User user = users.findForUpdateById(id).orElseThrow(() -> notFound());
         user.setFullName(request.fullName().strip());
@@ -95,6 +99,7 @@ public class UserService {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    @PreAuthorize(Permissions.HAS_USER_WRITE)
     public UserResponse updateStatus(UUID id, UpdateUserStatusRequest request) {
         // Read actor from trusted security context, not a caller-provided UUID; suitable for future audit events.
         var principal = (AuthenticatedUser) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

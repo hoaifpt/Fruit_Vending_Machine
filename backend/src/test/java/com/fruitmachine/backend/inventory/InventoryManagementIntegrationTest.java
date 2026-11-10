@@ -310,7 +310,7 @@ class InventoryManagementIntegrationTest {
         try {
             assertThatThrownBy(()->service.loadInventory(new LoadInventoryRequest(batch.getId(),slot.getId(),1))).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
             assertThatThrownBy(()->service.getInventorySummary(machine.getId(),slot.getId())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
-            var principal=new AuthenticatedUser(staffId,"test@example.invalid","",com.fruitmachine.backend.user.enums.UserStatus.ACTIVE,List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_STAFF")));
+            var principal=new AuthenticatedUser(staffId,"test@example.invalid","",com.fruitmachine.backend.user.enums.UserStatus.ACTIVE,com.fruitmachine.backend.support.SeededAuthorities.of("STAFF"));
             context.setAuthentication(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(principal,null,principal.getAuthorities()));
             assertThatThrownBy(()->service.loadInventory(new LoadInventoryRequest(batch.getId(),slot.getId(),0))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
             assertThatThrownBy(()->service.removeInventoryItem(UUID.randomUUID(),new RemoveInventoryRequest(" "))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);

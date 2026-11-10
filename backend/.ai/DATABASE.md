@@ -297,3 +297,15 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   InventoryItem (FOR UPDATE, rechecked). Loading = Product -> Batch -> Machine -> Slot; removal = Slot -> Item; release = Order -> Payment ->
   InventoryItem. Loads of the same product or into the same machine wait on the shared Product/Machine locks; removal waits on the slot lock.
 - Queries: `findSlotIdsHoldingProduct` (unlocked discovery), `findSellableHeadId` and `findCatalog` (DISTINCT ON over the present items).
+
+## 16. Issue #48 — V13 permissions
+
+- `permissions`: id UUID PK, `code` VARCHAR(64) UNIQUE with CHECK `^[A-Z][A-Z0-9_]{2,63}$` (never `ROLE_...`), `description` NOT NULL,
+  `created_at`. Seeded with fixed UUIDs `20000000-0000-0000-0000-0000000000NN` (01 USER_READ ... 15 PAYMENT_WEBHOOK_LOG_READ).
+- `role_permissions`: PK (role_id, permission_id); `role_id` -> roles ON DELETE CASCADE, `permission_id` -> permissions ON DELETE RESTRICT
+  (a referenced permission cannot be deleted); index `ix_role_permissions_permission`.
+- Seed mapping (reproduces the former role checks): ADMIN = all 15; STAFF = PRODUCT_READ, MACHINE_READ, BATCH_READ, BATCH_CREATE,
+  INVENTORY_READ, INVENTORY_WRITE, ORDER_READ.
+- Mapped by `Permission` and `RolePermission` (EmbeddedId `RolePermissionId`, like `UserRole`); `Role.permissionGrants` without cascade.
+- Role permission replacement locks the `roles` row (PESSIMISTIC_WRITE) and writes `audit_logs` (action ROLE_PERMISSIONS_CHANGED,
+  entity_type Role, old/new `{"permissions":[sorted codes]}`, user_id = actor). V1-V12 untouched. ERD: 2 new tables.

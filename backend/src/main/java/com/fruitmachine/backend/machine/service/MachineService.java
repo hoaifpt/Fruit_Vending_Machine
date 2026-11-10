@@ -17,6 +17,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +32,7 @@ public class MachineService {
     private final MachineMapper mapper;
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     public MachinePageResponse listMachines(int page, int size, MachineStatus status, String search, String sort) {
         if (page < 0 || size < 1 || size > 100) {
             throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
@@ -64,13 +65,13 @@ public class MachineService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     public MachineResponse getMachine(UUID id) {
         return mapper.toResponse(machines.findById(id).orElseThrow(this::notFound));
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse createMachine(@Valid CreateMachineRequest request) {
         if (machines.existsByCode(request.code())) throw new ConflictException("Machine code is already in use");
         Machine machine = new Machine();
@@ -81,7 +82,7 @@ public class MachineService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse updateMachine(UUID id, @Valid UpdateMachineRequest request) {
         Machine machine = machines.findForUpdateById(id).orElseThrow(this::notFound);
         applyConfiguration(machine, request.name(), request.location(), request.minTemperature(), request.maxTemperature(), request.minHumidity(), request.maxHumidity());
@@ -90,7 +91,7 @@ public class MachineService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse updateStatus(UUID id, @Valid UpdateMachineStatusRequest request) {
         Machine machine = machines.findForUpdateById(id).orElseThrow(this::notFound);
         machine.setStatus(request.status());
