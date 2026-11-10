@@ -4,6 +4,7 @@ import { formatDateTime, parseDecimal } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
 import { Badge, DataTable, Field, FormDialog, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, STATUS_ACTIONS, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useApi } from '../useApi.ts'
+import { useSession } from '../useSession.ts'
 
 const SORTS = [
   { value: 'name,asc', label: 'Tên A → Z' }, { value: 'code,asc', label: 'Mã máy A → Z' },
@@ -12,7 +13,8 @@ const SORTS = [
 
 export const lastSeen = (machine: Machine) => machine.lastSeenAt ? formatDateTime(machine.lastSeenAt) : 'Chưa từng kết nối'
 
-function MachinesPage({ isAdmin }: { isAdmin: boolean }) {
+function MachinesPage() {
+  const canManage = useSession().can('machines:manage')
   const { params, update } = useQueryParams()
   const status = params.get('status') ?? '', search = params.get('search') ?? '', sort = params.get('sort') ?? 'name,asc', page = pageParam(params)
   const state = useApi(signal => machinesApi.list({ page, size: PAGE_SIZE, status: (status || undefined) as 'ACTIVE' | undefined, search: search || undefined, sort }, signal), params.toString())
@@ -20,7 +22,7 @@ function MachinesPage({ isAdmin }: { isAdmin: boolean }) {
 
   return <>
     <PageHead title="Máy bán hàng" subtitle="Trạng thái ở đây là trạng thái quản trị, không phải trạng thái trực tuyến của máy."
-      actions={isAdmin ? <button type="button" className="a-primary" onClick={() => dialog.open()}>Đăng ký máy</button> : undefined} />
+      actions={canManage ? <button type="button" className="a-primary" onClick={() => dialog.open()}>Đăng ký máy</button> : undefined} />
     <Toolbar>
       <SearchFilter label="Tìm theo mã, tên hoặc vị trí" value={search} onCommit={value => update({ search: value })} />
       <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(STATUS_ACTIONS.MACHINE)} />

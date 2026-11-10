@@ -40,6 +40,7 @@ Thêm `?scenario=<tên>` vào URL trang để ép trạng thái, ví dụ `/admi
 | `slow` | Mọi phản hồi chậm 3 giây |
 | `error500`, `network` | Lỗi hệ thống, mất mạng |
 | `401`, `403` | Hết phiên, không có quyền |
+| `expire` | Phiên hiện tại hết hạn một lần: mọi lời gọi trả 401, chuyển về đăng nhập; đăng nhập lại thì quay về đúng trang cũ và chạy bình thường |
 | `400`, `409` | Lỗi khi ghi (POST/PUT/PATCH), trang vẫn tải được để gửi biểu mẫu |
 | `pending` | Kiosk: mã QR không tự được thanh toán |
 

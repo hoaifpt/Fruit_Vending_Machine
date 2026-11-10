@@ -17,6 +17,10 @@ Phạm vi: `apps/web` cho ADMIN/STAFF, gọi API thật theo `api-contract/api.y
 
 Điều hướng và nút thao tác bị ẩn theo vai trò; truy cập thẳng URL không đủ quyền hiện "Không có quyền truy cập". `/admin` và `/staff` chuyển tới màn hình đầu tiên mà vai trò được xem.
 
+Quy tắc quyền nằm ở một chỗ: `src/admin/permissions.ts` (`can(subject, permission)`, tên quyền theo `api-contract/drafts/auth-me.yaml`); route, mục điều hướng và nút chỉ hỏi `can`. Hiện quyền suy ra từ vai trò trong JWT; khi backend có `GET /auth/me` (BE 3.1) thì truyền `permissions` của API vào `Subject.permissions`. Truy cập thẳng URL không đủ quyền bị chặn trước khi màn hình gọi API. API trả 403 thì màn hiện cùng khối giải thích (vai trò hiện tại, liên hệ quản trị viên, về trang đầu), không đăng xuất. API trả 401 hoặc token hết hạn: xóa phiên, chuyển một lần tới `/login?next=<trang + query hiện tại>`; `next` chỉ nhận đường dẫn nội bộ bắt đầu bằng `/admin`.
+
+`useApi(loader, key, { pollMs })` làm mới định kỳ: một request mỗi lúc, dừng khi tab ẩn và làm mới ngay khi hiện lại, giữ dữ liệu cũ (`refreshing` thay vì `loading`), dừng hẳn khi gặp 401/403.
+
 ## Quy ước chung
 
 - **Phân trang, sắp xếp, lọc phía server.** Trang bắt đầu từ 0; bộ lọc nằm trong query string URL (chia sẻ được, nút Back hoạt động). Chỉ dùng các trường `sort` được contract liệt kê.

@@ -1,11 +1,11 @@
 import { lazy, Suspense, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import '@fontsource-variable/inter/wght.css'
-import { loginPathFor, endSession } from '../api/session.ts'
+import { endSession, expireSession, loginPathFor, setLoginRedirect } from '../api/session.ts'
 import type { Role } from '../api/session.ts'
 import { navigate, useLocation } from '../lib/router.ts'
-import { Link, PageSkeleton } from './kit.tsx'
-import { canAccess, homeFor, matchRoute, navFor } from './routes.ts'
+import { Forbidden, Link, PageSkeleton } from './kit.tsx'
+import { canOpen, homeFor, matchRoute, navFor } from './routes.ts'
 import { AdminShell } from './shell/AdminShell.tsx'
 import { useSession } from './useSession.ts'
 import './admin.css'
@@ -27,12 +27,26 @@ const WebhookLogDetailPage = lazy(() => import('./pages/WebhookLogDetailPage.tsx
 const KitPage = import.meta.env.DEV || import.meta.env.MODE === 'mock' ? lazy(() => import('./pages/KitPage.tsx')) : null
 
 const NO_ROLES: Role[] = []
+/** setTimeout cannot wait longer than ~24.8 days. */
+const MAX_TIMER_MS = 2 ** 31 - 1
 
 function AdminApp() {
   const { pathname, search } = useLocation()
-  const { session, isAdmin } = useSession()
+  const { session } = useSession()
   const roles = session?.user.roles ?? NO_ROLES
   const route = matchRoute(pathname)
+
+  // Session expiry (401 or token exp) goes through the SPA router: one redirect to /login?next=<this page>.
+  useEffect(() => {
+    setLoginRedirect(to => navigate(to, { replace: true }))
+    return () => setLoginRedirect(null)
+  }, [])
+  const expiresAt = session?.expiresAt
+  useEffect(() => {
+    if (!expiresAt) return
+    const timer = setTimeout(() => expireSession(), Math.min(Math.max(expiresAt - Date.now(), 0), MAX_TIMER_MS))
+    return () => clearTimeout(timer)
+  }, [expiresAt])
 
   useEffect(() => {
     if (!session) navigate(loginPathFor(pathname, search), { replace: true })
@@ -46,14 +60,14 @@ function AdminApp() {
   let content: ReactNode
   if (KitPage && pathname.replace(/\/+$/, '') === '/admin/_kit') content = <KitPage />
   else if (!route) content = pathname.replace(/\/+$/, '') === '/admin' || pathname === '/staff' ? <PageSkeleton /> : <NotFound />
-  else if (!canAccess(roles, route.roles)) content = <Forbidden />
+  else if (!canOpen(roles, route)) content = <Forbidden page permission={route.permission} />
   else {
     const id = route.id ?? ''
     content = {
       users: <UsersPage />,
-      products: <ProductsPage isAdmin={isAdmin} />,
-      machines: <MachinesPage isAdmin={isAdmin} />,
-      'machine-detail': <MachineDetailPage machineId={id} isAdmin={isAdmin} />,
+      products: <ProductsPage />,
+      machines: <MachinesPage />,
+      'machine-detail': <MachineDetailPage machineId={id} />,
       batches: <BatchesPage />,
       inventory: <InventoryPage />,
       'inventory-history': <InventoryHistoryPage />,
@@ -76,9 +90,6 @@ function AdminApp() {
   </AdminShell>
 }
 
-function Forbidden() {
-  return <section className="a-empty" role="alert"><h1>Không có quyền truy cập</h1><p>Tài khoản của bạn không được phép xem màn hình này.</p></section>
-}
 function NotFound() {
   return <section className="a-empty"><h1>Không tìm thấy màn hình</h1><p><Link to="/admin">Về trang quản trị</Link></p></section>
 }

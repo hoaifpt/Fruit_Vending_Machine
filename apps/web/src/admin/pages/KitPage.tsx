@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ApiError } from '../../api/client.ts'
 import { Button } from '../../components/ui/button.tsx'
@@ -10,8 +10,9 @@ import { formatDateTime, formatMoney } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
 import { activeFilterCount, clearFiltersPatch, oneOf, parseSort, sortParam } from '../../lib/table-query.ts'
 import type { SortRule } from '../../lib/table-query.ts'
-import { Badge, ConfirmDialog, DataTable, Field, FormDialog, Notice, PageHead, Pagination, SearchFilter, SelectFilter, StatusDialog, Toolbar, enumOptions, useDialog, useForm } from '../kit.tsx'
+import { Badge, ConfirmDialog, DataTable, ErrorState, Field, FormDialog, Notice, PageHead, Pagination, SearchFilter, SelectFilter, StatusDialog, Toolbar, enumOptions, useDialog, useForm } from '../kit.tsx'
 import type { Column } from '../kit.tsx'
+import { useApi } from '../useApi.ts'
 
 /** Sample data only: this screen makes no API call. */
 interface DemoOrder { id: string; orderCode: string; status: string; totalAmount: number; createdAt: string }
@@ -133,6 +134,38 @@ function DialogSection() {
   </Section>
 }
 
+type PollMode = 'ok' | 'fail' | 'forbidden'
+
+/** useApi with `pollMs`: a local loader (no API call) so the schedule can be watched without a backend. */
+function PollingSection() {
+  const [mode, setMode] = useState<PollMode>('ok')
+  const modeRef = useRef<PollMode>('ok')
+  const choose = (next: PollMode) => { modeRef.current = next; setMode(next) }
+  const loads = useRef(0)
+  const state = useApi(async signal => {
+    await wait(600)
+    signal.throwIfAborted()
+    loads.current += 1
+    if (modeRef.current === 'fail') throw new ApiError(500, 'Hệ thống đang gặp lỗi. Vui lòng thử lại sau.')
+    if (modeRef.current === 'forbidden') throw new ApiError(403, 'Bạn không có quyền thực hiện thao tác này.')
+    return { count: loads.current }
+  }, 'kit-poll', { pollMs: 5000 })
+  const status = state.loading ? 'Đang tải…' : state.refreshing ? 'Đang làm mới nền…' : 'Chờ lượt kế tiếp'
+  return <Section title="useApi: polling" note="Làm mới mỗi 5 giây, không chồng request; tạm dừng khi tab bị ẩn và làm mới ngay khi hiện lại. Lần làm mới nền giữ dữ liệu cũ, không hiện khung chờ. Lỗi 401/403 dừng polling; lỗi khác giữ dữ liệu và thử lại ở lượt sau.">
+    <div className="mb-3 flex flex-wrap gap-2">
+      <Button size="sm" variant={mode === 'ok' ? 'default' : 'outline'} aria-pressed={mode === 'ok'} onClick={() => choose('ok')}>Phản hồi thành công</Button>
+      <Button size="sm" variant={mode === 'fail' ? 'default' : 'outline'} aria-pressed={mode === 'fail'} onClick={() => choose('fail')}>Lỗi 500 ở lượt sau</Button>
+      <Button size="sm" variant={mode === 'forbidden' ? 'default' : 'outline'} aria-pressed={mode === 'forbidden'} onClick={() => choose('forbidden')}>Lỗi 403 ở lượt sau</Button>
+      <Button size="sm" variant="outline" onClick={state.reload}>Tải lại (khởi động lại polling)</Button>
+    </div>
+    <div className="rounded-xl border bg-card p-4" aria-live="polite">
+      {state.data && <p>Số lần đã tải: <strong>{state.data.count}</strong>{state.updatedAt && <> · cập nhật lúc {formatDateTime(new Date(state.updatedAt).toISOString())}</>}</p>}
+      <p className="text-[13px] text-muted-foreground">{status}</p>
+      {state.error && <ErrorState error={state.error} retry={state.reload} />}
+    </div>
+  </Section>
+}
+
 function OthersSection() {
   return <Section title="Thành phần khác">
     <div className="grid gap-4">
@@ -153,6 +186,7 @@ function KitPage() {
     <StatesSection />
     <FormFieldSection />
     <DialogSection />
+    <PollingSection />
     <OthersSection />
   </>
 }

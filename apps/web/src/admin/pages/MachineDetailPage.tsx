@@ -5,11 +5,13 @@ import { formatDateTime, parseInteger } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
 import { Badge, ConfirmDialog, DataTable, ErrorState, Field, FormDialog, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, STATUS_ACTIONS, StatusDialog, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useApi } from '../useApi.ts'
+import { useSession } from '../useSession.ts'
 import { MachineDialog, lastSeen } from './MachinesPage.tsx'
 
 type SlotTarget = { kind: 'create' } | { kind: 'capacity'; slot: Slot } | { kind: 'status'; slot: Slot }
 
-function MachineDetailPage({ machineId, isAdmin }: { machineId: string; isAdmin: boolean }) {
+function MachineDetailPage({ machineId }: { machineId: string }) {
+  const { can } = useSession()
   const machine = useApi(signal => machinesApi.get(machineId, signal), machineId)
   const [dialog, setDialog] = useState<'edit' | 'status' | null>(null)
   if (machine.error && !machine.data) return <><PageHead title="Máy bán hàng" back={{ to: '/admin/machines', label: 'Danh sách máy' }} /><ErrorState error={machine.error} retry={machine.reload} /></>
@@ -17,7 +19,7 @@ function MachineDetailPage({ machineId, isAdmin }: { machineId: string; isAdmin:
   if (!data) return <Loading />
   return <>
     <PageHead title={`${data.name} (${data.code})`} back={{ to: '/admin/machines', label: 'Danh sách máy' }}
-      actions={isAdmin ? <>
+      actions={can('machines:manage') ? <>
         <button type="button" onClick={() => setDialog('edit')}>Cấu hình</button>
         <button type="button" onClick={() => setDialog('status')}>Đổi trạng thái</button>
       </> : undefined} />
@@ -31,15 +33,15 @@ function MachineDetailPage({ machineId, isAdmin }: { machineId: string; isAdmin:
         <dt>Tạo / cập nhật</dt><dd>{formatDateTime(data.createdAt)} / {formatDateTime(data.updatedAt)}</dd>
       </dl>
     </section>
-    <SlotsSection machineId={machineId} isAdmin={isAdmin} />
-    {isAdmin && <CredentialsSection machineId={machineId} />}
+    <SlotsSection machineId={machineId} canManage={can('slots:manage')} />
+    {can('kiosk-credentials:manage') && <CredentialsSection machineId={machineId} />}
     {dialog === 'edit' && <MachineDialog machine={data} close={() => setDialog(null)} done={machine.reload} />}
     {dialog === 'status' && <StatusDialog title="Trạng thái máy" current={data.status} options={STATUS_ACTIONS.MACHINE} close={() => setDialog(null)}
       onSubmit={async status => { await machinesApi.setStatus(machineId, status as 'ACTIVE'); machine.reload() }} />}
   </>
 }
 
-function SlotsSection({ machineId, isAdmin }: { machineId: string; isAdmin: boolean }) {
+function SlotsSection({ machineId, canManage }: { machineId: string; canManage: boolean }) {
   const { params, update } = useQueryParams()
   const page = pageParam(params), status = params.get('slotStatus') ?? ''
   const state = useApi(signal => slotsApi.list(machineId, { page, size: PAGE_SIZE, status: (status || undefined) as 'ACTIVE' | undefined, sort: 'slotCode,asc' }, signal), `${machineId}|${params}`)
@@ -48,7 +50,7 @@ function SlotsSection({ machineId, isAdmin }: { machineId: string; isAdmin: bool
   return <section className="a-panel" aria-labelledby="slots-title">
     <div className="a-section-head">
       <div><h2 id="slots-title">Ngăn chứa</h2><p>Mỗi ngăn chứa tối đa theo sức chứa đã cấu hình.</p></div>
-      {isAdmin && <button type="button" className="a-primary" onClick={() => dialog.open({ kind: 'create' })}>Thêm ngăn</button>}
+      {canManage && <button type="button" className="a-primary" onClick={() => dialog.open({ kind: 'create' })}>Thêm ngăn</button>}
     </div>
     <Toolbar><SelectFilter label="Trạng thái ngăn" value={status} onChange={value => update({ slotStatus: value })} options={enumOptions(STATUS_ACTIONS.SLOT)} /></Toolbar>
     <DataTable state={state} rows={state.data?.content} rowKey={slot => slot.id} columns={[
@@ -58,7 +60,7 @@ function SlotsSection({ machineId, isAdmin }: { machineId: string; isAdmin: bool
       { head: 'Trạng thái', cell: slot => <Badge value={slot.status} /> },
       { head: 'Thao tác', cell: slot => <div className="a-actions">
         <Link to={`/admin/inventory?machineId=${machineId}&slotId=${slot.id}`}>Xem hộp hàng</Link>
-        {isAdmin && <><button type="button" onClick={() => dialog.open({ kind: 'capacity', slot })}>Sức chứa</button>
+        {canManage && <><button type="button" onClick={() => dialog.open({ kind: 'capacity', slot })}>Sức chứa</button>
           <button type="button" onClick={() => dialog.open({ kind: 'status', slot })}>Đổi trạng thái</button></>}
       </div> },
     ]} />

@@ -372,6 +372,37 @@ test('scenarios 401 and 403 go through the real client handling', async () => {
   assert.equal(state.unauthorized, 1)
 })
 
+test('scenario expire rejects the old session once; signing in again works, also after a reload', async () => {
+  const storage = memoryStorage()
+  const { state } = setup({ storage })
+  await signIn(state, 'staff')
+  state.clock += 5_000
+  state.search = '?scenario=expire'
+  await assert.rejects(ordersApi.list({}), failsWith(401))
+  await assert.rejects(productsApi.list({}), failsWith(401))
+  assert.equal(state.unauthorized, 2)
+  state.clock += 5_000
+  state.search = '?next=%2Fadmin%2Forders'
+  await signIn(state, 'staff')
+  state.search = '?scenario=expire'
+  await assert.doesNotReject(ordersApi.list({}))
+  // A full reload creates a new mock fetcher; the start time comes back from storage.
+  const reloaded = setup({ storage })
+  reloaded.state.clock = state.clock
+  reloaded.state.token = state.token
+  reloaded.state.search = '?page=2'
+  await assert.doesNotReject(ordersApi.list({}))
+  reloaded.state.search = '?scenario=none'
+  await assert.doesNotReject(ordersApi.list({}))
+})
+
+test('mock enforces roles: STAFF gets 403 on ADMIN-only endpoints', async () => {
+  const { state } = setup()
+  await signIn(state, 'staff')
+  await assert.rejects(paymentsApi.list({}), failsWith(403))
+  await assert.doesNotReject(ordersApi.list({}))
+})
+
 test('scenarios 400 and 409 hit writes only, carry message and fieldErrors, and leave the page loadable', async () => {
   const { state } = setup()
   await signIn(state)

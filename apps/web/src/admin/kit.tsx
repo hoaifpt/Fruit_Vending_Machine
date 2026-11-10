@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { ApiError } from '../api/client.ts'
+import { ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '../components/ui/alert-dialog.tsx'
 import { Button } from '../components/ui/button.tsx'
@@ -15,8 +16,12 @@ import { cn } from '../lib/cn.ts'
 import { linkHandler } from '../lib/router.ts'
 import type { StatusDomain } from '../lib/status.ts'
 import type { SortState } from '../lib/table-query.ts'
+import { rolesWith } from './permissions.ts'
+import type { Permission } from './permissions.ts'
+import { homeFor } from './routes.ts'
 import { errorMessage } from './useApi.ts'
 import type { ApiState } from './useApi.ts'
+import { useSession } from './useSession.ts'
 
 export const LABELS: Record<string, string> = {
   ACTIVE: 'Hoạt động', INACTIVE: 'Ngừng hoạt động', LOCKED: 'Đã khóa', MAINTENANCE: 'Bảo trì', ERROR: 'Lỗi',
@@ -95,14 +100,43 @@ export function PageSkeleton() {
   </div>
 }
 
-/** Query failure with the next step: 403 says who can grant access, 401 is on its way to login, others offer a retry. */
+/**
+ * "No access" explanation with the current role and the next step. Never signs the user out.
+ * `permission` set: the route guard refused the screen before any API call (says who may open it).
+ * Without it: the API answered 403 (permissions can change after sign-in).
+ */
+export function Forbidden({ permission, page = false }: { permission?: Permission; page?: boolean }) {
+  const { session, roles } = useSession()
+  const titleId = useId()
+  const Heading = page ? 'h1' : 'h2'
+  const current = roles.map(role => LABELS[role] ?? role).join(', ') || 'chưa xác định'
+  const allowed = permission ? rolesWith(permission).map(role => LABELS[role] ?? role).join(', ') : ''
+  const home = homeFor(roles)
+  return <section role="alert" aria-labelledby={titleId}
+    className={cn('mx-auto grid max-w-xl justify-items-center gap-3 px-4 text-center', page ? 'py-16' : 'py-10')}>
+    <span className="grid size-12 place-items-center rounded-full bg-status-warning text-status-warning-foreground" aria-hidden="true"><ShieldAlert className="size-6" /></span>
+    <Heading id={titleId} className="text-lg font-semibold text-foreground">Không có quyền truy cập</Heading>
+    <p className="text-muted-foreground">
+      {permission
+        ? <>Mục này chỉ dành cho {allowed ? <strong className="font-medium text-foreground">{allowed}</strong> : 'tài khoản được cấp quyền'}.</>
+        : <>Hệ thống đã từ chối yêu cầu vì tài khoản của bạn không có quyền xem hoặc thao tác với dữ liệu này.</>}
+    </p>
+    <p className="text-[13px] text-muted-foreground">
+      Bạn đang đăng nhập với vai trò <strong className="font-medium text-foreground">{current}</strong>{session?.user.email ? <> ({session.user.email})</> : null}.
+    </p>
+    <p className="text-[13px] text-muted-foreground">Nếu công việc cần mục này, hãy liên hệ quản trị viên để được cấp quyền, rồi đăng nhập lại để quyền mới có hiệu lực.</p>
+    {home !== '/login' && <Button asChild variant="outline" size="sm" className="mt-1"><a href={home} onClick={linkHandler(home)}>Về trang đầu của bạn</a></Button>}
+  </section>
+}
+
+/** Query failure with the next step: 403 explains the missing permission, 401 is on its way to login, others offer a retry. */
 export function ErrorState({ error, retry }: { error: unknown; retry?: () => void }) {
   const status = error instanceof ApiError ? error.status : undefined
+  if (status === 403) return <Forbidden />
   return <div className="px-4 py-10 text-center text-muted-foreground" role="alert">
     <p>{errorMessage(error)}</p>
-    {status === 403 && <p className="mt-1.5! text-[13px]">Nếu cần xem mục này, hãy liên hệ quản trị viên để được cấp quyền.</p>}
     {status === 401 && <p className="mt-1.5! text-[13px]">Đang chuyển đến trang đăng nhập…</p>}
-    {status !== 403 && status !== 401 && retry && <p className="mt-3!"><Button type="button" variant="outline" size="sm" onClick={retry}>Thử lại</Button></p>}
+    {status !== 401 && retry && <p className="mt-3!"><Button type="button" variant="outline" size="sm" onClick={retry}>Thử lại</Button></p>}
   </div>
 }
 

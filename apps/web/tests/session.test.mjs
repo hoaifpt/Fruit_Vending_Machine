@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { loginPathFor, parseToken, safeNext } from '../src/api/session.ts'
+import { endSession, expireSession, getSession, loginPathFor, parseToken, safeNext, setLoginRedirect, startSession } from '../src/api/session.ts'
 import { makeToken } from './helpers.mjs'
 
 test('reads roles from JWT claims, normalising the ROLE_ prefix and ignoring unknown roles', () => {
@@ -18,4 +18,37 @@ test('login redirect preserves the intended URL and blocks open redirects', () =
   assert.equal(loginPathFor('/admin/orders', '?status=PAID'), '/login?next=%2Fadmin%2Forders%3Fstatus%3DPAID')
   assert.equal(safeNext('/admin/orders?status=PAID'), '/admin/orders?status=PAID')
   for (const bad of ['https://evil.test', '//evil.test', '/\\evil.test', 'javascript:alert(1)', '/login', null, '']) assert.equal(safeNext(bad), '/admin')
+})
+test('next only accepts internal /admin paths', () => {
+  assert.equal(safeNext('/admin'), '/admin')
+  assert.equal(safeNext('/admin/orders/o-1?tab=items#top'), '/admin/orders/o-1?tab=items#top')
+  const bad = ['/buy', '/', '/administrator', '/admin//evil.test', '/admin/\\evil.test', '/admin/x\nLocation: evil', '/admin x', '/admin\tx',
+    'https://evil.test/admin', '//evil.test/admin', 'http:/admin', ' /admin', '/%2F%2Fevil.test', '/admin/../buy']
+  for (const value of bad) assert.equal(safeNext(value), '/admin', JSON.stringify(value))
+  assert.equal(loginPathFor('/buy'), '/login')
+  assert.equal(loginPathFor('/login', '?next=%2Fadmin'), '/login')
+})
+test('a burst of 401s ends the session and redirects once, back to the same page and query', () => {
+  const redirects = []
+  setLoginRedirect(to => redirects.push(to))
+  startSession(makeToken({ roles: ['ROLE_STAFF'] }))
+  const here = { pathname: '/admin/orders', search: '?status=PAID&page=2' }
+  const expected = '/login?next=%2Fadmin%2Forders%3Fstatus%3DPAID%26page%3D2'
+  assert.equal(expireSession(here), expected)
+  assert.equal(expireSession(here), null)
+  assert.equal(expireSession(here), null)
+  assert.deepEqual(redirects, [expected])
+  assert.equal(getSession(), null)
+  // The login page reads `next` back to the exact page and query.
+  assert.equal(safeNext(new URLSearchParams(expected.split('?')[1]).get('next')), '/admin/orders?status=PAID&page=2')
+  // After signing in again, a later expiry redirects again.
+  startSession(makeToken())
+  assert.equal(expireSession({ pathname: '/admin/users', search: '' }), '/login?next=%2Fadmin%2Fusers')
+  assert.equal(redirects.length, 2)
+  // Already on the login page: the session is cleared but there is no redirect loop.
+  startSession(makeToken())
+  assert.equal(expireSession({ pathname: '/login', search: '?next=%2Fadmin' }), null)
+  assert.equal(redirects.length, 2)
+  setLoginRedirect(null)
+  endSession()
 })

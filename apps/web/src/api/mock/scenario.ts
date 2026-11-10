@@ -1,13 +1,31 @@
 // `?scenario=<name>[:<targets>]` on the page URL forces a state for testing. It sticks in sessionStorage so it survives
 // SPA navigation and the full-page redirect after a 401. `?scenario=none` (or an empty value) clears it.
 // Targets narrow it to groups or path prefixes: `?scenario=403:orders,payments`, `?scenario=409:/inventory/load`.
-export const SCENARIO_NAMES = ['empty', 'slow', 'error500', 'network', '401', '403', '400', '409', 'pending'] as const
+// `expire`: tokens issued before the scenario started get 401 (session expired once); signing in again works,
+// so the return to the previous page can be tested. Unlike `401`, it does not fail the new session.
+export const SCENARIO_NAMES = ['empty', 'slow', 'error500', 'network', '401', '403', '400', '409', 'pending', 'expire'] as const
 export type ScenarioName = (typeof SCENARIO_NAMES)[number]
 
 export interface Scenario { name: ScenarioName; targets: string[]; /** Set in this page's URL, as opposed to carried over. */ explicit: boolean }
 export interface ScenarioStorage { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
 
 export const SCENARIO_STORAGE_KEY = 'fv-mock-scenario'
+/** When the `expire` scenario started (ms), kept so a page reload does not expire the new session too. */
+export const EXPIRE_SINCE_STORAGE_KEY = 'fv-mock-expire-since'
+
+/** Start time of the `expire` scenario: remembered on first use, forgotten when another scenario (or none) is active. */
+export function expireSince(scenario: Scenario | null, storage: ScenarioStorage | null, now: number, memory: { since: number | null }): number | null {
+  if (scenario?.name !== 'expire') {
+    memory.since = null
+    attempt(() => storage?.removeItem(EXPIRE_SINCE_STORAGE_KEY))
+    return null
+  }
+  const stored = Number(attempt(() => storage?.getItem(EXPIRE_SINCE_STORAGE_KEY)) ?? NaN)
+  const since = memory.since ?? (Number.isFinite(stored) && stored > 0 ? stored : now)
+  memory.since = since
+  attempt(() => storage?.setItem(EXPIRE_SINCE_STORAGE_KEY, String(since)))
+  return since
+}
 
 export function parseScenario(raw: string | null | undefined, explicit = false): Scenario | null {
   if (!raw) return null

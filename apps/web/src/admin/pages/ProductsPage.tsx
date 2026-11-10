@@ -4,6 +4,7 @@ import { formatDateTime, formatMoney, parsePrice } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
 import { Badge, DataTable, Field, FormDialog, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, STATUS_ACTIONS, StatusDialog, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useApi } from '../useApi.ts'
+import { useSession } from '../useSession.ts'
 
 const SORTS = [
   { value: 'name,asc', label: 'Tên A → Z' }, { value: 'name,desc', label: 'Tên Z → A' },
@@ -12,7 +13,8 @@ const SORTS = [
 ]
 type Target = { kind: 'form'; product?: Product } | { kind: 'status'; product: Product }
 
-function ProductsPage({ isAdmin }: { isAdmin: boolean }) {
+function ProductsPage() {
+  const canManage = useSession().can('products:manage')
   const { params, update } = useQueryParams()
   const status = params.get('status') ?? '', search = params.get('search') ?? '', sort = params.get('sort') ?? 'name,asc', page = pageParam(params)
   const state = useApi(signal => productsApi.list({ page, size: PAGE_SIZE, status: (status || undefined) as 'ACTIVE' | undefined, search: search || undefined, sort }, signal), params.toString())
@@ -20,8 +22,8 @@ function ProductsPage({ isAdmin }: { isAdmin: boolean }) {
   const target = dialog.value
 
   return <>
-    <PageHead title="Sản phẩm" subtitle={isAdmin ? 'Danh mục, SKU và giá bán.' : 'Danh mục sản phẩm (chỉ xem).'}
-      actions={isAdmin ? <button type="button" className="a-primary" onClick={() => dialog.open({ kind: 'form' })}>Thêm sản phẩm</button> : undefined} />
+    <PageHead title="Sản phẩm" subtitle={canManage ? 'Danh mục, SKU và giá bán.' : 'Danh mục sản phẩm (chỉ xem).'}
+      actions={canManage ? <button type="button" className="a-primary" onClick={() => dialog.open({ kind: 'form' })}>Thêm sản phẩm</button> : undefined} />
     <Toolbar>
       <SearchFilter label="Tìm theo tên hoặc SKU" value={search} onCommit={value => update({ search: value })} />
       <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions(STATUS_ACTIONS.PRODUCT)} />
@@ -33,7 +35,7 @@ function ProductsPage({ isAdmin }: { isAdmin: boolean }) {
       { head: 'Giá', cell: product => formatMoney(product.price) },
       { head: 'Trạng thái', cell: product => <Badge value={product.status} /> },
       { head: 'Cập nhật', cell: product => formatDateTime(product.updatedAt) },
-      ...(isAdmin ? [{ head: 'Thao tác', cell: (product: Product) => <div className="a-actions">
+      ...(canManage ? [{ head: 'Thao tác', cell: (product: Product) => <div className="a-actions">
         <button type="button" onClick={() => dialog.open({ kind: 'form', product })}>Sửa</button>
         <button type="button" onClick={() => dialog.open({ kind: 'status', product })}>Đổi trạng thái</button>
       </div> }] : []),

@@ -5,7 +5,7 @@ import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 
 function OrderDetailPage({ orderId }: { orderId: string }) {
-  const { isAdmin } = useSession()
+  const canSeePayments = useSession().can('payments:read')
   const order = useApi(signal => ordersApi.get(orderId, signal), orderId)
   const back = { to: '/admin/orders', label: 'Danh sách đơn hàng' }
   if (order.error && !order.data) return <><PageHead title="Đơn hàng" back={back} /><ErrorState error={order.error} retry={order.reload} /></>
@@ -49,7 +49,7 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
     <section className="a-panel" aria-labelledby="pay-title">
       <h2 id="pay-title">Thanh toán</h2>
       <DataTable state={none} rows={data.payments} rowKey={payment => payment.id ?? ''} empty="Chưa có lần thanh toán nào." columns={[
-        { head: 'Nhà cung cấp', cell: payment => isAdmin ? <Link to={`/admin/payments/${payment.id}`}>{payment.provider}</Link> : payment.provider },
+        { head: 'Nhà cung cấp', cell: payment => canSeePayments ? <Link to={`/admin/payments/${payment.id}`}>{payment.provider}</Link> : payment.provider },
         { head: 'Trạng thái', cell: payment => <Badge domain="payment" value={payment.status} /> },
         { head: 'Số tiền', cell: payment => formatMoney(payment.amount) },
         { head: 'Tạo lúc', cell: payment => formatDateTime(payment.createdAt) },

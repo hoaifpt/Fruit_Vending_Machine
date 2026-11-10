@@ -31,6 +31,8 @@ export function parseToken(token: string, now = Date.now()): Session | null {
 
 let current: Session | null = null
 let loaded = false
+/** Set once the session-expiry redirect has started, so a burst of 401s redirects only once. */
+let expiryHandled = false
 const listeners = new Set<() => void>()
 
 function readStored() {
@@ -53,6 +55,7 @@ export function startSession(token: string): Session {
   const session = parseToken(token)
   if (!session) throw new Error('Tài khoản chưa có thông tin hoặc quyền truy cập hợp lệ.')
   current = session; loaded = true
+  expiryHandled = false
   persist(token)
   emit()
   return session
@@ -70,18 +73,48 @@ export function hasRole(session: Session | null, role: Role) { return !!session?
 
 export function loginPathFor(pathname: string, search = ''): string {
   const target = pathname + search
-  return target === '/' || target.startsWith('/login') ? '/login' : `/login?next=${encodeURIComponent(target)}`
+  return isReturnTarget(target) ? `/login?next=${encodeURIComponent(target)}` : '/login'
 }
-/** Only same-site absolute paths are valid post-login targets (blocks open redirects). */
+
+const ADMIN_PATH = /^\/admin(?:[/?#]|$)/
+/** Backslash, whitespace and control characters (browsers strip or reinterpret them in URLs). */
+const UNSAFE_CHARS = new RegExp('[\\\\\\s\\u0000-\\u001f\\u007f]')
+/** Internal management path only: starts with /admin, no scheme, no `//` or `\`, no control characters or spaces. */
+function isReturnTarget(value: string): boolean {
+  if (!ADMIN_PATH.test(value) || UNSAFE_CHARS.test(value) || value.includes('//')) return false
+  try {
+    const url = new URL(value, 'https://web.invalid')
+    return url.origin === 'https://web.invalid' && ADMIN_PATH.test(url.pathname)
+  } catch { return false }
+}
+/** Only same-site /admin paths are valid post-login targets (blocks open redirects); anything else gives /admin. */
 export function safeNext(value: string | null): string {
-  return value && /^\/(?![/\\])/.test(value) && !value.startsWith('/login') ? value : '/admin'
+  return value && isReturnTarget(value) ? value : '/admin'
+}
+
+type Redirect = (to: string) => void
+let redirect: Redirect = to => window.location.assign(to)
+/** The admin app plugs in its client-side router so expiry keeps the in-memory state (and the mock store). */
+export function setLoginRedirect(next: Redirect | null) {
+  redirect = next ?? (to => window.location.assign(to))
+}
+
+/**
+ * Session expired or rejected (401, or the token's exp passed): clears the session and sends the user to login with
+ * the current page as `next`. Runs once per session however many requests fail together. Returns the target, or
+ * null when nothing was done (already handled, or already on the login page).
+ */
+export function expireSession(location: { pathname: string; search: string } = window.location): string | null {
+  if (expiryHandled) return null
+  expiryHandled = true
+  const target = loginPathFor(location.pathname, location.search)
+  endSession()
+  if (location.pathname.startsWith('/login')) return null
+  redirect(target)
+  return target
 }
 
 configureClient({
   getToken: () => getSession()?.token ?? null,
-  onUnauthorized: () => {
-    endSession()
-    const { pathname, search } = window.location
-    if (!pathname.startsWith('/login')) window.location.assign(loginPathFor(pathname, search))
-  },
+  onUnauthorized: () => { expireSession() },
 })
