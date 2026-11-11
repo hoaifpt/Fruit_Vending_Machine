@@ -5,6 +5,8 @@
 // filled in) showing the free places and what the batch can still take, and take a box out in a Sheet with a required
 // reason. Rules: ../inventory-map.ts (map), ../inventory-load.ts (load/remove). Each slot links to its history and a
 // blocking head to the history of that box (screen I4, ./InventoryHistoryPage.tsx).
+// Connectivity (FE 6.4): the machine picker and the map header show "Trực tuyến" / "Mất kết nối (OFFLINE)" (180 s rule of
+// ../connection.ts), reloaded every 30 s, with a warning on the map while the machine is OFFLINE.
 import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowDownToLine, CircleAlert, Lock, Minus, PackageMinus, Plus, RefreshCw, TriangleAlert } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
@@ -35,7 +37,10 @@ import type { InventoryView, MachineMap, SlotColumn } from '../inventory-map.ts'
 import { Badge, DataTable, ErrorState, FormSheet, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useBatchOptions, useMachineOptions, useSlotOptions } from '../options.ts'
 import { focusByKey, focusLost } from '../return-focus.ts'
+import { ConnectionStatus, OfflineNotice } from '../connection-parts.tsx'
+import { CONNECTION_POLL_MS } from '../connection.ts'
 import { useApi } from '../useApi.ts'
+import { useLiveLastSeen } from '../useConnection.ts'
 import { useSession } from '../useSession.ts'
 
 const SORTS = [{ value: 'loadedAt,desc', label: 'Nạp gần nhất' }, { value: 'updatedAt,desc', label: 'Cập nhật gần nhất' }, { value: 'status,asc', label: 'Trạng thái' }]
@@ -153,7 +158,7 @@ function MapView({ canWrite, changes, focusAfter, load, hideLoad }: {
 
 /** No machine in the URL yet: the machines to choose from, as buttons. */
 function MachinePicker({ choose }: { choose: (machineId: string) => void }) {
-  const state = useApi(signal => machinesApi.list({ page: 0, size: 100, sort: 'name,asc' }, signal), 'inventory-machines')
+  const state = useApi(signal => machinesApi.list({ page: 0, size: 100, sort: 'name,asc' }, signal), 'inventory-machines', { pollMs: CONNECTION_POLL_MS })
   const titleId = useId()
   if (state.error && !state.data) return <ErrorState error={state.error} retry={state.reload} />
   if (!state.data) return <Loading label="Đang tải danh sách máy…" rows={3} />
@@ -167,7 +172,10 @@ function MachinePicker({ choose }: { choose: (machineId: string) => void }) {
           {machines.map(machine => <li key={machine.id}>
             <Button type="button" variant="outline" className="h-auto w-full justify-between gap-3 px-3 py-2.5 text-left whitespace-normal" onClick={() => choose(machine.id)}>
               <span className="grid min-w-0 gap-0.5"><span className="font-medium">{machine.name}</span><span className="font-mono text-xs text-muted-foreground">{machine.code}</span></span>
-              <StatusBadge domain="machine" value={machine.status} describe={false} />
+              <span className="grid justify-items-end gap-1">
+                <StatusBadge domain="machine" value={machine.status} describe={false} />
+                <ConnectionStatus lastSeenAt={machine.lastSeenAt} source={state} detail={false} className="justify-items-end" />
+              </span>
             </Button>
           </li>)}
         </ul>
@@ -204,6 +212,7 @@ function MapBody({ state, data, slotId, canWrite, remove, load, showAll }: {
         <RefreshCw aria-hidden="true" className={cn(state.loading && 'motion-safe:animate-spin')} />{state.loading ? 'Đang tải…' : 'Tải lại'}
       </Button>
     </div>
+    <MapConnection machineId={data.machine.id} lastSeenAt={data.machine.lastSeenAt} />
     {state.error ? <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-[13px] text-destructive">Không tải lại được sơ đồ; đang hiện dữ liệu cũ. Bấm Tải lại để thử lần nữa.</p> : null}
     {data.machine.status !== 'ACTIVE' && <p role="note" className="mb-3 rounded-lg border border-status-warning-foreground/30 bg-status-warning px-3.5 py-2.5 text-[13px] text-status-warning-foreground">
       Máy đang ở trạng thái <strong>{machineMeta.label}</strong>: kiosk không bán hộp nào, kể cả ở ngăn có hộp đáy sẵn sàng.
@@ -224,6 +233,18 @@ function MapBody({ state, data, slotId, canWrite, remove, load, showAll }: {
           {columns.map(column => <li key={column.slot.id} className="flex min-w-0"><Column column={column} canWrite={canWrite} remove={remove} load={load} /></li>)}
         </ul>}
   </section>
+}
+
+/** Connectivity of the machine on the map: its own 30 s reload, since the map itself is not polled. */
+function MapConnection({ machineId, lastSeenAt }: { machineId: string; lastSeenAt: string | null | undefined }) {
+  const { lastSeenAt: seen, source } = useLiveLastSeen(machineId, lastSeenAt)
+  return <>
+    <div className="mb-3 flex flex-wrap items-start gap-x-2 gap-y-1 text-[13px]">
+      <span className="text-muted-foreground">Kết nối của máy:</span>
+      <ConnectionStatus lastSeenAt={seen} source={source} />
+    </div>
+    <OfflineNotice lastSeenAt={seen} source={source} className="mb-0 [&>p]:mb-3" />
+  </>
 }
 
 function Legend() {

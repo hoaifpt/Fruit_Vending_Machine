@@ -4,11 +4,12 @@ import { expect, test } from '@playwright/test'
 import { ACCOUNTS, loginAs, typeLogin } from './support.ts'
 
 const ADMIN_ONLY = ['Tài khoản', 'Vai trò & quyền', 'Thanh toán', 'Webhook thanh toán']
-const SHARED = ['Máy bán hàng', 'Sản phẩm', 'Lô hàng', 'Tồn kho', 'Đơn hàng']
+const SHARED = ['Tổng quan', 'Máy bán hàng', 'Sản phẩm', 'Lô hàng', 'Tồn kho', 'Đơn hàng']
 
 test('ADMIN đăng nhập bằng bàn phím và thấy đủ menu', async ({ page }) => {
   await loginAs(page, 'ADMIN')
-  await expect(page).toHaveURL(/\/admin\/machines$/)
+  // FE 6.5: the overview is the first screen after sign-in.
+  await expect(page).toHaveURL(/\/admin\/overview$/)
   const nav = page.getByRole('navigation', { name: 'Quản trị' })
   for (const label of [...SHARED, ...ADMIN_ONLY]) await expect(nav.getByRole('link', { name: label, exact: true })).toBeVisible()
 })
@@ -29,7 +30,7 @@ test('STAFF không thấy mục ADMIN, gõ URL ADMIN thì gặp 403 và vẫn đ
   // The next step works with the keyboard.
   await page.getByRole('link', { name: 'Về trang đầu của bạn' }).focus()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(/\/admin\/machines$/)
+  await expect(page).toHaveURL(/\/admin\/overview$/)
 })
 
 test('Sai mật khẩu hiện thông báo role=alert, ô mật khẩu aria-invalid đến khi sửa, ở lại trang đăng nhập', async ({ page }) => {
@@ -71,7 +72,7 @@ test('Trang đăng nhập: chữ tiếng Việt và thứ tự Tab theo thứ t�
 test('STAFF đăng nhập với next là màn ADMIN thì về màn đầu của mình, không gặp 403', async ({ page }) => {
   await page.goto('/login?next=%2Fadmin%2Fpayments%3Fstatus%3DSUCCESS')
   await typeLogin(page, ACCOUNTS.STAFF.email, ACCOUNTS.STAFF.password)
-  await page.waitForURL(url => url.pathname === '/admin/machines')
+  await page.waitForURL(url => url.pathname === '/admin/overview')
   await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toHaveCount(0)
 })
 

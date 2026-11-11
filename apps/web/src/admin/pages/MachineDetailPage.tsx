@@ -1,6 +1,10 @@
-// C3 Chi tiết máy: three tabs kept in the URL (`?tab=overview|slots|kiosk`).
+// C3 Chi tiết máy: tabs kept in the URL (`?tab=overview|sensors|slots|kiosk`). The header shows, on every tab, the
+// administrative status and the connectivity (Trực tuyến / Mất kết nối (OFFLINE) after 180 s without a message, FE 6.4);
+// the machine is read again every 30 s and turns OFFLINE on screen the moment its 180 s are up.
 // - Tổng quan: whether the kiosk sells and why, what it still needs (active slots, a kiosk key) before switching the
 //   machine to ACTIVE, status changes with a confirmation, configuration (edited in a Sheet).
+// - Cảm biến & Sự kiện (FE 6.4, ./MachineSensorsTab.tsx): heartbeat, Wi-Fi, firmware, temperature/humidity, events
+//   with FAULT codes; draft API waiting for BE 3.4/3.5.
 // - Ngăn: slots with server paging/sort/status filter in the URL; add a slot, change its capacity or status.
 // - Khóa kiosk (ADMIN, KIOSK_CREDENTIAL_MANAGE): key history by prefix; issue a key (shown once, with a copy button, and
 //   never stored anywhere), revoke with a confirmation.
@@ -25,6 +29,8 @@ import { statusMeta } from '../../lib/status.ts'
 import { activeFilterCount, clearFiltersPatch, sortParam } from '../../lib/table-query.ts'
 import { ConfirmDialog, DataTable, ErrorState, FormSheet, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, enumOptions, useDialog, useForm } from '../kit.tsx'
 import type { Column } from '../kit.tsx'
+import { ConnectionStatus, OfflineNotice } from '../connection-parts.tsx'
+import { CONNECTION_POLL_MS } from '../connection.ts'
 import { useApi, errorMessage } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 import { focusByKey, focusLost, useReturnFocus } from '../return-focus.ts'
@@ -37,6 +43,7 @@ import {
 } from '../machine-detail.ts'
 import type { DetailTab, ReadinessItem, SlotStatus, SlotValues } from '../machine-detail.ts'
 import { MachineSheet } from './MachinesPage.tsx'
+import MachineSensorsTab from './MachineSensorsTab.tsx'
 
 const BACK = { to: '/admin/machines', label: 'Danh sách máy' }
 const PANEL = 'mb-5 min-w-0 rounded-xl border bg-card p-5 shadow-xs max-[680px]:p-4'
@@ -48,7 +55,8 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
   const { pathname, params, update } = useQueryParams()
   const tab = readDetailTab(params, canKeys)
   const rawTab = params.get('tab')
-  const machine = useApi(signal => machinesApi.get(machineId, signal), machineId)
+  // Polled for connectivity (lastSeenAt); a failed poll keeps the machine on screen.
+  const machine = useApi(signal => machinesApi.get(machineId, signal), machineId, { pollMs: CONNECTION_POLL_MS })
   const [editing, setEditing] = useState(false)
   const tabsRef = useRef<HTMLDivElement>(null)
   // A checklist button that opens another tab names the control to land on there (its data-focus-key).
@@ -60,6 +68,11 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
   useEffect(() => {
     if (rawTab !== null && rawTab !== (tab === 'overview' ? null : tab)) update({ tab: tab === 'overview' ? undefined : tab })
   }, [rawTab, tab, update])
+
+  // On a narrow screen the tab list scrolls sideways: keep the selected tab in view (ArrowRight, ?tab=kiosk, a jump).
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [tab, data?.id])
 
   // After a jump the old panel is unmounted, so focus would fall to <body>: put it on the selected tab right away, then
   // on the target control once its panel has rendered it (it may wait for a list to load), unless the person moved on.
@@ -101,11 +114,17 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
     <PageHead title={data.name} back={BACK}
       subtitle={`Mã ${data.code} · ${data.location || 'Chưa có vị trí'}.${canWrite ? '' : ' Bạn chỉ xem; thêm ngăn, cấp khóa và đổi trạng thái do Quản trị viên thực hiện.'}`}
       actions={canWrite ? <Button type="button" variant="outline" data-focus-key="machine-edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Sửa cấu hình</Button> : undefined} />
+    <div role="group" aria-label="Trạng thái máy"><dl className="mb-4 flex flex-wrap items-start gap-x-8 gap-y-3 text-sm">
+      <div className="grid gap-1"><dt className="text-xs text-muted-foreground">Trạng thái quản trị</dt><dd><StatusBadge domain="machine" value={data.status} describe={false} /></dd></div>
+      <div className="grid gap-1"><dt className="text-xs text-muted-foreground">Kết nối</dt><dd><ConnectionStatus lastSeenAt={data.lastSeenAt} source={machine} /></dd></div>
+    </dl></div>
+    <OfflineNotice lastSeenAt={data.lastSeenAt} source={machine} />
     <Tabs ref={tabsRef} value={tab} onValueChange={value => openTab(value as DetailTab)}>
       <TabsList aria-label="Thông tin máy">
         {visibleTabs(canKeys).map(name => <TabsTrigger key={name} value={name}>{TAB_LABELS[name]}</TabsTrigger>)}
       </TabsList>
       <TabsContent value="overview"><Overview machine={data} canWrite={canWrite} canKeys={canKeys} canInventory={canInventory} reload={machine.reload} jumpTo={jumpTo} /></TabsContent>
+      <TabsContent value="sensors"><MachineSensorsTab machine={data} connection={machine} /></TabsContent>
       <TabsContent value="slots"><SlotsTab machine={data} canWrite={canWrite} canKeys={canKeys} canInventory={canInventory} jumpTo={jumpTo} /></TabsContent>
       {canKeys && <TabsContent value="kiosk"><KioskTab machine={data} /></TabsContent>}
     </Tabs>
@@ -189,7 +208,7 @@ function Overview({ machine, canWrite, canKeys, canInventory, reload, jumpTo }: 
         <dt>Vị trí</dt><dd>{machine.location || 'Chưa có vị trí'}</dd>
         <dt>Nhiệt độ cho phép</dt><dd>{range(machine.minTemperature, machine.maxTemperature, '°C')}</dd>
         <dt>Độ ẩm cho phép</dt><dd>{range(machine.minHumidity, machine.maxHumidity, '%')}</dd>
-        <dt>Liên lạc gần nhất</dt><dd>{lastContact(machine)} <span className="text-[13px] text-muted-foreground">(không ảnh hưởng việc bán)</span></dd>
+        <dt>Liên lạc gần nhất</dt><dd>{lastContact(machine)} <span className="text-[13px] text-muted-foreground">(kết nối xem ở đầu trang; không đổi trạng thái quản trị)</span></dd>
         <dt>Đăng ký lúc</dt><dd>{formatDateTime(machine.createdAt)}</dd>
         <dt>Cập nhật lúc</dt><dd>{formatDateTime(machine.updatedAt)}</dd>
       </dl>

@@ -2,7 +2,7 @@
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
 import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
-import type { MockAlert, MockCredential, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
+import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
@@ -482,6 +482,19 @@ export const routes: Route[] = [
     return ok(credentialView(credential))
   }),
 
+  // ---- heartbeat, sensor readings, events: draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml)
+  route('GET', '/machines/:machineId/heartbeat', { permission: 'MACHINE_READ' }, ctx => ok(heartbeatView(heartbeatOf(ctx.store, findMachine(ctx).id)))),
+  route('GET', '/machines/:machineId/sensor-readings', { permission: 'MACHINE_READ' }, ctx => {
+    const machine = findMachine(ctx)
+    const rows = ctx.store.readings.filter(reading => reading.machineId === machine.id && within(ctx.query, 'recordedFrom', 'recordedTo', reading.recordedAt))
+    return ok(paginate(rows, ctx.query, { sorts: { recordedAt: row => row.recordedAt }, defaultSort: 'recordedAt,desc' }))
+  }),
+  route('GET', '/machines/:machineId/events', { permission: 'MACHINE_READ' }, ctx => {
+    const machine = findMachine(ctx)
+    const rows = ctx.store.machineEvents.filter(event => event.machineId === machine.id && eq(ctx.query, 'eventType', event.eventType) && within(ctx.query, 'createdFrom', 'createdTo', event.createdAt))
+    return ok(paginate(rows, ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc' }))
+  }),
+
   // ---- product batches
   route('GET', '/product-batches', 'any', ctx => {
     const rows = ctx.store.batches.filter(batch => eq(ctx.query, 'productId', batch.productId))
@@ -726,4 +739,47 @@ export function raiseAlert(store: MockStore, now: number, input: RaiseAlertInput
   }
   store.alerts.push(alert)
   return alert
+}
+
+/** Heartbeat row of a machine; machines registered during the session start with one that has never connected. */
+function heartbeatOf(store: MockStore, machineId: string): MockHeartbeat {
+  let heartbeat = store.heartbeats.find(candidate => candidate.machineId === machineId)
+  if (!heartbeat) {
+    heartbeat = { machineId, lastSeenAt: null, reportedAt: null, state: null, firmwareVersion: null, uptimeSeconds: null, rssi: null, dispenseState: null, live: false, bootedAt: null }
+    store.heartbeats.push(heartbeat)
+  }
+  return heartbeat
+}
+function heartbeatView(heartbeat: MockHeartbeat) {
+  const { machineId, lastSeenAt, reportedAt, state, firmwareVersion, uptimeSeconds, rssi, dispenseState } = heartbeat
+  return { machineId, lastSeenAt, reportedAt, state, firmwareVersion, uptimeSeconds, rssi, dispenseState }
+}
+
+/**
+ * What MachineMessageHandler does in the background, applied before each request: a machine whose heartbeat is live
+ * keeps talking, so its last_seen_at (and the heartbeat) is "now". A stopped one keeps its last value and turns OFFLINE
+ * on screen 180 s later.
+ */
+export function syncHeartbeats(store: MockStore, now: number) {
+  for (const heartbeat of store.heartbeats) {
+    if (!heartbeat.live) continue
+    const at = iso(now)
+    Object.assign(heartbeat, { lastSeenAt: at, reportedAt: at, state: 'ONLINE', uptimeSeconds: heartbeat.bootedAt ? Math.max(0, Math.floor((now - Date.parse(heartbeat.bootedAt)) / 1000)) : null })
+    const machine = store.machines.find(candidate => candidate.id === heartbeat.machineId)
+    if (machine) machine.lastSeenAt = at
+  }
+}
+
+/**
+ * Mock-only control (window.__fvMock.stopHeartbeat, see index.ts): the machine (id or code) sends one last message now and
+ * then goes silent, like a power cut. Returns that last `lastSeenAt`. `resumeHeartbeat` makes it talk again.
+ */
+export function setHeartbeat(store: MockStore, now: number, machine: string, live: boolean): string | null {
+  const target = store.machines.find(candidate => candidate.id === machine || candidate.code === machine)
+  if (!target) throw new Error(`Không có máy ${machine}`)
+  const heartbeat = heartbeatOf(store, target.id)
+  const at = iso(now)
+  Object.assign(heartbeat, { live, lastSeenAt: at, reportedAt: at, state: 'ONLINE', bootedAt: heartbeat.bootedAt ?? at })
+  target.lastSeenAt = at
+  return at
 }

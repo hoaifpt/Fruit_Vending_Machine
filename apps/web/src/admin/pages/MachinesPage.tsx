@@ -1,9 +1,10 @@
 // C2 Máy bán hàng: list (server paging, sort, status/search filters in the URL) where each row says whether the kiosk
-// takes orders and, if not, why — from the administrative status only, shown apart from the last contact time
-// (connectivity). ADMIN registers a machine in a Sheet (it starts INACTIVE). No delete anywhere; the code of a row opens
+// takes orders and, if not, why — from the administrative status only, shown apart from connectivity: "Trực tuyến" or
+// "Mất kết nối (OFFLINE)" when the machine has been silent for more than 180 s (FE 6.4, ../connection.ts). The list
+// reloads every 30 s and a row turns OFFLINE on screen the moment its 180 s are up, without a reload. ADMIN registers a machine in a Sheet (it starts INACTIVE). No delete anywhere; the code of a row opens
 // /admin/machines/:id where configuration, slots, kiosk keys and switching to ACTIVE live (FE 3.5).
 // ADMIN: view, register (MACHINE_WRITE). STAFF: view only (MACHINE_READ, route guard).
-import { Clock, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
 import { machinesApi } from '../../api/resources.ts'
 import type { Machine } from '../../api/resources.ts'
@@ -17,10 +18,12 @@ import { useQueryParams } from '../../lib/router.ts'
 import { activeFilterCount, clearFiltersPatch, sortParam } from '../../lib/table-query.ts'
 import { DataTable, FormSheet, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, enumOptions, useDialog, useForm } from '../kit.tsx'
 import type { Column } from '../kit.tsx'
+import { ConnectionStatus } from '../connection-parts.tsx'
+import { CONNECTION_POLL_MS } from '../connection.ts'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 import {
-  LIMITS, MACHINE_FILTER_KEYS, MACHINE_SORT, NEW_MACHINE, THRESHOLDS, createMachineBody, describeSaveError, lastContact,
+  LIMITS, MACHINE_FILTER_KEYS, MACHINE_SORT, NEW_MACHINE, THRESHOLDS, createMachineBody, describeSaveError,
   machineListQuery, machineValues, readMachineFilters, saleState, updateMachineBody, validateMachine,
 } from '../machines.ts'
 import type { MachineValues } from '../machines.ts'
@@ -31,7 +34,7 @@ function MachinesPage() {
   const { params, update } = useQueryParams()
   const filters = readMachineFilters(params)
   const query = machineListQuery(filters, PAGE_SIZE)
-  const state = useApi(signal => machinesApi.list(query, signal), `${query.status}|${query.search}|${query.sort}|${query.page}`)
+  const state = useApi(signal => machinesApi.list(query, signal), `${query.status}|${query.search}|${query.sort}|${query.page}`, { pollMs: CONNECTION_POLL_MS })
   const dialog = useDialog()
   const filterCount = activeFilterCount([filters.status, filters.search])
   const data = state.data
@@ -45,8 +48,7 @@ function MachinesPage() {
     { head: 'Tên máy', sortKey: 'name', cell: machine => <span className="font-medium">{machine.name}</span> },
     { head: 'Vị trí', sortKey: 'location', cell: machine => machine.location || <span className="text-muted-foreground">Chưa có vị trí</span> },
     { head: 'Bán hàng', sortKey: 'status', cell: machine => <SaleCell machine={machine} canManage={canManage} /> },
-    { head: 'Liên lạc gần nhất', nowrap: true, cell: machine => <span className={cn('inline-flex items-center gap-1.5', !machine.lastSeenAt && 'text-muted-foreground')}>
-      <Clock aria-hidden="true" className="size-3.5 shrink-0" />{lastContact(machine)}</span> },
+    { head: 'Kết nối', cell: machine => <ConnectionStatus lastSeenAt={machine.lastSeenAt} source={state} /> },
   ]
 
   const empty = pastEnd
@@ -59,7 +61,7 @@ function MachinesPage() {
 
   return <>
     <PageHead title="Máy bán hàng"
-      subtitle={`Cột Bán hàng là trạng thái quản trị: chỉ máy Hoạt động mới nhận đơn trên kiosk. Liên lạc gần nhất chỉ cho biết lần cuối máy gửi tín hiệu, không làm máy ngừng bán.${canManage ? '' : ' Bạn chỉ xem; đăng ký và đổi trạng thái do Quản trị viên thực hiện.'}`}
+      subtitle={`Cột Bán hàng là trạng thái quản trị: chỉ máy Hoạt động mới nhận đơn trên kiosk. Cột Kết nối báo Mất kết nối (OFFLINE) khi máy không gửi tín hiệu quá 180 giây; trạng thái quản trị không tự đổi, nhưng lệnh nhả hàng có thể không tới được máy.${canManage ? '' : ' Bạn chỉ xem; đăng ký và đổi trạng thái do Quản trị viên thực hiện.'}`}
       actions={canManage && !forbidden ? <Button type="button" data-focus-key="machines-create" onClick={() => dialog.open()}><Plus aria-hidden="true" />Đăng ký máy</Button> : undefined} />
     {!forbidden && <FilterBar activeCount={filterCount} onClear={clearFilters}>
       <SearchFilter label="Tìm theo mã, tên hoặc vị trí" value={filters.search} onCommit={value => update({ search: value || undefined, page: undefined })} />

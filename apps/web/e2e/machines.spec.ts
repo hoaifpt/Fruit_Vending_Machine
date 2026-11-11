@@ -1,5 +1,5 @@
 // C2 Máy bán hàng (issue FE 3.4) on the mock API. Done criterion: looking at the list tells at once which machines do not
-// sell and why. Also: administrative status kept apart from connectivity (no online/offline guess), registration in a
+// sell and why. Also: administrative status kept apart from connectivity (Trực tuyến / OFFLINE after 180 s, FE 6.4), registration in a
 // Sheet starting INACTIVE, duplicate code (409, including the race) once under the code field, client checks of the
 // thresholds, filters/sort in the URL, row → /admin/machines/:id, STAFF view-only, 403/500; screenshots + axe.
 import { expect, test } from '@playwright/test'
@@ -43,9 +43,13 @@ test.describe('màn Máy bán hàng (Quản trị viên)', () => {
     await expect(row(page, 'DEV-MACHINE-03')).toContainText('Ngừng hoạt động')
     await expect(row(page, 'DEV-MACHINE-03')).toContainText('Ngừng bán: mới đăng ký, chưa bật bán.')
     await expect(row(page, 'DEV-MACHINE-03')).toContainText('Chưa từng kết nối')
-    // The API has no connectivity value: nothing claims a machine is online or offline.
-    await expect(table(page).getByText(/Trực tuyến|Mất kết nối/)).toHaveCount(0)
-    await expect(table(page).getByRole('columnheader', { name: /Liên lạc gần nhất/ })).toBeVisible()
+    // FE 6.4: connectivity has its own column, derived from lastSeenAt (OFFLINE after 180 s), apart from the
+    // administrative status: DEV-MACHINE-02 is in maintenance AND offline, DEV-MACHINE-01 active and online.
+    await expect(table(page).getByRole('columnheader', { name: 'Kết nối' })).toBeVisible()
+    await expect(row(page, 'DEV-MACHINE-01').locator('[data-connection]')).toHaveAttribute('data-connection', 'ONLINE')
+    await expect(row(page, 'DEV-MACHINE-01')).toContainText('Trực tuyến')
+    await expect(row(page, 'DEV-MACHINE-02')).toContainText('Mất kết nối (OFFLINE)')
+    await expect(row(page, 'DEV-MACHINE-03')).toContainText('Mất kết nối (OFFLINE)')
     await expect(deleteControls(page)).toHaveCount(0)
   })
 

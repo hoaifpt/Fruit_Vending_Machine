@@ -1,14 +1,14 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceOrders, draftPermissionsOfUser, permissionsOfUser, raiseAlert, routes } from './handlers.ts'
+import { advanceOrders, draftPermissionsOfUser, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
 import type { HandlerContext, Policy, RaiseAlertInput } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
 import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -34,6 +34,8 @@ export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/slots(\/|$)/.test(path)) return 'slots'
   // Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): its own group, so it can be mocked while orders are real.
   if (/^\/orders\/[^/]+\/dispense-commands(\/|$)/.test(path)) return 'dispense-commands'
+  // Draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml): its own group, like dispense-commands.
+  if (/^\/machines\/[^/]+\/(heartbeat|sensor-readings|events)(\/|$)/.test(path)) return 'telemetry'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
 }
 
@@ -114,7 +116,14 @@ function emptied(data: unknown): unknown {
 }
 
 /** Mock-only controls for tests and demos (never in a production build: this module is only loaded with VITE_API_MOCK). */
-export interface MockControl { raiseAlert: (input?: RaiseAlertInput) => MockAlert }
+export interface MockControl {
+  raiseAlert: (input?: RaiseAlertInput) => MockAlert
+  /** The machine (id or code) sends a last message now, then goes silent; returns that lastSeenAt. */
+  stopHeartbeat: (machine: string) => string | null
+  resumeHeartbeat: (machine: string) => string | null
+  /** Mocked requests so far whose path (without /api/v1) starts with `prefix`, with the mock time they arrived. */
+  requests: (prefix?: string) => { method: string; path: string; at: number }[]
+}
 export type MockFetcher = typeof fetch & { control: MockControl }
 
 export function createMockFetcher(selection: MockSelection, overrides: Partial<MockOptions> = {}): MockFetcher {
@@ -175,12 +184,20 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       if (route.policy === 'kiosk') ctx.machineId = kioskMachineId(headers.get('x-kiosk-key'))
       else if (route.policy !== 'public') ctx.user = authenticate(route.policy, headers.get('authorization'))
       advanceOrders(ctx)
+      syncHeartbeats(store, ctx.now)
       return route.handle(ctx)
     }
     throw new MockHttpError(501, `Mock chưa có handler cho ${method} ${API_PREFIX}${path}`)
   }
 
-  const control: MockControl = { raiseAlert: input => raiseAlert(store, options.now(), input) }
+  /** Last mocked requests (at most 500), for tests that must prove how many polls happened. */
+  const requestLog: { method: string; path: string; at: number }[] = []
+  const control: MockControl = {
+    requests: (prefix = '') => requestLog.filter(entry => entry.path.startsWith(prefix)).map(entry => ({ ...entry })),
+    raiseAlert: input => raiseAlert(store, options.now(), input),
+    stopHeartbeat: machine => setHeartbeat(store, options.now(), machine, false),
+    resumeHeartbeat: machine => setHeartbeat(store, options.now(), machine, true),
+  }
   const fetcher: typeof fetch = async (input, init) => {
     const url = requestUrl(input)
     const path = url.pathname.startsWith(`${API_PREFIX}/`) ? url.pathname.slice(API_PREFIX.length) : url.pathname
@@ -189,6 +206,8 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     if (!selection.all && !(group && enabledGroups.has(group))) return options.realFetch(input, init)
 
     const method = (init?.method ?? 'GET').toUpperCase()
+    requestLog.push({ method, path, at: options.now() })
+    if (requestLog.length > 500) requestLog.shift()
     const signal = init?.signal
     await wait(options.latencyMs, signal)
     const current = readScenario(options.getSearch(), options.storage)

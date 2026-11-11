@@ -1,0 +1,434 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - machine heartbeat, sensor readings and events
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 6.4, tab "Cảm biến & Sự kiện" of screen C3) for backend issues 3.4 and 3.5
+    "Heartbeat, số đo, sự kiện máy"; the backend has not implemented these endpoints yet. Names follow what exists:
+    table sensor_readings (V4, entity com.fruitmachine.backend.sensor.entity.SensorReading: id BIGINT identity,
+    temperature/humidity NUMERIC(5,2) nullable but not both null, recorded_at), table machine_events (V6, entity
+    com.fruitmachine.backend.machine.entity.MachineEvent: id UUID, event_type VARCHAR(64), payload JSONB, created_at),
+    machines.last_seen_at (touched by MachineMessageHandler on every MQTT message), and the firmware messages of
+    docs/mqtt-dispense.md and firmware/fruit (status payload {"state":"ONLINE","firmwareVersion":"0.3.0","uptimeSeconds":N},
+    Last Will {"state":"OFFLINE"}, telemetry {"temperature":4.7,"humidity":68.2}, events DISPENSE_ACCEPTED,
+    DISPENSE_REJECTED {"commandId","state"}, DISPENSE_COMPLETED, DISPENSE_ABORTED, BOWL_SENSOR_TRIGGERED
+    {"dispenseState"}). Connectivity rule used by every web screen: a machine is OFFLINE when lastSeenAt is null or older
+    than 180 seconds; it is never stored. Proposed for the backend and firmware (not built yet): (1) the firmware
+    publishes `status` (or a `heartbeat` channel) at least every 60 s, proposed 30 s, otherwise an idle machine shows
+    OFFLINE after 180 s; (2) the status payload adds `rssi` (WiFi.RSSI(), dBm) and `dispenseState` (the controller state
+    name, e.g. IDLE or FAULT); (3) a Last Will OFFLINE message must not touch last_seen_at; (4) the backend subscribes to
+    `telemetry` and stores sensor_readings, and stores every `events`/`status` message in machine_events with payload =
+    the message's `details` (or the status payload); (5) a controller fault is published as eventType FAULT with
+    payload {"code": "<FAULT_CODE>", "message"?: string, "commandId"?: string}; known codes are listed in
+    MachineEventResponse. Permission: MACHINE_READ (ADMIN and STAFF), as for GET /machines/{id}; no new permission is
+    needed. Read only: nothing is ever deleted or changed through this API. Used by the mock layer until the backend
+    ships it, then this file is deleted and the paths move to api.yaml.
+paths:
+  /api/v1/machines/{machineId}/heartbeat:
+    get:
+      tags: [Machines]
+      operationId: getMachineHeartbeat
+      summary: Latest heartbeat of a machine (draft)
+      description: >-
+        MACHINE_READ. What the machine last reported on its status channel, plus machines.last_seen_at. A machine that has
+        never connected answers 200 with every field null except machineId. The web decides ONLINE/OFFLINE from
+        lastSeenAt alone (older than 180 s or null = OFFLINE); `state` is only what the machine itself last said.
+      x-required-permission: MACHINE_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MachineId"
+      responses:
+        "200":
+          description: Latest heartbeat
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMachineHeartbeatResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/machines/{machineId}/sensor-readings:
+    get:
+      tags: [Machines]
+      operationId: listMachineSensorReadings
+      summary: Temperature and humidity readings of a machine (draft)
+      description: >-
+        MACHINE_READ. Database pagination page0/size20/max100. recordedFrom (inclusive) and recordedTo (exclusive) bound
+        recordedAt. Approved sort: recordedAt (default desc), tie-break id. The first row of the default sort is the
+        latest reading.
+      x-required-permission: MACHINE_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MachineId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - name: recordedFrom
+          in: query
+          description: ISO-8601 instant, inclusive lower bound of recordedAt.
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: recordedTo
+          in: query
+          description: ISO-8601 instant, exclusive upper bound of recordedAt.
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          description: recordedAt with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: recordedAt,desc
+      responses:
+        "200":
+          description: One page of readings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageSensorReadingResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/machines/{machineId}/events:
+    get:
+      tags: [Machines]
+      operationId: listMachineEvents
+      summary: Events reported by a machine (draft)
+      description: >-
+        MACHINE_READ. Database pagination page0/size20/max100. Optional exact eventType filter (the vocabulary is open,
+        see MachineEventResponse.eventType); createdFrom (inclusive) and createdTo (exclusive) bound createdAt. Approved
+        sort: createdAt (default desc), tie-break id.
+      x-required-permission: MACHINE_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MachineId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
+        - name: eventType
+          in: query
+          description: Exact event type, e.g. FAULT.
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - name: createdFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: createdTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          description: createdAt with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        "200":
+          description: One page of events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageMachineEventResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    MachineId:
+      name: machineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      description: Zero-based page.
+      required: false
+      schema:
+        type: integer
+        format: int32
+        default: 0
+        minimum: 0
+    Size:
+      name: size
+      in: query
+      description: Page size 1..100.
+      required: false
+      schema:
+        type: integer
+        format: int32
+        default: 20
+        minimum: 1
+        maximum: 100
+  responses:
+    BadRequest:
+      description: Invalid parameters (fieldErrors per field) or machineId not a UUID
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Forbidden:
+      description: The account lacks MACHINE_READ
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    NotFound:
+      description: Machine not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    ServerError:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+  schemas:
+    MachineHeartbeatResponse:
+      type: object
+      description: Latest status message of a machine. Times are UTC instants.
+      required: [machineId]
+      properties:
+        machineId:
+          type: string
+          format: uuid
+        lastSeenAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: machines.last_seen_at, the last MQTT message of any kind (same value as MachineResponse.lastSeenAt).
+        reportedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the backend received the latest status message (the firmware has no reliable clock).
+        state:
+          type:
+            - string
+            - "null"
+          enum: [ONLINE, OFFLINE, null]
+          description: What the machine last said on its status topic (OFFLINE = Last Will). Not the web's connectivity.
+        firmwareVersion:
+          type:
+            - string
+            - "null"
+          maxLength: 32
+          examples: ["0.3.0"]
+        uptimeSeconds:
+          type:
+            - integer
+            - "null"
+          format: int64
+          minimum: 0
+          description: Seconds since the controller started, as reported at reportedAt.
+        rssi:
+          type:
+            - integer
+            - "null"
+          format: int32
+          minimum: -127
+          maximum: 0
+          description: Proposed. Wi-Fi signal strength in dBm (WiFi.RSSI() of the ESP32).
+        dispenseState:
+          type:
+            - string
+            - "null"
+          maxLength: 32
+          description: >-
+            Proposed. State name of the dispense controller (firmware DispenseState): IDLE, LOCK_UPPER, OPENING_LOWER,
+            HOLD_LOWER, CLOSING_LOWER, PAUSE_BETWEEN_GATES, OPENING_UPPER, HOLD_UPPER, CLOSING_UPPER, MANUAL_MOVE, FAULT.
+    SensorReadingResponse:
+      type: object
+      description: One reading of table sensor_readings. At least one of temperature and humidity is present.
+      required: [id, machineId, recordedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        machineId:
+          type: string
+          format: uuid
+        temperature:
+          type:
+            - number
+            - "null"
+          minimum: -100
+          maximum: 100
+          description: Degrees Celsius, 2 decimals.
+        humidity:
+          type:
+            - number
+            - "null"
+          minimum: 0
+          maximum: 100
+          description: Relative humidity in percent, 2 decimals.
+        recordedAt:
+          type: string
+          format: date-time
+    MachineEventResponse:
+      type: object
+      description: >-
+        One row of machine_events. eventType is an open vocabulary (VARCHAR 64): DISPENSE_ACCEPTED, DISPENSE_REJECTED,
+        DISPENSE_COMPLETED, DISPENSE_ABORTED, BOWL_SENSOR_TRIGGERED (firmware today), ONLINE, OFFLINE (status messages)
+        and the proposed FAULT and FAULT_CLEARED. FAULT payload {"code","message"?,"commandId"?}; proposed codes:
+        CYCLE_INTERRUPTED (a dispense cycle stopped midway: STOP or power loss, gate positions unknown until RESET),
+        SERVO_INIT_FAILED, SENSOR_READ_FAILED (temperature/humidity sensor), BOWL_SENSOR_STUCK. Clients show unknown
+        types and codes as they are.
+      required: [id, machineId, eventType, payload, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        machineId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          maxLength: 64
+        payload:
+          type: object
+          additionalProperties: true
+          description: The machine's details, stored as jsonb; untrusted input, shown as text only.
+        createdAt:
+          type: string
+          format: date-time
+    PageSensorReadingResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/SensorReadingResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    PageMachineEventResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/MachineEventResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponseMachineHeartbeatResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/MachineHeartbeatResponse"
+    ApiResponsePageSensorReadingResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageSensorReadingResponse"
+    ApiResponsePageMachineEventResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageMachineEventResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

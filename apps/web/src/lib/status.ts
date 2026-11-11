@@ -21,8 +21,9 @@ export const STATUS_CATALOG = {
     MAINTENANCE: { label: 'Bảo trì', tone: 'warning', icon: 'wrench', description: 'Máy tạm dừng nhận đơn. Kiểm tra máy rồi để quản trị viên bật lại.' },
   },
   connection: {
-    ONLINE: { label: 'Trực tuyến', tone: 'success', icon: 'online', description: 'Máy đang kết nối với hệ thống.' },
-    OFFLINE: { label: 'Mất kết nối', tone: 'danger', icon: 'offline', description: 'Máy không còn kết nối với hệ thống. Kiểm tra nguồn điện và mạng của máy.' },
+    // Derived on the web from lastSeenAt (src/admin/connection.ts): OFFLINE after 180 s without any message.
+    ONLINE: { label: 'Trực tuyến', tone: 'success', icon: 'online', description: 'Máy đã gửi tín hiệu về hệ thống trong 3 phút gần nhất.' },
+    OFFLINE: { label: 'Mất kết nối (OFFLINE)', tone: 'danger', icon: 'offline', description: 'Máy không gửi tín hiệu quá 180 giây. Kiểm tra nguồn điện và Wi-Fi của máy.' },
   },
   box: {
     AVAILABLE: { label: 'Sẵn sàng', tone: 'success', icon: 'boxOk', description: 'Hộp nằm trong ngăn và có thể bán.' },

@@ -77,19 +77,21 @@ test('every nav item is governed by a held permission; nav and home follow the s
   for (const item of NAV) assert.ok(rolesWith(item.permission).length > 0, item.to)
   assert.deepEqual(navFor({ roles: ['STAFF'], permissions: ['ORDER_READ'] }).map(item => item.to), ['/admin/orders'])
   assert.equal(homeFor({ roles: ['STAFF'], permissions: [] }), '/login')
-  assert.equal(homeFor(['ADMIN']), '/admin/machines')
+  assert.equal(homeFor(['ADMIN']), '/admin/overview')
+  // Without MACHINE_READ the overview is not offered: home is the first screen the account may open.
+  assert.equal(homeFor({ roles: ['STAFF'], permissions: ['ORDER_READ'] }), '/admin/orders')
 })
 
 test('after sign-in, next is used only when the new account may open it', async () => {
   const { landingFor } = await import('../src/admin/routes.ts')
   assert.equal(landingFor(['ADMIN'], '/admin/payments?status=PAID'), '/admin/payments?status=PAID')
   // Someone else's ADMIN page left in next: a STAFF account lands on its own first screen, not on a 403.
-  assert.equal(landingFor(['STAFF'], '/admin/payments?status=PAID'), '/admin/machines')
-  assert.equal(landingFor(['STAFF'], '/admin/users'), '/admin/machines')
+  assert.equal(landingFor(['STAFF'], '/admin/payments?status=PAID'), '/admin/overview')
+  assert.equal(landingFor(['STAFF'], '/admin/users'), '/admin/overview')
   assert.equal(landingFor(['STAFF'], '/admin/orders/o-1?tab=items'), '/admin/orders/o-1?tab=items')
   // No route to check (alias, home, unknown screen): kept, AdminApp redirects or explains.
   assert.equal(landingFor(['STAFF'], '/staff'), '/staff')
   assert.equal(landingFor(['STAFF'], '/admin'), '/admin')
-  assert.equal(landingFor(['STAFF'], null), '/admin/machines')
-  assert.equal(landingFor(['ADMIN'], null), '/admin/machines')
+  assert.equal(landingFor(['STAFF'], null), '/admin/overview')
+  assert.equal(landingFor(['ADMIN'], null), '/admin/overview')
 })

@@ -12,6 +12,7 @@ import { AlertBell } from './shell/AlertBell.tsx'
 import { useSession } from './useSession.ts'
 import './admin.css'
 
+const OverviewPage = lazy(() => import('./pages/OverviewPage.tsx'))
 const UsersPage = lazy(() => import('./pages/UsersPage.tsx'))
 const RolesPage = lazy(() => import('./pages/RolesPage.tsx'))
 const ProductsPage = lazy(() => import('./pages/ProductsPage.tsx'))
@@ -70,6 +71,7 @@ function AdminApp() {
   else {
     const id = route.id ?? ''
     content = {
+      overview: <OverviewPage />,
       users: <UsersPage />,
       roles: <RolesPage />,
       products: <ProductsPage />,

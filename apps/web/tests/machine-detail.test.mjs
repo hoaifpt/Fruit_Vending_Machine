@@ -16,8 +16,11 @@ import {
 const slot = (patch = {}) => ({ slotCode: ' a1 ', capacity: ' 6 ', ...patch })
 
 test('tabs in the URL: unknown or not-allowed tab opens the overview; STAFF never gets the kiosk keys tab', () => {
-  assert.deepEqual(visibleTabs(true), ['overview', 'slots', 'kiosk'])
-  assert.deepEqual(visibleTabs(false), ['overview', 'slots'])
+  // FE 6.4 added "Cảm biến & Sự kiện" (MACHINE_READ, so STAFF too) right after the overview.
+  assert.deepEqual(visibleTabs(true), ['overview', 'sensors', 'slots', 'kiosk'])
+  assert.deepEqual(visibleTabs(false), ['overview', 'sensors', 'slots'])
+  assert.equal(readDetailTab(new URLSearchParams('tab=sensors'), false), 'sensors')
+  assert.equal(tabSearch('sensors'), '?tab=sensors')
   assert.equal(readDetailTab(new URLSearchParams('tab=slots'), false), 'slots')
   assert.equal(readDetailTab(new URLSearchParams('tab=kiosk'), true), 'kiosk')
   assert.equal(readDetailTab(new URLSearchParams('tab=kiosk'), false), 'overview')

@@ -129,7 +129,22 @@ async function send<T>(method: string, path: string, options: RequestOptions): P
   let envelope: { data?: T; timestamp?: unknown }
   try { envelope = await response.json() } catch { throw new ApiError(response.status, 'Phản hồi từ hệ thống không hợp lệ.') }
   const serverTime = typeof envelope.timestamp === 'string' ? Date.parse(envelope.timestamp) : NaN
+  noteServerTime(Number.isFinite(serverTime) ? serverTime : undefined)
   return { data: envelope.data as T, status: response.status, serverTime: Number.isFinite(serverTime) ? serverTime : undefined }
+}
+
+/**
+ * Server clock minus client clock (ms), from the `timestamp` of the last 2xx envelope; 0 until one arrives. Lets screens
+ * compare server instants (e.g. `lastSeenAt`) with "now" on the server's clock, so a wrong PC clock does not show a
+ * machine OFFLINE or online by mistake. Includes the response's transit time (a few hundred ms at most).
+ */
+let serverOffsetMs = 0
+export function serverClockOffset(): number { return serverOffsetMs }
+/** "Now" on the server's clock (ms). */
+export function serverNow(): number { return Date.now() + serverOffsetMs }
+/** Records the server time of a response received at `receivedAt` (client clock). Ignores unreadable times. */
+export function noteServerTime(serverTime: number | undefined, receivedAt = Date.now()) {
+  if (typeof serverTime === 'number' && Number.isFinite(serverTime)) serverOffsetMs = serverTime - receivedAt
 }
 
 export const api = {

@@ -77,8 +77,8 @@ export function saleState(machine: MachineLike, canManage: boolean): SaleState {
 }
 
 /**
- * Last time the machine talked to the server, shown apart from the administrative status. The API has no
- * online/offline value yet (heartbeat not built), so nothing is inferred from it and it never stops sales.
+ * Last time the machine talked to the server, as plain text. Online/OFFLINE (180 s without a message) is decided in
+ * connection.ts, never here, and never changes the administrative status.
  */
 export function lastContact(machine: Pick<MachineLike, 'lastSeenAt'>): string {
   return machine.lastSeenAt ? formatDateTime(machine.lastSeenAt) : 'Chưa từng kết nối'

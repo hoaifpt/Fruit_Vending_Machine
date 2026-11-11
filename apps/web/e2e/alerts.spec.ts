@@ -20,6 +20,12 @@ const row = (page: Page, alertId: string) => rows(page).filter({ has: page.locat
 /** dd/mm/yyyy hh:mm, the only time format of the portal. */
 const TIME = String.raw`\d{2}/\d{2}/\d{4} \d{2}:\d{2}`
 
+/** Latency of the mock API in the browser (src/api/mock/index.ts). */
+const MOCK_LATENCY_MS = 150
+async function alertRequests(page: Page) {
+  return page.evaluate(() => (window as unknown as { __fvMock: { requests: (prefix: string) => { path: string; at: number }[] } }).__fvMock.requests('/alerts'))
+}
+
 async function raiseAlert(page: Page) {
   return page.evaluate(() => (window as unknown as { __fvMock: { raiseAlert: (input: object) => { id: string } } }).__fvMock
     .raiseAlert({ type: 'MACHINE_OFFLINE', severity: 'CRITICAL', title: 'Machine offline', machineId: '20000000-0000-0000-0000-000000000001' }).id)
@@ -28,17 +34,29 @@ async function raiseAlert(page: Page) {
 test('Tiêu chí xong: cảnh báo mới hiện trên chuông sau đúng một lần polling (30 giây)', async ({ page }) => {
   await page.clock.install()
   await loginAs(page, 'STAFF')
-  await page.goto('/admin/machines')
+  // A screen that does not poll by itself, so only the bell talks to the mock while time moves.
+  await page.goto('/admin/orders')
   await expect(bell(page)).toHaveAccessibleName('Cảnh báo: 3 đang mở, 1 nghiêm trọng')
   const live = page.getByRole('banner').locator('[aria-live="polite"]')
   await expect(live).toHaveText('')
+  // One bell load = two requests (open alerts, open critical ones) sent at the same mock time; the poll interval counts
+  // from the last load (the shell may load the bell more than once while it starts).
+  const loads = await alertRequests(page)
+  expect(loads.length).toBeGreaterThanOrEqual(2)
+  const loadedAt = loads[loads.length - 1].at
+  // The clock is moved from that load, not from "now": the mock answers after 150 ms, the next poll is 30 s later.
+  const moveTo = async (sinceLoad: number) => page.clock.fastForward(loadedAt + MOCK_LATENCY_MS + sinceLoad - await page.evaluate(() => Date.now()))
 
   const newId = await raiseAlert(page)
-  // Not yet: the bell only learns about it at the next poll.
-  await page.clock.fastForward(29_000)
+  // Not yet: 29 s after the load the bell has not asked again.
+  await moveTo(29_000)
+  expect(await alertRequests(page)).toHaveLength(loads.length)
   await expect(bell(page)).toHaveAccessibleName('Cảnh báo: 3 đang mở, 1 nghiêm trọng')
-  await page.clock.fastForward(1_000)
+  // Just past 30 s (+0.4 s: the poll timer starts once the previous answer is handled, and its own answer takes 150 ms):
+  // exactly one more load (two requests), and the new alert is on the bell.
+  await moveTo(30_400)
   await expect(bell(page)).toHaveAccessibleName('Cảnh báo: 4 đang mở, 2 nghiêm trọng')
+  expect(await alertRequests(page)).toHaveLength(loads.length + 2)
   await expect(live).toHaveText('Cảnh báo mới: Máy mất kết nối tại máy DEV-MACHINE-01.')
 
   await bell(page).click()

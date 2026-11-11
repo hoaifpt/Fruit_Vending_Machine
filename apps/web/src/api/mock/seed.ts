@@ -4,6 +4,7 @@
 import type { components } from '../schema'
 import type { components as DispenseDraft } from '../drafts/dispense-commands'
 import type { components as AlertsDraft } from '../drafts/alerts'
+import type { components as TelemetryDraft } from '../drafts/machine-telemetry'
 
 type S = components['schemas']
 
@@ -34,6 +35,13 @@ export type MockPayment = Omit<S['PaymentDetailResponse'], 'orderCode' | 'machin
 export type MockDispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse']
 /** Draft of backend 3.6 (api-contract/drafts/alerts.yaml): an alert of a machine, people named by fullName. */
 export type MockAlert = AlertsDraft['schemas']['AlertResponse']
+/**
+ * Draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml). `live`: the machine keeps sending, so every
+ * request sees it heard from just now (syncHeartbeats in handlers.ts); `bootedAt` gives its uptime.
+ */
+export type MockHeartbeat = TelemetryDraft['schemas']['MachineHeartbeatResponse'] & { live: boolean; bootedAt: string | null }
+export type MockReading = TelemetryDraft['schemas']['SensorReadingResponse']
+export type MockMachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
 
 export interface MockStore {
   users: MockUser[]
@@ -48,6 +56,9 @@ export interface MockStore {
   payments: MockPayment[]
   dispenseCommands: MockDispenseCommand[]
   alerts: MockAlert[]
+  heartbeats: MockHeartbeat[]
+  readings: MockReading[]
+  machineEvents: MockMachineEvent[]
   webhookLogs: MockWebhookLog[]
   /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
   permissions: MockPermission[]
@@ -112,7 +123,9 @@ export function createStore(nowMs: number): MockStore {
     ({ id: uuid('20000000', n), code, name, location: 'Local development', status, minTemperature: 2, maxTemperature: 8, minHumidity: 0, maxHumidity: 100, lastSeenAt, ...stamp })
   const machines = [
     machine(1, 'DEV-MACHINE-01', 'Development fruit machine', 'ACTIVE', iso(0)),
-    machine(2, 'DEV-MACHINE-02', 'Maintenance test machine', 'MAINTENANCE', null),
+    // Unlike backend/db/dev/seed.sql (last_seen_at NULL), the mock has it silent for 35 minutes (FE 6.4): OFFLINE with a
+    // FAULT, matching its open MACHINE_OFFLINE alert.
+    machine(2, 'DEV-MACHINE-02', 'Maintenance test machine', 'MAINTENANCE', iso(-35 * 60_000)),
     // Just registered (FE 3.4): INACTIVE, never changed nor connected, no slots yet.
     { ...machine(3, 'DEV-MACHINE-03', 'New machine awaiting setup', 'INACTIVE', null), location: 'Warehouse bay 3', createdAt: iso(-2 * DAY), updatedAt: iso(-2 * DAY) },
   ]
@@ -302,9 +315,11 @@ export function createStore(nowMs: number): MockStore {
   for (const payment of payments) if (payment.id.startsWith('a3000000')) webhookLogs.push(call(`b3000000${payment.id.slice(8)}`, payment, payment.paidAt!, 'SUCCESS'))
   const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
   const alerts = seedAlerts(nowMs, { machines, slots, orders, admin: users[0], staff: users[1] })
+  const { heartbeats, readings, machineEvents } = seedTelemetry(nowMs, machines)
 
   return {
     users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, webhookLogs,
+    heartbeats, readings, machineEvents,
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
 }
@@ -381,4 +396,54 @@ function seedAlerts(nowMs: number, { machines, slots, orders, admin, staff }: { 
     alert(6, m1, { type: 'PRODUCT_EXPIRING', severity: 'INFO', title: 'Bowls expiring soon', message: 'Bowls in slot A1 expire within 2 days.', status: 'RESOLVED', ...slot(m1, 'A1'), ...ack(staff, -23 * HOUR), ...done(staff, -20 * HOUR) }, -DAY),
     alert(7, m2, { type: 'HIGH_HUMIDITY', severity: 'WARNING', title: 'Humidity above range', message: 'Humidity stayed at the configured maximum for 15 minutes.', status: 'RESOLVED', ...done(admin, -3 * DAY + 2 * HOUR) }, -3 * DAY),
   ]
+}
+
+/**
+ * Heartbeats, readings and events of the draft of backend 3.4/3.5 (FE 6.4):
+ * - DEV-MACHINE-01: online (live heartbeat, firmware 0.3.0 like app_config.h, good Wi-Fi), the 24 hourly readings of
+ *   backend/db/dev/seed.sql (9.50 °C two hours ago, above its 8 °C maximum), dispense events and a FAULT
+ *   (CYCLE_INTERRUPTED) cleared by a RESET, plus an old FAULT with a code the web does not know.
+ * - DEV-MACHINE-02: silent for 35 minutes (OFFLINE, its broker sent the Last Will), weak Wi-Fi, controller in FAULT
+ *   (CYCLE_INTERRUPTED) and a refused command because of it; readings stop when it went quiet.
+ * - DEV-MACHINE-03: never connected (heartbeat all null, no readings, no events).
+ */
+function seedTelemetry(nowMs: number, machines: S['MachineResponse'][]): { heartbeats: MockHeartbeat[]; readings: MockReading[]; machineEvents: MockMachineEvent[] } {
+  const iso = (offset: number) => new Date(nowMs + offset).toISOString()
+  const MIN = 60_000
+  const [m1, m2] = machines
+  const heartbeats: MockHeartbeat[] = machines.map(machine => ({
+    machineId: machine.id, lastSeenAt: null, reportedAt: null, state: null, firmwareVersion: null, uptimeSeconds: null, rssi: null, dispenseState: null, live: false, bootedAt: null,
+  }))
+  Object.assign(heartbeats[0], { lastSeenAt: iso(0), reportedAt: iso(0), state: 'ONLINE', firmwareVersion: '0.3.0', rssi: -58, dispenseState: 'IDLE', live: true, bootedAt: iso(-(2 * DAY + 3 * HOUR)), uptimeSeconds: (2 * DAY + 3 * HOUR) / 1000 })
+  Object.assign(heartbeats[1], { lastSeenAt: m2.lastSeenAt, reportedAt: iso(-34 * MIN), state: 'OFFLINE', firmwareVersion: '0.2.1', rssi: -86, dispenseState: 'FAULT', bootedAt: iso(-5 * HOUR - 35 * MIN), uptimeSeconds: 5 * 3600 })
+
+  const readings: MockReading[] = []
+  let readingId = 0
+  for (let h = 23; h >= 0; h--) readings.push({ id: ++readingId, machineId: m1.id, temperature: h === 2 ? 9.5 : 4 + (h % 4) * 0.5, humidity: 60 + (h % 5), recordedAt: iso(-h * HOUR) })
+  for (let h = 12; h >= 1; h--) readings.push({ id: ++readingId, machineId: m2.id, temperature: 5 + (h % 3) * 0.25, humidity: h === 1 ? null : 70 + (h % 4), recordedAt: iso(-h * HOUR) })
+
+  let eventN = 0
+  const event = (machine: S['MachineResponse'], eventType: string, payload: Record<string, unknown>, offset: number): MockMachineEvent =>
+    ({ id: uuid('95000000', ++eventN), machineId: machine.id, eventType, payload, createdAt: iso(offset) })
+  const machineEvents: MockMachineEvent[] = [
+    event(m1, 'FAULT', { code: 'GATE_POSITION_LOST' }, -6 * DAY),
+    event(m1, 'FAULT_CLEARED', {}, -6 * DAY + 20 * MIN),
+    event(m1, 'ONLINE', { firmwareVersion: '0.3.0', uptimeSeconds: 0 }, -(2 * DAY + 3 * HOUR)),
+    event(m1, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(901), column: 1 }, -5 * HOUR),
+    event(m1, 'DISPENSE_COMPLETED', { commandId: seedCommandCode(901) }, -5 * HOUR + 12_000),
+    event(m1, 'BOWL_SENSOR_TRIGGERED', { dispenseState: 'IDLE' }, -3 * HOUR),
+    event(m1, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(902), column: 1 }, -150 * MIN),
+    event(m1, 'DISPENSE_ABORTED', { commandId: seedCommandCode(902) }, -150 * MIN + 4_000),
+    event(m1, 'FAULT', { code: 'CYCLE_INTERRUPTED', commandId: seedCommandCode(902) }, -150 * MIN + 4_000),
+    event(m1, 'FAULT_CLEARED', {}, -130 * MIN),
+    event(m1, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(903), column: 1 }, -40 * MIN),
+    event(m1, 'DISPENSE_COMPLETED', { commandId: seedCommandCode(903) }, -40 * MIN + 12_000),
+    event(m2, 'ONLINE', { firmwareVersion: '0.2.1', uptimeSeconds: 0 }, -5 * HOUR - 35 * MIN),
+    event(m2, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(904), column: 1 }, -52 * MIN),
+    event(m2, 'DISPENSE_ABORTED', { commandId: seedCommandCode(904) }, -50 * MIN),
+    event(m2, 'FAULT', { code: 'CYCLE_INTERRUPTED', commandId: seedCommandCode(904) }, -50 * MIN),
+    event(m2, 'DISPENSE_REJECTED', { commandId: seedCommandCode(905), state: 'FAULT' }, -45 * MIN),
+    event(m2, 'OFFLINE', {}, -34 * MIN),
+  ]
+  return { heartbeats, readings, machineEvents }
 }

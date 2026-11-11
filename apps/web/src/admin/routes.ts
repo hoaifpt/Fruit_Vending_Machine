@@ -5,7 +5,7 @@ import { can, rolesWith } from './permissions.ts'
 import type { Permission, Subject } from './permissions.ts'
 
 export type PageKey =
-  | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
+  | 'overview' | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
   | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
   | 'alerts' | 'alert-detail'
 
@@ -13,6 +13,8 @@ export type PageKey =
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
 
 const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
+  // O1 (FE 6.5): MACHINE_READ for the page; each block checks its own source's permission (overview.ts).
+  { pattern: /^\/admin\/overview$/, page: 'overview', permission: 'MACHINE_READ' },
   { pattern: /^\/admin\/users$/, page: 'users', permission: 'USER_READ' },
   { pattern: /^\/admin\/roles$/, page: 'roles', permission: 'PERMISSION_MANAGE' },
   { pattern: /^\/admin\/products$/, page: 'products', permission: 'PRODUCT_READ' },
@@ -44,6 +46,8 @@ export type NavGroup = 'Vận hành' | 'Giao dịch' | 'Hệ thống'
 export interface NavItem { to: string; label: string; group: NavGroup; permission: Permission; match: PageKey[] }
 
 export const NAV: NavItem[] = [
+  // First item: the landing screen after sign-in for everyone who may read machines (homeFor).
+  { to: '/admin/overview', label: 'Tổng quan', group: 'Vận hành', permission: 'MACHINE_READ', match: ['overview'] },
   { to: '/admin/machines', label: 'Máy bán hàng', group: 'Vận hành', permission: 'MACHINE_READ', match: ['machines', 'machine-detail'] },
   { to: '/admin/products', label: 'Sản phẩm', group: 'Vận hành', permission: 'PRODUCT_READ', match: ['products'] },
   { to: '/admin/batches', label: 'Lô hàng', group: 'Vận hành', permission: 'BATCH_READ', match: ['batches'] },

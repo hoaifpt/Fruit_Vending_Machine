@@ -4,6 +4,7 @@ import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
 import type { components as DispenseDraft } from './drafts/dispense-commands'
 import type { components as AlertsDraft, operations as AlertOperations } from './drafts/alerts'
+import type { components as TelemetryDraft, operations as TelemetryOperations } from './drafts/machine-telemetry'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -138,6 +139,24 @@ export const alertsApi = {
   acknowledge: (alertId: string) => api.post<Alert>(`/alerts/${id(alertId)}/acknowledge`),
   /** OPEN/ACKNOWLEDGED → RESOLVED; the note is only sent when there is one. 409 when already resolved. */
   resolve: (alertId: string, body: ResolveAlertBody) => api.post<Alert>(`/alerts/${id(alertId)}/resolve`, body),
+}
+
+// Heartbeat, sensor readings and events of a machine (tab "Cảm biến & Sự kiện" of C3, FE 6.4): draft contract
+// api-contract/drafts/machine-telemetry.yaml, waiting for backend issues 3.4/3.5. Until they ship the real backend answers
+// 404 here; the tab then says "chưa có dữ liệu" and stops refreshing (see telemetryAvailability in
+// src/admin/telemetry.ts). Connectivity (ONLINE/OFFLINE) never needs these: it comes from Machine.lastSeenAt, already in
+// api.yaml. When 3.4/3.5 land: move the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete
+// the draft.
+export type MachineHeartbeat = TelemetryDraft['schemas']['MachineHeartbeatResponse']
+export type SensorReading = TelemetryDraft['schemas']['SensorReadingResponse']
+export type MachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
+export type SensorReadingQuery = NonNullable<TelemetryOperations['listMachineSensorReadings']['parameters']['query']>
+export type MachineEventQuery = NonNullable<TelemetryOperations['listMachineEvents']['parameters']['query']>
+
+export const telemetryApi = {
+  heartbeat: (machineId: string, signal?: AbortSignal) => api.get<MachineHeartbeat>(`/machines/${id(machineId)}/heartbeat`, undefined, signal),
+  readings: (machineId: string, query: SensorReadingQuery, signal?: AbortSignal) => list<SensorReading>(`/machines/${id(machineId)}/sensor-readings`, query, signal),
+  events: (machineId: string, query: MachineEventQuery, signal?: AbortSignal) => list<MachineEvent>(`/machines/${id(machineId)}/events`, query, signal),
 }
 
 export type { Q as QueryParams }
