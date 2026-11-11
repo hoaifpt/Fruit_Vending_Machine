@@ -1,107 +1,90 @@
-# Issue #53 — [BE] Implement Machine Heartbeat & Telemetry
+# Issue #56 — [BE] Implement Machine Event Logging
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/53
-Branch: feature/53-machine-heartbeat-telemetry (from origin/dev 719c4ed, includes #48, #49, #52)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/56
+Branch: feature/56-machine-event-logging (from origin/dev d02980a, includes #48, #49, #52, #53)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
 
 ## Scope
-Heartbeat + telemetry subscriptions, strict envelope validation for every channel, V15 presence/diagnostic columns (read-only on
-Machine), forward-only presence updates, derived connectivity (60 s / 180 s), reboot detection and recovery log, telemetry
-validation/dedup/throttle/storage, Machine API fields + connectivity filter, latest and history telemetry APIs (tag Machine Health),
-domain events (published + logged only).
+V16 (machine_events.source + message_id with CHECKs, partial unique (machine_id, message_id), type/time index, AUDIT_LOG_READ -> ADMIN),
+recording of every valid events/status message (source MACHINE, once per messageId, own transaction, never breaks MQTT processing),
+recording of 3.3 / 3.4 domain events AFTER_COMMIT (source BACKEND), machine event timeline API (MACHINE_READ), audit log read API
+(AUDIT_LOG_READ), append-only repositories, docs/Swagger/api.yaml/mqtt-contract.
 
 ## Non-goals
-Alerts and automatic MAINTENANCE (3.6), status/heartbeat history in machine_events (3.5), dashboards (6.1), reading retention,
-push updates, multi-instance dedup, firmware changes.
+Alerts (3.6), heartbeat/telemetry history, replay, retention/purge, global event search, editing history, frontend timeline.
 
 ## Database / API impact
-New V15 (V1-V14 untouched). Machine responses + connectivity, lastHeartbeatAt, firmwareVersion, uptimeSeconds, wifiRssi,
-freeHeapBytes; `GET /api/v1/machines?connectivity=`; new `GET /api/v1/machines/{machineId}/telemetry/latest` and
-`GET /api/v1/machines/{machineId}/telemetry`. Swagger tag Machine Health, api.yaml synced, MQTT contract 1.2.0.
+New V16 (V1-V15 untouched). New GET /api/v1/machines/{machineId}/events, GET /api/v1/audit-logs, GET /api/v1/audit-logs/{id}
+(tags Machine Events, Audit Log). MQTT contract 1.3.0 (statuses only). New permission AUDIT_LOG_READ (ADMIN).
 
 ## Status and verification
-Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 730 tests, 0 failures, BUILD SUCCESS.
-New: MachineHealthIntegrationTest (35), MqttHealthEndToEndTest (2, real broker with the repo's mosquitto.conf and ACL, real Last Will),
-MachineHealthPropertiesTest (2), MachineHealthDocumentationTest (1).
+Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 740 tests, 0 failures,
+BUILD SUCCESS. Existing fixture in MachineManagementIntegrationTest now inserts its machine_events row as BACKEND (V16 CHECK). New: MachineEventLoggingIntegrationTest (9),
+MachineEventLoggingDocumentationTest (1).
 
-Notes:
-- "Heartbeat updates ... in one statement" is shown by the code (one UPDATE ... RETURNING old.* per message) and the tests check
-  every field changes together; statements are not counted by a test.
-- Payload size: the whole MQTT message (envelope included) is limited to 8 KB.
-- PaymentWebhookProcessingIntegrationTest: test-only fix for DB-vs-JVM clock skew (paid_at = GREATEST(now(), created_at));
-  it failed once in the full run and passed twice alone; unrelated to #53.
-- The Mosquitto image eclipse-mosquitto:2.0.20 (same tag as infra/docker-compose.yml) is pulled by Testcontainers on first run.
+Decisions / notes:
+- Legacy machine_events rows (none expected; nothing wrote the table before) have no message id: V16 marks them BACKEND.
+- events messages: missing/blank eventType stored as UNSPECIFIED, longer than 64 characters truncated to 64; unknown types kept.
+- Hibernate @Immutable was tried on MachineEvent/AuditLog and removed: existing writers then failed ("Lock mode not supported").
+  Append-only is enforced by the repositories (plain Repository, no update/delete methods) and the single JDBC writer.
+- DispenseService publishes DispenseFailedEvent before entering MAINTENANCE, so the timeline reads failure -> maintenance.
+- Backend events are written AFTER_COMMIT in REQUIRES_NEW, the same pattern as the existing dispense dispatcher (needs a second pool
+  connection briefly; see the #47 load-test finding).
 
 # Testing
 
-## 9. Envelope
+## 7. Migration
 
-- [x] Every machine → backend example in `api-contract/mqtt/examples/` is accepted
-- [x] Missing / wrong `schemaVersion`, missing `messageId`, missing or mismatched `machineCode`, non-object `payload`, > 8 KB → dropped, no DB change
-- [x] Unknown machine code → dropped
-- [x] Dispense events still processed (3.3 regression)
+- [x] V16 applies; Flyway + Hibernate validation pass
+- [x] MACHINE row without message_id rejected; BACKEND row without message_id accepted
+- [x] Duplicate (machine_id, message_id) rejected by the unique index
+- [x] `AUDIT_LOG_READ` seeded for ADMIN only
 
-## 10. Presence
+## 8. Recording Machine Messages
 
-- [x] Heartbeat updates last_seen_at, last_heartbeat_at and diagnostics in one statement
-- [x] Missing wifiRssi / freeHeap stored as NULL
-- [x] Invalid heartbeat → nothing updated
-- [x] status ONLINE updates presence; status OFFLINE sets last_offline_at only
-- [x] last_seen_at never moves backward
-- [x] machines.updated_at unchanged
-- [x] Concurrent Admin machine update + heartbeat → no lost configuration change, no deadlock
+- [x] Each `events` example from `api-contract/mqtt/examples/` stored once with its eventType and payload
+- [x] status ONLINE / OFFLINE stored as STATUS_ONLINE / STATUS_OFFLINE
+- [x] heartbeat and telemetry NOT stored in machine_events
+- [x] Same message delivered twice → one row; dispense handling still idempotent
+- [x] Invalid envelope → no row
+- [x] Unknown eventType stored (forward compatibility)
+- [x] Recorder failure (simulated) → ERROR log, dispense handling still runs, MQTT callback does not throw
 
-## 11. Connectivity (fixed Clock)
+## 9. Recording Backend Events
 
-- [x] NEVER_SEEN, ONLINE (≤ 60 s), WARNING (60–180 s), OFFLINE (> 180 s)
-- [x] Last Will OFFLINE → OFFLINE immediately; next heartbeat → ONLINE
-- [x] Invalid durations fail startup
-- [x] Connectivity filter (if implemented) uses SQL and paginates correctly
+- [x] Each 3.3 / 3.4 domain event creates one BACKEND row after commit
+- [x] Rolled-back business transaction → no BACKEND row
+- [x] Payload contains ids/reason only (no secrets, no customer contact data)
 
-## 12. Reboot / Recovery
+## 10. Machine Event API
 
-- [x] Uptime decrease publishes MachineRebootDetectedEvent once
-- [x] Recovery after > 180 s logged once
-
-## 13. Telemetry
-
-- [x] Valid reading stored with 2-decimal precision and server time
-- [x] Temperature-only and humidity-only readings accepted
-- [x] Both missing, NaN, out of range → dropped
-- [x] Duplicate messageId dropped; readings closer than min-interval dropped
-- [x] TelemetryRecordedEvent published after commit
-
-## 14. Read APIs
-
-- [x] Machine list/detail include connectivity + diagnostics
-- [x] Latest reading with LOW / NORMAL / HIGH; null when no reading
-- [x] History: validation (`400`), DB paging, DESC order, `404` for missing machine
+- [x] Filters type / source / from / to; DESC order; DB paging; size limit `400`
+- [x] Missing machine `404`
 - [x] ADMIN, STAFF allowed; anonymous `401`; kiosk key `401`; role without MACHINE_READ `403`
 
-## 15. End-to-End (Testcontainers Mosquitto + PostgreSQL)
+## 11. Audit Log API
 
-- [x] Publish heartbeat example → machine ONLINE with diagnostics
-- [x] Publish Last Will → OFFLINE
-- [x] Publish telemetry example → latest API returns it
+- [x] Rows written by 3.1 / 3.3 visible with old/new values
+- [x] Filters and paging work; system rows show userId null
+- [x] ADMIN allowed; STAFF `403`; anonymous `401`
+- [x] No write endpoints exist
 
-## 16. Regression
+## 12. Regression
 
 - [x] All tests pass (`mvn clean verify`)
 - [x] Swagger, `api.yaml`, `mqtt-contract.md` consistent
-- [x] Flyway / Hibernate validation pass
+- [x] Authorization matrix test (3.1) extended with the new endpoints
 
 ---
 
 # Acceptance Criteria
 
-- [x] Heartbeat and telemetry topics subscribed
-- [x] Envelope validated strictly per contract; dispense flow unaffected
-- [x] V15 presence/diagnostic columns added and mapped (read-only)
-- [x] Heartbeat/status update presence forward-only; Last Will sets OFFLINE immediately
-- [x] Connectivity derived (ONLINE / WARNING / OFFLINE / NEVER_SEEN) with 60 s / 180 s thresholds
-- [x] Reboot detection event published
-- [x] Telemetry validated, deduplicated, throttled and stored
-- [x] Machine APIs show connectivity and diagnostics; latest + history telemetry APIs work
-- [x] No alerts or automatic status changes in this issue
-- [x] Swagger, `api.yaml`, `mqtt-contract.md`, `.ai/` docs updated
+- [x] machine_events extended with source + message_id and duplicate protection (V16)
+- [x] Every valid machine event and status message logged once
+- [x] Backend decisions from 3.3 / 3.4 logged after commit
+- [x] Logging never blocks or breaks MQTT processing
+- [x] Machine event timeline API (MACHINE_READ)
+- [x] Audit log read API (AUDIT_LOG_READ, ADMIN)
+- [x] History append-only; no write endpoints
+- [x] Docs, Swagger, `api.yaml`, `mqtt-contract.md` updated
 - [x] Tests pass (`mvn clean verify`); Flyway / Hibernate validation pass; applied migrations unchanged

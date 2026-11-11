@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fruitmachine.backend.dispense.service.DispenseReport;
 import com.fruitmachine.backend.dispense.service.DispenseService;
 import com.fruitmachine.backend.machine.repository.MachineRepository;
+import com.fruitmachine.backend.machine.service.MachineEventRecorder;
 import com.fruitmachine.backend.machine.service.MachinePresenceService;
 import com.fruitmachine.backend.machine.service.MachinePresenceService.Heartbeat;
 import com.fruitmachine.backend.mqtt.contract.MachineChannel;
@@ -23,6 +24,8 @@ import org.springframework.stereotype.Service;
  * Validates and routes machine messages ({@code <root>/<machineCode>/<channel>}, api-contract/mqtt-contract.md). Messages are
  * untrusted input: anything that breaks the envelope or payload rules, or comes from an unknown machine, is logged at WARN and
  * dropped, never retried, and changes nothing. The receive time is the backend clock; device timestamps are not used.
+ * Valid events and status messages are written to the machine history first (issue #56, once per messageId), then routed;
+ * a history failure is logged at ERROR and never stops the routing.
  */
 @Slf4j
 @Service
@@ -38,6 +41,7 @@ public class MachineMessageHandler {
     private final MachineRepository machines;
     private final MachinePresenceService presence;
     private final TelemetryService telemetry;
+    private final MachineEventRecorder history;
     private final Clock clock;
 
     /** @param topicMachineCode the machine segment of the topic; the broker ACL ties it to the machine's account. */
@@ -76,8 +80,10 @@ public class MachineMessageHandler {
     }
 
     private void event(UUID machineId, MachineEnvelope envelope, Instant now) {
-        presence.touch(machineId, envelope.machineCode(), now);
         JsonNode payload = envelope.payload();
+        JsonNode reported = payload.path(MachineEventType.EVENT_TYPE_FIELD);
+        record(machineId, envelope, reported.isTextual() ? reported.asText() : null, now);
+        presence.touch(machineId, envelope.machineCode(), now);
         String eventType = payload.path(MachineEventType.EVENT_TYPE_FIELD).asText("");
         JsonNode details = payload.path(MachineEventType.DETAILS_FIELD);
         String commandId = details.path(MachineCommandType.COMMAND_ID_FIELD).asText(null);
@@ -96,9 +102,27 @@ public class MachineMessageHandler {
         JsonNode payload = envelope.payload();
         String state = payload.path(STATE_FIELD).isTextual() ? payload.path(STATE_FIELD).asText() : "";
         switch (state) {
-            case ONLINE -> presence.online(machineId, envelope.machineCode(), optionalFirmware(payload), optionalUptime(payload), now);
-            case OFFLINE -> presence.offline(machineId, envelope.machineCode(), now);
+            case ONLINE -> {
+                String firmware = optionalFirmware(payload);
+                Long uptime = optionalUptime(payload);
+                record(machineId, envelope, MachineEventRecorder.STATUS_ONLINE, now);
+                presence.online(machineId, envelope.machineCode(), firmware, uptime, now);
+            }
+            case OFFLINE -> {
+                record(machineId, envelope, MachineEventRecorder.STATUS_OFFLINE, now);
+                presence.offline(machineId, envelope.machineCode(), now);
+            }
             default -> throw new MachineEnvelope.Invalid("status state must be ONLINE or OFFLINE");
+        }
+    }
+
+    /** History is evidence, not a workflow: a failure here is logged and the message is still processed (already idempotent). */
+    private void record(UUID machineId, MachineEnvelope envelope, String eventType, Instant now) {
+        try {
+            history.recordMachineMessage(machineId, eventType, envelope.messageId(), envelope.payload(), now);
+        } catch (RuntimeException ex) {
+            log.error("Machine {} message {} could not be written to the machine history; processing continues", envelope.machineCode(),
+                    envelope.messageId(), ex);
         }
     }
 

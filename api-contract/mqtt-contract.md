@@ -1,7 +1,7 @@
 # MQTT Contract — Backend ↔ Vending Machines
 
 ```text
-Contract version:        1.2.0
+Contract version:        1.3.0
 Envelope schemaVersion:  1
 Source of truth for:     topics, envelope, commands, events, payloads, timings, error codes, broker security
 Examples (fixtures):     api-contract/mqtt/examples/*.json
@@ -31,6 +31,7 @@ in its firmware; until it is merged into `dev` those items stay pending here.
 | 1.0.0 | 2026-11-09 | First publication (issue #49). Replaces the message definitions in `docs/`. |
 | 1.1.0 | 2026-11-10 | Issue #52: the backend sends `columnCode` and handles `details.reason` / `details.bowlCount`; separate result and pending timeouts; one in-flight command per machine; late-result rule. No message shape changed. |
 | 1.2.0 | 2026-11-10 | Issue #53: the backend subscribes to `heartbeat` and `telemetry`, validates every envelope strictly, keeps presence and diagnostics, derives connectivity (60 s / 180 s) and stores telemetry. No message shape changed. |
+| 1.3.0 | 2026-11-11 | Issue #56: every valid `events` and `status` message is stored once per `messageId` in the machine history (`machine_events`, source MACHINE); heartbeat and telemetry are not. No message shape changed. |
 
 ## Versioning rules
 
@@ -161,7 +162,10 @@ Payload shape:
 { "eventType": "DISPENSE_COMPLETED", "details": { "commandId": "D-…", "columnCode": "B" } }
 ```
 
-Unknown `eventType` values are logged and ignored by the backend.
+Every valid event, unknown `eventType` values included, is stored once per `messageId` in the machine history (#56,
+`GET /api/v1/machines/{machineId}/events`); unknown types are otherwise ignored by the backend. A redelivered message (same
+`messageId`) adds no second history row and is still processed idempotently. Status messages are stored as `STATUS_ONLINE` /
+`STATUS_OFFLINE`; heartbeat and telemetry are not part of the history.
 
 ### 4.1 Command lifecycle
 
@@ -208,7 +212,7 @@ values `RESULT_TIMEOUT`, `NOT_DELIVERED` and `LEGACY_UNKNOWN` (rows from before 
 
 | Event type | Meaning | `details` | Status |
 | --- | --- | --- | --- |
-| `BOWL_SENSOR_TRIGGERED` | the IR sensor saw a bowl pass (information, not an error) | `dispenseState` | BACKEND_PENDING (3.5) — firmware sends it, backend ignores it |
+| `BOWL_SENSOR_TRIGGERED` | the IR sensor saw a bowl pass (information, not an error) | `dispenseState` | IMPLEMENTED — stored in the machine history (#56); no other backend action |
 | `FAULT` | hardware fault | `code` (§6.2), optional `state`, `columnCode` | PLANNED |
 | `FAULT_CLEARED` | the fault was cleared by RESET | `code` | PLANNED |
 | `BOOT` | the device started | `resetReason` (§6.3), `firmwareVersion` | PLANNED |

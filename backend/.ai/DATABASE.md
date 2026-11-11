@@ -52,7 +52,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
 | dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, failure_reason, created_at, updated_at |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
-| machine_events | id, machine_id, event_type, payload, created_at |
+| machine_events | id, machine_id, event_type, payload, source, message_id, created_at |
 | kiosk_credentials | id, machine_id, key_prefix, secret_hash, status, created_by, created_at, revoked_by, revoked_at |
 | audit_logs | id, user_id, action, entity_type, entity_id, old_value, new_value, ip_address, created_at |
 
@@ -341,3 +341,14 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   thresholds and never stored; the list filter uses the same rules as SQL predicates.
 - `sensor_readings` rows come from MQTT telemetry (receive time, 2 decimals, -40..85 °C, 0..100 %RH); reads use
   `ix_sensor_readings_machine_time`. Machines with readings cannot be deleted (RESTRICT, unchanged).
+
+## 19. Issue #56 — V16 machine event logging
+
+- `machine_events.source` VARCHAR(16) NOT NULL DEFAULT 'MACHINE', CHECK MACHINE/BACKEND; `message_id` VARCHAR(64), CHECK: required and
+  not blank for MACHINE, optional (NULL) for BACKEND. Pre-V16 rows (none expected) are marked BACKEND.
+- Partial UNIQUE `uq_machine_events_machine_message (machine_id, message_id) WHERE message_id IS NOT NULL`: one row per machine
+  message (insert with ON CONFLICT DO NOTHING). Index `ix_machine_events_machine_type_time (machine_id, event_type, created_at DESC)`.
+- Writes only through `MachineEventWriter` (JdbcTemplate INSERT), in a transaction of its own (`MachineEventRecorder`, REQUIRES_NEW);
+  backend events are written AFTER_COMMIT of the deciding transaction. `MachineEvent` and `AuditLog` are `@Immutable`;
+  `MachineEventRepository` and `AuditLogRepository` are plain Repositories without update/delete methods (append-only by policy).
+- Permission `AUDIT_LOG_READ` (20000000-0000-0000-0000-000000000016) granted to ADMIN only.

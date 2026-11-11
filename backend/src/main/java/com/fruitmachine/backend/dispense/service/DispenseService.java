@@ -360,9 +360,10 @@ public class DispenseService {
             append(bowl, order, InventoryTransactionType.ADJUSTMENT, reason, InventoryStatus.RESERVED, InventoryStatus.DISPENSE_FAILED);
         }
         failOrder(order);
-        machineService.enterMaintenanceBySystem(command.getMachineId(), reason);
+        // The failure is published before its consequence, so the machine history reads failure -> maintenance (issue #56).
         events.publishEvent(new DispenseFailedEvent(command.getId(), command.getCommandCode(), command.getMachineId(), command.getSlotId(),
                 order.getId(), reason, false));
+        machineService.enterMaintenanceBySystem(command.getMachineId(), reason);
         flush();
     }
 

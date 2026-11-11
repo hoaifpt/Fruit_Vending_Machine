@@ -1,18 +1,15 @@
-# Chat handoff - Issue #53, 2026-11-10
+# Chat handoff - Issue #56, 2026-11-11
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/53, [BE] Implement Machine Heartbeat & Telemetry.
-Branch feature/53-machine-heartbeat-telemetry from origin/dev 719c4ed (includes #48 PR #50, #49 PR #51, #52 PR #54).
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/56, [BE] Implement Machine Event Logging.
+Branch feature/56-machine-event-logging from origin/dev d02980a (includes #48, #49, #52, #53 via PRs #50, #51, #54, #55).
 Git delivery: see the final report; do not assume commit/push/PR/merge happened.
 
-Delivered: V15 presence/diagnostic columns (Machine maps them, and last_seen_at, read-only). MachineMessageHandler validates every
-envelope (8 KB, JSON, schemaVersion 1, messageId, machineCode = topic, payload object, known machine) and routes events/status/
-heartbeat/telemetry. MachinePresenceService: one forward-only UPDATE per message with RETURNING old.* (reboot event, recovery log).
-ConnectivityEvaluator (60 s / 180 s, app.machine-health) for responses and the SQL list filter. TelemetryService (validation,
-dedup 10 min, min interval 10 s, sensor_readings) and TelemetryQueryService/TelemetryController (latest, history; tag Machine Health).
-Events MachineRebootDetected/MachineOfflineReported/TelemetryRecorded logged after commit. Docs: docs/machine-health.md,
-mqtt-contract 1.2.0, api.yaml, machine-management.md, database-migration.md, .ai/DATABASE.md §18.
+Delivered: V16 (machine_events.source/message_id + CHECKs, partial UNIQUE (machine_id, message_id), type/time index, AUDIT_LOG_READ -> ADMIN).
+MachineMessageHandler records valid events/status messages via MachineEventRecorder (REQUIRES_NEW, INSERT ON CONFLICT DO NOTHING,
+errors logged, routing continues). MachineDomainEventListener records BACKEND_* rows AFTER_COMMIT. APIs: GET /api/v1/machines/{id}/events
+(MACHINE_READ), GET /api/v1/audit-logs and /{id} (AUDIT_LOG_READ). Repositories are append-only (no update/delete methods).
+Docs: docs/machine-event-logging.md, mqtt-contract 1.3.0, api.yaml, database-migration.md, permission-authorization.md, .ai/DATABASE.md §19.
 
-Verification: `mvn clean verify` 730 tests, 0 failures (incl. real Mosquitto end-to-end test). Test-only clock-skew fix in
-PaymentWebhookProcessingIntegrationTest. Open: firmware on dev sends no heartbeat/telemetry yet; alerts are 3.6.
+Verification: `mvn clean verify` 740 tests, 0 failures. Open: alerts from these events are 3.6.
 Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...`.

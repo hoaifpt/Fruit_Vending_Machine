@@ -107,7 +107,7 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(15);
+                .isEqualTo(16);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
         assertThat(entities).hasSize(22);
@@ -278,6 +278,8 @@ class EntityMappingTest {
         event.setMachine(machine);
         event.setEventType("BOOT");
         event.setPayload(JsonNodeFactory.instance.objectNode().put("firmware", "test"));
+        // V16: a MACHINE row carries the envelope messageId.
+        event.setMessageId("entity-test-1");
         entityManager.persist(event);
         AuditLog audit = new AuditLog();
         audit.setUser(user);

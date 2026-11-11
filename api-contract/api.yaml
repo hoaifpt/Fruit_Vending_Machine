@@ -6,6 +6,8 @@ info:
 servers:
   - url: http://localhost:8080
 tags:
+  - name: "Audit Log"
+    description: "Read-only audit log (who changed what, and when) for AUDIT_LOG_READ, held by ADMIN. Entries are written by the services that make the changes; there is no create, update or delete endpoint."
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
   - name: Inventory
@@ -18,6 +20,8 @@ tags:
     description: "Kiosk order creation with atomic reservation of exactly one bowl, own-order read and cancel. Only PENDING_PAYMENT and CANCELLED are produced; payment attempts are in Kiosk Payments and there is no dispensing. Changelog (issue #35, breaking): the create request is now {\"productId\"} only; the former items[]/quantity shape is rejected with 400."
   - name: Kiosk Payments
     description: "Kiosk payment attempts (QR) for its own PENDING_PAYMENT orders. This API never reports payment success; only a verified provider webhook (a later issue) can do that."
+  - name: "Machine Events"
+    description: "History of each machine for ADMIN/STAFF with MACHINE_READ: every valid MQTT event and status message it sent (source MACHINE, once per messageId) and the backend decisions about it (source BACKEND). Read-only evidence; heartbeats and telemetry are not part of it."
   - name: "Machine Health"
     description: "Temperature/humidity readings sent by the machines over MQTT (telemetry channel), for ADMIN/STAFF with MACHINE_READ. Machine connectivity and controller diagnostics are part of the Machines responses. Display only: no alerts."
   - name: Machine Slots
@@ -6376,6 +6380,458 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "MACHINE_READ"
+  "/api/v1/machines/{machineId}/events":
+    "get":
+      "tags":
+        - "Machine Events"
+      "summary": "Event timeline of a machine"
+      "description": "MACHINE_READ. Newest first (createdAt DESC, id DESC), filtered and paged in the database. type is an exact eventType, source MACHINE or BACKEND; from (inclusive) and to (exclusive) are optional ISO-8601 instants and to must be after from. page >= 0, size 1 to 200 (default 50). payload of MACHINE events is untrusted device data: render it escaped. Invalid parameters are 400 before the machine is looked up; a missing machine is 404."
+      "operationId": "listMachineEvents"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "type"
+          "in": "query"
+          "description": "Optional exact eventType, for example FAULT or BACKEND_DISPENSE_FAILED."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "source"
+          "in": "query"
+          "description": "Optional MACHINE or BACKEND."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "MACHINE"
+              - "BACKEND"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "Optional start, inclusive, ISO-8601 instant."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-11T00:00:00Z"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Optional end, exclusive, ISO-8601 instant; after from."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-12T00:00:00Z"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 200."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 50
+      "responses":
+        "400":
+          "description": "Malformed machine UUID, invalid source, time range or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "path": "/api/v1/machines/{machineId}/events"
+                "error": "Bad Request"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "to must be after from"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "path": "/api/v1/machines/{machineId}/events"
+                "error": "Unauthorized"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Authentication required or access token invalid"
+        "403":
+          "description": "Authenticated account lacks MACHINE_READ"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "path": "/api/v1/machines/{machineId}/events"
+                "error": "Forbidden"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Access denied"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "path": "/api/v1/machines/{machineId}/events"
+                "error": "Not Found"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Machine not found"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "path": "/api/v1/machines/{machineId}/events"
+                "error": "Internal Server Error"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "An unexpected error occurred"
+        "200":
+          "description": "Page of events"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineEventPageResponse"
+              "example":
+                "timestamp": "2026-11-11T03:21:00Z"
+                "data":
+                  "totalElements": 1
+                  "content":
+                    -
+                      "id": "0d1e2f30-4a5b-4c6d-8e9f-a0b1c2d3e4f5"
+                      "eventType": "DISPENSE_ABORTED"
+                      "source": "MACHINE"
+                      "messageId": "a1b2c3d4-0042"
+                      "payload":
+                        "eventType": "DISPENSE_ABORTED"
+                        "details":
+                          "reason": "NO_BOWL_DETECTED"
+                          "commandId": "D-7F3A91C2E4B05D18"
+                      "createdAt": "2026-11-11T03:20:01Z"
+                  "size": 50
+                  "page": 0
+                  "totalPages": 1
+                "message": "Machine events retrieved"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MACHINE_READ"
+  "/api/v1/audit-logs":
+    "get":
+      "tags":
+        - "Audit Log"
+      "summary": "Search the audit log"
+      "description": "AUDIT_LOG_READ. Newest first (createdAt DESC, id DESC), filtered and paged in the database. Every filter is optional: action and entityType are exact values, entityId and userId are UUIDs, from (inclusive) and to (exclusive) are ISO-8601 instants and to must be after from. page >= 0, size 1 to 200 (default 50). System changes have userId null and actor \"system\"."
+      "operationId": "listAuditLogs"
+      "parameters":
+        -
+          "name": "action"
+          "in": "query"
+          "description": "Optional exact action, for example ROLE_PERMISSIONS_CHANGED."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "entityType"
+          "in": "query"
+          "description": "Optional exact entity type, for example Machine."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "entityId"
+          "in": "query"
+          "description": "Optional UUID of the changed record."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "userId"
+          "in": "query"
+          "description": "Optional UUID of the acting user."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "Optional start, inclusive, ISO-8601 instant."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-11T00:00:00Z"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Optional end, exclusive, ISO-8601 instant; after from."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-12T00:00:00Z"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 200."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 50
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid time range or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "path": "/api/v1/audit-logs"
+                "error": "Bad Request"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "to must be after from"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "path": "/api/v1/audit-logs"
+                "error": "Unauthorized"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Authentication required or access token invalid"
+        "403":
+          "description": "Authenticated account lacks AUDIT_LOG_READ"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "path": "/api/v1/audit-logs"
+                "error": "Forbidden"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Access denied"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "path": "/api/v1/audit-logs"
+                "error": "Internal Server Error"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "An unexpected error occurred"
+        "200":
+          "description": "Page of audit entries"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseAuditLogPageResponse"
+              "example":
+                "timestamp": "2026-11-11T03:21:00Z"
+                "data":
+                  "totalElements": 1
+                  "content":
+                    -
+                      "id": "7b0f3c2e-55a1-4f0e-9c1d-2a6b8e4f0c11"
+                      "action": "MACHINE_MAINTENANCE_AUTO"
+                      "entityType": "Machine"
+                      "entityId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "userId": null
+                      "userEmail": null
+                      "actor": "system"
+                      "oldValue":
+                        "status": "ACTIVE"
+                      "newValue":
+                        "reason": "NO_BOWL_DETECTED"
+                        "status": "MAINTENANCE"
+                      "ipAddress": null
+                      "createdAt": "2026-11-11T03:20:01Z"
+                  "size": 50
+                  "page": 0
+                  "totalPages": 1
+                "message": "Audit log retrieved"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "AUDIT_LOG_READ"
+  "/api/v1/audit-logs/{id}":
+    "get":
+      "tags":
+        - "Audit Log"
+      "summary": "Get one audit entry"
+      "description": "AUDIT_LOG_READ. One audit entry by UUID."
+      "operationId": "getAuditLog"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Audit entry UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Audit entry"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseAuditLogResponse"
+              "example":
+                "timestamp": "2026-11-11T03:21:00Z"
+                "data":
+                  "id": "7b0f3c2e-55a1-4f0e-9c1d-2a6b8e4f0c11"
+                  "action": "MACHINE_MAINTENANCE_AUTO"
+                  "entityType": "Machine"
+                  "entityId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                  "userId": null
+                  "userEmail": null
+                  "actor": "system"
+                  "oldValue":
+                    "status": "ACTIVE"
+                  "newValue":
+                    "reason": "NO_BOWL_DETECTED"
+                    "status": "MAINTENANCE"
+                  "ipAddress": null
+                  "createdAt": "2026-11-11T03:20:01Z"
+                "message": "Audit log entry retrieved"
+        "404":
+          "description": "Audit log entry not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 404
+                "path": "/api/v1/audit-logs/{id}"
+                "error": "Not Found"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Audit log entry not found"
+        "400":
+          "description": "Malformed UUID, invalid time range or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 400
+                "path": "/api/v1/audit-logs/{id}"
+                "error": "Bad Request"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "to must be after from"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "path": "/api/v1/audit-logs/{id}"
+                "error": "Unauthorized"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Authentication required or access token invalid"
+        "403":
+          "description": "Authenticated account lacks AUDIT_LOG_READ"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "path": "/api/v1/audit-logs/{id}"
+                "error": "Forbidden"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "Access denied"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "path": "/api/v1/audit-logs/{id}"
+                "error": "Internal Server Error"
+                "timestamp": "2026-11-11T03:21:00Z"
+                "message": "An unexpected error occurred"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "AUDIT_LOG_READ"
 
 components:
   securitySchemes:
@@ -8525,3 +8981,197 @@ components:
       "required":
         - "connectivity"
         - "machineId"
+    "ApiResponseMachineEventPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MachineEventPageResponse"
+    "MachineEventPageResponse":
+      "type": "object"
+      "description": "Database page of machine events, newest first (createdAt DESC, then id DESC)."
+      "properties":
+        "content":
+          "type": "array"
+          "description": "Events of this page."
+          "items":
+            "$ref": "#/components/schemas/MachineEventResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Matching events."
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Pages of matching events."
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+    "MachineEventResponse":
+      "type": "object"
+      "description": "One entry of a machine's history: a message the machine sent (MACHINE) or a backend decision about it (BACKEND)."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "description": "Event UUID."
+        "eventType":
+          "type": "string"
+          "description": "MACHINE: the reported eventType (DISPENSE_ACCEPTED, FAULT, BOOT, unknown types too), STATUS_ONLINE or STATUS_OFFLINE; BACKEND: BACKEND_DISPENSE_FAILED, BACKEND_DISPENSE_LATE_SUCCESS, BACKEND_DISPENSE_MULTIPLE_BOWLS, BACKEND_MAINTENANCE_ENTERED, BACKEND_REBOOT_DETECTED."
+          "example": "DISPENSE_ABORTED"
+        "source":
+          "type": "string"
+          "description": "MACHINE or BACKEND."
+          "enum":
+            - "MACHINE"
+            - "BACKEND"
+        "messageId":
+          "type":
+            - "string"
+            - "null"
+          "description": "Envelope messageId of a MACHINE event (unique per machine); null for BACKEND events."
+          "example": "a1b2c3d4-0042"
+        "payload":
+          "type": "object"
+          "additionalProperties": true
+          "description": "MACHINE: the message payload as the machine sent it. Untrusted device data: render it escaped, never as HTML. BACKEND: ids and reason only."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Backend receive or decision instant, UTC."
+      "required":
+        - "createdAt"
+        - "eventType"
+        - "id"
+        - "payload"
+        - "source"
+    "ApiResponseAuditLogPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/AuditLogPageResponse"
+    "AuditLogPageResponse":
+      "type": "object"
+      "description": "Database page of audit entries, newest first (createdAt DESC, then id DESC)."
+      "properties":
+        "content":
+          "type": "array"
+          "description": "Entries of this page."
+          "items":
+            "$ref": "#/components/schemas/AuditLogResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Matching entries."
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Pages of matching entries."
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+    "AuditLogResponse":
+      "type": "object"
+      "description": "One audit log entry. userId/userEmail are null when the system made the change; actor then says \"system\"."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "description": "Audit entry UUID."
+        "action":
+          "type": "string"
+          "description": "What happened, for example ROLE_PERMISSIONS_CHANGED, MACHINE_MAINTENANCE_AUTO, DISPENSE_SUCCESS_AFTER_REFUND, PAYMENT_LATE."
+          "example": "MACHINE_MAINTENANCE_AUTO"
+        "entityType":
+          "type": "string"
+          "description": "Kind of record changed, for example Role, Machine, DispenseCommand, Payment."
+          "example": "Machine"
+        "entityId":
+          "type": "string"
+          "format": "uuid"
+          "description": "UUID of the record changed (no foreign key: the record may be of any kind)."
+        "userId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Acting user; null for system changes."
+        "userEmail":
+          "type":
+            - "string"
+            - "null"
+          "description": "Email of the acting user; null for system changes."
+          "example": "admin@example.com"
+        "actor":
+          "type": "string"
+          "description": "userEmail, or \"system\" when no user made the change."
+          "example": "system"
+        "oldValue":
+          "type":
+            - "object"
+            - "null"
+          "additionalProperties": true
+          "description": "State before the change, as recorded; null when not recorded."
+        "newValue":
+          "type":
+            - "object"
+            - "null"
+          "additionalProperties": true
+          "description": "State after the change, as recorded; null when not recorded."
+        "ipAddress":
+          "type":
+            - "string"
+            - "null"
+          "description": "Client IP address when recorded; null otherwise."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Instant of the change, UTC."
+      "required":
+        - "action"
+        - "actor"
+        - "createdAt"
+        - "entityId"
+        - "entityType"
+        - "id"
+    "ApiResponseAuditLogResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/AuditLogResponse"
