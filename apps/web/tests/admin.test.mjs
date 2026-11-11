@@ -7,8 +7,8 @@ import { prettyPayload } from '../src/admin/payload.ts'
 const labels = roles => navFor(roles).map(item => item.to.replace('/admin/', ''))
 
 test('role matrix: STAFF cannot see users, payments or webhook logs', () => {
-  assert.deepEqual(labels(['STAFF']), ['machines', 'products', 'batches', 'inventory', 'orders'])
-  assert.deepEqual(labels(['ADMIN']), ['machines', 'products', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'users', 'roles'])
+  assert.deepEqual(labels(['STAFF']), ['machines', 'products', 'batches', 'inventory', 'alerts', 'orders'])
+  assert.deepEqual(labels(['ADMIN']), ['machines', 'products', 'batches', 'inventory', 'alerts', 'orders', 'payments', 'webhook-logs', 'users', 'roles'])
   assert.equal(canAccess(['STAFF'], matchRoute('/admin/users').roles), false)
   assert.equal(canAccess(['STAFF'], matchRoute('/admin/payments/abc').roles), false)
   assert.equal(canAccess(['STAFF'], matchRoute('/admin/webhook-logs').roles), false)

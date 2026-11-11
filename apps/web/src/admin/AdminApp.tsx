@@ -5,8 +5,10 @@ import { endSession, expireSession, loginPathFor, setLoginRedirect } from '../ap
 import type { Role } from '../api/session.ts'
 import { confirmLeave, navigate, useLocation } from '../lib/router.ts'
 import { Forbidden, Link, PageSkeleton } from './kit.tsx'
+import { can } from './permissions.ts'
 import { canOpen, homeFor, matchRoute, navFor } from './routes.ts'
 import { AdminShell } from './shell/AdminShell.tsx'
+import { AlertBell } from './shell/AlertBell.tsx'
 import { useSession } from './useSession.ts'
 import './admin.css'
 
@@ -24,6 +26,8 @@ const PaymentsPage = lazy(() => import('./pages/PaymentsPage.tsx'))
 const PaymentDetailPage = lazy(() => import('./pages/PaymentDetailPage.tsx'))
 const WebhookLogsPage = lazy(() => import('./pages/WebhookLogsPage.tsx'))
 const WebhookLogDetailPage = lazy(() => import('./pages/WebhookLogDetailPage.tsx'))
+const AlertsPage = lazy(() => import('./pages/AlertsPage.tsx'))
+const AlertDetailPage = lazy(() => import('./pages/AlertDetailPage.tsx'))
 // Component reference at /admin/_kit: the literal condition drops this chunk from production builds.
 const KitPage = import.meta.env.DEV || import.meta.env.MODE === 'mock' ? lazy(() => import('./pages/KitPage.tsx')) : null
 
@@ -81,6 +85,8 @@ function AdminApp() {
       'payment-detail': <PaymentDetailPage key={id} paymentId={id} />,
       'webhook-logs': <WebhookLogsPage />,
       'webhook-log-detail': <WebhookLogDetailPage key={id} logId={id} />,
+      alerts: <AlertsPage />,
+      'alert-detail': <AlertDetailPage key={id} alertId={id} />,
     }[route.page]
   }
 
@@ -91,7 +97,8 @@ function AdminApp() {
     navigate('/login', { replace: true, force: true })
   }
 
-  return <AdminShell nav={navFor(roles)} route={route} email={session.user.email} roles={roles} onLogout={logout}>
+  return <AdminShell nav={navFor(roles)} route={route} email={session.user.email} roles={roles} onLogout={logout}
+    bell={can(roles, 'ALERT_READ') ? <AlertBell key={session.user.email} /> : null}>
     <Suspense fallback={<PageSkeleton />}>{content}</Suspense>
   </AdminShell>
 }

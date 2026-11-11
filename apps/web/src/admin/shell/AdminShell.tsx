@@ -30,10 +30,14 @@ function readCollapsed() {
   try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
 }
 
-interface ShellProps { nav: NavItem[]; route: RouteMatch | undefined; email: string; roles: Role[]; onLogout: () => void; children: ReactNode }
+interface ShellProps {
+  nav: NavItem[]; route: RouteMatch | undefined; email: string; roles: Role[]; onLogout: () => void; children: ReactNode
+  /** Alert bell of the top bar (FE 6.3), given only to accounts that may read alerts. */
+  bell?: ReactNode
+}
 
 /** Management layout: collapsible sidebar (drawer on mobile), top bar with breadcrumb, Ctrl+K palette and menus. */
-export function AdminShell({ nav, route, email, roles, onLogout, children }: ShellProps) {
+export function AdminShell({ nav, route, email, roles, onLogout, children, bell }: ShellProps) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const [drawer, setDrawer] = useState(false)
   const [palette, setPalette] = useState(false)
@@ -89,6 +93,7 @@ export function AdminShell({ nav, route, email, roles, onLogout, children }: She
               {/* Named by its visible text (WCAG 2.5.3); icon-only on phones, where the sr-only copy names it. */}
               <Search className="mx-auto sm:mx-0" aria-hidden="true" /><span className="sr-only sm:hidden">Tìm màn hình</span><span className="hidden flex-1 text-left font-normal sm:inline">Tìm màn hình…</span><Kbd className="hidden sm:inline-flex">Ctrl K</Kbd>
             </Button>
+            {bell}
             <ThemeMenu />
           </div>
         </header>

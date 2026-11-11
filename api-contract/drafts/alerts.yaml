@@ -1,0 +1,449 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - machine alerts
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 6.3, screen O2 and the alert bell) for backend issue 3.6 "Cảnh báo, thông
+    báo"; the backend has not implemented these endpoints yet. Field and enum names follow the existing entity
+    com.fruitmachine.backend.alert.entity.Alert (table alerts, V4__create_sensor_and_alert_tables.sql) and the enums
+    AlertType, AlertSeverity, AlertStatus. Proposed additions to the table, needed to record who acknowledged an alert
+    (acceptance of FE 6.3) and why it was closed: acknowledged_at TIMESTAMPTZ NULL, acknowledged_by UUID NULL REFERENCES
+    users(id), resolution_note TEXT NULL (max 500), and the optional context columns slot_id UUID NULL REFERENCES
+    machine_slots(id) and order_id UUID NULL REFERENCES orders(id) (for PRODUCT_EXPIRED/PRODUCT_EXPIRING/LOW_STOCK and
+    DISPENSE_FAILED). Proposed constraints for the new columns, next to ck_alerts_resolution: CHECK ((acknowledged_at IS
+    NULL) = (acknowledged_by IS NULL)); CHECK (status <> 'OPEN' OR acknowledged_at IS NULL); CHECK (status <>
+    'ACKNOWLEDGED' OR acknowledged_at IS NOT NULL); CHECK (acknowledged_at IS NULL OR acknowledged_at >= triggered_at);
+    and CREATE INDEX ix_alerts_acknowledger ON alerts (acknowledged_by) WHERE acknowledged_by IS NOT NULL. A RESOLVED alert
+    may have no acknowledgement (closed directly). title and message are shown to Vietnamese operators as they are: the
+    backend should write them in Vietnamese (the dev seed's English title is shown labelled "Tiêu đề từ máy"). Proposed permissions (not in backend #48 yet): ALERT_READ (ADMIN, STAFF) and ALERT_WRITE (ADMIN,
+    STAFF). Used by the mock layer until the backend ships it, then this file is deleted and the paths move to api.yaml.
+paths:
+  /api/v1/alerts:
+    get:
+      tags: [Alerts]
+      operationId: listAlerts
+      summary: List and filter alerts (draft)
+      description: >-
+        ALERT_READ. Database pagination page0/size20/max100. Filters combine: status, severity, type, machineId,
+        triggeredFrom (inclusive), triggeredTo (exclusive). Approved sort: triggeredAt (default desc), with a UUID
+        tie-break. The alert bell polls this endpoint with status=OPEN&size=5&sort=triggeredAt,desc: totalElements is the
+        number of open alerts and content the newest ones.
+      x-required-permission: ALERT_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Zero-based page.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size 1..100.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          description: Exact alert status.
+          required: false
+          schema:
+            type: string
+            enum: [OPEN, ACKNOWLEDGED, RESOLVED]
+        - name: severity
+          in: query
+          description: Exact severity.
+          required: false
+          schema:
+            type: string
+            enum: [INFO, WARNING, CRITICAL]
+        - name: type
+          in: query
+          description: Exact alert type.
+          required: false
+          schema:
+            type: string
+            enum: [HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK]
+        - name: machineId
+          in: query
+          description: Machine UUID filter.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: triggeredFrom
+          in: query
+          description: ISO-8601 instant, inclusive lower bound of triggeredAt.
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: triggeredTo
+          in: query
+          description: ISO-8601 instant, exclusive upper bound of triggeredAt.
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          description: triggeredAt with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: triggeredAt,desc
+      responses:
+        "200":
+          description: One page of alerts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageAlertResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/alerts/{id}:
+    get:
+      tags: [Alerts]
+      operationId: getAlert
+      summary: One alert (draft)
+      description: ALERT_READ.
+      x-required-permission: ALERT_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AlertId"
+      responses:
+        "200":
+          description: The alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAlertResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/alerts/{id}/acknowledge:
+    post:
+      tags: [Alerts]
+      operationId: acknowledgeAlert
+      summary: Acknowledge an open alert (draft)
+      description: >-
+        ALERT_WRITE. OPEN -> ACKNOWLEDGED; records acknowledgedAt (now) and acknowledgedBy (the caller). No request body.
+        The row is locked while changing, so two people acknowledging at once get one 200 and one 409. Not reversible.
+      x-required-permission: ALERT_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AlertId"
+      responses:
+        "200":
+          description: The acknowledged alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAlertResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The alert is no longer OPEN (already acknowledged or resolved by someone else)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Alert is not OPEN
+                path: /api/v1/alerts/60000000-0000-0000-0000-000000000001/acknowledge
+                timestamp: "2026-11-30T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/alerts/{id}/resolve:
+    post:
+      tags: [Alerts]
+      operationId: resolveAlert
+      summary: Resolve (close) an alert (draft)
+      description: >-
+        ALERT_WRITE. OPEN or ACKNOWLEDGED -> RESOLVED; records resolvedAt (now, >= triggeredAt as ck_alerts_resolution
+        requires), resolvedBy (the caller) and the optional note. Resolving an OPEN alert leaves acknowledgedAt and
+        acknowledgedBy null. The body may be omitted. Unknown fields are rejected (400). Not reversible; alerts are never
+        deleted.
+      x-required-permission: ALERT_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AlertId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveAlertRequest"
+      responses:
+        "200":
+          description: The resolved alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseAlertResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The alert is already RESOLVED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Alert is already RESOLVED
+                path: /api/v1/alerts/60000000-0000-0000-0000-000000000001/resolve
+                timestamp: "2026-11-30T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    AlertId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid parameters or body (fieldErrors per field)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Forbidden:
+      description: The account lacks the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    NotFound:
+      description: Alert not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    ServerError:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+  schemas:
+    AlertResponse:
+      type: object
+      description: One alert raised for a machine. Times are UTC instants. People are named by their fullName.
+      required: [id, machineId, machineCode, type, severity, title, status, triggeredAt, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        machineId:
+          type: string
+          format: uuid
+        machineCode:
+          type: string
+        machineName:
+          type: string
+        type:
+          type: string
+          enum: [HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK]
+        severity:
+          type: string
+          enum: [INFO, WARNING, CRITICAL]
+        title:
+          type: string
+          maxLength: 255
+          description: Short title, preferably in Vietnamese (shown as is, labelled "Tiêu đề từ máy").
+        message:
+          type:
+            - string
+            - "null"
+          description: >-
+            Plain text from the backend, preferably in Vietnamese; clients show it as text, never as HTML (labelled
+            "Nội dung từ máy").
+        status:
+          type: string
+          enum: [OPEN, ACKNOWLEDGED, RESOLVED]
+        triggeredAt:
+          type: string
+          format: date-time
+        slotId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: Proposed column; the slot concerned, when there is one.
+        slotCode:
+          type:
+            - string
+            - "null"
+        orderId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: Proposed column; the order concerned (DISPENSE_FAILED).
+        orderCode:
+          type:
+            - string
+            - "null"
+        acknowledgedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Proposed column; set by POST /acknowledge.
+        acknowledgedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        acknowledgedByName:
+          type:
+            - string
+            - "null"
+          description: fullName of the account that acknowledged.
+        resolvedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        resolvedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        resolvedByName:
+          type:
+            - string
+            - "null"
+          description: fullName of the account that resolved.
+        resolutionNote:
+          type:
+            - string
+            - "null"
+          description: Proposed column; the optional note given when resolving.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ResolveAlertRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 500
+          description: What was done; blank is stored as null.
+    PageAlertResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/AlertResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponsePageAlertResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageAlertResponse"
+    ApiResponseAlertResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/AlertResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

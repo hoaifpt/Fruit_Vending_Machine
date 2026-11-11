@@ -3,6 +3,7 @@ import { api, request } from './client.ts'
 import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
 import type { components as DispenseDraft } from './drafts/dispense-commands'
+import type { components as AlertsDraft, operations as AlertOperations } from './drafts/alerts'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -120,6 +121,23 @@ export type DispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse'
 export const dispenseCommandsApi = {
   /** One command per paid bowl of the order, oldest first; empty for an order that was never paid. */
   listForOrder: (orderId: string, signal?: AbortSignal) => api.get<DispenseCommand[]>(`/orders/${id(orderId)}/dispense-commands`, undefined, signal),
+}
+
+// Alerts (screen O2 and the alert bell, FE 6.3): draft contract api-contract/drafts/alerts.yaml, waiting for backend
+// issue 3.6. Until it ships the real backend answers 404 here; the alerts screen then says "chưa có dữ liệu" and the
+// bell hides itself and stops polling (see alertsAvailability in src/admin/alerts.ts). When 3.6 lands: move the paths
+// into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
+export type Alert = AlertsDraft['schemas']['AlertResponse']
+export type AlertListQuery = NonNullable<AlertOperations['listAlerts']['parameters']['query']>
+export type ResolveAlertBody = AlertsDraft['schemas']['ResolveAlertRequest']
+
+export const alertsApi = {
+  list: (query: AlertListQuery, signal?: AbortSignal) => list<Alert>('/alerts', query, signal),
+  get: (alertId: string, signal?: AbortSignal) => api.get<Alert>(`/alerts/${id(alertId)}`, undefined, signal),
+  /** OPEN → ACKNOWLEDGED, no body; 409 when someone else changed it first. */
+  acknowledge: (alertId: string) => api.post<Alert>(`/alerts/${id(alertId)}/acknowledge`),
+  /** OPEN/ACKNOWLEDGED → RESOLVED; the note is only sent when there is one. 409 when already resolved. */
+  resolve: (alertId: string, body: ResolveAlertBody) => api.post<Alert>(`/alerts/${id(alertId)}/resolve`, body),
 }
 
 export type { Q as QueryParams }

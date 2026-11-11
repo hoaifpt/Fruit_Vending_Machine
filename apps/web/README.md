@@ -30,7 +30,7 @@ npm run dev:mock
 
 Toàn bộ web (admin, đăng nhập, kiosk) chạy trên dữ liệu giả trong bộ nhớ, dựng từ seed dev; tải lại trang là về dữ liệu ban đầu. Đăng nhập bằng `admin@freshvend.test` / `mock-admin-password` hoặc `staff@freshvend.test` / `mock-staff-password` (giá trị giả, chỉ dùng cho mock). Kiosk `/buy` tự xác nhận thanh toán sau 15 giây.
 
-Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,dispense-commands,payments,webhook-logs,kiosk,roles`; `dispense-commands` là API nháp lệnh nhả hàng (chờ BE 3.3), mock riêng được khi đơn hàng đi API thật nhưng chỉ trả dữ liệu cho đơn có trong mock, đơn khác nhận 404 và màn chi tiết đơn hiện "chưa có dữ liệu"), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ. Khi không mock nhóm `auth`, đăng nhập đi qua backend thật; token thật mang tài khoản mà dữ liệu mock không có, nên mock dựng một tài khoản tạm từ claim của token (`sub`, `email`, `roles`) và xét quyền theo bảng vai trò của mock thay vì trả 401. Token hết hạn hoặc thiếu `roles` vẫn bị 401.
+Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,dispense-commands,payments,webhook-logs,kiosk,roles,alerts`; `alerts` là API nháp cảnh báo (chờ BE 3.6); `dispense-commands` là API nháp lệnh nhả hàng (chờ BE 3.3), mock riêng được khi đơn hàng đi API thật nhưng chỉ trả dữ liệu cho đơn có trong mock, đơn khác nhận 404 và màn chi tiết đơn hiện "chưa có dữ liệu"), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ. Khi không mock nhóm `auth`, đăng nhập đi qua backend thật; token thật mang tài khoản mà dữ liệu mock không có, nên mock dựng một tài khoản tạm từ claim của token (`sub`, `email`, `roles`) và xét quyền theo bảng vai trò của mock thay vì trả 401. Token hết hạn hoặc thiếu `roles` vẫn bị 401.
 
 Mock chỉ dành cho máy phát triển và demo, **không bao giờ triển khai**:
 
@@ -64,6 +64,7 @@ Kịch bản giữ nguyên khi chuyển trang cho tới khi đóng tab hoặc m�
 | `/admin/inventory`, `/admin/inventory/history` | Sơ đồ ngăn theo máy (hộp đáy, hộp đang giữ, hộp chặn ngăn), danh sách hộp, nạp/rút hộp, lịch sử |
 | `/admin/orders`, `/admin/orders/:id` | Đơn hàng (chỉ xem) |
 | `/admin/payments`, `/admin/payments/:id` | Thanh toán và danh sách "Cần xử lý" (ADMIN, chỉ xem) |
+| `/admin/alerts`, `/admin/alerts/:id` | Cảnh báo của máy: lọc, xác nhận, đóng (ghi người và thời điểm); chuông trên thanh trên cùng cập nhật mỗi 30 giây (API nháp, chờ BE 3.6) |
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Log webhook thanh toán (ADMIN, chỉ xem) |
 | `/admin/users` | Tài khoản nhân viên (ADMIN) |
 | `/buy` | Màn hình kiosk: chọn sản phẩm và thanh toán VietQR (cần `VITE_KIOSK_API_KEY`) |

@@ -65,7 +65,9 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
         <div className="h-full w-2/5 animate-progress rounded-full bg-primary motion-reduce:w-full motion-reduce:animate-none" />
       </div>}
       {error}
-      <table role="table" className="w-full border-collapse text-left text-sm @max-[680px]:block">
+      {/* No rows: no table at all. An empty rowgroup (and, on phones, a hidden header) leaves the table without rows,
+          which assistive tech reports as a broken table (axe aria-required-children); the empty message stands in. */}
+      {rows.length > 0 && <table role="table" className="w-full border-collapse text-left text-sm @max-[680px]:block">
         {caption && <caption className="sr-only">{caption}</caption>}
         <thead role="rowgroup" className="@max-[680px]:hidden">
           <tr role="row">{columns.map(column => {
@@ -87,7 +89,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
             </td>)}
           </tr>)}
         </tbody>
-      </table>
+      </table>}
       {!rows.length && !loading && <p className="px-4 py-10 text-center text-muted-foreground">{empty}</p>}
     </div>
   </div>

@@ -2,9 +2,10 @@
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
 import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
-import type { MockCredential, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
+import type { MockAlert, MockCredential, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
-import { PERMISSIONS } from '../../admin/permissions.ts'
+import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
+import type { Role } from '../session.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -17,8 +18,12 @@ export interface HandlerContext {
   machineId: string
   options: { autoPayMs: number; dispenseMs: number; autoPay: boolean }
 }
-/** `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now). */
-export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string }
+/**
+ * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
+ * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_WRITE of
+ * drafts/alerts.yaml); checked against the web's proposed seed DRAFT_ROLE_PERMISSIONS.
+ */
+export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
 export interface Route { method: string; pattern: RegExp; policy: Policy; handle: (ctx: HandlerContext) => Reply }
 
 const RESERVATION_MS = 5 * 60_000
@@ -42,6 +47,10 @@ function byId<T extends { id: string }>(rows: T[], id: string, message: string):
 }
 const findUser = (ctx: HandlerContext) => byId(ctx.store.users, ctx.params.id, 'Không tìm thấy tài khoản.')
 const findProduct = (ctx: HandlerContext) => byId(ctx.store.products, ctx.params.id, 'Không tìm thấy sản phẩm.')
+function findAlert(ctx: HandlerContext): MockAlert {
+  if (!UUID_PATTERN.test(decode(ctx.params.id))) throw new MockHttpError(400, 'Invalid alert id')
+  return byId(ctx.store.alerts, ctx.params.id, 'Alert not found')
+}
 const findMachine = (ctx: HandlerContext, id = ctx.params.machineId) => byId(ctx.store.machines, id, 'Machine not found') // MachineService, English as the backend sends it
 function findSlot(ctx: HandlerContext) {
   findMachine(ctx)
@@ -57,6 +66,11 @@ function within(query: URLSearchParams, fromName: string, toName: string, value:
   return (!from || at >= Date.parse(from)) && (!to || at < Date.parse(to))
 }
 const flag = (query: URLSearchParams, name: string, value: boolean) => !query.get(name) || (query.get(name) === 'true') === value
+
+/** Draft codes an account holds through its roles (proposed seed of the draft contracts). */
+export function draftPermissionsOfUser(user: Pick<MockUser, 'roles'>): string[] {
+  return [...new Set(user.roles.map(role => role.replace(/^ROLE_/, '')).flatMap(role => DRAFT_ROLE_PERMISSIONS[role as Role] ?? []))].sort()
+}
 
 /** Effective permissions of an account: the union of its roles' sets, read from the store on every request (like #48). */
 export function permissionsOfUser(store: MockStore, user: Pick<MockUser, 'roles'>): string[] {
@@ -568,6 +582,36 @@ export const routes: Route[] = [
     return ok(rows.map(command => ({ ...command })))
   }),
 
+  // ---- alerts: draft of backend 3.6 (api-contract/drafts/alerts.yaml). Messages in English as the backend would send.
+  route('GET', '/alerts', { draftPermission: 'ALERT_READ' }, ctx => {
+    const { query } = ctx
+    const rows = ctx.store.alerts.filter(alert => eq(query, 'status', alert.status) && eq(query, 'severity', alert.severity) && eq(query, 'type', alert.type)
+      && eq(query, 'machineId', alert.machineId) && within(query, 'triggeredFrom', 'triggeredTo', alert.triggeredAt)).map(alert => ({ ...alert }))
+    return ok(paginate(rows, query, { sorts: { triggeredAt: row => row.triggeredAt }, defaultSort: 'triggeredAt,desc' }))
+  }),
+  route('GET', '/alerts/:id', { draftPermission: 'ALERT_READ' }, ctx => ok({ ...findAlert(ctx) })),
+  route('POST', '/alerts/:id/acknowledge', { draftPermission: 'ALERT_WRITE' }, ctx => {
+    const alert = findAlert(ctx)
+    if (alert.status !== 'OPEN') throw conflict('Alert is not OPEN')
+    const at = iso(ctx.now)
+    Object.assign(alert, { status: 'ACKNOWLEDGED', acknowledgedAt: at, acknowledgedById: ctx.user!.id, acknowledgedByName: ctx.user!.fullName, updatedAt: at })
+    return ok({ ...alert })
+  }),
+  route('POST', '/alerts/:id/resolve', { draftPermission: 'ALERT_WRITE' }, ctx => {
+    let note: string | null = null
+    if (ctx.body !== undefined) {
+      const form = new Form(ctx.body, ['note'])
+      note = form.optionalText('note', 500)
+      form.done()
+    }
+    const alert = findAlert(ctx)
+    if (alert.status === 'RESOLVED') throw conflict('Alert is already RESOLVED')
+    // ck_alerts_resolution: resolved_at >= triggered_at.
+    const at = iso(Math.max(ctx.now, Date.parse(alert.triggeredAt)))
+    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedById: ctx.user!.id, resolvedByName: ctx.user!.fullName, resolutionNote: note, updatedAt: at })
+    return ok({ ...alert })
+  }),
+
   // ---- payments (ADMIN)
   route('GET', '/payments', 'admin', ctx => {
     const { store, query } = ctx
@@ -663,3 +707,23 @@ export const routes: Route[] = [
     return created(kioskPaymentView(payment))
   }),
 ]
+
+export interface RaiseAlertInput { type?: MockAlert['type']; severity?: MockAlert['severity']; machineId?: string; title?: string; message?: string | null }
+
+/**
+ * Mock-only control (window.__fvMock.raiseAlert, see index.ts): a machine raises a new OPEN alert now, as the backend
+ * would from a sensor reading or a missed heartbeat. Lets tests prove the bell shows it within one poll.
+ */
+export function raiseAlert(store: MockStore, now: number, input: RaiseAlertInput = {}): MockAlert {
+  const machine = store.machines.find(candidate => candidate.id === input.machineId) ?? store.machines[0]
+  const at = iso(now)
+  const alert: MockAlert = {
+    id: newId(), machineId: machine.id, machineCode: machine.code, machineName: machine.name,
+    type: input.type ?? 'HIGH_TEMPERATURE', severity: input.severity ?? 'CRITICAL', title: input.title ?? 'Temperature above range',
+    message: input.message === undefined ? 'Reading of 12.00 C exceeds the 8.00 C maximum.' : input.message, status: 'OPEN', triggeredAt: at,
+    slotId: null, slotCode: null, orderId: null, orderCode: null, acknowledgedAt: null, acknowledgedById: null, acknowledgedByName: null,
+    resolvedAt: null, resolvedById: null, resolvedByName: null, resolutionNote: null, createdAt: at, updatedAt: at,
+  }
+  store.alerts.push(alert)
+  return alert
+}

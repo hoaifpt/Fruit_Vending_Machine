@@ -15,7 +15,15 @@ export const PERMISSIONS = [
   'INVENTORY_READ', 'INVENTORY_WRITE',
   'ORDER_READ', 'PAYMENT_READ', 'PAYMENT_WEBHOOK_LOG_READ',
 ] as const
-export type Permission = (typeof PERMISSIONS)[number]
+
+/**
+ * Codes proposed by the web's draft contracts, not in the backend yet (so not in PERMISSIONS, which mirrors V13 of #48):
+ * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6). When the backend adds
+ * them to its permissions table, move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
+ */
+export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE'] as const
+export type DraftPermission = (typeof DRAFT_PERMISSIONS)[number]
+export type Permission = (typeof PERMISSIONS)[number] | DraftPermission
 
 export const ROLES: readonly Role[] = ['ADMIN', 'STAFF']
 
@@ -29,15 +37,25 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   STAFF: ['PRODUCT_READ', 'MACHINE_READ', 'BATCH_READ', 'BATCH_CREATE', 'INVENTORY_READ', 'INVENTORY_WRITE', 'ORDER_READ'],
 }
 
+/** Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do. */
+export const DRAFT_ROLE_PERMISSIONS: Readonly<Record<Role, readonly DraftPermission[]>> = {
+  ADMIN: DRAFT_PERMISSIONS,
+  STAFF: ['ALERT_READ', 'ALERT_WRITE'],
+}
+const KNOWN: readonly string[] = [...PERMISSIONS, ...DRAFT_PERMISSIONS]
+
 /** Who is asking: roles from the session and, once the backend provides them, explicit permissions. */
 export interface Subject { roles: readonly Role[]; permissions?: readonly string[] }
 
-/** Effective permissions of a subject; explicit permissions win over the role table, unknown codes are ignored. */
+/**
+ * Effective permissions of a subject; explicit permissions win over the role table (draft codes included only when the
+ * backend lists them), unknown codes are ignored.
+ */
 export function permissionsOf(subject: Subject | readonly Role[]): Set<Permission> {
   const { roles, permissions } = Array.isArray(subject) ? { roles: subject as readonly Role[], permissions: undefined } : subject as Subject
   const granted = new Set<Permission>()
-  const source = permissions ?? roles.flatMap(role => ROLE_PERMISSIONS[role] ?? [])
-  for (const name of source) if ((PERMISSIONS as readonly string[]).includes(name)) granted.add(name as Permission)
+  const source = permissions ?? roles.flatMap(role => [...ROLE_PERMISSIONS[role] ?? [], ...DRAFT_ROLE_PERMISSIONS[role] ?? []])
+  for (const name of source) if (KNOWN.includes(name)) granted.add(name as Permission)
   return granted
 }
 

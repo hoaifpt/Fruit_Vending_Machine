@@ -1,14 +1,14 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceOrders, permissionsOfUser, routes } from './handlers.ts'
-import type { HandlerContext, Policy } from './handlers.ts'
+import { advanceOrders, draftPermissionsOfUser, permissionsOfUser, raiseAlert, routes } from './handlers.ts'
+import type { HandlerContext, Policy, RaiseAlertInput } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
 import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
-import type { MockUser } from './seed.ts'
+import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -25,6 +25,8 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   auth: 'auth', users: 'users', products: 'products', machines: 'machines', 'product-batches': 'batches',
   inventory: 'inventory', orders: 'orders', payments: 'payments', 'payment-webhook-logs': 'webhook-logs', kiosk: 'kiosk',
   roles: 'roles', permissions: 'roles',
+  // Draft of backend 3.6 (api-contract/drafts/alerts.yaml).
+  alerts: 'alerts',
 }
 
 export function groupOf(path: string): MockGroup | null {
@@ -111,7 +113,11 @@ function emptied(data: unknown): unknown {
   return data
 }
 
-export function createMockFetcher(selection: MockSelection, overrides: Partial<MockOptions> = {}): typeof fetch {
+/** Mock-only controls for tests and demos (never in a production build: this module is only loaded with VITE_API_MOCK). */
+export interface MockControl { raiseAlert: (input?: RaiseAlertInput) => MockAlert }
+export type MockFetcher = typeof fetch & { control: MockControl }
+
+export function createMockFetcher(selection: MockSelection, overrides: Partial<MockOptions> = {}): MockFetcher {
   const options: MockOptions = {
     realFetch: (...args) => fetch(...args), getSearch: () => '', storage: null, latencyMs: 0, slowMs: 3000, now: () => Date.now(), autoPayMs: 15_000, dispenseMs: 4_000, ...overrides,
   }
@@ -148,7 +154,8 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     }
     if (policy === 'admin' && !user.roles.includes('ADMIN')) throw new MockHttpError(403, 'Access denied')
     // Backend #48: permissions are read from the role table on every request, so a change applies to the next call.
-    if (typeof policy === 'object' && !permissionsOfUser(store, user).includes(policy.permission)) throw new MockHttpError(403, 'Access denied')
+    if (typeof policy === 'object' && 'permission' in policy && !permissionsOfUser(store, user).includes(policy.permission)) throw new MockHttpError(403, 'Access denied')
+    if (typeof policy === 'object' && 'draftPermission' in policy && !draftPermissionsOfUser(user).includes(policy.draftPermission)) throw new MockHttpError(403, 'Access denied')
     return user
   }
 
@@ -173,7 +180,8 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     throw new MockHttpError(501, `Mock chưa có handler cho ${method} ${API_PREFIX}${path}`)
   }
 
-  return async (input, init) => {
+  const control: MockControl = { raiseAlert: input => raiseAlert(store, options.now(), input) }
+  const fetcher: typeof fetch = async (input, init) => {
     const url = requestUrl(input)
     const path = url.pathname.startsWith(`${API_PREFIX}/`) ? url.pathname.slice(API_PREFIX.length) : url.pathname
     const fullPath = url.pathname
@@ -208,4 +216,5 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       return errorResponse(500, 'An unexpected error occurred', fullPath, now)
     }
   }
+  return Object.assign(fetcher, { control })
 }

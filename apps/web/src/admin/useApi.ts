@@ -18,6 +18,8 @@ export interface ApiState<T> {
 export interface ApiOptions {
   /** Reload every `pollMs` ms (minimum 2 s) while the tab is visible. Stops after a 401/403. */
   pollMs?: number
+  /** Extra errors that end polling for good (besides 401/403), e.g. an endpoint the backend has not shipped yet (404). */
+  stopOn?: (error: unknown) => boolean
 }
 
 type LoadState<T> = Omit<ApiState<T>, 'reload'>
@@ -32,8 +34,8 @@ export function stopsPolling(error: unknown): boolean {
  * Only one request is in flight: a new load aborts the previous one, and polls wait for the last to settle.
  */
 export function useApi<T>(loader: (signal: AbortSignal) => Promise<T>, key: string, options: ApiOptions = {}): ApiState<T> {
-  const loaderRef = useRef(loader)
-  loaderRef.current = loader
+  const loaderRef = useRef({ loader, stopOn: options.stopOn })
+  loaderRef.current = { loader, stopOn: options.stopOn }
   const pollMs = normalizeInterval(options.pollMs)
   const [state, setState] = useState<LoadState<T>>({ loading: true, refreshing: false })
   const [tick, setTick] = useState(0)
@@ -47,7 +49,7 @@ export function useApi<T>(loader: (signal: AbortSignal) => Promise<T>, key: stri
       // Polls are not something the user waits on: their requests do not run the top progress bar.
       if (background) markBackground(own.signal)
       setState(previous => background ? { ...previous, refreshing: true } : { data: previous.data, updatedAt: previous.updatedAt, loading: true, refreshing: false })
-      loaderRef.current(own.signal).then(
+      loaderRef.current.loader(own.signal).then(
         data => {
           if (!own.signal.aborted) setState({ data, loading: false, refreshing: false, updatedAt: Date.now() })
           resolve(true)
@@ -56,7 +58,7 @@ export function useApi<T>(loader: (signal: AbortSignal) => Promise<T>, key: stri
           if (own.signal.aborted) { resolve(true); return }
           // A failed poll keeps the data on screen next to the error; a failed foreground load shows the error alone.
           setState(previous => background ? { ...previous, error, loading: false, refreshing: false } : { error, loading: false, refreshing: false })
-          resolve(!stopsPolling(error))
+          resolve(!stopsPolling(error) && !loaderRef.current.stopOn?.(error))
         },
       )
     })

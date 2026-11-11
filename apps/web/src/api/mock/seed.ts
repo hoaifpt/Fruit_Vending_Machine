@@ -3,6 +3,7 @@
 // MOCK_PASSWORDS are fake values for the mock only; they exist nowhere else.
 import type { components } from '../schema'
 import type { components as DispenseDraft } from '../drafts/dispense-commands'
+import type { components as AlertsDraft } from '../drafts/alerts'
 
 type S = components['schemas']
 
@@ -31,6 +32,8 @@ export type MockPayment = Omit<S['PaymentDetailResponse'], 'orderCode' | 'machin
 }
 /** Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): one command per paid bowl. */
 export type MockDispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse']
+/** Draft of backend 3.6 (api-contract/drafts/alerts.yaml): an alert of a machine, people named by fullName. */
+export type MockAlert = AlertsDraft['schemas']['AlertResponse']
 
 export interface MockStore {
   users: MockUser[]
@@ -44,6 +47,7 @@ export interface MockStore {
   orders: MockOrder[]
   payments: MockPayment[]
   dispenseCommands: MockDispenseCommand[]
+  alerts: MockAlert[]
   webhookLogs: MockWebhookLog[]
   /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
   permissions: MockPermission[]
@@ -297,9 +301,10 @@ export function createStore(nowMs: number): MockStore {
   webhookLogs.push(call(uuid('b2000000', 24), { ...mismatched, transactionId: 'TXNMISMATCH01' }, plus(mismatched.createdAt, 90_000), 'SUCCESS', 1000))
   for (const payment of payments) if (payment.id.startsWith('a3000000')) webhookLogs.push(call(`b3000000${payment.id.slice(8)}`, payment, payment.paidAt!, 'SUCCESS'))
   const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
+  const alerts = seedAlerts(nowMs, { machines, slots, orders, admin: users[0], staff: users[1] })
 
   return {
-    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, webhookLogs,
+    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, webhookLogs,
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
 }
@@ -345,4 +350,35 @@ function seedDispenseCommands(orders: MockOrder[], items: MockItem[], { timeoutO
     }
   }
   return commands
+}
+
+/**
+ * Alerts of the draft of backend 3.6. The first one is the alert of backend/db/dev/seed.sql (same id, type, title and
+ * message); the others cover every status, severity and the slot/order context: 3 OPEN (one CRITICAL), 1 ACKNOWLEDGED,
+ * 3 RESOLVED (one closed with a note, one closed without being acknowledged first).
+ */
+function seedAlerts(nowMs: number, { machines, slots, orders, admin, staff }: { machines: S['MachineResponse'][]; slots: S['MachineSlotResponse'][]; orders: MockOrder[]; admin: MockUser; staff: MockUser }): MockAlert[] {
+  const iso = (offset: number) => new Date(nowMs + offset).toISOString()
+  const [m1, m2] = machines
+  const slotOf = (machine: S['MachineResponse'], code: string) => slots.find(slot => slot.machineId === machine.id && slot.slotCode === code)
+  const failed = orders.find(order => order.id === uuid('93000000', 1))
+  const failedMachine = machines.find(machine => machine.id === failed?.machineId) ?? m1
+  const alert = (n: number, machine: S['MachineResponse'], fields: Partial<MockAlert> & Pick<MockAlert, 'type' | 'severity' | 'title' | 'status'>, triggered: number): MockAlert => ({
+    id: uuid('60000000', n), machineId: machine.id, machineCode: machine.code, machineName: machine.name, message: null,
+    slotId: null, slotCode: null, orderId: null, orderCode: null, acknowledgedAt: null, acknowledgedById: null, acknowledgedByName: null,
+    resolvedAt: null, resolvedById: null, resolvedByName: null, resolutionNote: null,
+    triggeredAt: iso(triggered), createdAt: iso(triggered), updatedAt: iso(triggered), ...fields,
+  })
+  const ack = (user: MockUser, at: number) => ({ acknowledgedAt: iso(at), acknowledgedById: user.id, acknowledgedByName: user.fullName, updatedAt: iso(at) })
+  const done = (user: MockUser, at: number, note: string | null = null) => ({ resolvedAt: iso(at), resolvedById: user.id, resolvedByName: user.fullName, resolutionNote: note, updatedAt: iso(at) })
+  const slot = (machine: S['MachineResponse'], code: string) => ({ slotId: slotOf(machine, code)?.id ?? null, slotCode: code })
+  return [
+    alert(1, m1, { type: 'HIGH_TEMPERATURE', severity: 'WARNING', title: 'Temperature above range', message: 'Seeded reading of 9.50 C exceeds the 8.00 C maximum.', status: 'OPEN' }, -2 * HOUR),
+    alert(2, m2, { type: 'MACHINE_OFFLINE', severity: 'CRITICAL', title: 'Machine offline', message: 'No heartbeat for more than 180 seconds.', status: 'OPEN' }, -35 * 60_000),
+    alert(3, m1, { type: 'PRODUCT_EXPIRED', severity: 'WARNING', title: 'Expired bowl at slot head', message: 'The bowl at the head of slot B1 has expired; the slot cannot sell until it is removed.', status: 'ACKNOWLEDGED', ...slot(m1, 'B1'), ...ack(staff, -4 * HOUR) }, -5 * HOUR),
+    alert(4, failedMachine, { type: 'DISPENSE_FAILED', severity: 'CRITICAL', title: 'Dispense timed out', message: 'The machine did not report the drop within 60 seconds.', status: 'RESOLVED', orderId: failed?.id ?? null, orderCode: failed?.orderCode ?? null, ...ack(admin, -110 * 60_000), ...done(admin, -HOUR, 'Đã kiểm tra ngăn tại máy và hoàn tiền thủ công cho khách.') }, -2 * HOUR + 70_000),
+    alert(5, m1, { type: 'LOW_STOCK', severity: 'INFO', title: 'Low stock', message: 'Slot A2 has 1 bowl left.', status: 'OPEN', ...slot(m1, 'A2') }, -50 * 60_000),
+    alert(6, m1, { type: 'PRODUCT_EXPIRING', severity: 'INFO', title: 'Bowls expiring soon', message: 'Bowls in slot A1 expire within 2 days.', status: 'RESOLVED', ...slot(m1, 'A1'), ...ack(staff, -23 * HOUR), ...done(staff, -20 * HOUR) }, -DAY),
+    alert(7, m2, { type: 'HIGH_HUMIDITY', severity: 'WARNING', title: 'Humidity above range', message: 'Humidity stayed at the configured maximum for 15 minutes.', status: 'RESOLVED', ...done(admin, -3 * DAY + 2 * HOUR) }, -3 * DAY),
+  ]
 }
