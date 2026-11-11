@@ -314,7 +314,8 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
     void aRefundedPaymentIsNeverTouchedByASuccessWebhook() throws Exception {
         var order = payable();
         String reference = reference(order);
-        jdbc.update("UPDATE payments SET status='REFUNDED', transaction_id='TXN-OLD', paid_at=now() WHERE payment_reference=?", reference);
+        // GREATEST: created_at comes from the JVM clock, now() from the database server clock, which may lag slightly.
+        jdbc.update("UPDATE payments SET status='REFUNDED', transaction_id='TXN-OLD', paid_at=GREATEST(now(), created_at) WHERE payment_reference=?", reference);
         assertThat(paid(reference, "TXN-OLD", orderTotal(order.orderId()))).isEqualTo(200);
         assertThat(paymentStatus(reference)).isEqualTo("REFUNDED");
         assertThat(orderStatus(order.orderId())).isEqualTo("PENDING_PAYMENT");

@@ -45,6 +45,9 @@ implement slots, inventory, telemetry, heartbeat, online/offline, payments or di
 
 Response fields are the twelve machine fields, with UTC Instant/ISO-8601 timestamps.
 lastSeenAt is system-managed and may be null; legacy location may also be null.
+Issue #53 adds read-only, system-managed fields: connectivity (derived ONLINE / WARNING / OFFLINE / NEVER_SEEN,
+never stored), lastHeartbeatAt, firmwareVersion, uptimeSeconds, wifiRssi and freeHeapBytes (null until reported;
+a missing RSSI/heap is null, never 0). Write requests still reject them. See [machine-health.md](machine-health.md).
 Missing UUID returns 404, malformed UUID 400. Common ApiResponse/ApiErrorResponse and
 global exception handling are reused; no SQL/Hibernate internals are exposed.
 Success responses use Cache-Control: no-store; 201 includes relative Location.
@@ -64,6 +67,9 @@ One sort field/direction uses Spring conventions. Approved fields: id, code, nam
 location, status, createdAt, updatedAt. Direction asc/desc is case-insensitive; omitted
 direction means asc, omitted/empty sort uses createdAt,desc. UUID ascending breaks ties
 unless sorting by id. Invalid sort/parameters return 400.
+
+Optional `connectivity` filter (ONLINE, WARNING, OFFLINE, NEVER_SEEN) is translated to SQL on last_seen_at /
+last_offline_at with the same thresholds as the field, so filtering and paging stay in the database.
 
 ## Swagger and frontend contract
 

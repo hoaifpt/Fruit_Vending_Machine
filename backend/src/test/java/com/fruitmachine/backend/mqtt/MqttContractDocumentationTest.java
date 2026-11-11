@@ -95,7 +95,7 @@ class MqttContractDocumentationTest {
         assertThat(channels.keySet()).containsExactlyElementsOf(MachineChannel.ALL);
         channels.forEach((channel, cells) -> assertThat(cells.get(0)).isEqualTo("`" + MachineTopic.of("vending", "{machineCode}", channel) + "`"));
         assertThat(section(contract(), "## 1. Topics")).contains(MachineChannel.SUBSCRIBED.stream()
-                .map(c -> MachineTopic.allMachines("vending", c)).reduce((a, b) -> a + " and " + b).orElseThrow());
+                .map(c -> MachineTopic.allMachines("vending", c)).reduce((a, b) -> a + ", " + b).orElseThrow() + " (QoS 1)");
 
         assertThat(rows(section(contract(), "## 3. Commands")).keySet()).containsExactlyElementsOf(MachineCommandType.ALL);
 

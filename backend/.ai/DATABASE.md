@@ -38,7 +38,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | users | id, email, password_hash, full_name, phone, status, created_at, updated_at |
 | roles | id, name, description, created_at |
 | user_roles | user_id, role_id |
-| machines | id, code, name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, created_at, updated_at |
+| machines | id, code, name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes, created_at, updated_at |
 | machine_slots | id, machine_id, slot_code, capacity, status, created_at, updated_at |
 | products | id, sku, name, description, price, image_url, status, created_at, updated_at |
 | product_batches | id, batch_code, product_id, manufactured_at, expires_at, quantity, created_by, created_at |
@@ -326,3 +326,18 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   The payment webhook creates commands without the machine lock and never publishes. Maintenance commands (4.2) must take the same lock.
 - System maintenance (`MachineService.enterMaintenanceBySystem`) writes `audit_logs` action `MACHINE_MAINTENANCE_AUTO`, user_id NULL.
   Late dispense results write `DISPENSE_SUCCESS_AFTER_REFUND` / `DISPENSE_LATE_RESULT_CONFLICT` (entity_type DispenseCommand).
+
+## 18. Issue #53 — V15 machine presence
+
+- `machines` gains system-managed `last_heartbeat_at`, `last_offline_at`, `firmware_version` VARCHAR(32), `uptime_seconds` BIGINT,
+  `wifi_rssi` SMALLINT, `free_heap_bytes` BIGINT, with CHECKs (uptime >= 0, RSSI -127..0, heap >= 0, firmware not blank). Missing
+  diagnostics are NULL, never 0.
+- Written only by `MachinePresenceService` with one conditional, forward-only UPDATE per MQTT message (JdbcTemplate,
+  `RETURNING old.*` for reboot detection); `updated_at` is never changed by presence. `Machine` maps all presence columns
+  (including `last_seen_at`) `insertable = false, updatable = false`, so configuration writes never write them back.
+- Lock order: presence touches only the `machines` row (and inserts `sensor_readings` after it in the telemetry path), so it
+  serializes with configuration updates (`findForUpdateById`) without deadlock.
+- Connectivity (ONLINE / WARNING / OFFLINE / NEVER_SEEN) is derived from last_seen_at / last_offline_at with `app.machine-health`
+  thresholds and never stored; the list filter uses the same rules as SQL predicates.
+- `sensor_readings` rows come from MQTT telemetry (receive time, 2 decimals, -40..85 °C, 0..100 %RH); reads use
+  `ix_sensor_readings_machine_time`. Machines with readings cannot be deleted (RESTRICT, unchanged).

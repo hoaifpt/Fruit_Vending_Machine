@@ -22,7 +22,8 @@ class MqttContractExamplesIntegrationTest extends AbstractCoreIntegrationTest {
 
     @BeforeEach
     void contractMachine() throws Exception {
-        jdbc.update("DELETE FROM machines WHERE code = ?", MACHINE);
+        // Machines keep their readings (sensor_readings RESTRICT), so an earlier test machine is renamed, not deleted.
+        jdbc.update("UPDATE machines SET code = 'OLD-' || id WHERE code = ?", MACHINE);
         machine = fixtures.machine(admin.token());
         jdbc.update("UPDATE machines SET code = ? WHERE id = ?", MACHINE, machine);
     }
@@ -45,14 +46,22 @@ class MqttContractExamplesIntegrationTest extends AbstractCoreIntegrationTest {
         long history = jdbc.queryForObject("SELECT count(*) FROM inventory_transactions", Long.class);
         for (Path example : examples) {
             String channel = MqttContractDocumentationTest.channelOf(example.getFileName().toString());
-            jdbc.update("UPDATE machines SET last_seen_at = NULL WHERE id = ?", machine);
+            jdbc.update("UPDATE machines SET last_seen_at = NULL, last_offline_at = NULL WHERE id = ?", machine);
             byte[] body = Files.readAllBytes(example);
             assertThatCode(() -> messages.handle(MACHINE, channel, body)).as(example.toString()).doesNotThrowAnyException();
-            // Accepted: the envelope passed the machine check (last_seen_at moves); the fake commandIds match no command.
-            assertThat(lastSeen()).as(example.toString()).isNotNull();
+            // Accepted: the envelope passed the checks and presence moved (the fake commandIds match no command). The Last Will
+            // is the one message that records last_offline_at instead of last_seen_at (#53).
+            if (example.getFileName().toString().equals("status-offline-lwt.json")) {
+                assertThat(lastSeen()).as(example.toString()).isNull();
+                assertThat(jdbc.queryForObject("SELECT last_offline_at FROM machines WHERE id = ?", Object.class, machine)).isNotNull();
+            } else {
+                assertThat(lastSeen()).as(example.toString()).isNotNull();
+            }
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM orders", Long.class)).isEqualTo(orders);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_transactions", Long.class)).isEqualTo(history);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM sensor_readings WHERE machine_id = ?", Long.class, machine)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT firmware_version FROM machines WHERE id = ?", String.class, machine)).isEqualTo("0.3.0");
     }
 
     @Test

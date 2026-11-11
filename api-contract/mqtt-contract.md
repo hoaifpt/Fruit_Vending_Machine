@@ -1,7 +1,7 @@
 # MQTT Contract — Backend ↔ Vending Machines
 
 ```text
-Contract version:        1.1.0
+Contract version:        1.2.0
 Envelope schemaVersion:  1
 Source of truth for:     topics, envelope, commands, events, payloads, timings, error codes, broker security
 Examples (fixtures):     api-contract/mqtt/examples/*.json
@@ -30,6 +30,7 @@ in its firmware; until it is merged into `dev` those items stay pending here.
 | --- | --- | --- |
 | 1.0.0 | 2026-11-09 | First publication (issue #49). Replaces the message definitions in `docs/`. |
 | 1.1.0 | 2026-11-10 | Issue #52: the backend sends `columnCode` and handles `details.reason` / `details.bowlCount`; separate result and pending timeouts; one in-flight command per machine; late-result rule. No message shape changed. |
+| 1.2.0 | 2026-11-10 | Issue #53: the backend subscribes to `heartbeat` and `telemetry`, validates every envelope strictly, keeps presence and diagnostics, derives connectivity (60 s / 180 s) and stores telemetry. No message shape changed. |
 
 ## Versioning rules
 
@@ -52,9 +53,9 @@ Topic root: `vending` (backend `MQTT_TOPIC_ROOT`, firmware `AppConfig::MQTT_TOPI
 | --- | --- | --- | --- | --- |
 | `commands` | `vending/{machineCode}/commands` | backend → machine | dispense, maintenance and reset commands | IMPLEMENTED (DISPENSE) |
 | `events` | `vending/{machineCode}/events` | machine → backend | command results, sensor events, faults, boot | IMPLEMENTED (DISPENSE_*) |
-| `status` | `vending/{machineCode}/status` | machine → backend | `ONLINE` on connect, `OFFLINE` as Last Will | IMPLEMENTED (backend records `last_seen_at` only; state handling 3.4) |
-| `heartbeat` | `vending/{machineCode}/heartbeat` | machine → backend | liveness and diagnostics every 30 s | PLANNED (backend 3.4; firmware on the unmerged firmware branch) |
-| `telemetry` | `vending/{machineCode}/telemetry` | machine → backend | temperature / humidity | FIRMWARE_PENDING (no sensor yet) |
+| `status` | `vending/{machineCode}/status` | machine → backend | `ONLINE` on connect, `OFFLINE` as Last Will | IMPLEMENTED (ONLINE updates presence and diagnostics; OFFLINE records `last_offline_at`, connectivity OFFLINE at once) |
+| `heartbeat` | `vending/{machineCode}/heartbeat` | machine → backend | liveness and diagnostics every 30 s | FIRMWARE_PENDING (backend handles it since #53; firmware on the unmerged firmware branch) |
+| `telemetry` | `vending/{machineCode}/telemetry` | machine → backend | temperature / humidity | FIRMWARE_PENDING (backend validates and stores it since #53; no sensor yet) |
 
 Rules:
 
@@ -62,7 +63,7 @@ Rules:
 exactly 3 levels <root>/<machineCode>/<channel>; any other topic is dropped
 machine code: uppercase, exactly as registered in the backend (e.g. FV-DEV-001)
 no other topics; payment, order and dispense decisions are never taken outside these messages
-the backend subscribes to vending/+/events and vending/+/status (QoS 1); heartbeat and telemetry are added in 3.4
+the backend subscribes to vending/+/events, vending/+/status, vending/+/heartbeat, vending/+/telemetry (QoS 1)
 ```
 
 ## 2. Envelope
@@ -86,8 +87,9 @@ Every message, in both directions:
 | `payload` | yes | JSON object, shape defined per channel below |
 
 - There is no device timestamp. The backend always uses its own receive time (the ESP32 has no reliable clock).
-- Current backend tolerance (no change before 3.3): a message without `machineCode` is treated as the topic's machine;
-  `schemaVersion` and `messageId` are not validated yet. A `machineCode` that differs from the topic is always dropped.
+- The backend enforces every rule above since #53 (a missing `machineCode` is no longer accepted), plus: the whole message is
+  valid UTF-8 JSON of at most 8 KB, and the machine code is registered. A message that breaks a rule is logged at WARN (topic,
+  machine code, messageId, reason) and dropped; it changes nothing, not even `last_seen_at`.
 - Current firmware tolerance: a command without `machineCode` is accepted as its own; `schemaVersion` is not checked yet
   (`UNSUPPORTED_SCHEMA`, PLANNED).
 - Malformed JSON is logged and dropped by both sides, never retried and never allowed to stop the MQTT client.
@@ -225,7 +227,11 @@ values `RESULT_TIMEOUT`, `NOT_DELIVERED` and `LEGACY_UNKNOWN` (rows from before 
 `ONLINE` is published right after every (re)connect. `OFFLINE` is the Last Will registered at connect (QoS 1, not retained)
 and published by the broker when the machine disappears; it carries a full envelope with `messageId` `lwt-<boot id>`.
 
-### 5.2 `heartbeat` (every 30 s) — PLANNED (backend 3.4; firmware on the unmerged firmware branch)
+Backend handling (#53): `ONLINE` sets `last_seen_at` and the `firmwareVersion` / `uptimeSeconds` it carries (an omitted field keeps
+its stored value); `OFFLINE` sets only `last_offline_at`, so connectivity is OFFLINE at once until the next message.
+Any other `state` is dropped.
+
+### 5.2 `heartbeat` (every 30 s) — FIRMWARE_PENDING (backend implemented #53; firmware on the unmerged firmware branch)
 
 ```json
 { "state": "ONLINE", "uptimeSeconds": 12345, "wifiRssi": -55, "freeHeap": 18240, "firmwareVersion": "0.3.0" }
@@ -237,7 +243,12 @@ optional: wifiRssi (dBm), freeHeap (bytes) → a missing value is stored as null
 also sent once right after each connect
 ```
 
-### 5.3 `telemetry` (FIRMWARE_PENDING)
+Backend validation and storage (#53): `state` must be `ONLINE`; `uptimeSeconds` an integer >= 0; `firmwareVersion` 1–32 characters;
+`wifiRssi` an integer -127..0; `freeHeap` an integer >= 0. An invalid heartbeat is dropped whole. A valid one sets `last_seen_at`,
+`last_heartbeat_at`, `firmware_version`, `uptime_seconds`, `wifi_rssi`, `free_heap_bytes` in one forward-only update (an older
+message never moves them back). An uptime lower than the stored one is a reboot (`MachineRebootDetectedEvent`).
+
+### 5.3 `telemetry` (FIRMWARE_PENDING; backend implemented #53)
 
 ```json
 { "temperature": 4.7, "humidity": 68.2 }
@@ -247,6 +258,11 @@ also sent once right after each connect
 °C and %RH, one decimal; recommended interval 60 s
 sensor unreadable → FAULT event TEMP_SENSOR_ERROR, no telemetry message (never 0, NaN or a fake value)
 ```
+
+Backend validation and storage (#53): at least one of `temperature` / `humidity`; each a finite JSON number, rounded HALF_UP to
+2 decimals, temperature -40.00..85.00 °C (sensor range), humidity 0.00..100.00 %RH; unknown fields are ignored. Stored in
+`sensor_readings` with the backend receive time. A repeated `messageId` within 10 minutes and a reading less than 10 s after the
+previous stored reading of the machine are dropped (in memory of one backend instance; `TELEMETRY_MIN_INTERVAL`).
 
 ---
 
@@ -321,8 +337,8 @@ Wi-Fi / MQTT connection loss → inferred by the backend (no message for 180 s, 
 | Late `DISPENSE_COMPLETED` after FAILED/TIMEOUT | implemented (#52), only while the bowl is still DISPENSE_FAILED: order DISPENSE_FAILED → SUCCESS, bowl SOLD, order COMPLETED, machine stays MAINTENANCE; order REFUNDED → bowl SOLD, order stays REFUNDED, audit `DISPENSE_SUCCESS_AFTER_REFUND`; otherwise (bowl returned, removed or sold) nothing changes, audit `DISPENSE_LATE_RESULT_CONFLICT` |
 | Success confirmation | `DISPENSE_COMPLETED` only when the IR sensor counted exactly one bowl (FIRMWARE_PENDING) |
 | Heartbeat interval | 30 s |
-| Offline threshold | 180 s without status, heartbeat or event (3.4) |
-| `last_seen_at` | updated by the backend on every accepted message (implemented) |
+| Connectivity (derived, never stored, #53) | no message yet NEVER_SEEN; Last Will after the last message OFFLINE; silent > 180 s (`MACHINE_OFFLINE_AFTER`) OFFLINE; silent > 60 s (`MACHINE_WARNING_AFTER`) WARNING; otherwise ONLINE |
+| `last_seen_at` | updated by the backend on every accepted message except the OFFLINE Last Will, forward-only (implemented) |
 
 ---
 
@@ -361,5 +377,5 @@ Backend tests parse every example on each build; the firmware team may use them 
 | `event-boot.json` | BOOT | PLANNED |
 | `status-online.json` | status ONLINE | IMPLEMENTED |
 | `status-offline-lwt.json` | status OFFLINE (Last Will) | IMPLEMENTED |
-| `heartbeat.json` | heartbeat | PLANNED |
-| `telemetry.json` | telemetry | FIRMWARE_PENDING |
+| `heartbeat.json` | heartbeat | FIRMWARE_PENDING (backend implemented) |
+| `telemetry.json` | telemetry | FIRMWARE_PENDING (backend implemented) |

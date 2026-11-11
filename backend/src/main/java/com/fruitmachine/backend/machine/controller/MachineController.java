@@ -3,6 +3,7 @@ package com.fruitmachine.backend.machine.controller;
 import com.fruitmachine.backend.common.response.ApiErrorResponse;
 import com.fruitmachine.backend.common.response.ApiResponse;
 import com.fruitmachine.backend.machine.dto.*;
+import com.fruitmachine.backend.machine.enums.MachineConnectivity;
 import com.fruitmachine.backend.machine.enums.MachineStatus;
 import com.fruitmachine.backend.machine.service.MachineService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,7 +40,7 @@ public class MachineController {
     @GetMapping
     @PreAuthorize(Permissions.HAS_MACHINE_READ)
     @Operation(operationId = "listMachines", summary = "List/search machines",
-            description = "ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on code/name/location. "
+            description = "ADMIN or STAFF. Database pagination with combined optional status, connectivity and case-insensitive literal substring search on code/name/location. "
                     + "Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. "
                     + "All three statuses are visible by default; out-of-range pages are empty.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Paginated machines")
@@ -47,10 +48,11 @@ public class MachineController {
             @RequestParam(defaultValue = "0") @Min(0) @Parameter(description = "Zero-based page index.") int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) @Parameter(description = "Page size, 1 to 100.") int size,
             @RequestParam(required = false) @Parameter(description = "Optional ACTIVE, INACTIVE or MAINTENANCE filter.") MachineStatus status,
+            @RequestParam(required = false) @Parameter(description = "Optional ONLINE, WARNING, OFFLINE or NEVER_SEEN filter, evaluated in SQL with the same rules as the connectivity field.") MachineConnectivity connectivity,
             @RequestParam(required = false) @Size(max = 200) @Parameter(description = "Optional literal substring of code/name/location, case-insensitive, stripped; blank means no filter. Maximum 200 characters.") String search,
             @RequestParam(defaultValue = "createdAt,desc") @Parameter(description = "One approved field: id, code, name, location, status, createdAt, updatedAt; optional asc/desc (asc when omitted). Example name,asc.") String sort) {
         return ResponseEntity.ok().header("Cache-Control", "no-store")
-                .body(ApiResponse.success("Machines retrieved", machines.listMachines(page, size, status, search, sort)));
+                .body(ApiResponse.success("Machines retrieved", machines.listMachines(page, size, status, connectivity, search, sort)));
     }
 
     @GetMapping("/{id}")

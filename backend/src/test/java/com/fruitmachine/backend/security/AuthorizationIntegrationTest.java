@@ -320,7 +320,8 @@ class AuthorizationIntegrationTest {
                 "/api/v1/kiosk/me", "/api/v1/kiosk/catalog", "/api/v1/kiosk/orders", "/api/v1/kiosk/orders/{orderId}",
                 "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/kiosk/orders/{orderId}/payments", "/api/v1/payments", "/api/v1/payments/{id}",
                 "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}",
-                "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions");
+                "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions",
+                "/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());

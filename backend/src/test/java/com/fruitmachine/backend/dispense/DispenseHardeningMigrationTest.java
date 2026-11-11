@@ -22,8 +22,9 @@ class DispenseHardeningMigrationTest {
             return new Database(container, new JdbcTemplate(source), source);
         }
 
+        /** Up to V14 only: these scenarios are about V14. */
         Flyway flyway() {
-            return Flyway.configure().dataSource(source).load();
+            return Flyway.configure().dataSource(source).target("14").load();
         }
 
         UUID machine(String code) {

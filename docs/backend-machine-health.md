@@ -1,5 +1,9 @@
 # Yêu cầu backend: theo dõi tình trạng máy
 
+> **Trạng thái (2026-11-10):** phần heartbeat/presence/kết nối/telemetry đã được triển khai trong issue #53, xem
+> [machine-health.md](machine-health.md). Tài liệu này giữ yêu cầu gốc; chỗ nào khác với code thì code và
+> machine-health.md là đúng. Cảnh báo (3.6) và lịch sử sự kiện (3.5) vẫn chưa làm.
+
 Tài liệu này mô tả phần việc của backend để theo dõi sức khỏe máy (backlog 3.4 heartbeat/telemetry, 3.6 cảnh báo).
 **Định dạng message không nằm ở đây**: topic, envelope, payload `status` / `heartbeat` / `telemetry`, mã lỗi và thời gian
 được định nghĩa duy nhất trong [api-contract/mqtt-contract.md](../api-contract/mqtt-contract.md)
@@ -9,7 +13,7 @@ Các topic cũ dạng `<prefix>/{machineId}/...` và payload có `timestamp` c�
 ## 1. Nhận message
 
 - Máy được nhận diện bằng **mã máy** (`machines.code`) trong topic; mã máy trong envelope phải trùng, nếu không thì bỏ tin.
-- Backend sẽ subscribe thêm `heartbeat` và `telemetry` cho mọi máy (hiện chỉ có `events` và `status`).
+- Backend subscribe `events`, `status`, `heartbeat` và `telemetry` cho mọi máy (#53).
 - Thời điểm dùng cho mọi phép tính là **thời điểm backend nhận tin**; contract không có timestamp của thiết bị.
 - Mã máy chưa đăng ký: ghi log và bỏ tin, không tự tạo máy.
 - JSON sai, thiếu trường bắt buộc hoặc sai kiểu: ghi log, bỏ tin, không làm consumer MQTT dừng.

@@ -8,6 +8,7 @@ import com.fruitmachine.backend.common.exception.ConflictException;
 import com.fruitmachine.backend.common.exception.ResourceNotFoundException;
 import com.fruitmachine.backend.machine.dto.*;
 import com.fruitmachine.backend.machine.entity.Machine;
+import com.fruitmachine.backend.machine.enums.MachineConnectivity;
 import com.fruitmachine.backend.machine.enums.MachineStatus;
 import com.fruitmachine.backend.machine.event.MachineMaintenanceEnteredEvent;
 import com.fruitmachine.backend.machine.mapper.MachineMapper;
@@ -39,18 +40,23 @@ public class MachineService {
     private final MachineMapper mapper;
     private final AuditLogRepository audits;
     private final ApplicationEventPublisher events;
+    private final ConnectivityEvaluator connectivity;
+    private final java.time.Clock clock;
 
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_MACHINE_READ)
-    public MachinePageResponse listMachines(int page, int size, MachineStatus status, String search, String sort) {
+    public MachinePageResponse listMachines(int page, int size, MachineStatus status, MachineConnectivity connectivityFilter, String search, String sort) {
         if (page < 0 || size < 1 || size > 100) {
             throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
         }
         String needle = search == null ? "" : search.strip().toLowerCase(Locale.ROOT);
+        var now = clock.instant();
         if (needle.length() > 200) throw new BadRequestException("Search must not exceed 200 characters");
         var result = machines.findAll((root, query, cb) -> {
             var predicates = new ArrayList<Predicate>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            // Same rules as the connectivity field, as SQL on last_seen_at / last_offline_at: filtered and paged in the database.
+            if (connectivityFilter != null) predicates.add(connectivity.predicate(connectivityFilter, root, cb, now));
             if (!needle.isEmpty()) {
                 // LOCATE gives literal substring semantics: '%' and '_' are not wildcard input.
                 predicates.add(cb.or(cb.greaterThan(cb.locate(cb.lower(root.get("name")), needle), 0),

@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V14 hiện có (22 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V15 hiện có (22 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -113,6 +113,12 @@ erDiagram
         numeric humidity_min "default 0"
         numeric humidity_max "default 100"
         timestamptz last_seen_at "nullable"
+        timestamptz last_heartbeat_at "nullable (V15)"
+        timestamptz last_offline_at "nullable (V15)"
+        varchar firmware_version "nullable, not blank (V15)"
+        bigint uptime_seconds "nullable, >= 0 (V15)"
+        smallint wifi_rssi "nullable, -127..0 (V15)"
+        bigint free_heap_bytes "nullable, >= 0 (V15)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -356,7 +362,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | user_roles — membership | (user_id, role_id); users, roles | không lặp membership; cascade chỉ từ user | role_id; PK hỗ trợ user_id |
 | permissions — quyền hạn (V13) | id | code UNIQUE, CHECK chữ hoa/số/gạch dưới, không bắt đầu bằng ROLE_; seed 15 code với UUID cố định | code đã có UNIQUE index |
 | role_permissions — role → permission (V13) | (role_id, permission_id); roles CASCADE, permissions RESTRICT | không lặp; xóa permission đang được cấp bị chặn | ix_role_permissions_permission; PK hỗ trợ role_id |
-| machines — máy và ngưỡng | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền | code đã có UNIQUE index |
+| machines — máy, ngưỡng và presence | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền; presence/chẩn đoán do hệ thống ghi (V15: uptime >= 0, RSSI -127..0, heap >= 0, firmware không rỗng) | code đã có UNIQUE index |
 | machine_slots — slot vật lý = một cột | id; machine_id → machines | UNIQUE(machine_id, slot_code), slot_code A/B (V14), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
 | kiosk_credentials — khóa API của kiosk (V10) | id; machine_id → machines; created_by, revoked_by → users nullable | key_prefix UNIQUE 12 ký tự; secret_hash SHA-256 hex; ACTIVE/REVOKED; REVOKED cần revoked_at ≥ created_at | partial UNIQUE một ACTIVE/máy, machine/time |
 | products — danh mục, giá hiện tại | id | sku UNIQUE; giá không âm hợp lệ; ACTIVE/INACTIVE | sku đã có UNIQUE index |
@@ -399,6 +405,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V12 | partial UNIQUE payments(provider, payment_reference) |
 | V13 | permissions, role_permissions và seed mapping ADMIN/STAFF (issue #48, [permission-authorization.md](permission-authorization.md)) |
 | V14 | machine_slots: đổi `A1`/`B1` → `A`/`B` khi không mơ hồ (mơ hồ thì dừng, không đổi gì), CHECK slot_code A/B; dispense_commands.failure_reason (+ CHECK, backfill `LEGACY_UNKNOWN`), index lệnh đang chạy theo máy (issue #52, [mqtt-dispense.md](mqtt-dispense.md)) |
+| V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)
@@ -437,7 +444,7 @@ dev/migration; production tách migration owner và runtime user quyền tối t
 Flyway clean bị vô hiệu hóa. Dừng container bằng `docker compose --env-file .env -f backend/db/compose.yaml stop`;
 volume giữ dữ liệu. Không reset/xóa volume database đang dùng để sửa checksum.
 
-Migration mới dùng V15 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
+Migration mới dùng V16 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
 Flyway chạy trước ứng dụng. Sau này Maven/Spring Boot dùng flyway-core và module
 flyway-database-postgresql với phiên bản tương thích. Module JPA hiện có pom Java 21,
 Spring Boot 3.5.14 và Flyway 11.20.1 cùng phiên bản đã kiểm chứng bằng Docker.
