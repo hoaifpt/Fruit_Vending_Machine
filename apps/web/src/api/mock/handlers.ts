@@ -515,7 +515,8 @@ export const routes: Route[] = [
     const before = item.status
     setItemStatus(item, 'REMOVED', now)
     item.removedAt = iso(now)
-    history(store, item, 'REMOVE', now, { performedBy: ctx.user!.id, reason, statusBefore: before, statusAfter: 'REMOVED' })
+    // Like InventoryService.remove: a fresh random reference per removal, shared with no other row.
+    history(store, item, 'REMOVE', now, { referenceId: newId(), performedBy: ctx.user!.id, reason, statusBefore: before, statusAfter: 'REMOVED' })
     return ok(itemView(item, now))
   }),
 

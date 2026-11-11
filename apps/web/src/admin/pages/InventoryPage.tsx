@@ -3,7 +3,8 @@
 // "Đang chặn ngăn" and, when the API allows it, offers "Rút hộp". `?view=list` keeps the list of boxes with its filters.
 // INVENTORY_WRITE: load N boxes in a Sheet (from the page header, or "Nạp hộp" on a slot column with machine and slot
 // filled in) showing the free places and what the batch can still take, and take a box out in a Sheet with a required
-// reason. Rules: ../inventory-map.ts (map), ../inventory-load.ts (load/remove). History is issue FE 4.4.
+// reason. Rules: ../inventory-map.ts (map), ../inventory-load.ts (load/remove). Each slot links to its history and a
+// blocking head to the history of that box (screen I4, ./InventoryHistoryPage.tsx).
 import { useEffect, useId, useRef, useState } from 'react'
 import { ArrowDownToLine, CircleAlert, Lock, Minus, PackageMinus, Plus, RefreshCw } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
@@ -17,7 +18,7 @@ import { Skeleton } from '../../components/ui/skeleton.tsx'
 import { StatusBadge } from '../../components/ui/status-badge.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime } from '../../lib/format.ts'
-import { useQueryParams } from '../../lib/router.ts'
+import { linkHandler, useQueryParams } from '../../lib/router.ts'
 import { statusMeta } from '../../lib/status.ts'
 import { uuidParam } from '../../lib/table-query.ts'
 import { countLoaded } from '../batches.ts'
@@ -47,6 +48,10 @@ export function InventoryTabs({ current }: { current: 'items' | 'history' }) {
     <Link to="/admin/inventory/history" className={current === 'history' ? 'is-current' : ''}>Lịch sử</Link>
   </nav>
 }
+
+/** History screen (I4) filtered to one slot of a machine, or to one box. */
+const slotHistoryPath = (machineId: string | undefined, slotId: string | undefined) => `/admin/inventory/history?machineId=${machineId ?? ''}&slotId=${slotId ?? ''}`
+const boxHistoryPath = (itemId: string | undefined) => `/admin/inventory/history?inventoryItemId=${itemId ?? ''}`
 
 /** Box to take out, with where it sits (for the Sheet text). */
 interface RemoveTarget { item: InventoryItem; slotCode?: string; head?: boolean }
@@ -277,6 +282,8 @@ function Column({ column, canWrite, remove, load }: { column: SlotColumn; canWri
       </li>}
       {!column.occupied && <li className="py-1 text-center text-xs text-muted-foreground">Chưa có hộp nào.</li>}
     </ol>
+    <a href={slotHistoryPath(slot.machineId, slot.id)} onClick={linkHandler(slotHistoryPath(slot.machineId, slot.id))} aria-label={`Lịch sử ngăn ${slot.slotCode}`}
+      className="inline-flex min-h-6 items-center self-start text-xs font-medium text-primary no-underline hover:underline max-sm:min-h-11">Lịch sử ngăn</a>
   </section>
 }
 
@@ -318,6 +325,8 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
     {head && status && !blocking && state.kind !== 'reserved' && <span aria-hidden="true" className="justify-self-start rounded-full bg-status-danger px-1.5 text-[11px] font-medium text-status-danger-foreground">{status}</span>}
     {blocking && <div className="mt-0.5 grid gap-1.5 border-t border-destructive/30 pt-1.5">
       <p id={describedBy} className="text-xs text-foreground"><strong className="text-destructive">{state.reason === 'expired' ? 'Hết hạn' : 'Nhả hàng thất bại'}.</strong> {blockedText(state, column.occupied - 1)}</p>
+      <a href={boxHistoryPath(item.id)} onClick={linkHandler(boxHistoryPath(item.id))} aria-label={`Lịch sử hộp đáy ngăn ${column.slot.slotCode}`}
+        className="inline-flex min-h-6 items-center justify-self-start text-xs font-medium text-primary no-underline hover:underline max-sm:min-h-11">Lịch sử hộp</a>
       {state.removable
         ? canWrite
           ? <Button type="button" size="sm" variant="destructive" className="justify-self-start max-sm:h-11" data-focus-key={`head-remove-${column.slot.id}`}
@@ -373,7 +382,8 @@ function ListView({ canWrite, changes, changed }: { canWrite: boolean; changes: 
       { head: 'Hết hạn', cell: item => <>{formatDateTime(item.expiresAt)}{item.expired && <> <Badge value="expired" /></>}</> },
       { head: 'Nạp lúc', cell: item => formatDateTime(item.loadedAt) },
       { head: 'Thao tác', cell: item => <div className="flex flex-wrap items-center gap-1.5">
-        <Button asChild size="sm" variant="ghost"><Link to={`/admin/inventory/history?inventoryItemId=${item.id}`}>Lịch sử</Link></Button>
+        <Button asChild size="sm" variant="ghost"><a href={boxHistoryPath(item.id)} onClick={linkHandler(boxHistoryPath(item.id))}
+          aria-label={['Lịch sử hộp', item.productName, item.slotCode && `ngăn ${item.slotCode}`, item.batchCode && `lô ${item.batchCode}`].filter(Boolean).join(', ')}>Lịch sử</a></Button>
         {canWrite && <Button type="button" size="sm" variant="outline" disabled={!canRemove(item)} title={canRemove(item) ? undefined : 'Chỉ rút được hộp Sẵn sàng hoặc Hết hạn'} onClick={() => dialog.open(item)}>Rút hộp</Button>}
       </div> },
     ]} />

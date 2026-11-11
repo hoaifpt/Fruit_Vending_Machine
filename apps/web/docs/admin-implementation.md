@@ -11,7 +11,7 @@ Phạm vi: `apps/web` cho ADMIN/STAFF, gọi API thật theo `api-contract/api.y
 | `/admin/products` | Xem, tạo, sửa, đổi trạng thái | Chỉ xem |
 | `/admin/machines`, `/admin/machines/:id` | Xem, đăng ký, cấu hình, đổi trạng thái; ngăn chứa; khóa kiosk | Chỉ xem (máy và ngăn) |
 | `/admin/batches` | Tạo và xem (lô không sửa/xóa) | Tạo và xem |
-| `/admin/inventory`, `/admin/inventory/history` | Sơ đồ ngăn theo máy (`?machineId=`, hộp đáy bán tiếp theo, hộp chặn ngăn và nút Rút hộp), danh sách hộp (`?view=list`), nạp hộp, rút hộp, tóm tắt ngăn, lịch sử | Như ADMIN |
+| `/admin/inventory`, `/admin/inventory/history` | Sơ đồ ngăn theo máy (`?machineId=`, hộp đáy bán tiếp theo, hộp chặn ngăn và nút Rút hộp), danh sách hộp (`?view=list`), nạp hộp, rút hộp, tóm tắt ngăn; lịch sử chỉ đọc (lọc máy, ngăn, loại, mã hộp, phiếu nạp/đơn và trang trên URL, mỗi lần lọc là một mục Back/Forward; mã không phải UUID bị bỏ qua kèm giải thích; tên máy, ngăn, sản phẩm (qua lô) và người thực hiện chỉ tra trong 100 bản ghi đầu của mỗi danh sách, ngoài đó hiện mã rút gọn; STAFF không xem được danh sách tài khoản nên thấy "Tài khoản …xxxxxxxx" hoặc "Bạn"; sơ đồ có link "Lịch sử ngăn" và "Lịch sử hộp" ở hộp đáy chặn ngăn) | Như ADMIN |
 | `/admin/orders`, `/admin/orders/:id` | Chỉ xem | Chỉ xem |
 | `/admin/payments`, `/admin/payments/:id` | Chỉ xem, chế độ "Cần xử lý" | Ẩn |
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Chỉ xem | Ẩn |
