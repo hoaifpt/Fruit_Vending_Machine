@@ -1,11 +1,16 @@
 package com.fruitmachine.backend.machine.service;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fruitmachine.backend.audit.entity.AuditLog;
+import com.fruitmachine.backend.audit.repository.AuditLogRepository;
 import com.fruitmachine.backend.common.exception.BadRequestException;
 import com.fruitmachine.backend.common.exception.ConflictException;
 import com.fruitmachine.backend.common.exception.ResourceNotFoundException;
 import com.fruitmachine.backend.machine.dto.*;
 import com.fruitmachine.backend.machine.entity.Machine;
+import com.fruitmachine.backend.machine.enums.MachineConnectivity;
 import com.fruitmachine.backend.machine.enums.MachineStatus;
+import com.fruitmachine.backend.machine.event.MachineMaintenanceEnteredEvent;
 import com.fruitmachine.backend.machine.mapper.MachineMapper;
 import com.fruitmachine.backend.machine.repository.MachineRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -15,10 +20,13 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
@@ -27,20 +35,28 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 public class MachineService {
     private static final Set<String> SORT_FIELDS = Set.of("id", "code", "name", "location", "status", "createdAt", "updatedAt");
+    public static final String AUDIT_MAINTENANCE_AUTO = "MACHINE_MAINTENANCE_AUTO";
     private final MachineRepository machines;
     private final MachineMapper mapper;
+    private final AuditLogRepository audits;
+    private final ApplicationEventPublisher events;
+    private final ConnectivityEvaluator connectivity;
+    private final java.time.Clock clock;
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
-    public MachinePageResponse listMachines(int page, int size, MachineStatus status, String search, String sort) {
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
+    public MachinePageResponse listMachines(int page, int size, MachineStatus status, MachineConnectivity connectivityFilter, String search, String sort) {
         if (page < 0 || size < 1 || size > 100) {
             throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
         }
         String needle = search == null ? "" : search.strip().toLowerCase(Locale.ROOT);
+        var now = clock.instant();
         if (needle.length() > 200) throw new BadRequestException("Search must not exceed 200 characters");
         var result = machines.findAll((root, query, cb) -> {
             var predicates = new ArrayList<Predicate>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
+            // Same rules as the connectivity field, as SQL on last_seen_at / last_offline_at: filtered and paged in the database.
+            if (connectivityFilter != null) predicates.add(connectivity.predicate(connectivityFilter, root, cb, now));
             if (!needle.isEmpty()) {
                 // LOCATE gives literal substring semantics: '%' and '_' are not wildcard input.
                 predicates.add(cb.or(cb.greaterThan(cb.locate(cb.lower(root.get("name")), needle), 0),
@@ -64,13 +80,13 @@ public class MachineService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     public MachineResponse getMachine(UUID id) {
         return mapper.toResponse(machines.findById(id).orElseThrow(this::notFound));
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse createMachine(@Valid CreateMachineRequest request) {
         if (machines.existsByCode(request.code())) throw new ConflictException("Machine code is already in use");
         Machine machine = new Machine();
@@ -81,7 +97,7 @@ public class MachineService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse updateMachine(UUID id, @Valid UpdateMachineRequest request) {
         Machine machine = machines.findForUpdateById(id).orElseThrow(this::notFound);
         applyConfiguration(machine, request.name(), request.location(), request.minTemperature(), request.maxTemperature(), request.minHumidity(), request.maxHumidity());
@@ -90,12 +106,38 @@ public class MachineService {
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse updateStatus(UUID id, @Valid UpdateMachineStatusRequest request) {
         Machine machine = machines.findForUpdateById(id).orElseThrow(this::notFound);
         machine.setStatus(request.status());
         machines.flush();
         return mapper.toResponse(machine);
+    }
+
+    /**
+     * Protects customers after a hardware problem: an ACTIVE machine stops selling until an administrator has checked it and
+     * sets it ACTIVE again (status endpoint, MACHINE_WRITE). Idempotent: MAINTENANCE and INACTIVE machines are left as they are.
+     * Called by the system, not by a user, inside the caller's transaction; the caller should already hold the Machine row lock
+     * when it holds Order or InventoryItem locks (lock order: Machine first).
+     *
+     * @return true when the status changed
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean enterMaintenanceBySystem(UUID machineId, String reason) {
+        Machine machine = machines.findForUpdateById(machineId).orElseThrow(this::notFound);
+        if (machine.getStatus() != MachineStatus.ACTIVE) return false;
+        machine.setStatus(MachineStatus.MAINTENANCE);
+        machines.flush();
+        var row = new AuditLog();
+        // user stays NULL: the system made this change.
+        row.setAction(AUDIT_MAINTENANCE_AUTO);
+        row.setEntityType("Machine");
+        row.setEntityId(machineId);
+        row.setOldValue(JsonNodeFactory.instance.objectNode().put("status", MachineStatus.ACTIVE.name()));
+        row.setNewValue(JsonNodeFactory.instance.objectNode().put("status", MachineStatus.MAINTENANCE.name()).put("reason", reason));
+        audits.save(row);
+        events.publishEvent(new MachineMaintenanceEnteredEvent(machineId, machine.getCode(), reason));
+        return true;
     }
 
     private void applyConfiguration(Machine machine, String name, String location,

@@ -60,7 +60,7 @@ class MachineSlotManagementDocumentationTest {
         var create = actual.at("/components/schemas/CreateMachineSlotRequest");
         assertThat(create.path("additionalProperties").asBoolean(true)).isFalse();
         assertThat(create.path("required")).hasSize(2);
-        assertThat(create.at("/properties/slotCode/maxLength").asInt()).isEqualTo(32);
+        assertThat(create.at("/properties/slotCode/enum")).containsExactly(mapper.getNodeFactory().textNode("A"), mapper.getNodeFactory().textNode("B"));
         assertThat(create.at("/properties/capacity/type").asText()).isEqualTo("integer");
         assertThat(create.at("/properties/capacity/minimum").asInt()).isEqualTo(1);
         assertThat(create.at("/properties/capacity/maximum").asLong()).isEqualTo(Integer.MAX_VALUE);

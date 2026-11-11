@@ -51,7 +51,7 @@ class PayOsWebhookIntegrationTest extends AbstractOrderIntegrationTest {
 
     private Placed place(String price, int quantity) throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "W1", 10), product = createProduct("Webhook bowl", price);
+        UUID slot = createSlot(machine, "A", 10), product = createProduct("Webhook bowl", price);
         load(fixtures.batch(product, quantity + 1, staff.token()), slot, quantity + 1);
         String key = issueKey(machine);
         UUID orderId = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(product), 201).path("id").asText());

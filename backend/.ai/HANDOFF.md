@@ -1,18 +1,18 @@
-# Chat handoff - Issue #35, 2026-10-18
+# Chat handoff - Issue #53, 2026-11-10
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/35, [BE] Update orders (one bowl per order, slot-head reservation).
-Branch feature/35-single-bowl-orders from origin/dev 903b4af (includes #33 via PR#34).
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/53, [BE] Implement Machine Heartbeat & Telemetry.
+Branch feature/53-machine-heartbeat-telemetry from origin/dev 719c4ed (includes #48 PR #50, #49 PR #51, #52 PR #54).
 Git delivery: see the final report; do not assume commit/push/PR/merge happened.
 
-Delivered: kiosk order request is `{ "productId" }` only (breaking, strict DTO; CreateOrderItemRequest and OrderQuantityDeserializer deleted), one item of quantity 1 per order;
-reservation of the sellable slot head only (locks Product share -> Machine share -> candidate Slots FOR UPDATE by id -> head item FOR UPDATE), FEFO between heads
-(head expiry, head loaded_at, slot_code, slot id), at most one RESERVED bowl per slot; catalog via one DISTINCT ON aggregate listing only products with a sellable head;
-`app.order.max-total-quantity` / ORDER_MAX_TOTAL_QUANTITY / catalog maxTotalQuantity removed; optional section 9 done: inventory summary headStatus/headExpired
-(REPEATABLE READ). Management order APIs unchanged; historical multi-line orders readable. No schema change, migrations untouched.
-Docs: .ai PROJECT/ARCHITECTURE/DATABASE, docs/order-management.md, Swagger (tag changelog) and api-contract/api.yaml; scripts/payment_test_data.py sends the new body.
+Delivered: V15 presence/diagnostic columns (Machine maps them, and last_seen_at, read-only). MachineMessageHandler validates every
+envelope (8 KB, JSON, schemaVersion 1, messageId, machineCode = topic, payload object, known machine) and routes events/status/
+heartbeat/telemetry. MachinePresenceService: one forward-only UPDATE per message with RETURNING old.* (reboot event, recovery log).
+ConnectivityEvaluator (60 s / 180 s, app.machine-health) for responses and the SQL list filter. TelemetryService (validation,
+dedup 10 min, min interval 10 s, sensor_readings) and TelemetryQueryService/TelemetryController (latest, history; tag Machine Health).
+Events MachineRebootDetected/MachineOfflineReported/TelemetryRecorded logged after commit. Docs: docs/machine-health.md,
+mqtt-contract 1.2.0, api.yaml, machine-management.md, database-migration.md, .ai/DATABASE.md §18.
 
-Verification: `mvn clean verify` 628 tests, 0 failures, Flyway validated 12 migrations, no real payOS call (JDK 21.0.10, PostgreSQL 18.6 Testcontainers).
-After that run only a test-only assertion block (summary head fields) was added to KioskCatalogIntegrationTest; that class and InventoryManagementIntegrationTest were rerun (43 tests, 0 failures).
-Open: hardware team must confirm the head assumption (columns refilled from the top, earlier loaded_at = lower position); kiosk developer must switch to the new request shape.
+Verification: `mvn clean verify` 730 tests, 0 failures (incl. real Mosquitto end-to-end test). Test-only clock-skew fix in
+PaymentWebhookProcessingIntegrationTest. Open: firmware on dev sends no heartbeat/telemetry yet; alerts are 3.6.
 Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...`.

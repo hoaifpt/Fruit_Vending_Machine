@@ -27,6 +27,7 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -54,7 +55,7 @@ public class KioskCredentialService {
     private final Clock clock;
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_KIOSK_CREDENTIAL_MANAGE)
     public IssuedKioskCredentialResponse issue(UUID machineId) {
         // The machine row lock serializes rotation so the one-ACTIVE index is never raced.
         machines.findForUpdateById(machineId).orElseThrow(KioskCredentialService::missingMachine);
@@ -79,14 +80,14 @@ public class KioskCredentialService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_KIOSK_CREDENTIAL_MANAGE)
     public List<KioskCredentialResponse> list(UUID machineId) {
         if (!machines.existsById(machineId)) throw missingMachine();
         return credentials.findHistoryByMachineId(machineId).stream().map(this::metadata).toList();
     }
 
     @Transactional
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_KIOSK_CREDENTIAL_MANAGE)
     public KioskCredentialResponse revoke(UUID machineId, UUID credentialId) {
         if (!machines.existsById(machineId)) throw missingMachine();
         var credential = credentials.findForUpdateByIdAndMachineId(credentialId, machineId)

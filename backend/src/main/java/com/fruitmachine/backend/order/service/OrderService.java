@@ -40,6 +40,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -128,7 +129,7 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_ORDER_READ)
     public OrderPageResponse list(int page, int size, OrderStatus status, UUID machineId, Instant createdFrom, Instant createdTo,
             String search, String sort) {
         Specification<Order> filter = (root, query, cb) -> {
@@ -155,7 +156,7 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_ORDER_READ)
     public OrderDetailResponse getDetail(UUID id) {
         Order order = orders.findWithDetailsById(id).orElseThrow(OrderService::missing);
         Map<UUID, List<OrderItemAllocation>> byLine = allocations.findDetailsByOrderId(id).stream()

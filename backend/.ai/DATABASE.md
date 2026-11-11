@@ -38,7 +38,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | users | id, email, password_hash, full_name, phone, status, created_at, updated_at |
 | roles | id, name, description, created_at |
 | user_roles | user_id, role_id |
-| machines | id, code, name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, created_at, updated_at |
+| machines | id, code, name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes, created_at, updated_at |
 | machine_slots | id, machine_id, slot_code, capacity, status, created_at, updated_at |
 | products | id, sku, name, description, price, image_url, status, created_at, updated_at |
 | product_batches | id, batch_code, product_id, manufactured_at, expires_at, quantity, created_by, created_at |
@@ -50,7 +50,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
-| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at |
+| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, failure_reason, created_at, updated_at |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
 | machine_events | id, machine_id, event_type, payload, created_at |
 | kiosk_credentials | id, machine_id, key_prefix, secret_hash, status, created_by, created_at, revoked_by, revoked_at |
@@ -62,7 +62,8 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
   level; role deletion is RESTRICT. Prefer deactivation. JPA does not cascade REMOVE/ALL.
   Seed V8 contains ADMIN/STAFF reference roles only, no accounts or passwords.
 - Machine -> MachineSlot, SensorReading, Alert, MachineEvent and Order.
-  Slots have UNIQUE(machine_id, slot_code), capacity > 0 and UNIQUE(id, machine_id).
+  Slots have UNIQUE(machine_id, slot_code), capacity > 0 and UNIQUE(id, machine_id). Since V14 a slot is a physical
+  column: slot_code IN ('A','B') (ck_machine_slots_column), so a machine has at most two slots.
 - Product -> ProductBatch -> InventoryItem. Batch quantity > 0 and finite
   expires_at > manufactured_at. created_by -> users is nullable.
 - InventoryItem.slot_id -> MachineSlot is nullable before loading. Keep the last slot
@@ -297,3 +298,46 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   InventoryItem (FOR UPDATE, rechecked). Loading = Product -> Batch -> Machine -> Slot; removal = Slot -> Item; release = Order -> Payment ->
   InventoryItem. Loads of the same product or into the same machine wait on the shared Product/Machine locks; removal waits on the slot lock.
 - Queries: `findSlotIdsHoldingProduct` (unlocked discovery), `findSellableHeadId` and `findCatalog` (DISTINCT ON over the present items).
+
+## 16. Issue #48 — V13 permissions
+
+- `permissions`: id UUID PK, `code` VARCHAR(64) UNIQUE with CHECK `^[A-Z][A-Z0-9_]{2,63}$` (never `ROLE_...`), `description` NOT NULL,
+  `created_at`. Seeded with fixed UUIDs `20000000-0000-0000-0000-0000000000NN` (01 USER_READ ... 15 PAYMENT_WEBHOOK_LOG_READ).
+- `role_permissions`: PK (role_id, permission_id); `role_id` -> roles ON DELETE CASCADE, `permission_id` -> permissions ON DELETE RESTRICT
+  (a referenced permission cannot be deleted); index `ix_role_permissions_permission`.
+- Seed mapping (reproduces the former role checks): ADMIN = all 15; STAFF = PRODUCT_READ, MACHINE_READ, BATCH_READ, BATCH_CREATE,
+  INVENTORY_READ, INVENTORY_WRITE, ORDER_READ.
+- Mapped by `Permission` and `RolePermission` (EmbeddedId `RolePermissionId`, like `UserRole`); `Role.permissionGrants` without cascade.
+- Role permission replacement locks the `roles` row (PESSIMISTIC_WRITE) and writes `audit_logs` (action ROLE_PERMISSIONS_CHANGED,
+  entity_type Role, old/new `{"permissions":[sorted codes]}`, user_id = actor). V1-V12 untouched. ERD: 2 new tables.
+
+## 17. Issue #52 — V14 dispense hardening
+
+- `machine_slots.slot_code` is the physical column: CHECK `slot_code IN ('A','B')`. V14 renamed only unambiguous legacy codes
+  (`A1`/`B1`, any case or spaces -> `A`/`B`) and stops with "V14 stopped ..." (changing nothing) when a code names no column or two
+  slots of a machine would become the same column. Slots keep their ids, so history is unchanged.
+- `dispense_commands.failure_reason` VARCHAR(48): CHECK `(status IN ('FAILED','TIMEOUT')) = (failure_reason IS NOT NULL)` and not blank.
+  Extensible string validated in Java (`DispenseFailureReason`): machine reasons of the MQTT contract §6.1, `ABORTED_UNSPECIFIED`,
+  `RESULT_TIMEOUT`, `NOT_DELIVERED`; rows failed before V14 were backfilled with `LEGACY_UNKNOWN`.
+- Index `ix_dispense_commands_machine_in_flight` (machine_id) WHERE status IN ('SENT','ACKNOWLEDGED').
+- **Lock order for dispense**: machine command advisory lock (`pg_advisory_xact_lock(0x46564D03, hashtext(machine_id))`,
+  `MachineCommandLockRepository`; first delivery uses the try variant and leaves the command to the sweep) -> Machine row (FOR SHARE
+  to publish, FOR UPDATE when the step may put the machine in MAINTENANCE) -> Order -> DispenseCommand -> InventoryItem.
+  The payment webhook creates commands without the machine lock and never publishes. Maintenance commands (4.2) must take the same lock.
+- System maintenance (`MachineService.enterMaintenanceBySystem`) writes `audit_logs` action `MACHINE_MAINTENANCE_AUTO`, user_id NULL.
+  Late dispense results write `DISPENSE_SUCCESS_AFTER_REFUND` / `DISPENSE_LATE_RESULT_CONFLICT` (entity_type DispenseCommand).
+
+## 18. Issue #53 — V15 machine presence
+
+- `machines` gains system-managed `last_heartbeat_at`, `last_offline_at`, `firmware_version` VARCHAR(32), `uptime_seconds` BIGINT,
+  `wifi_rssi` SMALLINT, `free_heap_bytes` BIGINT, with CHECKs (uptime >= 0, RSSI -127..0, heap >= 0, firmware not blank). Missing
+  diagnostics are NULL, never 0.
+- Written only by `MachinePresenceService` with one conditional, forward-only UPDATE per MQTT message (JdbcTemplate,
+  `RETURNING old.*` for reboot detection); `updated_at` is never changed by presence. `Machine` maps all presence columns
+  (including `last_seen_at`) `insertable = false, updatable = false`, so configuration writes never write them back.
+- Lock order: presence touches only the `machines` row (and inserts `sensor_readings` after it in the telemetry path), so it
+  serializes with configuration updates (`findForUpdateById`) without deadlock.
+- Connectivity (ONLINE / WARNING / OFFLINE / NEVER_SEEN) is derived from last_seen_at / last_offline_at with `app.machine-health`
+  thresholds and never stored; the list filter uses the same rules as SQL predicates.
+- `sensor_readings` rows come from MQTT telemetry (receive time, 2 decimals, -40..85 °C, 0..100 %RH); reads use
+  `ix_sensor_readings_machine_time`. Machines with readings cannot be deleted (RESTRICT, unchanged).

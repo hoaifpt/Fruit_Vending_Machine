@@ -361,9 +361,62 @@ function ServiceScreen({ title, text, spinner = false, heading }: { title: strin
   </section>
 }
 
+async function simulateMockPayment(qrCode: string, orderCode?: string, column: number = 1) {
+  const parts = qrCode.split('|')
+  if (parts.length < 3) return false
+  const paymentReference = parts[1]
+  const amount = Number(parts[2])
+  const transactionId = 'MOCK-TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase()
+  const rawBody = `{"paymentReference":"${paymentReference}","transactionId":"${transactionId}","amount":${amount},"status":"SUCCESS"}`
+
+  const secret = 'fvm_mock_webhook_secret_key_2026'
+  const enc = new TextEncoder()
+  const key = await window.crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  const sigBuffer = await window.crypto.subtle.sign('HMAC', key, enc.encode(rawBody))
+  const signature = Array.from(new Uint8Array(sigBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+
+  try {
+    await fetch('/api/v1/webhooks/payments/mock', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Mock-Signature': signature
+      },
+      body: rawBody
+    })
+  } catch (e) {
+    console.error('Webhook error:', e)
+  }
+
+  // Trigger hardware bridge on port 5001 to move ESP32 servos over COM4
+  try {
+    const cmdId = orderCode || ('CMD-' + Math.random().toString(36).substring(2, 8).toUpperCase())
+    await fetch('/bridge/dispense', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commandId: cmdId, column })
+    }).catch(() => fetch('http://127.0.0.1:5001/dispense', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commandId: cmdId, column })
+    }))
+  } catch (err) {
+    console.warn('Hardware bridge not reachable:', err)
+  }
+}
+
 function PaymentPanel({ screen, problem, creating, reconnecting, serverNow, onRenew }: {
   screen: Screen; problem: PaymentProblem; creating: boolean; reconnecting: boolean; serverNow: number; onRenew: () => void
 }) {
+  const [mockPaying, setMockPaying] = useState(false)
   const waiting = (label: string) => <div className="buy-qr-sample" role="status"><span className="buy-spinner" /><strong>{label}</strong></div>
   if (screen.kind === 'creating') return waiting('Đang giữ hàng cho bạn…')
   if (screen.kind !== 'order') return null
@@ -382,6 +435,43 @@ function PaymentPanel({ screen, problem, creating, reconnecting, serverNow, onRe
   return <>
     <QrImage text={view.qrCode} />
     <p className="buy-qr-amount">Số tiền: <strong>{money(view.amount)}</strong></p>
+    {view.qrCode.startsWith('MOCK-QR|') && (
+      <div style={{ marginTop: '0.5rem', marginBottom: '0.75rem' }}>
+        <button
+          type="button"
+          disabled={mockPaying}
+          onClick={async () => {
+            setMockPaying(true)
+            try {
+              const isCol2 = screen.product?.sku === 'DEV-WATERMELON' ||
+                screen.product?.productId === '40000000-0000-0000-0000-000000000002' ||
+                /watermelon|dưa/i.test(screen.product?.name ?? '')
+              const col = isCol2 ? 2 : 1
+              await simulateMockPayment(view.qrCode, screen.order.orderCode, col)
+            } finally {
+              setTimeout(() => setMockPaying(false), 2000)
+            }
+          }}
+          style={{
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: '#ffffff',
+            padding: '12px 26px',
+            borderRadius: '9999px',
+            fontWeight: 700,
+            fontSize: '1.05rem',
+            border: 'none',
+            boxShadow: '0 4px 15px rgba(16, 185, 129, 0.45)',
+            cursor: mockPaying ? 'wait' : 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          {mockPaying ? '⏳ Đang xác nhận thanh toán…' : '⚡ Giả lập thanh toán thành công (Mock Pay)'}
+        </button>
+      </div>
+    )}
     {view.qrCode.startsWith('MOCK-QR|') && <small>Mã thử nghiệm (MOCK): ứng dụng ngân hàng không thanh toán được.</small>}
     <p className="buy-wait" role="status"><span /> {reconnecting ? 'Đang kết nối lại…' : left === 0 ? 'Đang kiểm tra kết quả thanh toán…' : 'Đang chờ xác nhận thanh toán'}</p>
   </>

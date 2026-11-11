@@ -273,7 +273,8 @@ Never dispense based solely on client-reported payment status.
 
 Dispensing uses Backend -> MQTT broker -> ESP32 (decision of 2026-10-23, replacing the earlier
 Kiosk -> Serial/USB flow). The ESP32 reports acceptance and the result as MQTT events; the kiosk
-only polls the order status. Contract and local setup: docs/mqtt-dispense.md. USB Serial remains
+only polls the order status. MQTT contract (topics, messages, error codes): api-contract/mqtt-contract.md;
+flow and local setup: docs/mqtt-dispense.md. USB Serial remains
 a firmware test/calibration channel with the same idempotent DISPENSE command.
 
 ESP32 must never decide whether an order is paid.

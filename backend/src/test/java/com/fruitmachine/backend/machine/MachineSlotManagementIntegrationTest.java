@@ -76,7 +76,7 @@ class MachineSlotManagementIntegrationTest {
         adminToken = login("ADMIN"); staffToken = login("STAFF");
         parent = machine("VM-A", MachineStatus.INACTIVE);
         other = machine("VM-B", MachineStatus.MAINTENANCE);
-        a1 = slot(parent, "A1", 6, SlotStatus.ACTIVE);
+        a1 = slot(parent, "A", 6, SlotStatus.ACTIVE);
     }
     String login(String role) throws Exception {
         var user = new User();
@@ -105,9 +105,9 @@ class MachineSlotManagementIntegrationTest {
 
     @Test
     void createNormalizesCodePersistsActiveAndReportsParentWithoutRecursiveEntities() throws Exception {
-        var response = mvc.perform(admin(post(path())).contentType("application/json").content(createBody(" a2 ", 7).toString()))
+        var response = mvc.perform(admin(post(path())).contentType("application/json").content(createBody(" b ", 7).toString()))
                 .andExpect(status().isCreated()).andExpect(header().string("Cache-Control", "no-store"))
-                .andExpect(jsonPath("$.data.slotCode").value("A2")).andExpect(jsonPath("$.data.capacity").value(7))
+                .andExpect(jsonPath("$.data.slotCode").value("B")).andExpect(jsonPath("$.data.capacity").value(7))
                 .andExpect(jsonPath("$.data.status").value("ACTIVE")).andExpect(jsonPath("$.data.machineId").value(parent.getId().toString()))
                 .andReturn().getResponse();
         var data = mapper.readTree(response.getContentAsString()).path("data");
@@ -116,7 +116,7 @@ class MachineSlotManagementIntegrationTest {
         assertThat(response.getHeader("Location")).isEqualTo(path() + "/" + id);
         var saved = slots.findById(id).orElseThrow();
         assertThat(saved.getMachineId()).isEqualTo(parent.getId());
-        assertThat(saved.getSlotCode()).isEqualTo("A2");
+        assertThat(saved.getSlotCode()).isEqualTo("B");
         assertThat(saved.getCapacity()).isEqualTo(7);
         assertThat(saved.getStatus()).isEqualTo(SlotStatus.ACTIVE);
         assertThat(saved.getUpdatedAt()).isAfterOrEqualTo(saved.getCreatedAt());
@@ -125,16 +125,16 @@ class MachineSlotManagementIntegrationTest {
 
     @Test
     void duplicatesAreScopedAndConcurrentDatabaseUniquenessReturnsSafe409() throws Exception {
-        mvc.perform(admin(post(path())).contentType("application/json").content(createBody(" a1 ", 6).toString()))
+        mvc.perform(admin(post(path())).contentType("application/json").content(createBody(" a ", 6).toString()))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.message").value("Slot code is already in use for this machine"));
-        mvc.perform(admin(post(path(other.getId()))).contentType("application/json").content(createBody("a1", 6).toString()))
+        mvc.perform(admin(post(path(other.getId()))).contentType("application/json").content(createBody("a", 6).toString()))
                 .andExpect(status().isCreated());
-        doReturn(false).when(slots).existsByMachineIdAndSlotCode(parent.getId(), "RACE");
+        doReturn(false).when(slots).existsByMachineIdAndSlotCode(parent.getId(), "B");
         var barrier = new CyclicBarrier(2);
         try (var executor = Executors.newFixedThreadPool(2)) {
             var jobs = java.util.stream.IntStream.range(0, 2).mapToObj(i -> executor.submit(() -> {
                 barrier.await(10, TimeUnit.SECONDS);
-                return mvc.perform(admin(post(path())).contentType("application/json").content(createBody("race", 6).toString()))
+                return mvc.perform(admin(post(path())).contentType("application/json").content(createBody("b", 6).toString()))
                         .andReturn().getResponse();
             })).toList();
             var responses = List.of(jobs.get(0).get(20, TimeUnit.SECONDS), jobs.get(1).get(20, TimeUnit.SECONDS));
@@ -146,23 +146,24 @@ class MachineSlotManagementIntegrationTest {
     }
 
     @Test
-    void allParentStatusesPermitProvisioningAndThereIsNoFixedSlotCountOrCapacity() throws Exception {
+    void allParentStatusesPermitProvisioningOfBothColumnsWithAnyCapacity() throws Exception {
         for (var value : MachineStatus.values()) {
-            jdbc.update("UPDATE machines SET status=? WHERE id=?", value.name(), parent.getId());
-            mvc.perform(admin(post(path())).contentType("application/json").content(createBody("S-" + value, 1).toString()))
+            var fresh = machine("VM-" + value, value);
+            mvc.perform(admin(post(path(fresh.getId()))).contentType("application/json").content(createBody("A", 1).toString()))
                     .andExpect(status().isCreated());
-        }
-        for (int i = 0; i < 3; i++) {
-            mvc.perform(admin(post(path())).contentType("application/json").content(createBody("STACK-" + i, Integer.MAX_VALUE).toString()))
+            mvc.perform(admin(post(path(fresh.getId()))).contentType("application/json").content(createBody("B", Integer.MAX_VALUE).toString()))
                     .andExpect(status().isCreated()).andExpect(jsonPath("$.data.capacity").value(Integer.MAX_VALUE));
+            // Issue #52: a slot is a physical column, so a machine has no third slot.
+            mvc.perform(admin(post(path(fresh.getId()))).contentType("application/json").content(createBody("C", 1).toString()))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.fieldErrors.slotCode").value("must be A or B"));
+            assertThat(slots.findByMachineId(fresh.getId(), org.springframework.data.domain.Pageable.unpaged()).getTotalElements()).isEqualTo(2);
         }
-        assertThat(slots.findByMachineId(parent.getId(), org.springframework.data.domain.Pageable.unpaged()).getTotalElements()).isEqualTo(7);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"0", "-1", "null", "1.5", "6.0", "2147483648", "\"6\"", "true", "{}", "[]", "\"bad\""})
     void invalidCapacityIs400OnCreateAndUpdateWithoutCoercion(String value) throws Exception {
-        mvc.perform(admin(post(path())).contentType("application/json").content("{\"slotCode\":\"NEW\",\"capacity\":" + value + "}"))
+        mvc.perform(admin(post(path())).contentType("application/json").content("{\"slotCode\":\"B\",\"capacity\":" + value + "}"))
                 .andExpect(status().isBadRequest());
         mvc.perform(admin(put(detail())).contentType("application/json").content("{\"capacity\":" + value + "}"))
                 .andExpect(status().isBadRequest());
@@ -172,10 +173,10 @@ class MachineSlotManagementIntegrationTest {
 
     @Test
     void missingBlankOrOversizedCodeAndMissingCapacityReturn400() throws Exception {
-        for (String value : List.of("", "   ", "A".repeat(33))) {
+        for (String value : List.of("", "   ", "A".repeat(33), "C", "A1", "B1", "AB", "1")) {
             mvc.perform(admin(post(path())).contentType("application/json").content(createBody(value, 6).toString())).andExpect(status().isBadRequest());
         }
-        for (String input : List.of("{}", "null", "{", "{\"capacity\":6}", "{\"slotCode\":null,\"capacity\":6}", "{\"slotCode\":\"NEW\"}")) {
+        for (String input : List.of("{}", "null", "{", "{\"capacity\":6}", "{\"slotCode\":null,\"capacity\":6}", "{\"slotCode\":\"B\"}")) {
             mvc.perform(admin(post(path())).contentType("application/json").content(input)).andExpect(status().isBadRequest());
         }
         mvc.perform(admin(put(detail())).contentType("application/json").content("{}")).andExpect(status().isBadRequest());
@@ -184,7 +185,7 @@ class MachineSlotManagementIntegrationTest {
     @ParameterizedTest
     @ValueSource(strings = {"id", "machineId", "status", "createdAt", "updatedAt", "productId", "batchId", "stock", "currentQuantity", "motorNumber", "GPIO"})
     void createUpdateAndStatusRejectImmutableOrUnrelatedFields(String field) throws Exception {
-        mvc.perform(admin(post(path())).contentType("application/json").content(createBody("NEW", 6).put(field, "forbidden").toString()))
+        mvc.perform(admin(post(path())).contentType("application/json").content(createBody("B", 6).put(field, "forbidden").toString()))
                 .andExpect(status().isBadRequest());
         if (!field.equals("status")) {
             mvc.perform(admin(patch(detail() + "/status")).contentType("application/json")
@@ -198,12 +199,12 @@ class MachineSlotManagementIntegrationTest {
     @Test
     void capacityReplacementPreservesCodeParentStatusAndCreation() throws Exception {
         mvc.perform(admin(put(detail())).contentType("application/json").content("{\"capacity\":8}")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.capacity").value(8)).andExpect(jsonPath("$.data.slotCode").value("A1"))
+                .andExpect(jsonPath("$.data.capacity").value(8)).andExpect(jsonPath("$.data.slotCode").value("A"))
                 .andExpect(jsonPath("$.data.machineId").value(parent.getId().toString())).andExpect(jsonPath("$.data.status").value("ACTIVE"));
         mvc.perform(admin(put(detail())).contentType("application/json").content("{\"capacity\":9,\"slotCode\":\"OTHER\"}")).andExpect(status().isBadRequest());
         var saved = slots.findById(a1.getId()).orElseThrow();
         assertThat(saved.getCapacity()).isEqualTo(8);
-        assertThat(saved.getSlotCode()).isEqualTo("A1");
+        assertThat(saved.getSlotCode()).isEqualTo("A");
         assertThat(saved.getCreatedAt()).isEqualTo(a1.getCreatedAt());
         assertThat(saved.getUpdatedAt()).isAfterOrEqualTo(a1.getUpdatedAt());
     }
@@ -241,42 +242,44 @@ class MachineSlotManagementIntegrationTest {
         }
         String missingParent = path(UUID.randomUUID());
         mvc.perform(admin(get(missingParent))).andExpect(status().isNotFound()).andExpect(jsonPath("$.message").value("Machine not found"));
-        mvc.perform(admin(post(missingParent)).contentType("application/json").content(createBody("NEW", 6).toString())).andExpect(status().isNotFound());
+        mvc.perform(admin(post(missingParent)).contentType("application/json").content(createBody("B", 6).toString())).andExpect(status().isNotFound());
         for (String slotId : List.of(UUID.randomUUID().toString(), "bad-id")) {
             for (var request : List.of(get(path() + "/" + slotId), put(path() + "/" + slotId).contentType("application/json").content("{\"capacity\":8}"),
                     patch(path() + "/" + slotId + "/status").contentType("application/json").content("{\"status\":\"ERROR\"}")))
                 mvc.perform(admin(request)).andExpect(status().is(slotId.equals("bad-id") ? 400 : 404));
         }
         mvc.perform(admin(get("/api/v1/machines/bad-id/slots"))).andExpect(status().isBadRequest());
-        mvc.perform(admin(post("/api/v1/machines/bad-id/slots")).contentType("application/json").content(createBody("NEW", 6).toString())).andExpect(status().isBadRequest());
+        mvc.perform(admin(post("/api/v1/machines/bad-id/slots")).contentType("application/json").content(createBody("B", 6).toString())).andExpect(status().isBadRequest());
         assertThat(jdbc.queryForList("SELECT * FROM machine_slots")).isEqualTo(before);
     }
 
     @Test
     void readsAreMachineScopedDatabasePagesWithStatusFilterAndDeterministicSort() throws Exception {
-        slot(parent, "A2", 8, SlotStatus.ERROR); slot(parent, "A3", 6, SlotStatus.INACTIVE);
-        slot(other, "A1", 20, SlotStatus.ACTIVE);
+        slot(parent, "B", 8, SlotStatus.ERROR);
+        slot(other, "A", 20, SlotStatus.ACTIVE);
         SqlCapture.QUERIES.clear();
         for (String token : List.of(adminToken, staffToken)) {
             var read = mvc.perform(get(detail()).header("Authorization", "Bearer " + token)).andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             assertThat(mapper.readTree(read).path("data").fieldNames()).toIterable()
                     .containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "createdAt", "updatedAt");
-            var first = mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("size", "2"))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(3)).andExpect(jsonPath("$.data.totalPages").value(2))
-                    .andExpect(jsonPath("$.data.content[0].slotCode").value("A1")).andExpect(jsonPath("$.data.content[1].slotCode").value("A2"))
+            var first = mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("size", "1"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(2)).andExpect(jsonPath("$.data.totalPages").value(2))
+                    .andExpect(jsonPath("$.data.content", hasSize(1))).andExpect(jsonPath("$.data.content[0].slotCode").value("A"))
                     .andReturn().getResponse().getContentAsString();
-            var second = mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("size", "2").param("page", "1"))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.content", hasSize(1))).andExpect(jsonPath("$.data.content[0].slotCode").value("A3"))
+            var second = mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("size", "1").param("page", "1"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.content", hasSize(1))).andExpect(jsonPath("$.data.content[0].slotCode").value("B"))
                     .andReturn().getResponse().getContentAsString();
             assertThat(mapper.readTree(first).at("/data/content").findValuesAsText("id"))
                     .doesNotContainAnyElementsOf(mapper.readTree(second).at("/data/content").findValuesAsText("id"));
-            for (var value : SlotStatus.values())
+            for (var value : List.of(SlotStatus.ACTIVE, SlotStatus.ERROR))
                 mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("status", value.name()))
                         .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1)).andExpect(jsonPath("$.data.content[0].status").value(value.name()));
+            mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("status", "INACTIVE"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(0));
         }
         mvc.perform(admin(get(path())).param("page", "999")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.content", hasSize(0))).andExpect(jsonPath("$.data.totalElements").value(3));
+                .andExpect(jsonPath("$.data.content", hasSize(0))).andExpect(jsonPath("$.data.totalElements").value(2));
         var empty = machine("EMPTY", MachineStatus.ACTIVE);
         mvc.perform(admin(get(path(empty.getId())))).andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(0));
         for (String field : List.of("id", "slotCode", "capacity", "status", "createdAt", "updatedAt")) {
@@ -357,7 +360,7 @@ class MachineSlotManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_ADMIN", "MACHINE_READ", "MACHINE_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidatesRequestsOutsideMvc() {
         assertThatThrownBy(() -> service.createSlot(parent.getId(), new CreateMachineSlotRequest("BAD", 0))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
         assertThatThrownBy(() -> service.updateSlot(parent.getId(), a1.getId(), new UpdateMachineSlotRequest(-1))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -365,7 +368,7 @@ class MachineSlotManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_STAFF", "MACHINE_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWritesRequireAdminOutsideController() {
         assertThatThrownBy(() -> service.createSlot(parent.getId(), new CreateMachineSlotRequest("DENIED", 6))).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> service.updateSlot(parent.getId(), a1.getId(), new UpdateMachineSlotRequest(8))).isInstanceOf(AccessDeniedException.class);
