@@ -39,7 +39,7 @@ export const PERMISSION_LABELS: Readonly<Record<string, string>> = {
   BATCH_READ: 'Xem lô hàng',
   BATCH_CREATE: 'Tạo lô hàng',
   INVENTORY_READ: 'Xem tồn kho, tóm tắt và lịch sử',
-  INVENTORY_WRITE: 'Nạp hộp vào ngăn, gỡ hộp',
+  INVENTORY_WRITE: 'Nạp hộp vào ngăn, rút hộp',
   ORDER_READ: 'Xem đơn hàng',
   PAYMENT_READ: 'Xem thanh toán',
   PAYMENT_WEBHOOK_LOG_READ: 'Xem nhật ký webhook thanh toán',

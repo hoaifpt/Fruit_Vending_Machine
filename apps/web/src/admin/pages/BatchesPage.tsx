@@ -72,7 +72,7 @@ function BatchesPage() {
 
   return <>
     <PageHead title="Lô hàng"
-      subtitle={`Mỗi lô ghi mã lô, ngày sản xuất, hạn dùng và số hộp khai báo; lô không sửa hay xóa được sau khi tạo. Cột Đã nạp đếm mọi hộp đã nạp vào ngăn từ lô, kể cả hộp đã bán hoặc đã gỡ.${canCreate ? '' : ' Bạn chỉ xem; tạo lô do người có quyền thực hiện.'}`}
+      subtitle={`Mỗi lô ghi mã lô, ngày sản xuất, hạn dùng và số hộp khai báo; lô không sửa hay xóa được sau khi tạo. Cột Đã nạp đếm mọi hộp đã nạp vào ngăn từ lô, kể cả hộp đã bán hoặc đã rút.${canCreate ? '' : ' Bạn chỉ xem; tạo lô do người có quyền thực hiện.'}`}
       actions={canCreate && !forbidden ? <Button type="button" data-focus-key="batches-create" onClick={() => dialog.open()}><PackagePlus aria-hidden="true" />Tạo lô hàng</Button> : undefined} />
     {!forbidden && <FilterBar activeCount={filterCount} onClear={clearFilters}>
       <SelectFilter label="Sản phẩm" value={filters.productId} onChange={value => update({ productId: value || undefined, page: undefined })} options={products} />

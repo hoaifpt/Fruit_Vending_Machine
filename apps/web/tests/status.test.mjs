@@ -120,3 +120,14 @@ test('every tone keeps at least 4.5:1 contrast in light and dark themes', () => 
     }
   }
 })
+
+test('box wording: taking a box out is "Rút hộp" everywhere, a failed dispense asks for reconciliation (409 on remove)', () => {
+  assert.equal(statusMeta('box', 'REMOVED').label, 'Đã rút')
+  assert.equal(statusMeta('inventoryTransactionType', 'REMOVE').label, 'Rút hộp')
+  assert.match(statusMeta('box', 'DISPENSE_FAILED').description, /đối soát/)
+  assert.doesNotMatch(statusMeta('box', 'DISPENSE_FAILED').description, /gỡ hộp|rút hộp\./i)
+  assert.doesNotMatch(statusMeta('inventoryTransactionType', 'ADJUSTMENT').description, /thủ công/)
+  for (const domain of ['box', 'inventoryTransactionType']) {
+    for (const meta of Object.values(STATUS_CATALOG[domain])) assert.doesNotMatch(`${meta.label} ${meta.description}`, /gỡ/i)
+  }
+})

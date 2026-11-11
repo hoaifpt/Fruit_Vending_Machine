@@ -151,7 +151,7 @@ export function advanceOrders(ctx: HandlerContext) {
       for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
       for (const item of allocationItems(store, order)) {
         setItemStatus(item, 'SOLD', now)
-        history(store, item, 'SALE', now, { referenceId: order.id, reason: 'ORDER_COMPLETED', statusBefore: 'RESERVED', statusAfter: 'SOLD' })
+        history(store, item, 'SALE', now, { referenceId: order.id, statusBefore: 'RESERVED', statusAfter: 'SOLD' })
       }
     }
   }
@@ -456,13 +456,15 @@ export const routes: Route[] = [
     const form = new Form(ctx.body, ['batchCode', 'productId', 'manufacturedAt', 'expiresAt', 'quantity'])
     const batchCode = form.text('batchCode', 64).toUpperCase(), productId = form.text('productId')
     const manufacturedAt = form.instant('manufacturedAt'), expiresAt = form.instant('expiresAt'), quantity = form.integer('quantity', 1, 2_147_483_647)
-    if (!form.errors.manufacturedAt && !form.errors.expiresAt && expiresAt <= manufacturedAt) form.reject('expiresAt', 'Hạn dùng phải sau thời điểm sản xuất.')
-    else if (!form.errors.expiresAt && expiresAt <= ctx.now) form.reject('expiresAt', 'Hạn dùng phải ở tương lai.')
     form.done()
+    // Same order as ProductBatchService.createBatch: duplicate code (409), product (404), product ACTIVE (409), then the
+    // two date rules as a 400 without field errors.
+    if (ctx.store.batches.some(batch => batch.batchCode === batchCode)) throw conflict('Mã lô này đã tồn tại.')
     const product = ctx.store.products.find(candidate => candidate.id === productId)
     if (!product) throw notFound('Không tìm thấy sản phẩm.')
     if (product.status !== 'ACTIVE') throw conflict('Sản phẩm đang ngừng bán, không thể tạo lô.')
-    if (ctx.store.batches.some(batch => batch.batchCode === batchCode)) throw conflict('Mã lô này đã tồn tại.')
+    if (expiresAt <= manufacturedAt) throw new MockHttpError(400, 'Hạn dùng phải sau thời điểm sản xuất.')
+    if (expiresAt <= ctx.now) throw new MockHttpError(400, 'Hạn dùng phải ở tương lai.')
     const batch = { id: newId(), batchCode, productId, productSku: product.sku, productName: product.name, manufacturedAt: iso(manufacturedAt), expiresAt: iso(expiresAt), quantity, createdBy: ctx.user!.id, createdAt: iso(ctx.now) }
     ctx.store.batches.push(batch)
     return created(batch)
@@ -606,7 +608,7 @@ export const routes: Route[] = [
       items: [{ id: newId(), productId, sku: product.sku, productName: product.name, quantity: 1, unitPrice: product.price, totalPrice: product.price, allocations: [{ id: newId(), inventoryItemId: head.id, slotCode: slot.slotCode, batchCode: head.batchCode, batchExpiresAt: batch?.expiresAt, status: 'RESERVED' }] }],
     }
     store.orders.push(order)
-    history(store, head, 'RESERVE', now, { referenceId: order.id, reason: 'ORDER_RESERVED', statusBefore: 'AVAILABLE', statusAfter: 'RESERVED' })
+    history(store, head, 'RESERVE', now, { referenceId: order.id, statusBefore: 'AVAILABLE', statusAfter: 'RESERVED' })
     return created(kioskOrderView(store, order))
   }),
   route('GET', '/kiosk/orders/:orderId', 'kiosk', ctx => ok(kioskOrderView(ctx.store, findKioskOrder(ctx)))),

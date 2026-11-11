@@ -138,6 +138,12 @@ test('mock: loaded count is totalElements of /inventory?batchId (all statuses), 
   await assert.rejects(batchesApi.create(body), error => describeSaveError(error).fieldErrors?.batchCode === CODE_TAKEN)
   await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-02', expiresAt: body.manufacturedAt }), error => error.status === 400 && !!describeSaveError(error).fieldErrors?.expiresAt)
   await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-03', productId: INACTIVE_PRODUCT_ID }), error => describeSaveError(error).fieldErrors?.productId === PRODUCT_INACTIVE)
+  // Order of ProductBatchService.createBatch: taken code (409) before product (404 / 409 INACTIVE) before dates, which
+  // come as a 400 without field errors.
+  await assert.rejects(batchesApi.create({ ...body, productId: INACTIVE_PRODUCT_ID, expiresAt: body.manufacturedAt }), error => error.status === 409 && describeSaveError(error).fieldErrors?.batchCode === CODE_TAKEN)
+  await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-04', productId: '40000000-0000-0000-0000-0000000000ff', expiresAt: body.manufacturedAt }), error => error.status === 404)
+  await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-05', productId: INACTIVE_PRODUCT_ID, expiresAt: body.manufacturedAt }), error => error.status === 409 && describeSaveError(error).fieldErrors?.productId === PRODUCT_INACTIVE)
+  await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-06', expiresAt: body.manufacturedAt }), error => error.status === 400 && !Object.keys(error.fieldErrors).length)
 
   await inventoryApi.load({ batchId: created.id, slotId: '30000000-0000-0000-0000-000000000002', quantity: 2 })
   assert.deepEqual((await countLoaded([created.id]))[created.id], { ok: true, loaded: 2 })

@@ -85,6 +85,8 @@ export function parseBoxCount(raw: string): number | undefined {
 
 export const QUANTITY_REQUIRED = 'Vui lòng nhập số hộp đã xếp vào ngăn.'
 export const QUANTITY_INVALID = 'Số hộp phải là số nguyên từ 1 trở lên.'
+/** "1.5", "2,5" or "1.000": a box count has no decimals nor thousands separators (at most 1000 per load). */
+export const QUANTITY_SEPARATOR = 'Số hộp chỉ gồm chữ số, không dùng dấu chấm hay dấu phẩy (ví dụ 5 hoặc 1000).'
 export const QUANTITY_TOO_MANY = `Mỗi lần nạp tối đa ${n(LOAD_MAX_PER_REQUEST)} hộp; chia thành nhiều lần nạp.`
 
 const slotName = (room: LoadRoom) => room.slotCode ? `Ngăn ${room.slotCode}` : 'Ngăn đã chọn'
@@ -97,6 +99,7 @@ const batchName = (room: LoadRoom) => room.batchCode ? `Lô ${room.batchCode}` :
 export function quantityProblem(raw: string, room: LoadRoom, required = false): string {
   if (!raw.trim()) return required ? QUANTITY_REQUIRED : ''
   const value = parseBoxCount(raw)
+  if (value === undefined && /^[\d\s]*[.,][\d\s.,]*$/.test(raw.trim())) return QUANTITY_SEPARATOR
   if (value === undefined || value < 1) return QUANTITY_INVALID
   if (value > LOAD_MAX_PER_REQUEST) return QUANTITY_TOO_MANY
   if (room.free !== undefined && value > room.free) return room.free <= 0

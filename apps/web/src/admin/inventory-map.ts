@@ -17,7 +17,8 @@ import { inventoryApi, machinesApi, slotsApi } from '../api/resources.ts'
 import type { InventoryItem, InventorySummary, Machine, Slot } from '../api/resources.ts'
 import { formatDateTime } from '../lib/format.ts'
 import { statusMeta } from '../lib/status.ts'
-import { oneOf, uuidParam } from '../lib/table-query.ts'
+import { formatSort, oneOf, parseSort, uuidParam } from '../lib/table-query.ts'
+import type { SortRule } from '../lib/table-query.ts'
 
 export const PRESENT_STATUSES = ['AVAILABLE', 'RESERVED', 'EXPIRED', 'DISPENSE_FAILED'] as const
 export type PresentStatus = (typeof PRESENT_STATUSES)[number]
@@ -48,6 +49,83 @@ export function readMapQuery(params: URLSearchParams): MapQuery {
     machineId: uuidParam(params.get('machineId')),
     slotId: uuidParam(params.get('machineId')) ? uuidParam(params.get('slotId')) : '',
   }
+}
+
+/** Every status GET /inventory?status= accepts (listInventory enum). */
+export const ITEM_STATUSES = ['AVAILABLE', 'RESERVED', 'SOLD', 'EXPIRED', 'REMOVED', 'DISPENSE_FAILED'] as const
+export type ItemStatus = (typeof ITEM_STATUSES)[number]
+/** listInventory: one approved sort among id/status/loadedAt/createdAt/updatedAt; the list view shows newest loads first. */
+export const LIST_SORT: SortRule = { fields: ['id', 'status', 'loadedAt', 'createdAt', 'updatedAt'], fallback: 'loadedAt,desc' }
+/** URL keys of the list view's filters (sort and page are not filters). */
+export const LIST_FILTER_KEYS = ['machineId', 'slotId', 'batchId', 'status', 'expired'] as const
+export type ListFilterKey = (typeof LIST_FILTER_KEYS)[number]
+export const LIST_PARAM_LABELS: Record<ListFilterKey | 'sort', string> = {
+  machineId: 'Máy', slotId: 'Ngăn', batchId: 'Lô hàng', status: 'Trạng thái', expired: 'Hạn dùng', sort: 'Sắp xếp',
+}
+export interface ListQuery { machineId: string; slotId: string; batchId: string; status: ItemStatus | ''; expired: 'true' | 'false' | ''; sort: string }
+/** A URL value of the list view that cannot be sent (the API would answer 400), with why. */
+export interface IgnoredListParam { key: ListFilterKey | 'sort'; value: string; reason: string }
+
+/**
+ * Filters of the list view from the URL. What GET /inventory would refuse with a 400 is left out and listed in
+ * `ignored` (as on the history screen): non-UUID ids, an unknown status or expiry flag, a sort the contract does not
+ * approve. A slot without its machine is dropped too (the slot picker belongs to a machine).
+ */
+export function readListQuery(params: URLSearchParams): { query: ListQuery; ignored: IgnoredListParam[] } {
+  const ignored: IgnoredListParam[] = []
+  const id = (key: 'machineId' | 'slotId' | 'batchId') => {
+    const raw = (params.get(key) ?? '').trim()
+    const value = uuidParam(raw).toLowerCase()
+    if (raw && !value) ignored.push({ key, value: raw, reason: 'không phải mã đầy đủ dạng UUID' })
+    return value
+  }
+  const machineId = id('machineId')
+  let slotId = id('slotId')
+  if (slotId && !machineId) {
+    ignored.push({ key: 'slotId', value: slotId, reason: 'chỉ lọc theo ngăn khi đã chọn máy' })
+    slotId = ''
+  }
+  const batchId = id('batchId')
+  const rawStatus = params.get('status') ?? ''
+  const status = oneOf(rawStatus, ITEM_STATUSES) as ItemStatus | ''
+  if (rawStatus && !status) ignored.push({ key: 'status', value: rawStatus, reason: 'không phải trạng thái hộp đã biết' })
+  const rawExpired = params.get('expired') ?? ''
+  const expired = oneOf(rawExpired, ['true', 'false']) as ListQuery['expired']
+  if (rawExpired && !expired) ignored.push({ key: 'expired', value: rawExpired, reason: 'chỉ nhận “đã quá hạn” hoặc “chưa quá hạn”' })
+  const rawSort = params.get('sort') ?? ''
+  const sort = formatSort(parseSort(rawSort, LIST_SORT))
+  if (rawSort && sort !== rawSort) ignored.push({ key: 'sort', value: rawSort, reason: 'không phải cách sắp xếp máy chủ nhận' })
+  return { query: { machineId, slotId, batchId, status, expired, sort }, ignored }
+}
+
+/** Filters in effect (sort is not a filter). */
+export function listFilterCount(query: ListQuery): number {
+  return LIST_FILTER_KEYS.filter(key => query[key]).length
+}
+
+/** Query of GET /inventory for the list view: only contract parameters, nothing empty. */
+export function listApiQuery(query: ListQuery, page: number, size: number) {
+  return {
+    page, size, sort: query.sort,
+    machineId: query.machineId || undefined,
+    slotId: (query.machineId && query.slotId) || undefined,
+    batchId: query.batchId || undefined,
+    status: query.status || undefined,
+    expired: query.expired ? query.expired === 'true' : undefined,
+  }
+}
+
+/**
+ * "Rút hộp" of one row of the list: `ok` when the API accepts the removal, `locked` (shown disabled, with why) when the
+ * box is still in the slot but cannot be taken out from here, `hidden` when it has left the slot (sold, taken out).
+ */
+export type ListRemoveState = { kind: 'ok' } | { kind: 'hidden' } | { kind: 'locked'; reason: string }
+export const RESERVED_LOCKED = 'Hộp đang giữ cho một đơn; chỉ rút được nếu đơn bị hủy và hộp trở lại ngăn.'
+export function listRemoveState(item: InventoryItem): ListRemoveState {
+  if (canRemove(item)) return { kind: 'ok' }
+  if (item.status === 'DISPENSE_FAILED') return { kind: 'locked', reason: REMOVE_LOCKED }
+  if (item.status === 'RESERVED') return { kind: 'locked', reason: RESERVED_LOCKED }
+  return { kind: 'hidden' }
 }
 
 // ---- order and head
@@ -331,8 +409,8 @@ export function mapColumns(map: MachineMap, maxCells = MAX_VISIBLE_CELLS): SlotC
 
 // ---- remove errors
 
-export const REMOVE_STALE = 'Hộp vừa đổi trạng thái (đang giữ cho đơn hoặc đã được rút). Sơ đồ đã tải lại.'
-export const REMOVE_GONE = 'Không tìm thấy hộp này nữa (có thể đã được rút). Sơ đồ đã tải lại.'
+export const REMOVE_STALE = 'Hộp vừa đổi trạng thái (đang giữ cho đơn hoặc đã được rút). Dữ liệu đã tải lại.'
+export const REMOVE_GONE = 'Không tìm thấy hộp này nữa (có thể đã được rút). Dữ liệu đã tải lại.'
 
 /**
  * 409/404 of POST /inventory/{id}/remove mean the map is out of date: Vietnamese text (shown as a form-level message,

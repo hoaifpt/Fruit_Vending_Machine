@@ -117,7 +117,7 @@ test.describe('Sơ đồ tồn kho (Quản trị viên)', () => {
     const dialog = page.getByRole('dialog', { name: 'Rút hộp khỏi ngăn' })
     await dialog.getByLabel('Lý do rút hộp').fill('Hộp hết hạn')
     await dialog.getByRole('button', { name: 'Rút hộp' }).click()
-    await expect(dialog.getByRole('alert')).toHaveText('Hộp vừa đổi trạng thái (đang giữ cho đơn hoặc đã được rút). Sơ đồ đã tải lại.')
+    await expect(dialog.getByRole('alert')).toHaveText('Hộp vừa đổi trạng thái (đang giữ cho đơn hoặc đã được rút). Dữ liệu đã tải lại.')
     await expect(map).not.toHaveAttribute('data-updated-at', before!)
     await page.goto(`/admin/inventory?machineId=${MACHINE_1}&scenario=none`)
   })
@@ -144,6 +144,48 @@ test.describe('Sơ đồ tồn kho (Quản trị viên)', () => {
     await expect(page.getByRole('table', { name: 'Danh sách hộp' })).toBeVisible()
     await page.getByRole('button', { name: 'Sơ đồ ngăn' }).click()
     await ready(page)
+  })
+
+  test('Danh sách hộp: tham số URL sai bị bỏ qua có ghi chú; hộp không rút được có lý do; rỗng / 403 / máy chưa có ngăn', async ({ page }) => {
+    const table = page.getByRole('table', { name: 'Danh sách hộp' })
+    const headerLoad = page.getByRole('button', { name: 'Nạp hộp', exact: true })
+    // Values GET /inventory would refuse with a 400 are not sent: the list loads and a note says what was ignored.
+    await page.goto('/admin/inventory?view=list&machineId=abc&status=LOST&sort=password,asc')
+    const note = page.getByRole('note').filter({ hasText: 'đã bỏ qua' })
+    await expect(note).toContainText('Máy “abc”')
+    await expect(note).toContainText('Trạng thái “LOST”')
+    await expect(note).toContainText('Sắp xếp “password,asc”')
+    await expect(table.getByRole('row').nth(1)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Thử lại' })).toHaveCount(0)
+    await note.getByRole('button', { name: 'Bỏ khỏi đường dẫn' }).click()
+    await expect(note).toHaveCount(0)
+    expect([...new URL(page.url()).searchParams.keys()]).toEqual(['view'])
+
+    // A box that failed to dispense: the button is locked (aria-disabled) and the reason is on screen.
+    await page.goto(`/admin/inventory?view=list&machineId=${MACHINE_2}&status=DISPENSE_FAILED`)
+    const locked = table.getByRole('button', { name: 'Rút hộp' })
+    await expect(locked).toHaveAttribute('aria-disabled', 'true')
+    await expect(locked).toHaveAccessibleDescription(/cần đối soát/)
+    await expect(table).toContainText('hệ thống chưa cho rút trực tiếp')
+
+    // Nothing at all (no filter): what to do next.
+    await page.goto('/admin/inventory?view=list&scenario=empty')
+    await expect(page.getByText('Chưa có hộp nào trong kho.', { exact: false })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Mở sơ đồ ngăn' })).toBeVisible()
+    await expect(headerLoad).toHaveCount(2) // the page header and the empty state
+
+    // 403: no filters and no load button, only the explanation.
+    await page.goto('/admin/inventory?view=list&scenario=403:inventory')
+    await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toBeVisible()
+    await expect(page.getByRole('group', { name: 'Bộ lọc' })).toHaveCount(0)
+    await expect(headerLoad).toHaveCount(0)
+
+    // A machine without slots: no load button, no "0 ngăn" summary nor legend above the explanation.
+    await page.goto(`/admin/inventory?machineId=${MACHINE_1}&scenario=empty`)
+    await expect(page.getByText('Máy chưa có ngăn nào nên chưa có hộp để hiện.')).toBeVisible()
+    await expect(headerLoad).toHaveCount(0)
+    await expect(page.getByText('Hộp đáy (bán tiếp theo)')).toHaveCount(0)
+    await expect(page.getByText(/0 ngăn/)).toHaveCount(0)
   })
 
   test('Trạng thái: đang tải, máy không tồn tại, không có máy, lỗi máy chủ, 403, 401', async ({ page }) => {

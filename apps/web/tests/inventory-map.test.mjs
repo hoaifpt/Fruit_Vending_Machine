@@ -1,13 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError, configureClient } from '../src/api/client.ts'
-import { authApi, inventoryApi } from '../src/api/resources.ts'
+import { authApi, inventoryApi, ordersApi } from '../src/api/resources.ts'
 import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import {
-  BLOCKED_LABEL, REMOVE_GONE, REMOVE_STALE, blockedText, boxDescription, boxStatusText, buildColumns, canRemove, columnLabel, columnSaleText,
+  BLOCKED_LABEL, ITEM_STATUSES, LIST_SORT, REMOVE_GONE, REMOVE_LOCKED, REMOVE_STALE, RESERVED_LOCKED, blockedText, boxDescription, boxStatusText, buildColumns, canRemove, columnLabel, columnSaleText,
   compareDispenseOrder, describeRemoveError, headLabel, headState, instantKey, isExpiredBox, loadMachineMap, lockedNextStep, mapColumns, mapOverview,
-  overviewText, readMapQuery, settleLimited,
+  listApiQuery, listFilterCount, listRemoveState, overviewText, readListQuery, readMapQuery, settleLimited,
 } from '../src/admin/inventory-map.ts'
 
 const MACHINE = '20000000-0000-0000-0000-000000000001'
@@ -24,6 +24,39 @@ test('URL: map is the default view; ids that are not UUIDs are dropped; a slot n
   assert.equal(readMapQuery(new URLSearchParams('view=grid')).view, 'map')
   assert.equal(readMapQuery(new URLSearchParams('machineId=abc')).machineId, '')
   assert.equal(readMapQuery(new URLSearchParams(`slotId=${MACHINE}`)).slotId, '', 'slot without machine')
+})
+
+test('list URL: only what GET /inventory accepts is sent; the rest is listed as ignored', () => {
+  const SLOT = '30000000-0000-0000-0000-000000000001', BATCH = '50000000-0000-0000-0000-000000000001'
+  const clean = readListQuery(new URLSearchParams(`view=list&machineId=${MACHINE}&slotId=${SLOT}&batchId=${BATCH}&status=EXPIRED&expired=true&sort=updatedAt,desc`))
+  assert.deepEqual(clean.query, { machineId: MACHINE, slotId: SLOT, batchId: BATCH, status: 'EXPIRED', expired: 'true', sort: 'updatedAt,desc' })
+  assert.deepEqual(clean.ignored, [])
+  assert.equal(listFilterCount(clean.query), 5)
+  assert.deepEqual(listApiQuery(clean.query, 2, 20), { page: 2, size: 20, sort: 'updatedAt,desc', machineId: MACHINE, slotId: SLOT, batchId: BATCH, status: 'EXPIRED', expired: true })
+
+  const none = readListQuery(new URLSearchParams('view=list'))
+  assert.deepEqual(none.query, { machineId: '', slotId: '', batchId: '', status: '', expired: '', sort: LIST_SORT.fallback })
+  assert.deepEqual(listApiQuery(none.query, 0, 20), { page: 0, size: 20, sort: 'loadedAt,desc', machineId: undefined, slotId: undefined, batchId: undefined, status: undefined, expired: undefined })
+
+  const junk = readListQuery(new URLSearchParams('machineId=abc&slotId=x&batchId=1&status=LOST&expired=yes&sort=password,asc'))
+  assert.deepEqual(junk.query, none.query, 'nothing invalid reaches the API')
+  assert.deepEqual(junk.ignored.map(item => item.key), ['machineId', 'slotId', 'batchId', 'status', 'expired', 'sort'])
+  assert.equal(listFilterCount(junk.query), 0)
+  const lone = readListQuery(new URLSearchParams(`slotId=${SLOT}&expired=false`))
+  assert.deepEqual([lone.query.slotId, lone.query.expired, lone.ignored.map(item => item.key)], ['', 'false', ['slotId']])
+  assert.match(lone.ignored[0].reason, /chọn máy/)
+  assert.equal(listApiQuery(lone.query, 0, 20).expired, false)
+  assert.equal(readListQuery(new URLSearchParams('sort=status,sideways')).query.sort, LIST_SORT.fallback)
+  for (const status of ITEM_STATUSES) assert.equal(readListQuery(new URLSearchParams(`status=${status}`)).query.status, status)
+})
+
+test('list "Rút hộp": open for AVAILABLE/EXPIRED, locked with a reason while held or failed, absent once out of the slot', () => {
+  assert.deepEqual(listRemoveState(box('s')), { kind: 'ok' })
+  assert.deepEqual(listRemoveState(box('s', { status: 'EXPIRED' })), { kind: 'ok' })
+  assert.deepEqual(listRemoveState(box('s', { status: 'DISPENSE_FAILED' })), { kind: 'locked', reason: REMOVE_LOCKED })
+  assert.deepEqual(listRemoveState(box('s', { status: 'RESERVED' })), { kind: 'locked', reason: RESERVED_LOCKED })
+  assert.deepEqual(listRemoveState(box('s', { status: 'SOLD' })), { kind: 'hidden' })
+  assert.deepEqual(listRemoveState(box('s', { status: 'REMOVED' })), { kind: 'hidden' })
 })
 
 test('dispense order: earliest loadedAt first, id breaks ties', () => {
@@ -205,6 +238,19 @@ test('loadMachineMap on the mock: expired head blocks B1, failed dispense and he
   const failedHistory = await inventoryApi.history({ inventoryItemId: m1.head.id })
   assert.deepEqual(failedHistory.content.map(row => [row.type, row.statusBefore ?? null, row.statusAfter]), [['ADJUSTMENT', 'RESERVED', 'DISPENSE_FAILED'], ['RESERVE', 'AVAILABLE', 'RESERVED'], ['LOAD', null, 'AVAILABLE']])
   assert.deepEqual((await inventoryApi.history({ inventoryItemId: m2.head.id })).content.map(row => row.type), ['RESERVE', 'LOAD'])
+  // Their orders exist (history "Mở đơn hàng" opens them): a failed dispense and a paid order still holding A2's box.
+  const failedOrder = await ordersApi.get(failedHistory.content[0].referenceId)
+  assert.equal(failedOrder.status, 'DISPENSE_FAILED')
+  assert.equal(failedOrder.machineId, '20000000-0000-0000-0000-000000000002')
+  assert.equal(failedOrder.items[0].allocations[0].inventoryItemId, m1.head.id)
+  assert.equal(failedHistory.content[0].reason, 'DISPENSE_TIMEOUT')
+  const heldRef = (await inventoryApi.history({ inventoryItemId: m2.head.id })).content[0].referenceId
+  const heldOrder = await ordersApi.get(heldRef)
+  assert.equal(heldOrder.status, 'PAID')
+  assert.equal(heldOrder.items[0].allocations[0].status, 'RESERVED')
+  assert.equal(heldOrder.items[0].allocations[0].inventoryItemId, m2.head.id)
+  // RESERVE and LOAD rows carry no reason, like the backend.
+  assert.ok(failedHistory.content.filter(row => row.type !== 'ADJUSTMENT').every(row => row.reason == null))
   // The remove API refuses the failed dispense, as the locked button says.
   await assert.rejects(inventoryApi.remove(m1.head.id, 'Thử'), error => error.status === 409)
 

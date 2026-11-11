@@ -144,15 +144,15 @@ export function createStore(nowMs: number): MockStore {
       const id = uuid('70000000', stockIndex * 100 + n)
       const loadedAt = iso(-loadedAgo + n * 1000)
       items.push({ id, batchId: source.id, batchCode: source.batchCode, productId: source.productId, productName: source.productName, machineId, slotId, slotCode, status: 'AVAILABLE', expiresAt: source.expiresAt, loadedAt, createdAt: loadedAt, updatedAt: loadedAt })
-      transactions.push({ id: uuid('71000000', stockIndex * 100 + n), inventoryItemId: id, batchId: source.id, batchCode: source.batchCode, machineId, slotId, type: 'LOAD', referenceId: uuid('72000000', stockIndex + 1), performedBy: staffId, reason: 'Development seed', statusAfter: 'AVAILABLE', createdAt: loadedAt })
+      transactions.push({ id: uuid('71000000', stockIndex * 100 + n), inventoryItemId: id, batchId: source.id, batchCode: source.batchCode, machineId, slotId, type: 'LOAD', referenceId: uuid('72000000', stockIndex + 1), performedBy: staffId, statusAfter: 'AVAILABLE', createdAt: loadedAt })
     }
   })
 
   // Slot heads of the maintenance machine (FE 4.2 inventory map): A1's bottom bowl failed to dispense and blocks the
   // column; A2's only bowl is held for an order. Machine 1 (the kiosk's) keeps sellable heads, B1 an expired one.
   // History follows the backend (OrderReservationService RESERVE AVAILABLE→RESERVED, DispenseService ADJUSTMENT
-  // RESERVED→DISPENSE_FAILED, reference = order id). The orders are not in `orders` (the seeded orders all belong to
-  // machine 1 and other screens count them), so these references point at order ids with no order row in the mock.
+  // RESERVED→DISPENSE_FAILED, reference = order id). Their orders (DISPENSE_FAILED, and PAID still holding A2's bowl)
+  // are added to `orders` below, so "Mở đơn hàng" in the history opens them.
   const markHead = (stockIndex: number, steps: { type: MockTransaction['type']; before: MockItem['status']; after: MockItem['status']; reason?: string; ago: number }[], orderN: number) => {
     const head = items.find(item => item.id === uuid('70000000', stockIndex * 100 + 1))!
     steps.forEach((step, index) => {
@@ -166,7 +166,7 @@ export function createStore(nowMs: number): MockStore {
   }
   markHead(3, [
     { type: 'RESERVE', before: 'AVAILABLE', after: 'RESERVED', ago: 2 * HOUR },
-    { type: 'ADJUSTMENT', before: 'RESERVED', after: 'DISPENSE_FAILED', reason: 'TIMEOUT', ago: 2 * HOUR - 90_000 },
+    { type: 'ADJUSTMENT', before: 'RESERVED', after: 'DISPENSE_FAILED', reason: 'DISPENSE_TIMEOUT', ago: 2 * HOUR - 90_000 },
   ], 1)
   markHead(4, [{ type: 'RESERVE', before: 'AVAILABLE', after: 'RESERVED', ago: 60_000 }], 2)
 
@@ -212,6 +212,27 @@ export function createStore(nowMs: number): MockStore {
       rawBody: n % 10 === 0 ? `<script>alert('webhook ${n}')</script> not json` : null,
     })
   }
+
+  // Orders of the maintenance machine's held / failed heads (see markHead): referenced by their history rows.
+  const headOrder = (orderN: number, stockIndex: number, status: 'DISPENSE_FAILED' | 'PAID', ago: number) => {
+    const head = items.find(item => item.id === uuid('70000000', stockIndex * 100 + 1))!
+    const product = products.find(candidate => candidate.id === head.productId)!
+    const source = batches.find(candidate => candidate.id === head.batchId)!
+    const id = uuid('93000000', orderN)
+    const createdAt = iso(-ago)
+    orders.push({
+      id, orderCode: `ORD-${compactDate(createdAt)}-${String(900 + orderN).padStart(8, '0')}`, machineId: machines[1].id, machineCode: machines[1].code, status,
+      subtotal: product.price, totalAmount: product.price, createdAt, expiresAt: iso(-ago + 5 * 60_000), paidAt: iso(-ago + 20_000), live: false,
+      items: [{ id: uuid('93100000', orderN), productId: product.id, sku: product.sku, productName: product.name, quantity: 1, unitPrice: product.price, totalPrice: product.price,
+        allocations: [{ id: uuid('93200000', orderN), inventoryItemId: head.id, slotCode: head.slotCode, batchCode: source.batchCode, batchExpiresAt: source.expiresAt, status: 'RESERVED' }] }],
+    })
+    payments.push({
+      id: uuid('a3000000', orderN), orderId: id, provider: 'MOCK', status: 'SUCCESS', amount: product.price, paymentReference: `MOCKREFM2${String(orderN).padStart(4, '0')}`,
+      transactionId: `TXNM2${String(orderN).padStart(6, '0')}`, createdAt: iso(-ago + 5_000), paidAt: iso(-ago + 20_000), expiredAt: iso(-ago + 5 * 60_000),
+    })
+  }
+  headOrder(1, 3, 'DISPENSE_FAILED', 2 * HOUR)
+  headOrder(2, 4, 'PAID', 60_000)
 
   // "Cần xử lý": a late payment on a cancelled order, and a duplicate SUCCESS on one order.
   const cancelled = orders.find(order => order.status === 'CANCELLED')!

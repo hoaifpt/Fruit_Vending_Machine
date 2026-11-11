@@ -155,7 +155,7 @@ test('classifies each path into its group', () => {
 test('groups that are off pass through to the real fetch, groups that are on never do', async () => {
   const { state } = setup({ mode: 'auth,orders' })
   await signIn(state)
-  assert.equal((await ordersApi.list({})).totalElements, 45)
+  assert.equal((await ordersApi.list({})).totalElements, 47) // 45 of machine 1 + 2 behind the held / failed heads of machine 2
   assert.equal(state.realCalls.length, 0)
   assert.equal(await productsApi.list({ page: 0 }), 'from-real-network')
   assert.deepEqual(state.realCalls, ['/api/v1/products?page=0'])
@@ -182,10 +182,10 @@ test('pages, filters and sorts orders on the server side', async () => {
   const { state } = setup()
   await signIn(state)
   const first = await ordersApi.list({ page: 0, size: 20 })
-  assert.deepEqual([first.content.length, first.page, first.size, first.totalElements, first.totalPages], [20, 0, 20, 45, 3])
+  assert.deepEqual([first.content.length, first.page, first.size, first.totalElements, first.totalPages], [20, 0, 20, 47, 3])
   const last = await ordersApi.list({ page: 2, size: 20 })
-  assert.equal(last.content.length, 5)
-  assert.equal(new Set([...first.content, ...last.content].map(row => row.id)).size, 25)
+  assert.equal(last.content.length, 7)
+  assert.equal(new Set([...first.content, ...last.content].map(row => row.id)).size, 27)
   assert.equal((await ordersApi.list({ page: 9, size: 20 })).content.length, 0)
   const completed = await ordersApi.list({ status: 'COMPLETED', size: 100 })
   assert.ok(completed.totalElements > 0 && completed.content.every(row => row.status === 'COMPLETED'))

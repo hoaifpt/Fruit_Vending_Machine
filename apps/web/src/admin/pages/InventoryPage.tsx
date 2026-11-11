@@ -6,7 +6,7 @@
 // reason. Rules: ../inventory-map.ts (map), ../inventory-load.ts (load/remove). Each slot links to its history and a
 // blocking head to the history of that box (screen I4, ./InventoryHistoryPage.tsx).
 import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowDownToLine, CircleAlert, Lock, Minus, PackageMinus, Plus, RefreshCw } from 'lucide-react'
+import { ArrowDownToLine, CircleAlert, Lock, Minus, PackageMinus, Plus, RefreshCw, TriangleAlert } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
 import { inventoryApi, machinesApi, slotsApi } from '../../api/resources.ts'
 import type { InventoryItem } from '../../api/resources.ts'
@@ -20,7 +20,6 @@ import { cn } from '../../lib/cn.ts'
 import { formatDateTime } from '../../lib/format.ts'
 import { linkHandler, useQueryParams } from '../../lib/router.ts'
 import { statusMeta } from '../../lib/status.ts'
-import { uuidParam } from '../../lib/table-query.ts'
 import { countLoaded } from '../batches.ts'
 import {
   NEW_LOAD, QUICK_REASONS, REASON_MAX, describeLoadError, describeRemoveFailure, fitConflictText, loadBody, loadLoadableBatches, loadMax, parseBoxCount,
@@ -28,17 +27,17 @@ import {
 } from '../inventory-load.ts'
 import type { FitConflict, LoadRoom, LoadValues, Reload } from '../inventory-load.ts'
 import {
-  REMOVE_LOCKED, blockedText, boxDescription, boxStatusText, canRemove, columnLabel, columnSaleText, headLabel, isExpiredBox, loadMachineMap,
-  lockedNextStep, mapColumns, mapOverview, overviewText, readMapQuery,
+  ITEM_STATUSES, LIST_FILTER_KEYS, LIST_PARAM_LABELS, LIST_SORT, REMOVE_LOCKED, blockedText, boxDescription, boxStatusText, columnLabel, columnSaleText,
+  headLabel, isExpiredBox, listApiQuery, listFilterCount, listRemoveState, loadMachineMap, lockedNextStep, mapColumns, mapOverview, overviewText,
+  readListQuery, readMapQuery,
 } from '../inventory-map.ts'
 import type { InventoryView, MachineMap, SlotColumn } from '../inventory-map.ts'
-import { Badge, DataTable, ErrorState, FormSheet, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, Toolbar, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
+import { Badge, DataTable, ErrorState, FormSheet, Link, Loading, PAGE_SIZE, PageHead, Pagination, SelectFilter, enumOptions, pageParam, useDialog, useForm } from '../kit.tsx'
 import { useBatchOptions, useMachineOptions, useSlotOptions } from '../options.ts'
 import { focusByKey, focusLost } from '../return-focus.ts'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 
-export const ITEM_STATUSES = ['AVAILABLE', 'RESERVED', 'SOLD', 'EXPIRED', 'REMOVED', 'DISPENSE_FAILED'] as const
 const SORTS = [{ value: 'loadedAt,desc', label: 'Nạp gần nhất' }, { value: 'updatedAt,desc', label: 'Cập nhật gần nhất' }, { value: 'status,asc', label: 'Trạng thái' }]
 const VIEW_LABELS: Record<InventoryView, string> = { map: 'Sơ đồ ngăn', list: 'Danh sách hộp' }
 
@@ -80,12 +79,15 @@ function InventoryPage() {
   const [changes, setChanges] = useState(0)
   const focusAfter = useFocusAfter()
   // The list view keeps its own filters; a slot there needs its machine too.
-  const listSlot = view === 'list' && machineId ? uuidParam(params.get('slotId')) : ''
+  const listSlot = view === 'list' ? readListQuery(params).query.slotId : ''
+  // The header "Nạp hộp" is hidden while the view says loading makes no sense: no permission to read stock (403), or the
+  // machine shown has no slot yet. Each view reports it (see useReportLoadable).
+  const [loadHidden, setLoadHidden] = useState(false)
 
   return <>
     <PageHead title="Tồn kho"
       subtitle={`Mỗi ngăn là một cột hộp xếp chồng: hộp dưới cùng (hộp đáy) được bán và đẩy ra tiếp theo. Hộp đáy hết hạn hoặc nhả hàng thất bại chặn cả ngăn cho tới khi được rút ra.${canWrite ? '' : ' Bạn chỉ xem; nạp và rút hộp do người có quyền thực hiện.'}`}
-      actions={canWrite ? <Button type="button" data-focus-key="inventory-load" className="max-sm:h-11" onClick={() => setLoad({ machineId: machineId || undefined, slotId: (view === 'map' ? slotId : listSlot) || undefined })}>
+      actions={canWrite && !loadHidden ? <Button type="button" data-focus-key="inventory-load" className="max-sm:h-11" onClick={() => setLoad({ machineId: machineId || undefined, slotId: (view === 'map' ? slotId : listSlot) || undefined })}>
         <ArrowDownToLine aria-hidden="true" />Nạp hộp</Button> : undefined} />
     <InventoryTabs current="items" />
     <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -97,8 +99,8 @@ function InventoryPage() {
       </div>
     </div>
     {view === 'map'
-      ? <MapView canWrite={canWrite} changes={changes} focusAfter={focusAfter} load={setLoad} />
-      : <ListView canWrite={canWrite} changes={changes} changed={() => setChanges(count => count + 1)} />}
+      ? <MapView canWrite={canWrite} changes={changes} focusAfter={focusAfter} load={setLoad} hideLoad={setLoadHidden} />
+      : <ListView canWrite={canWrite} changes={changes} changed={() => setChanges(count => count + 1)} load={setLoad} hideLoad={setLoadHidden} />}
     {load && <LoadSheet prefill={load} close={() => setLoad(null)} done={slot => {
       if (view === 'map') focusAfter.set([`load-${slot}`, `slot-${slot}`, `head-remove-${slot}`])
       setChanges(count => count + 1)
@@ -106,9 +108,16 @@ function InventoryPage() {
   </>
 }
 
+/** Tells the page whether its header "Nạp hộp" should be hidden for what this view shows. */
+function useReportLoadable(hidden: boolean, hideLoad: (hidden: boolean) => void) {
+  useEffect(() => { hideLoad(hidden) }, [hidden, hideLoad])
+}
+
 // ---- map
 
-function MapView({ canWrite, changes, focusAfter, load }: { canWrite: boolean; changes: number; focusAfter: FocusAfter; load: (prefill: LoadPrefill) => void }) {
+function MapView({ canWrite, changes, focusAfter, load, hideLoad }: {
+  canWrite: boolean; changes: number; focusAfter: FocusAfter; load: (prefill: LoadPrefill) => void; hideLoad: (hidden: boolean) => void
+}) {
   const { params, update } = useQueryParams()
   const { machineId, slotId } = readMapQuery(params)
   const machines = useMachineOptions()
@@ -124,6 +133,7 @@ function MapView({ canWrite, changes, focusAfter, load }: { canWrite: boolean; c
   }, [state.loading, state.updatedAt, focusAfter])
 
   const forbidden = state.error instanceof ApiError && state.error.status === 403
+  useReportLoadable(forbidden || (!!data && !data.slots.length), hideLoad)
   const slotOptions = (data?.slots ?? []).map(slot => ({ value: slot.id, label: `Ngăn ${slot.slotCode}` }))
   return <>
     {!forbidden && <FilterBar activeCount={slotId ? 1 : 0} onClear={() => update({ slotId: undefined })}>
@@ -187,7 +197,7 @@ function MapBody({ state, data, slotId, canWrite, remove, load, showAll }: {
       <div className="min-w-0">
         <h2 id="map-title">Sơ đồ ngăn · {data.machine.name} <span className="font-mono text-[13px] font-normal text-muted-foreground">({data.machine.code})</span></h2>
         <p className="mt-1! text-[13px] text-muted-foreground">
-          {overviewText(overview)}{' · '}Cập nhật {formatDateTime(new Date(data.asOf).toISOString())}
+          {all.length ? <>{overviewText(overview)}{' · '}</> : null}Cập nhật {formatDateTime(new Date(data.asOf).toISOString())}
         </p>
       </div>
       <Button type="button" variant="outline" size="sm" disabled={state.loading} onClick={state.reload}>
@@ -199,7 +209,7 @@ function MapBody({ state, data, slotId, canWrite, remove, load, showAll }: {
       Máy đang ở trạng thái <strong>{machineMeta.label}</strong>: kiosk không bán hộp nào, kể cả ở ngăn có hộp đáy sẵn sàng.
     </p>}
     {data.incomplete && <p role="note" className="mb-3 text-[13px] text-muted-foreground">Máy có quá nhiều ngăn hoặc hộp để hiện hết; sơ đồ có thể thiếu một phần. Dùng “Danh sách hộp” để lọc chi tiết.</p>}
-    <Legend />
+    {all.length > 0 && <Legend />}
     {!all.length
       ? <div className="rounded-xl border border-dashed px-4 py-10 text-center text-muted-foreground">
         <p>Máy chưa có ngăn nào nên chưa có hộp để hiện.</p>
@@ -352,29 +362,60 @@ function DiscountSlot({ label }: { label?: string }) {
 
 // ---- list (boxes with filters)
 
-function ListView({ canWrite, changes, changed }: { canWrite: boolean; changes: number; changed: () => void }) {
+const LIST_EXPIRED_OPTIONS = [{ value: 'true', label: 'Đã quá hạn' }, { value: 'false', label: 'Chưa quá hạn' }]
+
+/**
+ * Boxes with server-side filters kept in the URL. Values GET /inventory would refuse (non-UUID ids, unknown status,
+ * expiry flag or sort) are not sent; a note lists them and can drop them from the URL (rules: readListQuery).
+ */
+function ListView({ canWrite, changes, changed, load, hideLoad }: {
+  canWrite: boolean; changes: number; changed: () => void; load: (prefill: LoadPrefill) => void; hideLoad: (hidden: boolean) => void
+}) {
   const { params, update } = useQueryParams()
-  const machineId = params.get('machineId') ?? '', slotId = params.get('slotId') ?? '', batchId = params.get('batchId') ?? ''
-  const status = params.get('status') ?? '', expired = params.get('expired') ?? '', sort = params.get('sort') ?? 'loadedAt,desc', page = pageParam(params)
+  const { query, ignored } = readListQuery(params)
+  const { machineId, slotId, batchId, status, expired, sort } = query
+  const page = pageParam(params)
   const machines = useMachineOptions(), slots = useSlotOptions(machineId), batches = useBatchOptions()
-  const state = useApi(signal => inventoryApi.list({
-    page, size: PAGE_SIZE, machineId: machineId || undefined, slotId: slotId || undefined, batchId: batchId || undefined,
-    status: (status || undefined) as 'AVAILABLE' | undefined, expired: expired ? expired === 'true' : undefined, sort,
-  }, signal), `${params.toString()}|${changes}`)
+  const apiQuery = listApiQuery(query, page, PAGE_SIZE)
+  const state = useApi(signal => inventoryApi.list(apiQuery, signal), `${JSON.stringify(apiQuery)}|${changes}`)
   const dialog = useDialog<InventoryItem>()
   const target = dialog.value
+  const forbidden = state.error instanceof ApiError && state.error.status === 403
+  useReportLoadable(forbidden, hideLoad)
+  const filters = listFilterCount(query)
+  const clearFilters = () => update(Object.fromEntries(LIST_FILTER_KEYS.map(key => [key, undefined])))
+
+  const empty = filters
+    ? <>Không có hộp nào khớp bộ lọc. <Button type="button" variant="link" className="h-auto p-0" onClick={clearFilters}>Xóa bộ lọc</Button> để xem tất cả hộp.</>
+    : <>
+      <span className="block">Chưa có hộp nào trong kho. Hộp xuất hiện ở đây sau khi được nạp vào ngăn của một máy.</span>
+      <span className="mt-3 flex flex-wrap justify-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => update({ view: undefined })}>Mở sơ đồ ngăn</Button>
+        {canWrite && <Button type="button" size="sm" onClick={() => load({})}><ArrowDownToLine aria-hidden="true" />Nạp hộp</Button>}
+      </span>
+    </>
 
   return <>
-    <Toolbar>
-      <SelectFilter label="Máy" value={machineId} onChange={value => update({ machineId: value, slotId: '' })} options={machines} />
-      <SelectFilter label="Ngăn" value={slotId} onChange={value => update({ slotId: value })} options={slots} empty={machineId ? 'Tất cả ngăn' : 'Chọn máy trước'} />
-      <SelectFilter label="Lô hàng" value={batchId} onChange={value => update({ batchId: value })} options={batches} />
-      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('box', ITEM_STATUSES)} />
-      <SelectFilter label="Hạn dùng" value={expired} onChange={value => update({ expired: value })} options={[{ value: 'true', label: 'Đã quá hạn' }, { value: 'false', label: 'Chưa quá hạn' }]} />
-      <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value })} options={SORTS} empty="Mặc định" />
-    </Toolbar>
-    {machineId && slotId && <SlotSummaryPanel machineId={machineId} slotId={slotId} refresh={changes} />}
-    <DataTable state={state} rows={state.data?.content} rowKey={item => item.id ?? ''} caption="Danh sách hộp" columns={[
+    {ignored.length > 0 && <div role="note" className="mb-4 flex flex-wrap items-start gap-x-3 gap-y-2 rounded-lg border border-status-warning-foreground/30 bg-status-warning px-3.5 py-2.5 text-[13px] text-status-warning-foreground">
+      <TriangleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p>Đường dẫn có bộ lọc không dùng được nên đã bỏ qua; danh sách dưới đây không áp dụng các giá trị này:</p>
+        <ul className="mt-1 list-disc pl-5">
+          {ignored.map(item => <li key={item.key} className="wrap-anywhere">{LIST_PARAM_LABELS[item.key]} “{item.value.length > 40 ? `${item.value.slice(0, 40)}…` : item.value}”: {item.reason}.</li>)}
+        </ul>
+      </div>
+      <Button type="button" variant="outline" size="sm" onClick={() => update(Object.fromEntries(ignored.map(item => [item.key, undefined])))}>Bỏ khỏi đường dẫn</Button>
+    </div>}
+    {!forbidden && <FilterBar activeCount={filters} onClear={clearFilters}>
+      <SelectFilter label="Máy" value={machineId} onChange={value => update({ machineId: value || undefined, slotId: undefined })} options={machines} />
+      <SelectFilter label="Ngăn" value={slotId} onChange={value => update({ slotId: value || undefined })} options={slots} empty={machineId ? 'Tất cả ngăn' : 'Chọn máy trước'} />
+      <SelectFilter label="Lô hàng" value={batchId} onChange={value => update({ batchId: value || undefined })} options={batches} />
+      <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value || undefined })} options={enumOptions('box', ITEM_STATUSES)} />
+      <SelectFilter label="Hạn dùng" value={expired} onChange={value => update({ expired: value || undefined })} options={LIST_EXPIRED_OPTIONS} />
+      <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value && value !== LIST_SORT.fallback ? value : undefined })} options={SORTS} empty="Mặc định" />
+    </FilterBar>}
+    {!forbidden && machineId && slotId && <SlotSummaryPanel machineId={machineId} slotId={slotId} refresh={changes} />}
+    <DataTable state={state} rows={state.data?.content} rowKey={item => item.id ?? ''} caption="Danh sách hộp" empty={empty} columns={[
       { head: 'Sản phẩm', cell: item => item.productName },
       { head: 'Lô', cell: item => item.batchCode },
       { head: 'Ngăn', cell: item => item.slotCode },
@@ -384,12 +425,28 @@ function ListView({ canWrite, changes, changed }: { canWrite: boolean; changes: 
       { head: 'Thao tác', cell: item => <div className="flex flex-wrap items-center gap-1.5">
         <Button asChild size="sm" variant="ghost"><a href={boxHistoryPath(item.id)} onClick={linkHandler(boxHistoryPath(item.id))}
           aria-label={['Lịch sử hộp', item.productName, item.slotCode && `ngăn ${item.slotCode}`, item.batchCode && `lô ${item.batchCode}`].filter(Boolean).join(', ')}>Lịch sử</a></Button>
-        {canWrite && <Button type="button" size="sm" variant="outline" disabled={!canRemove(item)} title={canRemove(item) ? undefined : 'Chỉ rút được hộp Sẵn sàng hoặc Hết hạn'} onClick={() => dialog.open(item)}>Rút hộp</Button>}
+        {canWrite && <RowRemove item={item} open={() => dialog.open(item)} />}
       </div> },
     ]} />
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}
     {target && <RemoveSheet target={{ item: target, slotCode: target.slotCode }} close={dialog.close} done={changed} stale={changed} />}
   </>
+}
+
+/**
+ * "Rút hộp" of one row: a box the API refuses to take out (held for an order, failed to dispense) keeps a locked button
+ * with the reason shown beside it, as on the map; a box no longer in the slot (sold, taken out) has no button.
+ */
+function RowRemove({ item, open }: { item: InventoryItem; open: () => void }) {
+  const reasonId = useId()
+  const removal = listRemoveState(item)
+  if (removal.kind === 'hidden') return null
+  if (removal.kind === 'ok') return <Button type="button" size="sm" variant="outline" onClick={open}>Rút hộp</Button>
+  return <span className="grid max-w-56 gap-1">
+    <Button type="button" size="sm" variant="outline" className="cursor-not-allowed justify-self-start opacity-60 hover:bg-card"
+      aria-disabled="true" aria-describedby={reasonId} onClick={event => event.preventDefault()}>Rút hộp</Button>
+    <span id={reasonId} className="text-xs text-muted-foreground">{removal.reason}</span>
+  </span>
 }
 
 function SlotSummaryPanel({ machineId, slotId, refresh }: { machineId: string; slotId: string; refresh: number }) {
@@ -578,7 +635,7 @@ function RemoveSheet({ target, close, done, stale }: { target: RemoveTarget; clo
   const quickId = useId()
   return <FormSheet title="Rút hộp khỏi ngăn" submitLabel="Rút hộp" danger close={close} onFieldErrors={form.setErrors}
     successMessage="Đã rút hộp" successDescription={`Ngăn ${slotCode} · ${item.productName ?? ''}`.trim()}
-    description="Chỉ xác nhận sau khi đã lấy hộp ra khỏi máy. Hộp chuyển sang Đã gỡ và lý do được ghi vào lịch sử."
+    description="Chỉ xác nhận sau khi đã lấy hộp ra khỏi máy. Hộp chuyển sang Đã rút và lý do được ghi vào lịch sử."
     onSubmit={async () => {
       const problem = reasonProblem(reason)
       if (problem) form.fail({ reason: problem })

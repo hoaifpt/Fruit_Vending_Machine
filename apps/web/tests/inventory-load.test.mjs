@@ -9,7 +9,7 @@ import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { ValidationError, describeFormFailure } from '../src/admin/form-error.ts'
 import { REMOVE_GONE, REMOVE_STALE } from '../src/admin/inventory-map.ts'
 import {
-  LOAD_MAX_PER_REQUEST, LOAD_TEXT, NEW_LOAD, QUANTITY_INVALID, QUANTITY_REQUIRED, QUANTITY_TOO_MANY, QUICK_REASONS, REASON_MAX, REASON_REQUIRED,
+  LOAD_MAX_PER_REQUEST, LOAD_TEXT, NEW_LOAD, QUANTITY_INVALID, QUANTITY_REQUIRED, QUANTITY_SEPARATOR, QUANTITY_TOO_MANY, QUICK_REASONS, REASON_MAX, REASON_REQUIRED,
   REASON_TOO_LONG, batchRemaining, describeLoadError, describeRemoveFailure, fitConflictText, loadBody, loadLoadableBatches, loadMax, parseBoxCount,
   quantityHint, quantityProblem, reasonProblem, removeBody, roomLines, selectionProblems, validateLoad,
 } from '../src/admin/inventory-load.ts'
@@ -46,7 +46,11 @@ test('count: digits only, checked as typed against the slot then the batch, with
   assert.equal(quantityProblem('', room), '', 'empty is fine while typing')
   assert.equal(quantityProblem('', room, true), QUANTITY_REQUIRED)
   assert.equal(quantityProblem('0', room), QUANTITY_INVALID)
-  assert.equal(quantityProblem('2,5', room), QUANTITY_INVALID)
+  // A dot or a comma (decimals, thousands grouping) gets its own wording instead of the generic one.
+  for (const raw of ['2,5', '5.5', '1.000', ' 3, ']) assert.equal(quantityProblem(raw, room), QUANTITY_SEPARATOR, raw)
+  assert.equal(quantityProblem('-1', room), QUANTITY_INVALID)
+  assert.equal(quantityProblem('abc', room), QUANTITY_INVALID)
+  assert.throws(() => loadBody({ ...NEW_LOAD, batchId: 'b', slotId: 's', quantity: '1.000' }), error => fieldsOf(error).quantity === QUANTITY_SEPARATOR)
   assert.equal(quantityProblem('1001', {}), QUANTITY_TOO_MANY)
   assert.equal(quantityProblem('8', room), '')
   assert.equal(quantityProblem('9', room), 'Ngăn B1 chỉ còn trống 8 chỗ. Nhập tối đa 8 hộp hoặc chọn ngăn khác.')
