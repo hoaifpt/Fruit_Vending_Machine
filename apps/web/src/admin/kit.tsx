@@ -252,7 +252,7 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
  * It closes with Hủy, × or Esc only (a click outside would lose what was typed), none of them while a request runs.
  * Focus goes back to the control that opened it.
  */
-export function FormSheet({ title, description, submitLabel = 'Lưu', successMessage, successDescription, close, onSubmit, children, onFieldErrors }: {
+export function FormSheet({ title, description, submitLabel = 'Lưu', successMessage, successDescription, close, onSubmit, children, onFieldErrors, danger = false }: {
   title: string; description?: ReactNode; submitLabel?: string
   /** Toast after success; defaults to "Đã <submitLabel>". */
   successMessage?: string
@@ -262,6 +262,8 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
   onSubmit: () => Promise<void>
   children: ReactNode
   onFieldErrors?: (fieldErrors: Record<string, string>) => void
+  /** Submit styled as a destructive action (e.g. taking a box out). */
+  danger?: boolean
 }) {
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
@@ -303,11 +305,13 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {children}
-          {message && <p ref={messageRef} tabIndex={-1} className={ERROR_BOX} role="alert">{message}</p>}
         </div>
+        {/* Outside the scrolling body, just above the buttons: always in view, also on a phone with a long form. */}
+        {message && <div className="border-t px-5"><p ref={messageRef} tabIndex={-1} className={cn(ERROR_BOX, 'my-3!')} role="alert">{message}</p></div>}
+        {/* Phones: 44px touch targets. */}
         <footer className="flex justify-end gap-2 border-t bg-muted/50 px-5 py-3.5">
-          <Button type="button" variant="outline" disabled={pending} onClick={close}>Hủy</Button>
-          <Button type="submit" disabled={pending}>{pending ? 'Đang xử lý…' : submitLabel}</Button>
+          <Button type="button" variant="outline" className="max-sm:h-11" disabled={pending} onClick={close}>Hủy</Button>
+          <Button type="submit" variant={danger ? 'destructive' : 'default'} className="max-sm:h-11" disabled={pending}>{pending ? 'Đang xử lý…' : submitLabel}</Button>
         </footer>
       </form>
     </SheetContent>

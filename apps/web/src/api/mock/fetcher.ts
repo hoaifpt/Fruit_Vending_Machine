@@ -56,6 +56,12 @@ const SCENARIO_ERRORS: Partial<Record<Scenario['name'], { status: number; messag
   409: { status: 409, message: 'Thao tác xung đột với trạng thái hiện tại của dữ liệu.' },
 }
 
+/**
+ * Message of the `409` scenario on paths whose contract example names a specific conflict, so a screen can be tested
+ * with the backend's own wording (POST /inventory/load: a slot filled by someone else meanwhile).
+ */
+const CONTRACT_CONFLICTS: Record<string, string> = { '/inventory/load': 'Slot capacity exceeded' }
+
 function requestUrl(input: RequestInfo | URL): URL {
   const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   return new URL(raw, 'http://mock.invalid') // base URL is irrelevant: only the path and query matter
@@ -187,7 +193,8 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       if (simulated) {
         // Like GlobalExceptionHandler: only validation (400) carries fieldErrors; handleConflict (409) sends the message alone.
         const fields = simulated.status === 400 ? simulatedFieldErrors(body) : undefined
-        return errorResponse(simulated.status, simulated.message, fullPath, now, fields)
+        const message = simulated.status === 409 ? CONTRACT_CONFLICTS[path] ?? simulated.message : simulated.message
+        return errorResponse(simulated.status, message, fullPath, now, fields)
       }
       const reply = dispatch(method, path, url.searchParams, new Headers(init?.headers), body, current?.name !== 'pending')
       return successResponse(scenario?.name === 'empty' && method === 'GET' ? { ...reply, data: emptied(reply.data) } : reply, now)
