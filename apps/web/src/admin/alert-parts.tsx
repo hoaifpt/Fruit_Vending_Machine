@@ -20,7 +20,8 @@ interface ActionProps { alert: Alert; close: () => void; changed: () => void; sc
 
 /**
  * Runs an action. A 409 means someone else changed the alert meanwhile: retrying cannot help, so the dialog closes, the
- * screen reloads and the explanation is shown as an error toast (read by screen readers); focus goes to the content.
+ * screen reloads and the explanation is shown as an error toast (read by screen readers);
+ * focus returns to the button that opened the dialog, like any closed dialog.
  * The error is still thrown so the dialog does not report success. Other errors stay in the dialog for a retry.
  */
 async function act(props: ActionProps, action: AlertAction, call: () => Promise<unknown>) {
@@ -29,7 +30,6 @@ async function act(props: ActionProps, action: AlertAction, call: () => Promise<
     if (isConflict(error)) {
       props.close(); props.changed(); notifyAlertsChanged()
       toast.error(shown instanceof Error ? shown.message : 'Cảnh báo đã thay đổi.', { description: summary(props.alert) })
-      document.getElementById('admin-main')?.focus({ preventScroll: true })
     }
     throw shown
   }

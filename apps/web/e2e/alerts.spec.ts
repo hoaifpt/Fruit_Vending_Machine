@@ -147,7 +147,8 @@ test('409: hộp xác nhận đóng lại, màn tải lại, toast giải thích
   await expect(confirm).toBeHidden()
   await expect(page.getByText(/vừa được người khác xác nhận hoặc đóng nên không xác nhận được nữa\. Danh sách đã được tải lại/)).toBeVisible()
   await expect(page.getByText('Đã xác nhận cảnh báo')).toHaveCount(0)
-  await expect(page.locator('#admin-main')).toBeFocused()
+  // Focus is back on the button that opened the dialog (the row is unchanged here: the 409 is simulated).
+  await expect(row(page, SEEDED).getByRole('button', { name: /^Xác nhận cảnh báo/ })).toBeFocused()
 
   await page.goto(`/admin/alerts/${SEEDED}?scenario=409`)
   await page.getByRole('button', { name: 'Đóng cảnh báo' }).click()
