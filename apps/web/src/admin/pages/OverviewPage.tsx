@@ -72,7 +72,7 @@ function OverviewPage() {
           link: <Link to={machineDetailPath(machine.id)} className={LINK}>
             <span className="font-mono">{machine.code}</span> · {machine.name}
           </Link>,
-          detail: <>{machine.location ? `${machine.location} · ` : ''}Đổi trạng thái lúc {formatDateTime(machine.updatedAt)}</>,
+          detail: <>{machine.location ? `${machine.location} · ` : ''}Cập nhật lúc {formatDateTime(machine.updatedAt)}</>,
         }))} />
 
       <Block id="low-stock" title="Sắp hết hàng" unit="ngăn" icon={PackageMinus} tone="warning" permission={canMachines ? (canStock ? undefined : 'INVENTORY_READ') : 'MACHINE_READ'}
