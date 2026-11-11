@@ -2,6 +2,7 @@
 import { api, request } from './client.ts'
 import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
+import type { components as DispenseDraft } from './drafts/dispense-commands'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -108,6 +109,17 @@ export const rolesApi = {
   get: (roleId: string, signal?: AbortSignal) => api.get<RoleWithPermissions>(`/roles/${id(roleId)}`, undefined, signal),
   /** Replaces the whole permission set of one role (not a patch): send every code the role keeps. */
   replacePermissions: (roleId: string, body: ReplaceRolePermissionsBody) => api.put<RoleWithPermissions>(`/roles/${id(roleId)}/permissions`, body),
+}
+
+// Dispense commands of an order (screen T1, FE 6.1): draft contract api-contract/drafts/dispense-commands.yaml, waiting
+// for backend issue 3.3. Until it ships the real backend answers 404 here; the order screen then shows "chưa có dữ liệu"
+// (see dispenseAvailability in src/admin/order-detail.ts). When 3.3 lands: move the path into api.yaml, run gen:api,
+// switch this type to schema.d.ts and delete the draft.
+export type DispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse']
+
+export const dispenseCommandsApi = {
+  /** One command per paid bowl of the order, oldest first; empty for an order that was never paid. */
+  listForOrder: (orderId: string, signal?: AbortSignal) => api.get<DispenseCommand[]>(`/orders/${id(orderId)}/dispense-commands`, undefined, signal),
 }
 
 export type { Q as QueryParams }

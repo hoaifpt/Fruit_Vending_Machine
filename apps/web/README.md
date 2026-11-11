@@ -30,7 +30,7 @@ npm run dev:mock
 
 Toàn bộ web (admin, đăng nhập, kiosk) chạy trên dữ liệu giả trong bộ nhớ, dựng từ seed dev; tải lại trang là về dữ liệu ban đầu. Đăng nhập bằng `admin@freshvend.test` / `mock-admin-password` hoặc `staff@freshvend.test` / `mock-staff-password` (giá trị giả, chỉ dùng cho mock). Kiosk `/buy` tự xác nhận thanh toán sau 15 giây.
 
-Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,payments,webhook-logs,kiosk,roles`), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ. Khi không mock nhóm `auth`, đăng nhập đi qua backend thật; token thật mang tài khoản mà dữ liệu mock không có, nên mock dựng một tài khoản tạm từ claim của token (`sub`, `email`, `roles`) và xét quyền theo bảng vai trò của mock thay vì trả 401. Token hết hạn hoặc thiếu `roles` vẫn bị 401.
+Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,dispense-commands,payments,webhook-logs,kiosk,roles`; `dispense-commands` là API nháp lệnh nhả hàng (chờ BE 3.3), mock riêng được khi đơn hàng đi API thật nhưng chỉ trả dữ liệu cho đơn có trong mock, đơn khác nhận 404 và màn chi tiết đơn hiện "chưa có dữ liệu"), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ. Khi không mock nhóm `auth`, đăng nhập đi qua backend thật; token thật mang tài khoản mà dữ liệu mock không có, nên mock dựng một tài khoản tạm từ claim của token (`sub`, `email`, `roles`) và xét quyền theo bảng vai trò của mock thay vì trả 401. Token hết hạn hoặc thiếu `roles` vẫn bị 401.
 
 Mock chỉ dành cho máy phát triển và demo, **không bao giờ triển khai**:
 
@@ -48,6 +48,7 @@ Thêm `?scenario=<tên>` vào URL trang để ép trạng thái, ví dụ `/admi
 | `expire` | Phiên hiện tại hết hạn một lần: mọi lời gọi trả 401, chuyển về đăng nhập; đăng nhập lại thì quay về đúng trang cũ và chạy bình thường |
 | `400`, `409` | Lỗi khi ghi (POST/PUT/PATCH), trang vẫn tải được để gửi biểu mẫu |
 | `pending` | Kiosk: mã QR không tự được thanh toán |
+| `missing` | Trả 404 như backend chưa có endpoint; dùng kèm giới hạn, ví dụ `?scenario=missing:dispense-commands` |
 
 Kịch bản giữ nguyên khi chuyển trang cho tới khi đóng tab hoặc mở `?scenario=none`. Có thể giới hạn theo nhóm hoặc đường dẫn: `?scenario=403:orders,payments`, `?scenario=409:/inventory/load`; khi có giới hạn thì `400`/`409` áp dụng cho cả GET. Khi kịch bản được mang từ trang trước, đăng nhập vẫn hoạt động để quay lại được.
 

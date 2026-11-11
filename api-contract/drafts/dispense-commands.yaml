@@ -1,0 +1,165 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - dispense commands of an order
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 6.1) for backend issue 3.3 "Trạng thái lệnh nhả hàng đọc từ kiosk và web";
+    the backend has not implemented this endpoint yet. Field and enum names follow the existing entity
+    com.fruitmachine.backend.dispense.entity.DispenseCommand (table dispense_commands) and the enum DispenseStatus, and the
+    rules of docs/mqtt-dispense.md. Used by the mock layer until the backend ships it, then this file is deleted and the
+    path moves to api.yaml.
+paths:
+  /api/v1/orders/{orderId}/dispense-commands:
+    get:
+      tags: [Orders]
+      operationId: listOrderDispenseCommands
+      summary: Dispense commands of one order (draft)
+      description: >-
+        ADMIN or STAFF with ORDER_READ, read only. One command per paid bowl (created with the order's move to PAID, in
+        the same transaction as the verified payment webhook), oldest first (createdAt asc, then id). An order that was
+        never paid has an empty list. Status flow PENDING -> SENT -> ACKNOWLEDGED -> SUCCESS | FAILED | TIMEOUT: an
+        unanswered PENDING/SENT command is re-sent with the same commandCode every DISPENSE_RESEND_AFTER (5 s); a
+        command not finished after DISPENSE_TIMEOUT (60 s, counted from createdAt) becomes TIMEOUT. A DISPENSE_COMPLETED
+        arriving after FAILED or TIMEOUT is still applied (the machine witnessed the drop): the command becomes SUCCESS
+        and completedAt is the time of that late report. The resend counter lives in backend memory and is not exposed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Dispense commands of the order (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseListDispenseCommandResponse"
+        "400":
+          description: orderId is not a UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: Missing, invalid or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: The account lacks ORDER_READ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DispenseCommandResponse:
+      type: object
+      description: One dispense command (one paid bowl). Times are UTC instants.
+      required: [id, commandCode, orderId, machineId, slotId, inventoryItemId, status, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        commandCode:
+          type: string
+          description: The commandId sent to the machine over MQTT, "D-" followed by 16 upper-case hex digits.
+          pattern: "^[A-Za-z0-9_-]{1,39}$"
+          examples: ["D-3F2A9C0B7E14D865"]
+        orderId:
+          type: string
+          format: uuid
+        machineId:
+          type: string
+          format: uuid
+        slotId:
+          type: string
+          format: uuid
+        slotCode:
+          type: string
+          description: Code of the slot, for display (same value as the order allocation's slotCode).
+        inventoryItemId:
+          type: string
+          format: uuid
+          description: The bowl to dispense; equals the inventoryItemId of one allocation of the order.
+        status:
+          type: string
+          enum: [PENDING, SENT, ACKNOWLEDGED, SUCCESS, FAILED, TIMEOUT]
+        createdAt:
+          type: string
+          format: date-time
+          description: Creation time; the 60 s timeout counts from here.
+        sentAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: First time the command was published to the machine; null while PENDING.
+        acknowledgedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the machine reported DISPENSE_ACCEPTED.
+        completedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: When the command ended (SUCCESS, FAILED or TIMEOUT after being sent); for a late success, the time of the late report.
+        updatedAt:
+          type: string
+          format: date-time
+    ApiResponseListDispenseCommandResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/DispenseCommandResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

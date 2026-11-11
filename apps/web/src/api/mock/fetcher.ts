@@ -8,7 +8,7 @@ import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -30,6 +30,8 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
 export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/kiosk-credentials(\/|$)/.test(path)) return 'kiosk-credentials'
   if (/^\/machines\/[^/]+\/slots(\/|$)/.test(path)) return 'slots'
+  // Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): its own group, so it can be mocked while orders are real.
+  if (/^\/orders\/[^/]+\/dispense-commands(\/|$)/.test(path)) return 'dispense-commands'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
 }
 
@@ -54,6 +56,8 @@ const SCENARIO_ERRORS: Partial<Record<Scenario['name'], { status: number; messag
   403: { status: 403, message: 'Access denied' },
   400: { status: 400, message: 'Dữ liệu gửi lên chưa hợp lệ.' },
   409: { status: 409, message: 'Thao tác xung đột với trạng thái hiện tại của dữ liệu.' },
+  // What Spring answers for a path no controller maps yet (NoResourceFoundException).
+  missing: { status: 404, message: 'No static resource found.' },
 }
 
 /**

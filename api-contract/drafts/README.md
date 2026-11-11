@@ -16,3 +16,4 @@ API mà frontend cần nhưng backend chưa có. Nguồn chính thức vẫn là
 | --- | --- | --- | --- |
 | `auth-me.yaml` | `GET /api/v1/auth/me` | FE 2.1 | Đề nghị BE thêm mới |
 | `roles-permissions.yaml` | `GET /api/v1/permissions`, `GET /api/v1/roles`, `GET /api/v1/roles/{id}`, `PUT /api/v1/roles/{id}/permissions` | FE 3.2 | Chép nguyên từ nhánh BE #48 (`feature/48-permission-authorization`), chờ merge vào `dev` |
+| `dispense-commands.yaml` | `GET /api/v1/orders/{orderId}/dispense-commands` | FE 6.1 | Đề nghị BE thêm trong BE 3.3; tên field/enum theo entity `DispenseCommand` và enum `DispenseStatus` đã có ở backend |

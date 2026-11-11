@@ -1,4 +1,5 @@
 import { ordersApi } from '../../api/resources.ts'
+import { Button } from '../../components/ui/button.tsx'
 import { FilterBar } from '../../components/ui/filter-bar.tsx'
 import { dateRangeToInstants, formatDateTime, formatMoney } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
@@ -25,6 +26,14 @@ function OrdersPage() {
   }, signal), params.toString())
   return <>
     <PageHead title="Đơn hàng" subtitle="Chỉ xem. Trạng thái đơn do hệ thống xử lý; web không sửa hoặc hủy đơn." />
+    {/* Quick filter: paid orders the machine could not serve (the customer waits for a refund). Same URL key as the select. */}
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+      <span id="orders-quick" className="text-muted-foreground">Lọc nhanh</span>
+      <div role="group" aria-labelledby="orders-quick">
+        <Button type="button" size="sm" variant={status === 'DISPENSE_FAILED' ? 'default' : 'outline'} aria-pressed={status === 'DISPENSE_FAILED'} className="max-sm:h-11"
+          onClick={() => update({ status: status === 'DISPENSE_FAILED' ? undefined : 'DISPENSE_FAILED' })}>Cần xử lý: nhả hàng thất bại</Button>
+      </div>
+    </div>
     <FilterBar activeCount={activeFilterCount([search, status, machineId, from, to])} onClear={() => update(clearFiltersPatch(FILTER_KEYS))}>
       <SearchFilter label="Mã đơn" value={search} onCommit={value => update({ search: value })} />
       <SelectFilter label="Trạng thái" value={status} onChange={value => update({ status: value })} options={enumOptions('order', ORDER_STATUSES)} />

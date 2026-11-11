@@ -144,16 +144,37 @@ export function advanceOrders(ctx: HandlerContext) {
         Object.assign(payment, { status: 'SUCCESS', paidAt: iso(now), transactionId: `MOCK-TXN-${randomCode(8)}`, qrCode: undefined })
         order.status = 'PAID'
         order.paidAt = iso(now)
+        createDispenseCommands(store, order, now)
       } else if (order.expiresAt && Date.parse(order.expiresAt) <= now) releaseOrder(ctx, order, 'RESERVATION_EXPIRED')
     } else if (order.status === 'PAID' && order.paidAt && Date.parse(order.paidAt) + options.dispenseMs <= now) {
       order.status = 'COMPLETED'
       order.completedAt = iso(now)
+      for (const command of store.dispenseCommands) {
+        if (command.orderId === order.id) Object.assign(command, { status: 'SUCCESS', sentAt: command.sentAt ?? iso(now), acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
+      }
       for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
       for (const item of allocationItems(store, order)) {
         setItemStatus(item, 'SOLD', now)
         history(store, item, 'SALE', now, { referenceId: order.id, statusBefore: 'RESERVED', statusAfter: 'SOLD' })
       }
     }
+  }
+}
+
+/**
+ * Like the payment webhook + DispenseService for a kiosk order: one PENDING command per bowl, created with the move to
+ * PAID. The mock keeps the order PAID until it completes (the kiosk shows PAID and DISPENSING alike), so the command stays
+ * PENDING (a SENT command would mean DISPENSING) and ends SUCCESS with the order in advanceOrders.
+ */
+function createDispenseCommands(store: MockStore, order: MockOrder, now: number) {
+  for (const allocation of order.items.flatMap(line => line.allocations)) {
+    const item = store.items.find(candidate => candidate.id === allocation.inventoryItemId)
+    if (!item) continue
+    const code = `D-${Array.from({ length: 16 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('')}`
+    store.dispenseCommands.push({
+      id: newId(), commandCode: code, orderId: order.id, machineId: order.machineId, slotId: item.slotId, slotCode: allocation.slotCode ?? item.slotCode,
+      inventoryItemId: item.id, status: 'PENDING', createdAt: iso(now), sentAt: null, acknowledgedAt: null, completedAt: null, updatedAt: iso(now),
+    })
   }
 }
 
@@ -536,6 +557,15 @@ export const routes: Route[] = [
     const { live: _live, ...order } = byId(ctx.store.orders, ctx.params.id, 'Không tìm thấy đơn hàng.')
     const payments = ctx.store.payments.filter(payment => payment.orderId === order.id).map(({ id, provider, status, amount, createdAt, paidAt, expiredAt }) => ({ id, provider, status, amount, createdAt, paidAt, expiredAt }))
     return ok({ ...order, payments })
+  }),
+
+  // Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): commands of one order, oldest first. An order
+  // unknown to the mock (VITE_API_MOCK=dispense-commands with real orders) answers 404 like the backend would.
+  route('GET', '/orders/:orderId/dispense-commands', 'any', ctx => {
+    const order = byId(ctx.store.orders, ctx.params.orderId, 'Không tìm thấy đơn hàng.')
+    const rows = ctx.store.dispenseCommands.filter(command => command.orderId === order.id)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+    return ok(rows.map(command => ({ ...command })))
   }),
 
   // ---- payments (ADMIN)

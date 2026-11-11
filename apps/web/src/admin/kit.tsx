@@ -49,8 +49,9 @@ export function Badge({ value, domain, explain }: { value: string | undefined; d
   return <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current', tone)}>{LABELS[value] ?? value}</span>
 }
 
-export function Link({ to, children, className }: { to: string; children: ReactNode; className?: string }) {
-  return <a href={to} className={className} onClick={linkHandler(to)}>{children}</a>
+/** In-app link. `label` (aria-label) must contain the visible text, so speech users can still say what they see. */
+export function Link({ to, children, className, label }: { to: string; children: ReactNode; className?: string; label?: string }) {
+  return <a href={to} className={className} aria-label={label} onClick={linkHandler(to)}>{children}</a>
 }
 
 export function PageHead({ title, subtitle, actions, back }: { title: string; subtitle?: string; actions?: ReactNode; back?: { to: string; label: string } }) {

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError, api, configureClient, request } from '../src/api/client.ts'
-import { authApi, batchesApi, inventoryApi, kioskCredentialsApi, machinesApi, ordersApi, paymentsApi, productsApi, slotsApi, usersApi, webhookLogsApi } from '../src/api/resources.ts'
+import { authApi, batchesApi, dispenseCommandsApi, inventoryApi, kioskCredentialsApi, machinesApi, ordersApi, paymentsApi, productsApi, slotsApi, usersApi, webhookLogsApi } from '../src/api/resources.ts'
 import { parseToken } from '../src/api/session.ts'
 import { ROLE_PERMISSIONS } from '../src/admin/permissions.ts'
 import { createKioskApi } from '../src/kiosk/api.ts'
@@ -126,7 +126,7 @@ test('every endpoint the web calls has a handler', async () => {
     () => kioskCredentialsApi.list(MACHINE_ID), () => kioskCredentialsApi.issue(MACHINE_ID), () => kioskCredentialsApi.revoke(MACHINE_ID, '80000000-0000-0000-0000-000000000001'),
     () => batchesApi.list({}), () => batchesApi.create({ batchCode: 'B', productId: PRODUCT_ID, manufacturedAt: new Date(state.clock - 1000).toISOString(), expiresAt: new Date(state.clock + 1000).toISOString(), quantity: 1 }),
     () => inventoryApi.list({}), () => inventoryApi.history({}), () => inventoryApi.load({ batchId: '50000000-0000-0000-0000-000000000002', slotId: '30000000-0000-0000-0000-000000000002', quantity: 1 }), () => inventoryApi.remove('70000000-0000-0000-0000-000000000001', 'Hỏng'),
-    () => ordersApi.list({}), () => ordersApi.get('90000000-0000-0000-0000-000000000001'),
+    () => ordersApi.list({}), () => ordersApi.get('90000000-0000-0000-0000-000000000001'), () => dispenseCommandsApi.listForOrder('90000000-0000-0000-0000-000000000001'),
     () => paymentsApi.list({}), () => paymentsApi.get('a0000000-0000-0000-0000-000000000001'),
     () => webhookLogsApi.list({}), () => webhookLogsApi.get('b0000000-0000-0000-0000-000000000001'),
   ]

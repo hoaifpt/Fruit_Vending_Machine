@@ -2,6 +2,7 @@
 // no accounts, kiosk keys, orders or payments, so those rows are invented here to exercise the screens.
 // MOCK_PASSWORDS are fake values for the mock only; they exist nowhere else.
 import type { components } from '../schema'
+import type { components as DispenseDraft } from '../drafts/dispense-commands'
 
 type S = components['schemas']
 
@@ -23,6 +24,8 @@ export type MockOrder = Omit<S['OrderDetailResponse'], 'payments' | 'items'> & {
 export type MockPayment = Omit<S['PaymentDetailResponse'], 'orderCode' | 'machineCode'> & {
   id: string; orderId: string; provider: string; status: NonNullable<S['PaymentDetailResponse']['status']>; amount: number; createdAt: string
 }
+/** Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): one command per paid bowl. */
+export type MockDispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse']
 
 export interface MockStore {
   users: MockUser[]
@@ -35,6 +38,7 @@ export interface MockStore {
   transactions: MockTransaction[]
   orders: MockOrder[]
   payments: MockPayment[]
+  dispenseCommands: MockDispenseCommand[]
   webhookLogs: S['PaymentWebhookLogDetailResponse'][]
   /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
   permissions: MockPermission[]
@@ -241,8 +245,69 @@ export function createStore(nowMs: number): MockStore {
   const completed = orders.find(order => order.status === 'COMPLETED')!
   payments.push({ id: uuid('a0000000', 99), orderId: completed.id, provider: 'MOCK', status: 'SUCCESS', amount: completed.totalAmount, paymentReference: 'MOCKREFDUP001', transactionId: 'TXNDUP000001', createdAt: iso(-2 * HOUR), paidAt: iso(-2 * HOUR), expiredAt: iso(-HOUR) })
 
+  // Dispense commands (FE 6.1, draft of backend 3.3): one per allocation of every paid order. The second COMPLETED order
+  // finished after the 60 s timeout (a late DISPENSE_COMPLETED), so the "kết quả đến muộn" note is visible.
+  const lateOrder = orders.filter(order => order.status === 'COMPLETED')[1]
+  if (lateOrder?.paidAt) lateOrder.completedAt = new Date(Date.parse(lateOrder.paidAt) + 75_000).toISOString()
+  // The third COMPLETED order has two bowls: the first failed (its allocation stays RESERVED, as DispenseService.fail
+  // leaves it), the second was dispensed afterwards, which moved the order to COMPLETED anyway (DispenseService.completed).
+  const mixed = orders.filter(order => order.status === 'COMPLETED')[2]
+  if (mixed) {
+    const line = mixed.items[0]
+    const amount = line.unitPrice! * 2
+    line.allocations[0].status = 'RESERVED'
+    line.allocations.push({ ...line.allocations[0], id: uuid('92000000', 900), inventoryItemId: uuid('70000000', 6), status: 'DISPENSED' })
+    Object.assign(line, { quantity: 2, totalPrice: amount })
+    Object.assign(mixed, { subtotal: amount, totalAmount: amount })
+    for (const payment of payments) if (payment.orderId === mixed.id) payment.amount = amount
+  }
+  const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
+
   return {
-    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, webhookLogs,
+    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, webhookLogs,
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
+}
+
+/** `D-` and 16 upper-case hex digits, like DispenseService.newCode; deterministic for seed rows. */
+export function seedCommandCode(n: number): string {
+  const mixed = (BigInt(n) * 0x9E3779B97F4A7C15n + 0x632BE59BD9B4E019n) & 0xFFFFFFFFFFFFFFFFn
+  return `D-${mixed.toString(16).toUpperCase().padStart(16, '0')}`
+}
+
+/**
+ * Commands of the seed orders, following DispenseService: created with the move to PAID (createdAt = paidAt), SENT on
+ * the first publish, ACKNOWLEDGED on DISPENSE_ACCEPTED, then SUCCESS (order COMPLETED), FAILED (DISPENSE_ABORTED) or
+ * TIMEOUT (no result within 60 s). Order status → command status: PAID → PENDING (not delivered yet), DISPENSING →
+ * ACKNOWLEDGED or SENT (alternately), COMPLETED → SUCCESS (FAILED for a bowl whose allocation is still RESERVED),
+ * DISPENSE_FAILED → FAILED (TIMEOUT for `timeoutOrderId`), REFUNDED → FAILED.
+ */
+function seedDispenseCommands(orders: MockOrder[], items: MockItem[], { timeoutOrderId }: { timeoutOrderId: string }): MockDispenseCommand[] {
+  const at = (base: string, offsetMs: number) => new Date(Date.parse(base) + offsetMs).toISOString()
+  const commands: MockDispenseCommand[] = []
+  let dispensing = 0
+  for (const order of orders) {
+    if (!order.paidAt) continue
+    const paidAt = order.paidAt
+    for (const allocation of order.items.flatMap(line => line.allocations)) {
+      const item = items.find(candidate => candidate.id === allocation.inventoryItemId)
+      if (!item) continue
+      const n = commands.length + 1
+      const base = { id: `94000000-0000-0000-0000-${String(n).padStart(12, '0')}`, commandCode: seedCommandCode(n), orderId: order.id, machineId: order.machineId, slotId: item.slotId, slotCode: allocation.slotCode ?? item.slotCode, inventoryItemId: item.id, createdAt: paidAt }
+      const sent = { sentAt: at(paidAt, 1_000) }
+      const acknowledged = { ...sent, acknowledgedAt: at(paidAt, 3_000) }
+      let row: Omit<MockDispenseCommand, 'updatedAt'>
+      // A bowl still RESERVED in a COMPLETED order is one whose command failed before another bowl succeeded.
+      if (order.status === 'COMPLETED' && allocation.status === 'RESERVED') row = { ...base, ...acknowledged, status: 'FAILED', completedAt: at(paidAt, 20_000) }
+      else if (order.status === 'COMPLETED') row = { ...base, ...acknowledged, status: 'SUCCESS', completedAt: order.completedAt ?? at(paidAt, 30_000) }
+      // DISPENSING starts with the first publish (markSent): alternately still SENT, and already ACKNOWLEDGED.
+      else if (order.status === 'DISPENSING') row = (dispensing++ % 2) ? { ...base, ...sent, status: 'SENT' } : { ...base, ...acknowledged, status: 'ACKNOWLEDGED' }
+      else if (order.status === 'DISPENSE_FAILED' && order.id === timeoutOrderId) row = { ...base, ...sent, status: 'TIMEOUT', completedAt: at(paidAt, 70_000) }
+      else if (order.status === 'DISPENSE_FAILED' || order.status === 'REFUNDED') row = { ...base, ...acknowledged, status: 'FAILED', completedAt: at(paidAt, 20_000) }
+      // PAID: the command exists but was not published yet (machine offline or MQTT off); once sent the order is DISPENSING.
+      else row = { ...base, status: 'PENDING', sentAt: null }
+      commands.push({ ...row, updatedAt: row.completedAt ?? row.acknowledgedAt ?? row.sentAt ?? row.createdAt })
+    }
+  }
+  return commands
 }
