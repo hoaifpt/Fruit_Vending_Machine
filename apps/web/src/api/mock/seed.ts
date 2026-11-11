@@ -21,6 +21,11 @@ export type MockOrder = Omit<S['OrderDetailResponse'], 'payments' | 'items'> & {
   /** Created by the kiosk during this session; only these advance over time (seed rows stay put). */
   live: boolean
 }
+/**
+ * A webhook log as the backend really answers it: rawPayload is the stored jsonb as a JSON value (the generated schema
+ * types it as a string, which the backend should fix: object | null).
+ */
+export type MockWebhookLog = Omit<S['PaymentWebhookLogDetailResponse'], 'rawPayload'> & { rawPayload: Record<string, unknown> | null }
 export type MockPayment = Omit<S['PaymentDetailResponse'], 'orderCode' | 'machineCode'> & {
   id: string; orderId: string; provider: string; status: NonNullable<S['PaymentDetailResponse']['status']>; amount: number; createdAt: string
 }
@@ -39,7 +44,7 @@ export interface MockStore {
   orders: MockOrder[]
   payments: MockPayment[]
   dispenseCommands: MockDispenseCommand[]
-  webhookLogs: S['PaymentWebhookLogDetailResponse'][]
+  webhookLogs: MockWebhookLog[]
   /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
   permissions: MockPermission[]
   roles: MockRole[]
@@ -183,7 +188,7 @@ export function createStore(nowMs: number): MockStore {
   const ORDER_STATUSES: MockOrder['status'][] = ['COMPLETED', 'COMPLETED', 'COMPLETED', 'CANCELLED', 'PENDING_PAYMENT', 'PAID', 'DISPENSING', 'DISPENSE_FAILED', 'PAYMENT_FAILED', 'REFUNDED']
   const orders: MockOrder[] = []
   const payments: MockPayment[] = []
-  const webhookLogs: S['PaymentWebhookLogDetailResponse'][] = []
+  const webhookLogs: MockWebhookLog[] = []
 
   for (let n = 1; n <= 45; n += 1) {
     const status = ORDER_STATUSES[(n - 1) % ORDER_STATUSES.length]
@@ -207,13 +212,6 @@ export function createStore(nowMs: number): MockStore {
       id: uuid('a0000000', n), orderId: id, provider: n % 3 === 0 ? 'PAYOS' : 'MOCK', status: paymentStatus, amount: item.price, paymentReference: reference,
       transactionId: paid ? `TXN${String(n).padStart(8, '0')}` : undefined, createdAt: iso(createdMs + 10_000), paidAt: paid ? iso(createdMs + 60_000) : undefined,
       expiredAt: iso(createdMs + 5 * 60_000), qrCode: paymentStatus === 'PENDING' ? `FRESHVEND-MOCK-QR|${reference}|${item.price}` : undefined,
-    })
-    const verified = n % 7 !== 0
-    webhookLogs.push({
-      id: uuid('b0000000', n), provider: n % 3 === 0 ? 'PAYOS' : 'MOCK', eventType: verified ? 'PAYMENT_SUCCESS' : 'UNKNOWN', reference, verified, receivedAt: iso(createdMs + 60_000),
-      // Every tenth body is not JSON and carries markup, so the "show as escaped text" rule is visible on screen.
-      rawPayload: n % 10 === 0 ? null : JSON.stringify({ paymentReference: reference, transactionId: `TXN${String(n).padStart(8, '0')}`, amount: item.price, status: 'SUCCESS' }),
-      rawBody: n % 10 === 0 ? `<script>alert('webhook ${n}')</script> not json` : null,
     })
   }
 
@@ -261,6 +259,43 @@ export function createStore(nowMs: number): MockStore {
     Object.assign(mixed, { subtotal: amount, totalAmount: amount })
     for (const payment of payments) if (payment.orderId === mixed.id) payment.amount = amount
   }
+  // Webhook logs (FE 6.2): the calls providers made, built once the amounts above are final so every body matches its
+  // payment (the third COMPLETED order is 2 bowls, its body says the doubled total). b0000000-n is the first call about
+  // payment n: a verified PAYMENT_SUCCESS / PAYMENT_FAILED, or for n % 7 a call with a bad signature and for n % 10 a body
+  // that is not JSON (markup, so "escaped text only" is visible), both rejected; a paid one then has its verified call
+  // as b1000000-n. Payments still PENDING or EXPIRED got no call. The three anomalies of the "Cần xử lý" view:
+  // PAYMENT_LATE (the cancelled order's late payment), PAYMENT_DUPLICATE (b0000000-99) and PAYMENT_AMOUNT_MISMATCH
+  // (b2000000-24: 1.000 ₫ reported for a payment of another amount, so the payment stayed EXPIRED).
+  // rawPayload is a JSON object, as the real backend sends it (jsonb); a body that was not JSON has rawPayload null and
+  // the exact text in rawBody (PaymentWebhookLogService).
+  const body = (payment: MockPayment, status: 'SUCCESS' | 'FAILED', amount = payment.amount): Record<string, unknown> => (payment.provider === 'PAYOS'
+    ? { code: status === 'SUCCESS' ? '00' : '01', desc: status === 'SUCCESS' ? 'success' : 'failed', success: status === 'SUCCESS',
+      data: { orderCode: payment.paymentReference, amount, description: `FV ${payment.paymentReference}`, reference: payment.transactionId ?? null, transactionDateTime: payment.paidAt ?? payment.createdAt } }
+    : { paymentReference: payment.paymentReference, transactionId: payment.transactionId ?? null, amount, status })
+  const call = (id: string, payment: MockPayment, receivedAt: string, kind: 'SUCCESS' | 'FAILED' | 'REJECTED' | 'NOT_JSON', amount?: number): MockWebhookLog => ({
+    id, provider: payment.provider, reference: payment.paymentReference ?? null, receivedAt,
+    verified: kind === 'SUCCESS' || kind === 'FAILED',
+    eventType: kind === 'SUCCESS' ? 'PAYMENT_SUCCESS' : kind === 'FAILED' ? 'PAYMENT_FAILED' : 'UNKNOWN',
+    rawPayload: kind === 'NOT_JSON' ? null : body(payment, kind === 'FAILED' ? 'FAILED' : 'SUCCESS', amount),
+    rawBody: kind === 'NOT_JSON' ? `<script>alert('webhook ${id.slice(-2)}')</script> not json` : null,
+  })
+  const plus = (instant: string, ms: number) => new Date(Date.parse(instant) + ms).toISOString()
+  for (let n = 1; n <= 45; n += 1) {
+    const payment = payments.find(candidate => candidate.id === uuid('a0000000', n))!
+    const paidCall = payment.status === 'SUCCESS' || payment.status === 'REFUNDED'
+    const at = payment.paidAt ?? plus(payment.createdAt, 50_000)
+    const rejected = n % 10 === 0 ? 'NOT_JSON' : n % 7 === 0 ? 'REJECTED' : undefined
+    if (rejected) {
+      webhookLogs.push(call(uuid('b0000000', n), payment, plus(at, -20_000), rejected))
+      if (paidCall) webhookLogs.push(call(uuid('b1000000', n), payment, at, 'SUCCESS'))
+    } else if (paidCall) webhookLogs.push(call(uuid('b0000000', n), payment, at, 'SUCCESS'))
+    else if (payment.status === 'FAILED') webhookLogs.push(call(uuid('b0000000', n), payment, at, 'FAILED'))
+  }
+  const duplicate = payments.find(payment => payment.id === uuid('a0000000', 99))!
+  webhookLogs.push(call(uuid('b0000000', 99), duplicate, duplicate.paidAt!, 'SUCCESS'))
+  const mismatched = payments.find(payment => payment.id === uuid('a0000000', 24))!
+  webhookLogs.push(call(uuid('b2000000', 24), { ...mismatched, transactionId: 'TXNMISMATCH01' }, plus(mismatched.createdAt, 90_000), 'SUCCESS', 1000))
+  for (const payment of payments) if (payment.id.startsWith('a3000000')) webhookLogs.push(call(`b3000000${payment.id.slice(8)}`, payment, payment.paidAt!, 'SUCCESS'))
   const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
 
   return {

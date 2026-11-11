@@ -1,37 +1,38 @@
+// T4 Nhật ký webhook (FE 6.2), ADMIN only, read only: every call a payment provider made, with server-side filters on the
+// URL. `?reference=` is the link target from a payment ("every call about this payment"). Items carry no body: the
+// payload is on the detail screen.
 import { webhookLogsApi } from '../../api/resources.ts'
-import { dateRangeToInstants, formatDateTime } from '../../lib/format.ts'
+import { FilterBar } from '../../components/ui/filter-bar.tsx'
+import { formatDateTime } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
-import { DataTable, DateFilter, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter, Toolbar, pageParam } from '../kit.tsx'
+import { activeFilterCount, clearFiltersPatch, sortParam } from '../../lib/table-query.ts'
+import { DataTable, DateFilter, Link, PAGE_SIZE, PageHead, Pagination, SearchFilter, SelectFilter } from '../kit.tsx'
+import { WEBHOOK_FILTER_KEYS, WEBHOOK_SORT_RULE, readWebhookFilters, webhookEventText, webhookListQuery, webhookLogPath } from '../payments.ts'
+import { LINK, VerifiedBadge } from '../payment-parts.tsx'
 import { useApi } from '../useApi.ts'
-
-const SORTS = [{ value: 'receivedAt,desc', label: 'Mới nhất' }, { value: 'receivedAt,asc', label: 'Cũ nhất' }, { value: 'provider,asc', label: 'Nhà cung cấp' }]
 
 function WebhookLogsPage() {
   const { params, update } = useQueryParams()
-  const provider = params.get('provider') ?? '', verified = params.get('verified') ?? '', reference = params.get('reference') ?? ''
-  const from = params.get('from') ?? '', to = params.get('to') ?? '', sort = params.get('sort') ?? 'receivedAt,desc', page = pageParam(params)
-  const range = dateRangeToInstants(from, to)
-  const state = useApi(signal => webhookLogsApi.list({
-    page, size: PAGE_SIZE, provider: provider || undefined, verified: verified ? verified === 'true' : undefined, reference: reference || undefined,
-    receivedFrom: range.from, receivedTo: range.to, sort,
-  }, signal), params.toString())
+  const filters = readWebhookFilters(params)
+  const state = useApi(signal => webhookLogsApi.list(webhookListQuery(filters, PAGE_SIZE), signal), params.toString())
   return <>
-    <PageHead title="Webhook thanh toán" subtitle="Bằng chứng mọi lần nhà cung cấp gọi về hệ thống. Chỉ xem." />
-    <Toolbar>
-      <SearchFilter label="Nhà cung cấp" value={provider} onCommit={value => update({ provider: value })} placeholder="Ví dụ: PAYOS" />
-      <SelectFilter label="Xác thực" value={verified} onChange={value => update({ verified: value })} options={[{ value: 'true', label: 'Đã xác thực' }, { value: 'false', label: 'Bị từ chối' }]} />
-      <SearchFilter label="Mã tham chiếu" value={reference} onCommit={value => update({ reference: value })} />
-      <DateFilter label="Từ ngày" value={from} onChange={value => update({ from: value })} />
-      <DateFilter label="Đến ngày (gồm cả ngày này)" value={to} onChange={value => update({ to: value })} />
-      <SelectFilter label="Sắp xếp" value={sort} onChange={value => update({ sort: value })} options={SORTS} empty="Mặc định" />
-    </Toolbar>
-    <DataTable state={state} rows={state.data?.content} rowKey={log => log.id ?? ''} columns={[
-      { head: 'Nhận lúc', cell: log => <Link to={`/admin/webhook-logs/${log.id}`}>{formatDateTime(log.receivedAt)}</Link> },
-      { head: 'Nhà cung cấp', cell: log => log.provider },
-      { head: 'Sự kiện', cell: log => log.eventType || '—' },
-      { head: 'Tham chiếu', cell: log => log.reference || '—' },
-      { head: 'Xác thực', cell: log => log.verified ? 'Đã xác thực' : 'Bị từ chối' },
-    ]} />
+    <PageHead title="Webhook thanh toán" subtitle="Bằng chứng mọi lần nhà cung cấp gọi về hệ thống, kể cả lần bị từ chối. Chỉ xem." />
+    <FilterBar activeCount={activeFilterCount(WEBHOOK_FILTER_KEYS.map(key => filters[key]))} onClear={() => update(clearFiltersPatch(WEBHOOK_FILTER_KEYS))}>
+      <SearchFilter label="Nhà cung cấp" value={filters.provider} onCommit={value => update({ provider: value })} placeholder="Ví dụ: PAYOS" />
+      <SelectFilter label="Xác thực" value={filters.verified} onChange={value => update({ verified: value })} options={[{ value: 'true', label: 'Đã xác thực' }, { value: 'false', label: 'Bị từ chối' }]} />
+      <SearchFilter label="Mã tham chiếu" value={filters.reference} onCommit={value => update({ reference: value })} placeholder="Khớp chính xác" />
+      <DateFilter label="Từ ngày" value={filters.from} onChange={value => update({ from: value })} />
+      <DateFilter label="Đến ngày (gồm cả ngày này)" value={filters.to} onChange={value => update({ to: value })} />
+    </FilterBar>
+    <DataTable state={state} rows={state.data?.content} rowKey={log => log.id ?? ''} caption="Nhật ký webhook thanh toán, mới nhất ở trên"
+      empty={filters.reference ? 'Chưa có lần gọi nào với mã tham chiếu này: nhà cung cấp chưa báo kết quả cho thanh toán đó.' : 'Không có lần gọi nào phù hợp. Hãy đổi hoặc xóa bộ lọc.'}
+      sort={filters.sort} onSort={next => update({ sort: sortParam(next, WEBHOOK_SORT_RULE) })} columns={[
+        { head: 'Nhận lúc', sortKey: 'receivedAt', firstDirection: 'desc', nowrap: true, cell: log => <Link to={webhookLogPath(log.id)} className={`${LINK} whitespace-nowrap`} label={`Mở webhook nhận lúc ${formatDateTime(log.receivedAt)}`}>{formatDateTime(log.receivedAt)}</Link> },
+        { head: 'Nhà cung cấp', sortKey: 'provider', nowrap: true, cell: log => log.provider ?? '—' },
+        { head: 'Sự kiện', cell: log => webhookEventText(log.eventType) },
+        { head: 'Mã tham chiếu', cell: log => log.reference ? <span className="font-mono text-[13px] break-all">{log.reference}</span> : '—' },
+        { head: 'Xác thực', cell: log => <VerifiedBadge verified={log.verified} /> },
+      ]} />
     {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={next => update({ page: String(next) })} />}
   </>
 }

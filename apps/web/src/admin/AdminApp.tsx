@@ -77,9 +77,10 @@ function AdminApp() {
       orders: <OrdersPage />,
       'order-detail': <OrderDetailPage orderId={id} />,
       payments: <PaymentsPage />,
-      'payment-detail': <PaymentDetailPage paymentId={id} />,
+      // key: a new id is a new screen (state reset, no answer of the previous id shown under the new one).
+      'payment-detail': <PaymentDetailPage key={id} paymentId={id} />,
       'webhook-logs': <WebhookLogsPage />,
-      'webhook-log-detail': <WebhookLogDetailPage logId={id} />,
+      'webhook-log-detail': <WebhookLogDetailPage key={id} logId={id} />,
     }[route.page]
   }
 
