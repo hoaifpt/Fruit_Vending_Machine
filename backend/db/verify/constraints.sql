@@ -26,8 +26,8 @@ DECLARE
     command UUID; price_snapshot NUMERIC;
     test_suffix TEXT := gen_random_uuid()::TEXT;
 BEGIN
-    IF (SELECT count(*) FROM flyway_schema_history WHERE success AND version IN ('1','2','3','4','5','6','7','8','9')) <> 9 THEN
-        RAISE EXCEPTION 'Expected all nine successful Flyway migrations';
+    IF (SELECT count(*) FROM flyway_schema_history WHERE success AND version IN ('1','2','3','4','5','6','7','8')) <> 8 THEN
+        RAISE EXCEPTION 'Expected all eight successful Flyway migrations';
     END IF;
     IF (SELECT count(*) FROM roles WHERE name IN ('ADMIN', 'STAFF')) <> 2 THEN
         RAISE EXCEPTION 'Missing initial roles';
@@ -35,8 +35,8 @@ BEGIN
 
     INSERT INTO machines(code, name) VALUES ('TEST-A-' || test_suffix, 'Test A') RETURNING id INTO machine_a;
     INSERT INTO machines(code, name) VALUES ('TEST-B-' || test_suffix, 'Test B') RETURNING id INTO machine_b;
-    INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (machine_a, 'A', 10) RETURNING id INTO slot_a;
-    INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (machine_b, 'A', 10) RETURNING id INTO slot_b;
+    INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (machine_a, 'A1', 10) RETURNING id INTO slot_a;
+    INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (machine_b, 'A1', 10) RETURNING id INTO slot_b;
     INSERT INTO products(sku, name, price) VALUES ('TEST-' || test_suffix, 'Test bowl', 10) RETURNING id INTO product;
     INSERT INTO product_batches(batch_code, product_id, manufactured_at, expires_at, quantity)
     VALUES ('TEST-' || test_suffix, product, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '1 day', 2)
@@ -55,8 +55,7 @@ BEGIN
     PERFORM pg_temp.expect_error(format('UPDATE machines SET humidity_max = 101 WHERE id = %L', machine_a), '23514');
     PERFORM pg_temp.expect_error(format('UPDATE machines SET temperature_min = 9, temperature_max = 8 WHERE id = %L', machine_a), '23514');
     PERFORM pg_temp.expect_error(format('UPDATE machine_slots SET capacity = 0 WHERE id = %L', slot_a), '23514');
-    PERFORM pg_temp.expect_error(format('INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (%L, ''A'', 1)', machine_a), '23505');
-    PERFORM pg_temp.expect_error(format('INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (%L, ''C'', 1)', machine_a), '23514');
+    PERFORM pg_temp.expect_error(format('INSERT INTO machine_slots(machine_id, slot_code, capacity) VALUES (%L, ''A1'', 1)', machine_a), '23505');
     PERFORM pg_temp.expect_error(format('UPDATE product_batches SET expires_at = manufactured_at WHERE id = %L', batch), '23514');
     PERFORM pg_temp.expect_error(format('UPDATE inventory_items SET status = ''UNKNOWN'' WHERE id = %L', bowl), '23514');
     PERFORM pg_temp.expect_error(format('UPDATE inventory_items SET status = ''SOLD'' WHERE id = %L', bowl), '23514');
@@ -92,10 +91,7 @@ BEGIN
     INSERT INTO dispense_commands(command_code, order_id, machine_id, slot_id, inventory_item_id)
     VALUES ('CMD-' || test_suffix, purchase, machine_a, slot_a, bowl) RETURNING id INTO command;
     PERFORM pg_temp.expect_error(format('INSERT INTO dispense_commands(command_code, order_id, machine_id, slot_id, inventory_item_id) VALUES (%L, %L, %L, %L, %L)', 'DUP-' || test_suffix, purchase, machine_a, slot_a, bowl), '23505');
-    -- V14: a FAILED/TIMEOUT command always carries a failure reason, and only those do.
-    PERFORM pg_temp.expect_error(format('UPDATE dispense_commands SET status = ''FAILED'' WHERE id = %L', command), '23514');
-    PERFORM pg_temp.expect_error(format('UPDATE dispense_commands SET failure_reason = ''NOT_DELIVERED'' WHERE id = %L', command), '23514');
-    UPDATE dispense_commands SET status = 'FAILED', failure_reason = 'NOT_DELIVERED' WHERE id = command;
+    UPDATE dispense_commands SET status = 'FAILED' WHERE id = command;
     INSERT INTO dispense_commands(command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, completed_at)
     VALUES ('RETRY-' || test_suffix, purchase, machine_a, slot_a, bowl, 'SUCCESS', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
     PERFORM pg_temp.expect_error(format('INSERT INTO dispense_commands(command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, completed_at) VALUES (%L, %L, %L, %L, %L, ''SUCCESS'', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)', 'DOUBLE-' || test_suffix, purchase, machine_a, slot_a, bowl), '23505');

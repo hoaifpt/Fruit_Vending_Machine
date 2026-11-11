@@ -18,20 +18,11 @@ public interface DispenseCommandRepository extends JpaRepository<DispenseCommand
 
     boolean existsByCommandCode(String commandCode);
 
-    @Query("""
-            select new com.fruitmachine.backend.dispense.repository.CommandRoute(c.id, c.orderId, c.machineId, m.code, c.status, c.sentAt)
-            from DispenseCommand c join c.machine m where c.commandCode = :code""")
-    Optional<CommandRoute> findRouteByCommandCode(@Param("code") String commandCode);
+    @Query("select c.id from DispenseCommand c where c.commandCode = :code")
+    Optional<UUID> findIdByCommandCode(@Param("code") String commandCode);
 
-    @Query("""
-            select new com.fruitmachine.backend.dispense.repository.CommandRoute(c.id, c.orderId, c.machineId, m.code, c.status, c.sentAt)
-            from DispenseCommand c join c.machine m where c.id = :id""")
-    Optional<CommandRoute> findRouteById(@Param("id") UUID id);
-
-    /** Another command of the machine that was published and has no result yet (the firmware runs one command at a time). */
-    @Query("select count(c) > 0 from DispenseCommand c where c.machineId = :machineId and c.status in :statuses and c.id <> :id")
-    boolean existsOtherByMachineIdAndStatusIn(@Param("machineId") UUID machineId, @Param("statuses") Collection<DispenseStatus> statuses,
-            @Param("id") UUID id);
+    @Query("select c.orderId from DispenseCommand c where c.id = :id")
+    Optional<UUID> findOrderIdById(@Param("id") UUID id);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from DispenseCommand c where c.id = :id")

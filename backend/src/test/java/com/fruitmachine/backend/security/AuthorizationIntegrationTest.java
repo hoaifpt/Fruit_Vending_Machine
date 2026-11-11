@@ -61,11 +61,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"})
 @AutoConfigureMockMvc
 @Import(AuthorizationIntegrationTest.RbacTestConfiguration.class)
-@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
 class AuthorizationIntegrationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String PASSWORD = "RBAC-test-only-passphrase!";
     static final String KEY = newKey();
     static final String BASE = "/api/v1/test-only/rbac";
@@ -143,8 +142,8 @@ class AuthorizationIntegrationTest {
         String token = login(admin);
         request("/admin", token).andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(admin.getId().toString()))
-                .andExpect(jsonPath("$.principalAuthorities", contains(authorities("ADMIN"))))
-                .andExpect(jsonPath("$.contextAuthorities", contains(authorities("ADMIN"))))
+                .andExpect(jsonPath("$.principalAuthorities", contains("ROLE_ADMIN")))
+                .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_ADMIN")))
                 .andExpect(header().doesNotExist("Set-Cookie"));
         request("/shared", token).andExpect(status().isOk());
         request("/staff", token).andExpect(status().isForbidden());
@@ -156,8 +155,8 @@ class AuthorizationIntegrationTest {
         User staff = account("STAFF");
         String token = login(staff);
         request("/staff", token).andExpect(status().isOk())
-                .andExpect(jsonPath("$.principalAuthorities", contains(authorities("STAFF"))))
-                .andExpect(jsonPath("$.contextAuthorities", contains(authorities("STAFF"))));
+                .andExpect(jsonPath("$.principalAuthorities", contains("ROLE_STAFF")))
+                .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_STAFF")));
         request("/shared", token).andExpect(status().isOk());
         int before = operations.invocationCount();
         var denied = request("/admin", token).andExpect(status().isForbidden())
@@ -183,8 +182,8 @@ class AuthorizationIntegrationTest {
         String token = login(user);
         for (String path : List.of("/admin", "/staff", "/shared")) {
             request(path, token).andExpect(status().isOk())
-                    .andExpect(jsonPath("$.principalAuthorities", contains(authorities("ADMIN", "STAFF"))))
-                    .andExpect(jsonPath("$.contextAuthorities", contains(authorities("ADMIN", "STAFF"))));
+                    .andExpect(jsonPath("$.principalAuthorities", contains("ROLE_ADMIN", "ROLE_STAFF")))
+                    .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_ADMIN", "ROLE_STAFF")));
         }
     }
 
@@ -238,7 +237,7 @@ class AuthorizationIntegrationTest {
         addRole(user, "STAFF");
         request("/admin", token).andExpect(status().isForbidden());
         request("/staff", token).andExpect(status().isOk())
-                .andExpect(jsonPath("$.contextAuthorities", contains(authorities("STAFF"))));
+                .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_STAFF")));
         jdbc.update("DELETE FROM user_roles WHERE user_id = ?", user.getId());
         request("/shared", token).andExpect(status().isForbidden());
         request("/any", token).andExpect(status().isOk());
@@ -314,14 +313,7 @@ class AuthorizationIntegrationTest {
                         "/api/v1/products", "/api/v1/products/{id}", "/api/v1/products/{id}/status",
                         "/api/v1/machines", "/api/v1/machines/{id}", "/api/v1/machines/{id}/status",
                         "/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}", "/api/v1/machines/{machineId}/slots/{slotId}/status",
-                "/api/v1/product-batches", "/api/v1/product-batches/{id}",
-                "/api/v1/inventory", "/api/v1/inventory/{id}", "/api/v1/inventory/load", "/api/v1/inventory/{id}/remove", "/api/v1/inventory/transactions",
-                "/api/v1/machines/{machineId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary", "/api/v1/machines/{machineId}/kiosk-credentials", "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke",
-                "/api/v1/kiosk/me", "/api/v1/kiosk/catalog", "/api/v1/kiosk/orders", "/api/v1/kiosk/orders/{orderId}",
-                "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/kiosk/orders/{orderId}/payments", "/api/v1/payments", "/api/v1/payments/{id}",
-                "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}",
-                "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions",
-                "/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest");
+                "/api/v1/product-batches", "/api/v1/product-batches/{id}");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
@@ -331,17 +323,6 @@ class AuthorizationIntegrationTest {
     static class RbacTestConfiguration {
         @Bean RbacOperations rbacOperations() { return new RbacOperations(); }
         @Bean RbacTestController rbacTestController(RbacOperations operations) { return new RbacTestController(operations); }
-    }
-
-    /** Issue #48: ROLE_* plus the roles' permission codes as seeded by V13, sorted by name like Spring's User. */
-    static String[] authorities(String... roles) {
-        var permissions = new java.util.TreeSet<String>();
-        for (String role : roles) {
-            permissions.add("ROLE_" + role);
-            permissions.addAll(role.equals("ADMIN") ? com.fruitmachine.backend.security.permission.Permissions.ALL
-                    : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ"));
-        }
-        return permissions.toArray(String[]::new);
     }
 
     public record Snapshot(UUID id, List<String> principalAuthorities, List<String> contextAuthorities) { }

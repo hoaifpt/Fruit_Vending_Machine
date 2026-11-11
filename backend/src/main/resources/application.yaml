@@ -3,8 +3,7 @@ spring:
     name: fruit-machine-backend
   # Supports running Maven from the module or from the repository root.
   config:
-    # APP_DOTENV_IMPORT lets tests disable the developer .env (see pom.xml surefire); unset in normal runs.
-    import: "${APP_DOTENV_IMPORT:optional:file:../.env[.properties],optional:file:.env[.properties]}"
+    import: "optional:file:../.env[.properties],optional:file:.env[.properties]"
   datasource:
     url: jdbc:postgresql://${DB_HOST:127.0.0.1}:${DB_PORT:5433}/${DB_NAME:fruit_machine}
     username: ${DB_USER:fruit_machine}
@@ -55,57 +54,6 @@ app:
   account:
     password:
       min-length: ${PASSWORD_MIN_LENGTH:12}
-  payment:
-    provider: ${PAYMENT_PROVIDER:MOCK}
-    attempt-ttl: ${PAYMENT_ATTEMPT_TTL:PT5M}
-    min-remaining-hold: ${PAYMENT_MIN_REMAINING_HOLD:PT30S}
-    max-attempts-per-order: ${PAYMENT_MAX_ATTEMPTS_PER_ORDER:5}
-    provider-timeout: ${PAYMENT_PROVIDER_TIMEOUT:PT10S}
-    mock:
-      # HMAC secret that signs MOCK webhooks (development/tests only). Blank means every MOCK webhook fails verification.
-      webhook-secret: ${PAYMENT_MOCK_WEBHOOK_SECRET:}
-    # Required only when PAYMENT_PROVIDER=PAYOS; no credential has a default value.
-    payos:
-      base-url: ${PAYOS_BASE_URL:https://api-merchant.payos.vn}
-      client-id: ${PAYOS_CLIENT_ID:}
-      api-key: ${PAYOS_API_KEY:}
-      checksum-key: ${PAYOS_CHECKSUM_KEY:}
-      return-url: ${PAYOS_RETURN_URL:}
-      cancel-url: ${PAYOS_CANCEL_URL:}
-      description-prefix: ${PAYOS_DESCRIPTION_PREFIX:FV}
-      description-max-length: ${PAYOS_DESCRIPTION_MAX_LENGTH:9}
-      cancel-timeout: ${PAYOS_CANCEL_TIMEOUT:PT3S}
-  order:
-    reservation-ttl: ${ORDER_RESERVATION_TTL:PT5M}
-    expiry-sweep:
-      enabled: ${ORDER_EXPIRY_SWEEP_ENABLED:true}
-      interval: ${ORDER_EXPIRY_SWEEP_INTERVAL:PT30S}
-      batch-size: ${ORDER_EXPIRY_SWEEP_BATCH_SIZE:50}
-  # Dispense commands to machines over MQTT (api-contract/mqtt-contract.md). Disabled: commands stay PENDING until pending-timeout.
-  mqtt:
-    enabled: ${MQTT_ENABLED:false}
-    broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
-    client-id: ${MQTT_CLIENT_ID:fruit-backend}
-    username: ${MQTT_USERNAME:}
-    password: ${MQTT_PASSWORD:}
-    topic-root: ${MQTT_TOPIC_ROOT:vending}
-  dispense:
-    resend-after: ${DISPENSE_RESEND_AFTER:PT5S}
-    # Published command without a result, counted from its first delivery: outcome unknown, bowl blocked, machine MAINTENANCE.
-    timeout: ${DISPENSE_TIMEOUT:PT60S}
-    # Command that could never be published, counted from its creation: nothing moved, the bowl is available again.
-    pending-timeout: ${DISPENSE_PENDING_TIMEOUT:PT120S}
-  # Connectivity from machines.last_seen_at: 2 missed heartbeats (30 s each) = WARNING, 180 s = OFFLINE (MQTT contract §7).
-  machine-health:
-    warning-after: ${MACHINE_WARNING_AFTER:PT60S}
-    offline-after: ${MACHINE_OFFLINE_AFTER:PT180S}
-  # Telemetry intake (in memory, one backend instance): readings closer than min-interval and repeated messageIds are dropped.
-  telemetry:
-    min-interval: ${TELEMETRY_MIN_INTERVAL:PT10S}
-    duplicate-window: ${TELEMETRY_DUPLICATE_WINDOW:PT10M}
-    sweep:
-      enabled: ${DISPENSE_SWEEP_ENABLED:true}
-      interval: ${DISPENSE_SWEEP_INTERVAL:PT2S}
 
 security:
   jwt:

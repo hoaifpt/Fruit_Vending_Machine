@@ -106,11 +106,10 @@ Implemented by issue #6:
 
 Issue #10 enables @EnableMethodSecurity in existing SecurityConfig. Reuse the current
 CustomUserDetailsService/AuthenticatedUser mapping and current DB roles for every JWT
-request, no duplicate filter/role model or implicit ADMIN > STAFF hierarchy. Superseded by
-issue #48 (section 23): use-case entry points check a permission with
-@PreAuthorize(Permissions.HAS_<CODE>), never hasRole('ADMIN')/hasAnyRole('ADMIN','STAFF');
-the kiosk keeps hasRole('KIOSK'); invocation must cross the Spring proxy.
-See ../../docs/permission-authorization.md (and ../../docs/admin-staff-authorization.md for history).
+request, no duplicate filter/role model or implicit ADMIN > STAFF hierarchy. Future
+Spring-managed use-case entry points use @PreAuthorize with ADMIN, STAFF, either or
+isAuthenticated; invocation must cross the Spring proxy. No production role-protected
+business operation is invented in this issue. See ../../docs/admin-staff-authorization.md.
 
 ### auth
 
@@ -446,10 +445,7 @@ Update Order
 
 ## 10. MQTT Architecture
 
-MQTT is an integration boundary. Topics, envelope, commands, events, payloads, timings, error codes and broker ACL are
-defined only in `api-contract/mqtt-contract.md` (examples in `api-contract/mqtt/examples/`); the wire values live in
-`mqtt/contract/` (`MachineChannel`, `MachineCommandType`, `MachineEventType`, `MachineErrorCode`) and
-`MqttContractDocumentationTest` keeps code, contract, examples, docs and ACL aligned. Do not hard-code topic or event strings.
+MQTT is an integration boundary.
 
 Preferred flow:
 
@@ -467,16 +463,16 @@ Repository
 
 Do not implement business workflows directly inside MQTT callbacks.
 
-Outbound commands (dispense today, maintenance/reset later):
+Future outbound telemetry/event integration (not a dispense transport):
 
 ```text
 Application Service
      ↓
-MachineCommandGateway (MqttMachineGateway)
+MQTT Publisher
      ↓
-Broker: vending/{machineCode}/commands
+Broker
      ↓
-Machine (broker account = machine code, ACL per machine)
+Authenticated machine/kiosk integration
 ```
 
 ---
@@ -587,106 +583,3 @@ The current architecture is intentionally a modular monolith.
 Do not prematurely split modules into services.
 
 Module boundaries should remain clean enough that extraction is possible later if actually required.
-
-## 16. Inventory Management — Issue #22
-
-inventory owns controller/dto/service/repository/mapper and reuses existing entities.
-All eight management operations require ADMIN or STAFF at HTTP and service boundaries.
-Load/remove and per-item immutable history commit atomically. Product/Batch/Machine/Slot
-locks serialize capacity, batch quantity and configuration changes; removal uses Slot/Item.
-Database specifications/page wrappers and to-one entity graphs avoid collection paging/N+1.
-Slot summary derives occupancy, expiry, availability and sellability without stock counters.
-Only forward-only V9 extends history with reason/status snapshots after real schema audit.
-Orders/reservations/payments/dispense/schedulers are future scope. API details and local
-Swagger setup: [inventory-management.md](../../docs/inventory-management.md).
-
-## 17. Core integration testing — Issue #24
-
-Test-only support/TestPostgres centralizes disposable PostgreSQL18 configuration for
-existing suites. AbstractCoreIntegrationTest provides profile test, dynamic DB/JWT and
-MockMvc; TestDataFactory establishes unique roots through existing HTTP controllers.
-Core tests cover cross-domain flow, actual SQL faults/rollback, observed overlapping
-transactions and DB constraints. Contexts/containers dispose after class; append-only
-history is isolated by unique fixtures rather than erased between methods. Existing
-feature tests remain regression coverage, all discovered by Surefire *Test in clean verify.
-CI workflow uses Java21/Docker and publishes reports even on failure. No production API,
-mapping/migration/dependency change. See ../../docs/core-integration-testing.md.
-
-## 18. Order management and kiosk authentication — Issue #27
-
-Kiosks authenticate with a machine-bound key in the dedicated `X-Kiosk-Key` header, never with a
-user JWT and never through a fake user/role. `security.kiosk.KioskAuthenticationFilter` runs only for
-`/api/v1/kiosk/**` after the JWT filter, calls `KioskCredentialService.authenticate` (prefix lookup,
-SHA-256 digest, constant-time compare, ACTIVE only) and sets an `AuthenticatedKiosk` principal with
-ROLE_KIOSK; every failure is a uniform 401 and the machine always comes from the credential.
-SecurityConfig registers `/api/v1/kiosk/**` -> KIOSK and `/api/v1/machines/*/kiosk-credentials/**` ->
-ADMIN before the broader machine rules, `GET /api/v1/orders/**` -> ADMIN/STAFF and denies every
-other orders method. User JWT on kiosk paths is 403; kiosk key on management paths is 401.
-
-`machine.kiosk` owns credential entity/repository/service/controllers (ADMIN issue/rotate, list,
-revoke) and kiosk identity. `inventory` owns the catalog (one grouped query). `order` owns
-OrderController (read-only management), KioskOrderController, OrderService (create/read/cancel/list),
-OrderReservationService (slot-head selection since #35, RESERVE and RETURN side effects),
-OrderExpiryService (own transaction per order, lock-then-recheck, injected Clock),
-OrderExpiryScheduler (trigger only, `app.order.expiry-sweep.enabled`) and OrderCodeGenerator.
-Typed `app.order.*` properties fail startup when invalid. Only PENDING_PAYMENT and CANCELLED are
-produced; payment, QR, webhooks, PAID and dispensing remain future issues. See
-[order-management.md](../../docs/order-management.md).
-
-## 19. Payment service — Issue #29
-
-`payment.gateway.PaymentGateway` is the only provider boundary (provider code, new reference, create payment); webhook
-verification is added by the webhook issue. `PaymentGatewayRegistry` resolves the single gateway named by
-`app.payment.provider` and refuses an unknown code or MOCK under the prod profile. `MockPaymentGateway` never calls a network
-and never marks anything paid. `PaymentService` orchestrates attempt creation without a transaction and calls the transactional
-steps of `PaymentAttemptTransactions` through the Spring proxy; the provider call runs on its own thread with `provider-timeout`
-and is refused if an ambient transaction exists. `PaymentService.expirePendingPayments` is called by the order release workflow
-(kiosk cancel and expiry sweep) after the order lock, giving the order Order -> Payment -> InventoryItem. `KioskPaymentController`
-creates or reuses an attempt; `PaymentController` is ADMIN read-only; kiosk polling (`currentPayment`) and order details
-(`payments[]`) extend the #27 DTOs. `PaymentProviderException` maps to a generic 502 in GlobalExceptionHandler. Payment SUCCESS,
-Order PAID, webhooks and real providers remain future issues. See [payment-service.md](../../docs/payment-service.md).
-
-## 20. payOS provider adapter — Issue #31
-
-`PayOsPaymentGateway` implements `PaymentGateway` in `payment.gateway.payos` and is the only place that knows payOS. The interface gained
-`supportsAmount` (integer VND only for payOS; checked in attempt step 1, unsupported amounts return 409 before any attempt exists),
-`cancelPayment` (default no-op) and `validateConfiguration` (called by `PaymentGatewayRegistry` for the active gateway only, so MOCK needs no payOS secrets and
-a PAYOS start with missing values fails naming properties, never values). `PayOsClient` uses Spring `RestClient` with per-call timeouts, never logs bodies and maps every failure to a
-sanitized `PaymentProviderException`. `PayOsSignature` holds the HMAC-SHA256 helpers; `PayOsWebhookVerifier` and `PayOsWebhookParser` are provider components without an endpoint.
-`PaymentService.expirePendingPayments` and attempt replacement publish `PaymentExpiredEvent`; `PaymentCancellations` (`@TransactionalEventListener(AFTER_COMMIT)`)
-calls the active gateway only for attempts of that provider, swallows failures with a WARN naming the reference, and is also called directly when attempt creation finds its attempt superseded.
-No business service references payOS classes. See [payment-provider.md](../../docs/payment-provider.md).
-
-## 21. Payment webhook handling — Issue #33
-
-`PaymentGateway.verifyWebhook(rawBody, headers)` returns a `WebhookVerificationResult` (verified flag, event type, untrusted reference hint and signature for the log, and a `VerifiedPaymentEvent` only when verified and actionable);
-`webhookAcknowledgement()` supplies the provider body. PAYOS delegates to `PayOsWebhookVerifier` and `PayOsWebhookParser`; MOCK verifies `X-Mock-Signature` (HMAC-SHA256 of the raw body under
-`app.payment.mock.webhook-secret`, blank secret never verifies). `PaymentWebhookController` is the only public endpoint (`POST /api/v1/webhooks/payments/{provider}`, permitAll for exactly that path), reads the
-raw body (64 KB, JSON only) and maps results; `PaymentWebhookService` orchestrates verify, log, process without a transaction of its own; `PaymentWebhookLogWriter` persists the attempt with REQUIRES_NEW;
-`PaymentConfirmationService` is the single place that produces payment SUCCESS and order PAID (one transaction, Order then Payment locks, idempotent, amounts compared with compareTo);
-`PaymentAnomalyRecorder` writes audit_logs rows (joins the transaction, or its own for a rolled-back unique violation); `PaymentWebhookLogService` and `PaymentWebhookLogController` are the ADMIN read APIs
-and `requiresAttention` is a derived filter on payments. Business services never reference provider classes. Tests never read the developer .env (see CODING_RULES). See [payment-webhook.md](../../docs/payment-webhook.md).
-
-## 22. Saleable inventory = sellable slot head — Issue #35
-
-Saleable inventory is the sellable head of a slot, not any AVAILABLE bowl: the head is the physically present bowl
-(AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED) with the earliest loaded_at (tie-break id), and only an AVAILABLE head whose batch outlives
-the hold deadline, of an ACTIVE product in an ACTIVE slot of an ACTIVE machine, can be reserved. Hence at most one RESERVED bowl per slot.
-`OrderService.createOrder` takes one productId; `OrderReservationService.selectHead` locks candidate slots (FOR UPDATE, id order), recomputes
-heads in SQL (`InventoryItemRepository.findSellableHeadId`, DISTINCT ON) and locks the chosen head. `KioskCatalogService` uses one aggregate
-SQL with the same head rule. `InventoryService.getInventorySummary` adds headStatus/headExpired under REPEATABLE READ. Release is unchanged.
-
-## 23. Permission-based authorization — Issue #48
-
-Roles are sets of permissions (V13 `permissions`, `role_permissions`; entities `user.entity.Permission`, `RolePermission`,
-`Role.permissionGrants`/`getPermissions()`). `CustomUserDetailsService` builds authorities = `ROLE_<name>` + permission codes from one
-entity-graph query on every JWT request (no cache, so a change applies on the next request); the JWT `roles` claim keeps `ROLE_*` only.
-Every protected management endpoint checks one permission at both levels, which must name the same code:
-`SecurityConfig` URL rules (`hasAuthority`, GET = read permission, other methods = write permission of the path, so 403 precedes
-request validation) and `@PreAuthorize(Permissions.HAS_<CODE>)` on controller and service methods (constants in
-`security.permission.Permissions`, so typos fail compilation). The kiosk keeps `hasRole('KIOSK')`; login and the provider webhook stay public.
-`user.service.RolePermissionService` + `RoleController`/`PermissionController` (tag "Roles & Permissions", PERMISSION_MANAGE) list
-permissions/roles and replace a role's set under a role row lock, with the ADMIN lockout guard (must keep PERMISSION_MANAGE and
-USER_WRITE) and one `ROLE_PERMISSIONS_CHANGED` audit row. Swagger adds `x-required-permission` to each operation from the handler's
-@PreAuthorize (OpenApiConfig). Adding a permission later: migration (permission + role_permissions rows, fixed UUIDs), constant,
-URL rule + @PreAuthorize, extend the authorization tests. See [permission-authorization.md](../../docs/permission-authorization.md).

@@ -62,7 +62,7 @@ public final class TestDataFactory {
     }
 
     public UUID slot(UUID machineId, int capacity, String token) throws Exception {
-        return id(api("POST", "/api/v1/machines/" + machineId + "/slots", Map.of("slotCode", "A", "capacity", capacity), token, 201));
+        return id(api("POST", "/api/v1/machines/" + machineId + "/slots", Map.of("slotCode", "A1", "capacity", capacity), token, 201));
     }
 
     public UUID batch(UUID productId, int quantity, String token) throws Exception {

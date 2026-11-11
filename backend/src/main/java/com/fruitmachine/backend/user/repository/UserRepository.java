@@ -28,15 +28,6 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @EntityGraph(attributePaths = "roleMemberships.role")
     Optional<User> findWithRolesById(UUID id);
 
-    /** Authentication: user, roles and every role's permissions in one SQL statement (Sets, so no MultipleBagFetchException). */
-    @EntityGraph(attributePaths = "roleMemberships.role.permissionGrants.permission")
-    @Query("select u from User u where u.email = :email")
-    Optional<User> findWithAuthoritiesByEmail(@Param("email") String email);
-
-    @EntityGraph(attributePaths = "roleMemberships.role.permissionGrants.permission")
-    @Query("select u from User u where u.id = :id")
-    Optional<User> findWithAuthoritiesById(@Param("id") UUID id);
-
     // Page roots first: fetching a collection in this query would paginate in memory.
     @Query("""
             select u from User u

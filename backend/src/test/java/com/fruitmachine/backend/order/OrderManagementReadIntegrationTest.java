@@ -15,14 +15,14 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
     /** Each product has its own column (slot), so one PENDING order per product can coexist. */
     private Shop shop() throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "A", 30), second = createSlot(machine, "B", 30);
+        UUID slot = createSlot(machine, "S1", 30), second = createSlot(machine, "S2", 30);
         UUID a = createProduct("Read A", "10000"), b = createProduct("Read B", "2500.50");
         load(fixtures.batch(a, 10, staff.token()), slot, 10);
         load(fixtures.batch(b, 10, staff.token()), second, 10);
         return new Shop(machine, slot, a, b, issueKey(machine));
     }
 
-    /** Historical (pre-#35) order: Read A x2 from column A and Read B x1 from column B, CANCELLED with RELEASED allocations. */
+    /** Historical (pre-#35) order: Read A x2 from S1 and Read B x1 from S2, CANCELLED with RELEASED allocations. */
     private UUID historical(Shop shop) {
         UUID id = insertHistoricalOrder(shop.machineId(), shop.slotId(), new Object[]{shop.productId(), 2});
         UUID line = UUID.randomUUID();
@@ -31,7 +31,7 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
         jdbc.update("""
                 INSERT INTO order_item_allocations (order_item_id, inventory_item_id, status, released_at)
                 SELECT ?, i.id, 'RELEASED', now() FROM inventory_items i JOIN machine_slots s ON s.id = i.slot_id
-                WHERE s.machine_id = ? AND s.slot_code = 'B' ORDER BY i.loaded_at, i.id LIMIT 1
+                WHERE s.machine_id = ? AND s.slot_code = 'S2' ORDER BY i.loaded_at, i.id LIMIT 1
                 """, line, shop.machineId());
         jdbc.update("UPDATE orders SET subtotal=22500.50, total_amount=22500.50 WHERE id=?", id);
         return id;
@@ -125,7 +125,7 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
                 for (var allocation : item.path("allocations")) {
                     assertThat(allocation.path("status").asText()).isEqualTo("RELEASED");
                     assertThat(allocation.path("releasedAt").isNull()).isFalse();
-                    assertThat(allocation.path("slotCode").asText()).isIn("A", "B");
+                    assertThat(allocation.path("slotCode").asText()).isIn("S1", "S2");
                     assertThat(allocation.path("batchCode").asText()).isNotBlank();
                     assertThat(Instant.parse(allocation.path("batchExpiresAt").asText())).isAfter(Instant.now());
                 }

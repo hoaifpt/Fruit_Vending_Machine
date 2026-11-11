@@ -22,10 +22,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {"spring.config.import=", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"})
 @AutoConfigureMockMvc
-@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class MachineManagementDocumentationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String KEY = MachineManagementIntegrationTest.newKey();
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -76,8 +75,7 @@ class MachineManagementDocumentationTest {
                 mapper.getNodeFactory().textNode("ACTIVE"), mapper.getNodeFactory().textNode("INACTIVE"), mapper.getNodeFactory().textNode("MAINTENANCE"));
         assertThat(actual.at("/components/schemas/MachineResponse/properties").fieldNames()).toIterable()
                 .containsExactlyInAnyOrder("id", "code", "name", "location", "status", "minTemperature", "maxTemperature",
-                        "minHumidity", "maxHumidity", "connectivity", "lastSeenAt", "lastHeartbeatAt", "firmwareVersion", "uptimeSeconds",
-                        "wifiRssi", "freeHeapBytes", "createdAt", "updatedAt");
+                        "minHumidity", "maxHumidity", "lastSeenAt", "createdAt", "updatedAt");
         validateReferences(expected, expected);
         assertThat(body).doesNotContain(KEY, "passwordHash", "/test-only/");
     }

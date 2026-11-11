@@ -1,107 +1,209 @@
-# Issue #53 — [BE] Implement Machine Heartbeat & Telemetry
+# Issue #21 — Product Batch Management
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/53
-Branch: feature/53-machine-heartbeat-telemetry (from origin/dev 719c4ed, includes #48, #49, #52)
-Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/21
+Title: [BE] Implement Product Batch Management
+Branch: feature/21-product-batch-management
+Base: 71a01ac00a28dea259200d948f6e2f2085e8d904 (latest origin/dev, 2026-10-10).
+User manually tested and merged #18 via PR #20; 217f65e verified in ancestry.
+Implementation and #21 commit/push explicitly authorized by the user.
+No PR/merge/issue edits authorized; user handles merges manually.
 
-## Scope
-Heartbeat + telemetry subscriptions, strict envelope validation for every channel, V15 presence/diagnostic columns (read-only on
-Machine), forward-only presence updates, derived connectivity (60 s / 180 s), reboot detection and recovery log, telemetry
-validation/dedup/throttle/storage, Machine API fields + connectivity filter, latest and history telemetry APIs (tag Machine Health),
-domain events (published + logged only).
+## Scope / decisions / database
 
-## Non-goals
-Alerts and automatic MAINTENANCE (3.6), status/heartbeat history in machine_events (3.5), dashboards (6.1), reading retention,
-push updates, multi-instance dedup, firmware changes.
+Three APIs: POST/GET /api/v1/product-batches and GET /api/v1/product-batches/{id}.
+ADMIN and STAFF create/read. Reuse ProductBatch under product.entity, add product.batch
+API layers; no entity relocation/schema/migration/dependency change.
+Code client-supplied, strip/uppercase, globally unique, immutable, max64.
+Existing ACTIVE product required; row lock serializes with Product status/config writes.
+Creator resolved from existing AuthenticatedUser/SecurityContext and UserRepository.
+Positive 32-bit integer quantity is declared production quantity, never current stock.
+Offset ISO timestamps normalized to Instant UTC, truncated to microseconds before date
+validation; expiry strictly after manufacture and injected Clock's current instant.
+Database pagination, page0/size20/max100, exact productId filter; unknown filter empty.
+Approved sorts id/batchCode/manufacturedAt/expiresAt/quantity/createdAt, default createdAt,desc
+with UUID ascending tie-break. To-one product entity graph avoids N+1/collection paging.
+Response includes current product SKU/name, creator UUID (legacy nullable), UTC timestamps.
+No PUT/PATCH/DELETE. Expired and inactive-product batches remain readable.
+No inventory creation/calculation/lifecycle/location, hardware/MQTT/payment/order/dispense,
+expiration alerts/jobs, editing/deletion or optional expiration-state filter.
 
-## Database / API impact
-New V15 (V1-V14 untouched). Machine responses + connectivity, lastHeartbeatAt, firmwareVersion, uptimeSeconds, wifiRssi,
-freeHeapBytes; `GET /api/v1/machines?connectivity=`; new `GET /api/v1/machines/{machineId}/telemetry/latest` and
-`GET /api/v1/machines/{machineId}/telemetry`. Swagger tag Machine Health, api.yaml synced, MQTT contract 1.2.0.
+## Verification status
 
-## Status and verification
-Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 730 tests, 0 failures, BUILD SUCCESS.
-New: MachineHealthIntegrationTest (35), MqttHealthEndToEndTest (2, real broker with the repo's mosquitto.conf and ACL, real Last Will),
-MachineHealthPropertiesTest (2), MachineHealthDocumentationTest (1).
+Implementation complete against all 74 original source checklist items below.
+User explicitly requested #21 commit/push on 2026-10-10. Delivery commit:
+feat: implement product batch management (#21), branch feature/21-product-batch-management.
+Verify final hash/publication with Git refs. No PR/merge/GitHub issue edits authorized or performed.
 
-Notes:
-- "Heartbeat updates ... in one statement" is shown by the code (one UPDATE ... RETURNING old.* per message) and the tests check
-  every field changes together; statements are not counted by a test.
-- Payload size: the whole MQTT message (envelope included) is limited to 8 KB.
-- PaymentWebhookProcessingIntegrationTest: test-only fix for DB-vs-JVM clock skew (paid_at = GREATEST(now(), created_at));
-  it failed once in the full run and passed twice alone; unrelated to #53.
-- The Mosquitto image eclipse-mosquitto:2.0.20 (same tag as infra/docker-compose.yml) is pulled by Testcontainers on first run.
+- Java 21.0.10 / Maven 3.9.12, mvn clean verify BUILD SUCCESS, 2026-10-10 14:53:07 +07:00.
+  390 tests, zero failures/errors/skipped. Batch: 38 integration + 1 documentation.
+  All prior Product/Machine/Slot/User/Auth/RBAC/bootstrap/entity tests passed.
+- PostgreSQL18 Testcontainers applied/validated Flyway V1-V8; Hibernate ddl-auto=validate
+  initialized; EntityMappingTest verifies existing schema mappings. No migration/entity/
+  enum/pom change or developer DB/.env modification.
+- ProductBatchManagementIntegrationTest verifies both roles creating/reading, normalized
+  globally unique code, DB UNIQUE race (201/409), authenticated creator and spoof rejection,
+  positive strict JSON quantity bounds, required/unknown fields, active/existing product,
+  expiration vs manufacture/current injected Clock including equality/microsecond boundaries,
+  UTC/offset semantics, product/creator/quantity persistence and DB-generated createdAt.
+  Product deactivation race serialized by the existing row lock and rejected with 409.
+  DB paging/filter/sort, one to-one product query per page, missing/invalid IDs, safe DTOs,
+  legacy null creator, read history after expiry/product deactivation, related inventory
+  fixture changes preserve original quantity, no automatic items/slot changes and no
+  PUT/PATCH/DELETE endpoints. Real JWT current roles/account state and direct service guards.
+- ProductBatchManagementDocumentationTest verifies Swagger HTML/config/OpenAPI, compares
+  full Batch operations/parameters/requests/schemas/responses/headers/examples/security
+  with api-contract/api.yaml, checks required fields/bounds/DTO shape and resolves refs.
+  Contract additions only: Product Batches tag, two paths/three operations/five schemas.
+  Existing feature documentation consistency tests and production docs policy pass.
+- Packaged JAR with disposable PostgreSQL18, .env import disabled, localhost random port:
+  30 HTTP checks passed. Swagger HTML/CSS/JS/initializer/config/OpenAPI all 200; 3 operations.
+  Real ADMIN/STAFF logins, both roles POST201 with proper actor, list/detail200, product
+  filtering/page200, duplicate/inactive409, spoofed creator/expired/fractional quantity400,
+  missing product/batch404, anonymous401, PUT/PATCH/DELETE405. Inactive-product batch readable.
+  DB after QA: two batches, zero InventoryItems, zero MachineSlots.
+- Actual verified QA URLs: http://127.0.0.1:50758/swagger-ui/index.html and
+  http://127.0.0.1:50758/v3/api-docs. QA JAR PID6116/launcher19396 and exact container
+  fvm-issue21-qa (51e46c73...) cleaned up; URLs no longer live. User processes/data untouched.
+- Browser rendering/Swagger Try it out remains unverified: cua_repl initialization failed
+  before opening a browser, with Windows sandbox helper_unknown_error/setup refresh errors.
+  HTTP assets/MockMvc/live REST checks do not prove browser interaction. Manual UI follow-up:
+  run locally, Authorize with an isolated token, Try GET product-batches; use future expiry
+  and disposable product/batch for POST. All original source items supported by tests above;
+  this separate UI tooling limitation is explicitly disclosed.
+- Local setup: existing .env/PostgreSQL, API_DOCS_ENABLED=true, valid JWT_SECRET; run from
+  backend module: mvn spring-boot:run '-Dspring-boot.run.jvmArguments=-Duser.timezone=UTC'.
+  Swagger http://localhost:8080/swagger-ui/index.html, OpenAPI http://localhost:8080/v3/api-docs.
+  Production documentation disabled under existing configuration.
+- Ignored backend/target evidence: issue21-verify.log, issue21-targeted.log,
+  issue21-qa.stdout.log/issue21-qa.stderr.log, issue21-http-qa.py/issue21-http-qa.json,
+  product-batch-management-openapi.json, surefire-reports and packaged JAR.
+- git diff --check passed; current user request authorizes commit/push for #21.
+  Verify clean working tree and matching remote HEAD after delivery.
+  Only backend API layers/security/docs/OpenAPI/tests and root README/contract changed.
+
+## Original source checklist
 
 # Testing
 
-## 9. Envelope
+## Create Batch
 
-- [x] Every machine → backend example in `api-contract/mqtt/examples/` is accepted
-- [x] Missing / wrong `schemaVersion`, missing `messageId`, missing or mismatched `machineCode`, non-object `payload`, > 8 KB → dropped, no DB change
-- [x] Unknown machine code → dropped
-- [x] Dispense events still processed (3.3 regression)
+Verify:
 
-## 10. Presence
+- [x] ADMIN can create batch
+- [x] STAFF can create batch
+- [x] Product must exist
+- [x] Product must be ACTIVE
+- [x] Batch code must be unique
+- [x] Batch code normalization works if adopted
+- [x] `quantity > 0`
+- [x] `expiresAt > manufacturedAt`
+- [x] Already-expired batch is rejected
+- [x] `createdBy` comes from authenticated user
+- [x] Client cannot impersonate `createdBy`
+- [x] Unauthenticated request receives `401`
 
-- [x] Heartbeat updates last_seen_at, last_heartbeat_at and diagnostics in one statement
-- [x] Missing wifiRssi / freeHeap stored as NULL
-- [x] Invalid heartbeat → nothing updated
-- [x] status ONLINE updates presence; status OFFLINE sets last_offline_at only
-- [x] last_seen_at never moves backward
-- [x] machines.updated_at unchanged
-- [x] Concurrent Admin machine update + heartbeat → no lost configuration change, no deadlock
+---
 
-## 11. Connectivity (fixed Clock)
+## List Batches
 
-- [x] NEVER_SEEN, ONLINE (≤ 60 s), WARNING (60–180 s), OFFLINE (> 180 s)
-- [x] Last Will OFFLINE → OFFLINE immediately; next heartbeat → ONLINE
-- [x] Invalid durations fail startup
-- [x] Connectivity filter (if implemented) uses SQL and paginates correctly
+Verify:
 
-## 12. Reboot / Recovery
+- [x] ADMIN can list batches
+- [x] STAFF can list batches
+- [x] Pagination works
+- [x] Product filtering works
+- [x] Only DTOs are returned
+- [x] No User entity/security data is exposed
+- [x] Unauthenticated request receives `401`
 
-- [x] Uptime decrease publishes MachineRebootDetectedEvent once
-- [x] Recovery after > 180 s logged once
+---
 
-## 13. Telemetry
+## Get Batch
 
-- [x] Valid reading stored with 2-decimal precision and server time
-- [x] Temperature-only and humidity-only readings accepted
-- [x] Both missing, NaN, out of range → dropped
-- [x] Duplicate messageId dropped; readings closer than min-interval dropped
-- [x] TelemetryRecordedEvent published after commit
+Verify:
 
-## 14. Read APIs
+- [x] ADMIN can retrieve batch
+- [x] STAFF can retrieve batch
+- [x] Missing batch returns `404`
+- [x] Product information is mapped correctly
+- [x] Creator ID is returned correctly
+- [x] No recursive entity serialization occurs
 
-- [x] Machine list/detail include connectivity + diagnostics
-- [x] Latest reading with LOW / NORMAL / HIGH; null when no reading
-- [x] History: validation (`400`), DB paging, DESC order, `404` for missing machine
-- [x] ADMIN, STAFF allowed; anonymous `401`; kiosk key `401`; role without MACHINE_READ `403`
+---
 
-## 15. End-to-End (Testcontainers Mosquitto + PostgreSQL)
+## Immutability
 
-- [x] Publish heartbeat example → machine ONLINE with diagnostics
-- [x] Publish Last Will → OFFLINE
-- [x] Publish telemetry example → latest API returns it
+Verify:
 
-## 16. Regression
+- [x] No general batch update endpoint exists
+- [x] No hard-delete endpoint exists
+- [x] Creating a batch does not modify Product
+- [x] Creating a batch does not create InventoryItems
+- [x] Creating a batch does not modify MachineSlot
 
-- [x] All tests pass (`mvn clean verify`)
-- [x] Swagger, `api.yaml`, `mqtt-contract.md` consistent
-- [x] Flyway / Hibernate validation pass
+---
+
+## Persistence
+
+Verify:
+
+- [x] Product relationship persists correctly
+- [x] createdBy relationship persists correctly
+- [x] timestamps preserve expected timezone semantics
+- [x] quantity persists correctly
+- [x] unique batch code constraint works
+
+---
+
+## Regression
+
+Verify:
+
+- [x] Product Management tests still pass
+- [x] Machine Management tests still pass
+- [x] Machine Slot tests still pass
+- [x] User/Auth/RBAC tests still pass
+- [x] Flyway validation passes
+- [x] Hibernate `ddl-auto=validate` passes
+- [x] Application starts successfully
 
 ---
 
 # Acceptance Criteria
 
-- [x] Heartbeat and telemetry topics subscribed
-- [x] Envelope validated strictly per contract; dispense flow unaffected
-- [x] V15 presence/diagnostic columns added and mapped (read-only)
-- [x] Heartbeat/status update presence forward-only; Last Will sets OFFLINE immediately
-- [x] Connectivity derived (ONLINE / WARNING / OFFLINE / NEVER_SEEN) with 60 s / 180 s thresholds
-- [x] Reboot detection event published
-- [x] Telemetry validated, deduplicated, throttled and stored
-- [x] Machine APIs show connectivity and diagnostics; latest + history telemetry APIs work
-- [x] No alerts or automatic status changes in this issue
-- [x] Swagger, `api.yaml`, `mqtt-contract.md`, `.ai/` docs updated
-- [x] Tests pass (`mvn clean verify`); Flyway / Hibernate validation pass; applied migrations unchanged
+The issue is complete when:
+
+- [x] ProductBatch maps correctly to existing `product_batches`
+- [x] Every ProductBatch belongs to exactly one Product
+- [x] `createdBy` is derived from the authenticated user
+- [x] ProductBatchRepository is implemented
+- [x] ProductBatchService is implemented
+- [x] ProductBatchController is implemented
+- [x] `POST /api/v1/product-batches` works
+- [x] `GET /api/v1/product-batches` works
+- [x] `GET /api/v1/product-batches/{id}` works
+- [x] ADMIN can create/read batches
+- [x] STAFF can create/read batches
+- [x] Batch code is unique and stable
+- [x] Product must exist
+- [x] Product must be ACTIVE for new batch creation
+- [x] `quantity > 0`
+- [x] `expiresAt > manufacturedAt`
+- [x] Already-expired batches cannot be created through normal flow
+- [x] Batch quantity is not treated as current inventory
+- [x] Batch quantity is not decremented when stock changes
+- [x] No InventoryItems are automatically created
+- [x] No Machine/Slot information is stored on ProductBatch
+- [x] No general update endpoint exists
+- [x] No hard-delete endpoint exists
+- [x] Pagination works
+- [x] Product filtering works
+- [x] Common exception handling is reused
+- [x] Existing RBAC/security infrastructure is reused
+- [x] Tests pass
+- [x] Application starts
+- [x] Flyway validation passes
+- [x] Hibernate schema validation passes
+- [x] Existing migrations remain unchanged
+
+---

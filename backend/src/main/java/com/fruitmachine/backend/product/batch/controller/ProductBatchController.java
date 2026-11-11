@@ -15,12 +15,12 @@ import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController @RequiredArgsConstructor
 @RequestMapping(value = "/api/v1/product-batches", produces = "application/json")
+@PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Product Batches", description = "Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.")
 @ApiResponses({
@@ -31,7 +31,6 @@ import org.springframework.web.bind.annotation.*;
 })
 public class ProductBatchController {
     private final ProductBatchService batches;
-    @PreAuthorize(Permissions.HAS_BATCH_CREATE)
     @PostMapping(consumes = "application/json")
     @Operation(operationId = "createProductBatch", summary = "Register immutable product batch",
             description = "ADMIN or STAFF. Client supplies globally unique code; stripped and uppercased. Product must exist and be ACTIVE. "
@@ -49,7 +48,6 @@ public class ProductBatchController {
         return ResponseEntity.created(URI.create("/api/v1/product-batches/" + batch.id())).header("Cache-Control", "no-store")
                 .body(ApiResponse.success("Product batch created", batch));
     }
-    @PreAuthorize(Permissions.HAS_BATCH_READ)
     @GetMapping
     @Operation(operationId = "listProductBatches", summary = "List product batches",
             description = "ADMIN or STAFF. Database pagination, default page 0/size 20, maximum 100. Optional exact product UUID filter; "
@@ -64,7 +62,6 @@ public class ProductBatchController {
         return ResponseEntity.ok().header("Cache-Control", "no-store")
                 .body(ApiResponse.success("Product batches retrieved", batches.listBatches(page, size, productId, sort)));
     }
-    @PreAuthorize(Permissions.HAS_BATCH_READ)
     @GetMapping("/{id}")
     @Operation(operationId = "getProductBatch", summary = "Get product batch details",
             description = "ADMIN or STAFF. Immutable record including expired batches or INACTIVE products. Current product SKU/name and nullable legacy creator UUID only; no recursive entities or security data.")

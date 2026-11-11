@@ -45,7 +45,7 @@ class AuthorityMappingTest {
     }
 
     AuthenticatedUser load(User user) {
-        when(users.findWithAuthoritiesByEmail(user.getEmail())).thenReturn(Optional.of(user));
+        when(users.findWithRolesByEmail(user.getEmail())).thenReturn(Optional.of(user));
         return details.loadUserByUsername("  MAPPING-TEST@EXAMPLE.INVALID  ");
     }
 
@@ -55,7 +55,7 @@ class AuthorityMappingTest {
         var principal = load(user(role));
         assertThat(principal.getAuthorities()).extracting(GrantedAuthority::getAuthority)
                 .containsExactly("ROLE_" + role);
-        verify(users).findWithAuthoritiesByEmail("mapping-test@example.invalid");
+        verify(users).findWithRolesByEmail("mapping-test@example.invalid");
     }
 
     @Test
@@ -83,27 +83,11 @@ class AuthorityMappingTest {
     @Test
     void uuidLookupUsesTheSameExistingMapping() {
         User user = user("STAFF");
-        when(users.findWithAuthoritiesById(user.getId())).thenReturn(Optional.of(user));
+        when(users.findWithRolesById(user.getId())).thenReturn(Optional.of(user));
         var principal = details.loadUserById(user.getId());
         assertThat(principal.getId()).isEqualTo(user.getId());
         assertThat(principal.getAuthorities()).extracting(GrantedAuthority::getAuthority)
                 .containsExactly("ROLE_STAFF");
-    }
-
-    @Test
-    void permissionCodesOfAllRolesAreAddedToTheRoleAuthoritiesDeduplicated() {
-        User user = user("STAFF", "ADMIN");
-        String[][] grants = {{"PRODUCT_READ", "ORDER_READ"}, {"USER_WRITE", "PRODUCT_READ"}};
-        int index = 0;
-        for (Role role : user.getRoles()) {
-            for (String code : grants[index++]) {
-                var permission = new com.fruitmachine.backend.user.entity.Permission();
-                permission.setCode(code);
-                role.getPermissionGrants().add(new com.fruitmachine.backend.user.entity.RolePermission(role, permission));
-            }
-        }
-        assertThat(load(user).getAuthorities()).extracting(GrantedAuthority::getAuthority)
-                .containsExactly("ORDER_READ", "PRODUCT_READ", "ROLE_ADMIN", "ROLE_STAFF", "USER_WRITE");
     }
 
     @ParameterizedTest

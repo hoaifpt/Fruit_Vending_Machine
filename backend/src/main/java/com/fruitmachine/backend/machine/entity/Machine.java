@@ -47,28 +47,8 @@ public class Machine extends UpdatedEntity {
     @Column(name = "humidity_max", precision = 5, scale = 2, nullable = false)
     private BigDecimal humidityMax = new BigDecimal("100");
 
-    // Presence and diagnostics (V2 last_seen_at, V15 the rest) are written only by MachinePresenceService with conditional SQL
-    // updates. They are not insertable/updatable here, so a configuration change never writes back a stale value.
-    @Column(name = "last_seen_at", columnDefinition = "timestamptz", insertable = false, updatable = false)
+    @Column(name = "last_seen_at", columnDefinition = "timestamptz")
     private Instant lastSeenAt;
-
-    @Column(name = "last_heartbeat_at", columnDefinition = "timestamptz", insertable = false, updatable = false)
-    private Instant lastHeartbeatAt;
-
-    @Column(name = "last_offline_at", columnDefinition = "timestamptz", insertable = false, updatable = false)
-    private Instant lastOfflineAt;
-
-    @Column(name = "firmware_version", length = 32, insertable = false, updatable = false)
-    private String firmwareVersion;
-
-    @Column(name = "uptime_seconds", insertable = false, updatable = false)
-    private Long uptimeSeconds;
-
-    @Column(name = "wifi_rssi", insertable = false, updatable = false)
-    private Short wifiRssi;
-
-    @Column(name = "free_heap_bytes", insertable = false, updatable = false)
-    private Long freeHeapBytes;
 
     @OneToMany(mappedBy = "machine", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)

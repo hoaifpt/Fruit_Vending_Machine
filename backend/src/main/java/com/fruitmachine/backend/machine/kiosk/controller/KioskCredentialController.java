@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(value = "/api/v1/machines/{machineId}/kiosk-credentials", produces = "application/json")
-@PreAuthorize(Permissions.HAS_KIOSK_CREDENTIAL_MANAGE)
+@PreAuthorize("hasRole('ADMIN')")
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Kiosk Credentials", description = "ADMIN-only management of machine-bound kiosk API keys. The plaintext key is shown once, only its SHA-256 digest is stored. STAFF cannot read credential metadata.")
 @ApiResponses({

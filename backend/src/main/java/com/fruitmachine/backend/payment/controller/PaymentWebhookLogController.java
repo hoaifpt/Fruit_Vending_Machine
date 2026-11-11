@@ -18,7 +18,6 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(produces = "application/json")
-@PreAuthorize(Permissions.HAS_PAYMENT_WEBHOOK_LOG_READ)
+@PreAuthorize("hasRole('ADMIN')")
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Payment Webhook Logs", description = "Read-only evidence of every provider webhook attempt for ADMIN. No replay, no delete, and the signature is never returned.")
 @ApiResponses({

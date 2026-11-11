@@ -1,11 +1,8 @@
 package com.fruitmachine.backend.security;
 
-import com.fruitmachine.backend.machine.kiosk.service.KioskCredentialService;
 import com.fruitmachine.backend.security.jwt.JwtAuthenticationFilter;
 import com.fruitmachine.backend.security.jwt.JwtProperties;
 import com.fruitmachine.backend.security.jwt.JwtService;
-import com.fruitmachine.backend.security.kiosk.KioskAuthenticationFilter;
-import com.fruitmachine.backend.security.permission.Permissions;
 import com.fruitmachine.backend.security.user.CustomUserDetailsService;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
@@ -42,7 +39,7 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService tokens,
-            CustomUserDetailsService users, KioskCredentialService kioskCredentials, SecurityErrorHandler errors,
+            CustomUserDetailsService users, SecurityErrorHandler errors,
             @Value("${springdoc.api-docs.enabled:false}") boolean docsEnabled) throws Exception {
         http.csrf(csrf -> csrf.disable()) // Header-only bearer authentication; no cookie/session credentials.
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -58,39 +55,15 @@ public class SecurityConfig {
                         authorize.requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll();
                     }
-                    // Permission-based (issue #48). Each rule names the same permission as the @PreAuthorize of its endpoint, so an
-                    // unauthorized caller gets 403 before request validation (400). Non-GET methods without an endpoint keep 405 for
-                    // callers that hold the write permission of the path.
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/users", "/api/v1/users/**").hasAuthority(Permissions.USER_READ);
-                    authorize.requestMatchers("/api/v1/users", "/api/v1/users/**").hasAuthority(Permissions.USER_WRITE);
-                    authorize.requestMatchers("/api/v1/roles", "/api/v1/roles/**", "/api/v1/permissions", "/api/v1/permissions/**")
-                            .hasAuthority(Permissions.PERMISSION_MANAGE);
-                    // Kiosks are machine credentials, not users; kiosk and credential rules precede the broader machine rules.
-                    authorize.requestMatchers("/api/v1/kiosk", "/api/v1/kiosk/**").hasRole("KIOSK");
-                    authorize.requestMatchers("/api/v1/machines/*/kiosk-credentials", "/api/v1/machines/*/kiosk-credentials/**")
-                            .hasAuthority(Permissions.KIOSK_CREDENTIAL_MANAGE);
-                    // Providers call the webhook without any credential; its signature check is the only trust, and only this exact path is open.
-                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/webhooks/payments/*").permitAll();
-                    authorize.requestMatchers("/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/**")
-                            .hasAuthority(Permissions.PAYMENT_WEBHOOK_LOG_READ);
-                    authorize.requestMatchers("/api/v1/payments", "/api/v1/payments/**").hasAuthority(Permissions.PAYMENT_READ);
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/orders", "/api/v1/orders/**").hasAuthority(Permissions.ORDER_READ);
-                    authorize.requestMatchers("/api/v1/orders", "/api/v1/orders/**").denyAll();
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/products", "/api/v1/products/**").hasAuthority(Permissions.PRODUCT_READ);
-                    authorize.requestMatchers("/api/v1/products", "/api/v1/products/**").hasAuthority(Permissions.PRODUCT_WRITE);
-                    // Inventory views nested under a machine are inventory reads, not machine reads (same permission as their @PreAuthorize).
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines/*/inventory", "/api/v1/machines/*/slots/*/inventory",
-                            "/api/v1/machines/*/slots/*/inventory/**").hasAuthority(Permissions.INVENTORY_READ);
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines", "/api/v1/machines/**").hasAuthority(Permissions.MACHINE_READ);
-                    authorize.requestMatchers("/api/v1/machines", "/api/v1/machines/**").hasAuthority(Permissions.MACHINE_WRITE);
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/product-batches", "/api/v1/product-batches/**").hasAuthority(Permissions.BATCH_READ);
-                    authorize.requestMatchers("/api/v1/product-batches", "/api/v1/product-batches/**").hasAuthority(Permissions.BATCH_CREATE);
-                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/inventory", "/api/v1/inventory/**").hasAuthority(Permissions.INVENTORY_READ);
-                    authorize.requestMatchers("/api/v1/inventory", "/api/v1/inventory/**").hasAuthority(Permissions.INVENTORY_WRITE);
+                    authorize.requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole("ADMIN");
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/products", "/api/v1/products/**").hasAnyRole("ADMIN", "STAFF");
+                    authorize.requestMatchers("/api/v1/products", "/api/v1/products/**").hasRole("ADMIN");
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines", "/api/v1/machines/**").hasAnyRole("ADMIN", "STAFF");
+                    authorize.requestMatchers("/api/v1/machines", "/api/v1/machines/**").hasRole("ADMIN");
+                    authorize.requestMatchers("/api/v1/product-batches", "/api/v1/product-batches/**").hasAnyRole("ADMIN", "STAFF");
                     authorize.anyRequest().authenticated();
                 })
-                .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(new KioskAuthenticationFilter(kioskCredentials, errors), JwtAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }

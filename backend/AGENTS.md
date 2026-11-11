@@ -271,18 +271,15 @@ Never dispense based solely on client-reported payment status.
 
 ## 10. IoT Rules
 
-Dispensing uses Backend -> MQTT broker -> ESP32 (decision of 2026-10-23, replacing the earlier
-Kiosk -> Serial/USB flow). The ESP32 reports acceptance and the result as MQTT events; the kiosk
-only polls the order status. MQTT contract (topics, messages, error codes): api-contract/mqtt-contract.md;
-flow and local setup: docs/mqtt-dispense.md. USB Serial remains
-a firmware test/calibration channel with the same idempotent DISPENSE command.
+Dispensing uses Backend -> Kiosk -> Serial/USB -> ESP32. The kiosk reports the
+correlated ESP32 result to backend. MQTT is optional for future telemetry/events,
+not the dispense transport in the approved flow.
 
 ESP32 must never decide whether an order is paid.
 
 Backend creates/authorizes dispense commands only after payment verification.
-The machine must use the backend-issued command ID. Backend validates machine
-ownership (topic, envelope and command machine) and result transitions idempotently
-before changing inventory/order.
+Kiosk must use the backend-issued command ID and assigned slot. Backend validates
+machine ownership and result transitions idempotently before changing inventory/order.
 
 Every dispense command must have a unique command ID.
 
@@ -319,11 +316,6 @@ slot.quantity
 ```
 
 Inventory status must be traceable.
-
-Before implementing inventory/history workflows, inspect the actual applied Flyway
-migrations and list their columns, constraints, indexes and triggers. Do not assume
-`inventory_transactions` has quantity, batch, reason or status snapshot columns.
-Document any required forward-only migration before coding; preserve historical rows.
 
 Expired inventory must never be sold.
 
@@ -380,10 +372,8 @@ Do not work directly on dev.
 
 Read .ai/GIT_WORKFLOW.md before Git delivery actions. Commit/push only when requested;
 an implementation request does not automatically authorize them. The user merges into
-dev manually: a commit/push request never authorizes merge, PR creation or issue closure.
-Only a new explicit request can authorize those actions. Ticking the checklist items of the
-assigned GitHub issue is permitted without a separate request, under the rules in section 14
-(Issue Checklist Reporting).
+dev manually: a commit/push request never authorizes merge, PR creation, issue closure
+or GitHub checklist edits. Only a new explicit request can authorize those actions.
 
 ---
 
@@ -434,20 +424,6 @@ After implementation:
 
 An issue is NOT complete merely because the code compiles.
 
-### Mandatory Regression Testing
-
-Every software or runtime-environment change must be regression-tested so new changes
-do not break previously working features. This includes bug fixes, new features,
-performance optimizations, refactoring and dependency/environment upgrades.
-
-Follow `.ai/CODING_RULES.md` section 30: test affected existing behavior and shared
-flows, then run the full backend `mvn clean verify` on the final code/environment.
-Include contract, schema-upgrade, startup and runtime checks when affected. Fix
-regressions without weakening tests; report blocked/unverified checks honestly and
-do not claim verified completion. Record commands, environment and results at handoff.
-Guidance-only/documentation-only edits use content/diff verification unless they also
-change software behavior or runtime configuration.
-
 ### Issue Checklist Reporting
 
 At every issue handoff, including completion or a blocked/partial result, the final
@@ -475,24 +451,8 @@ Example handoff item:
 - [ ] Deployment verification — missing target environment access; user must provide it.
 ```
 
-### Ticking GitHub issue checkboxes
-
-The agent may tick (`[x]`) the checkboxes of the assigned GitHub issue for items it has
-completed AND verified under this section; no separate user request is needed.
-
-- Tick only items marked `[x]` in `.ai/CURRENT_TASK.md` with supporting evidence (tests,
-  code, build result). Never tick an unverified, blocked, partial or not-applicable-by-assumption item;
-  leave it `[ ]` and say why in the handoff.
-- Edit only the checkbox markers of the assigned issue's own body: never change item text,
-  order, headings or other content, never touch other issues, and never untick items the
-  user or a reviewer ticked.
-- Do this after the work is verified (normally after the full `mvn clean verify`), keep the
-  issue body otherwise identical, and report exactly which items were ticked. If the GitHub
-  tooling is unavailable or unauthenticated, do not work around it with other credentials;
-  disclose the limitation and list the items to tick instead.
-- This rule does NOT authorize closing issues, creating PRs, merging branches, changing
-  labels/milestones/assignees or commenting on behalf of the user. Perform those actions only
-  when the user requests them.
+This reporting rule does NOT authorize editing GitHub issue checkboxes, closing issues,
+creating PRs or merging branches. Perform those actions only when the user requests them.
 
 ---
 

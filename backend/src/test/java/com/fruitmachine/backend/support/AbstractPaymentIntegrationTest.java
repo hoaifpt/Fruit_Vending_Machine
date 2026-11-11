@@ -31,18 +31,20 @@ public abstract class AbstractPaymentIntegrationTest extends AbstractOrderIntegr
 
     protected Shop shop(int bowls) throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "A", 30), product = createProduct("Payment bowl", "35000");
+        UUID slot = createSlot(machine, "P1", 30), product = createProduct("Payment bowl", "35000");
         load(fixtures.batch(product, bowls, staff.token()), slot, bowls);
         return new Shop(machine, slot, product, issueKey(machine));
     }
 
-    /** Both columns with one bowl each, so that two orders can be PENDING at once on one machine (one RESERVED bowl per column). */
-    protected Shop shopWithTwoColumns() throws Exception {
+    /** Several slots of one bowl each, so that many orders can be PENDING at once (one RESERVED bowl per slot). */
+    protected Shop shopWithSlots(int count) throws Exception {
         UUID machine = fixtures.machine(admin.token()), product = createProduct("Payment bowl", "35000");
-        UUID batch = fixtures.batch(product, 2, staff.token());
-        UUID first = createSlot(machine, "A", 30);
-        load(batch, first, 1);
-        load(batch, createSlot(machine, "B", 30), 1);
+        UUID batch = fixtures.batch(product, count, staff.token()), first = null;
+        for (int n = 0; n < count; n++) {
+            UUID slot = createSlot(machine, "P" + (n + 1), 30);
+            load(batch, slot, 1);
+            if (first == null) first = slot;
+        }
         return new Shop(machine, first, product, issueKey(machine));
     }
 

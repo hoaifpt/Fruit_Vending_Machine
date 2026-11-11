@@ -20,13 +20,13 @@ import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping(value = "/api/v1/users", produces = "application/json")
 @RequiredArgsConstructor
+@PreAuthorize("hasRole('ADMIN')")
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Users", description = "Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.")
 @ApiResponses({
@@ -42,7 +42,6 @@ import org.springframework.web.bind.annotation.*;
 public class UserController {
     private final UserService users;
 
-    @PreAuthorize(Permissions.HAS_USER_READ)
     @GetMapping
     @Operation(operationId = "listUsers", summary = "List management users",
             description = "ADMIN only. Database pagination with optional combined status/role filters. Stable order: createdAt descending, UUID ascending. "
@@ -57,7 +56,6 @@ public class UserController {
                 .body(ApiResponse.success("Users retrieved", users.listUsers(page, size, status, role)));
     }
 
-    @PreAuthorize(Permissions.HAS_USER_READ)
     @GetMapping("/{id}")
     @Operation(operationId = "getUser", summary = "Get management user details", description = "ADMIN only. Returns a safe profile and current roles for the account UUID.")
     @ApiResponses({
@@ -68,7 +66,6 @@ public class UserController {
         return success("User retrieved", users.getUser(id));
     }
 
-    @PreAuthorize(Permissions.HAS_USER_WRITE)
     @PostMapping(consumes = "application/json")
     @Operation(operationId = "createStaff", summary = "Create an operational STAFF account",
             description = "ADMIN only. Atomically creates an ACTIVE account with the existing STAFF role and BCrypt password. "
@@ -84,7 +81,6 @@ public class UserController {
                 .body(ApiResponse.success("STAFF account created", user));
     }
 
-    @PreAuthorize(Permissions.HAS_USER_WRITE)
     @PutMapping(value = "/{id}", consumes = "application/json")
     @Operation(operationId = "updateUser", summary = "Update management user profile",
             description = "ADMIN only. Replaces fullName and phone. Omitted/null phone clears it. Email, password, roles, status and persistence fields are rejected. "
@@ -98,7 +94,6 @@ public class UserController {
         return success("User updated", users.updateUser(id, request));
     }
 
-    @PreAuthorize(Permissions.HAS_USER_WRITE)
     @PatchMapping(value = "/{id}/status", consumes = "application/json")
     @Operation(operationId = "updateUserStatus", summary = "Change management user status",
             description = "ADMIN only. Sets ACTIVE, INACTIVE or LOCKED, preserving the account and its roles/history. "

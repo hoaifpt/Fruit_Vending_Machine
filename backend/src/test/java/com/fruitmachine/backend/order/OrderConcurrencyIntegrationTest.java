@@ -21,7 +21,7 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
 
     private Shop shop(int bowls) throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "A", 30), product = createProduct("Race bowl", "10000");
+        UUID slot = createSlot(machine, "C1", 30), product = createProduct("Race bowl", "10000");
         load(fixtures.batch(product, bowls, staff.token()), slot, bowls);
         return new Shop(machine, slot, product, issueKey(machine));
     }
@@ -95,22 +95,24 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
         UUID machine = fixtures.machine(admin.token());
         UUID product = createProduct("Race columns", "10000");
         List<UUID> slots = new ArrayList<>();
-        for (String code : List.of("A", "B")) {
-            UUID slot = createSlot(machine, code, 10);
+        for (int n = 1; n <= 4; n++) {
+            UUID slot = createSlot(machine, "R" + n, 10);
             load(fixtures.batch(product, 2, staff.token()), slot, 2);
             slots.add(slot);
         }
         Shop shop = new Shop(machine, slots.get(0), product, issueKey(machine));
-        // Eight orders race for the two free columns: one order per column wins, the others get 409.
+        // Two orders, two free columns: both succeed on different columns.
+        assertThat(parallel(List.of(create(shop), create(shop)))).containsExactly(201, 201);
+        assertThat(count("SELECT count(DISTINCT i.slot_id) FROM inventory_items i WHERE i.status='RESERVED' AND i.slot_id IN (?,?,?,?)", slots.toArray())).isEqualTo(2);
+        // Eight more orders for the two remaining free columns.
         var statuses = parallel(java.util.stream.IntStream.range(0, 8).mapToObj(i -> create(shop)).toList());
         assertThat(statuses.stream().filter(s -> s == 201).count()).isEqualTo(2);
         assertThat(statuses.stream().filter(s -> s == 409).count()).isEqualTo(6);
-        assertThat(count("SELECT count(DISTINCT i.slot_id) FROM inventory_items i WHERE i.status='RESERVED' AND i.slot_id IN (?,?)", slots.toArray())).isEqualTo(2);
         for (UUID slot : slots) {
             assertThat(count("SELECT count(*) FROM inventory_items WHERE slot_id=? AND status='RESERVED'", slot)).as("one per column").isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT status FROM inventory_items WHERE id=?", String.class, head(slot))).isEqualTo("RESERVED");
         }
-        assertThat(count("SELECT count(*) FROM inventory_transactions WHERE type='RESERVE' AND machine_id=?", machine)).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM inventory_transactions WHERE type='RESERVE' AND machine_id=?", machine)).isEqualTo(4);
     }
 
     @Test

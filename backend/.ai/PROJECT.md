@@ -102,8 +102,8 @@ invent command IDs, select a different slot, or mark an order PAID. Backend crea
 and persists DispenseCommand before exposing it to the kiosk. The exact claim/status
 channel will be designed in its issue; polling/push transport is not implemented yet.
 
-One order buys exactly one bowl (issue #35): one order -> one allocation -> one dispense command -> one slot,
-so completing the order collapses to that single command; record its result idempotently.
+For multiple bowls, one command targets one allocated inventory item. Complete the
+order only after all required commands succeed; record per-item results idempotently.
 Use the existing DISPENSING state while fulfillment is in progress. Failure, timeout,
 disconnect and ambiguous physical outcomes require reconciliation, not blind resend.
 
@@ -224,19 +224,22 @@ Important rules:
 
 ## 9. IoT Communication
 
-Dispense commands and results use Backend -> MQTT broker -> ESP32 (decision of 2026-10-23); USB Serial is a
-firmware test/calibration channel only. The MQTT contract is `api-contract/mqtt-contract.md` (v1.0.0, issue #49):
+Dispense commands/results use kiosk Serial/USB with ESP32 and kiosk/backend communication.
+MQTT may be used in future telemetry/status/event integrations, but is not a parallel
+dispense-command path. Direct ESP32 MQTT connectivity is not required for purchase.
+
+Conceptual topics:
 
 ```text
-vending/{machineCode}/commands    backend -> machine   (machineCode = machines.code = broker username)
-vending/{machineCode}/events      machine -> backend
-vending/{machineCode}/status      machine -> backend
-vending/{machineCode}/heartbeat   machine -> backend   (backend: presence + diagnostics, #53)
-vending/{machineCode}/telemetry   machine -> backend   (backend stores readings, #53; firmware sensor pending)
+vending/{machineId}/telemetry
+vending/{machineId}/status
+vending/{machineId}/events
 ```
 
-Every message and error code carries an implementation status in the contract; later machine issues
-(3.3-3.7, 4.2) and firmware changes are built against it. Serial examples above are not part of the contract.
+Final MQTT contracts must be documented before production implementation.
+
+Specify whether topic identifiers are machine UUIDs or machine codes. Serial examples
+above describe the approved flow, not a finalized framing/checksum/security protocol.
 
 ---
 
@@ -359,61 +362,3 @@ Target scope:
 - Core integration tests
 
 IoT, payment and dispensing are later milestones.
-
-## 13. Delivered inventory scope — Issue #22
-
-ADMIN/STAFF can load physical boxes, query items/slot summary/history and confirm removal.
-This confirms operator work; it does not command hardware. Each new item is assigned to
-one existing batch and slot. Real migration inspection required V9 nullable reason/status
-snapshots; per-item history shares a load operation UUID, with no aggregate quantity column.
-No order/payment/dispense/expiry scheduler is delivered. See docs/inventory-management.md.
-
-## 14. Core integration testing — Issue #24
-
-Reuse existing feature suites and add shared PostgreSQL18 factory/profile/HTTP fixtures,
-cross-domain management flow, real SQL-fault rollback, database constraint checks and
-overlapping inventory transaction races. Maven Surefire discovers all *Test classes in
-clean verify; GitHub Actions workflow uses Java21/Docker and retains test reports.
-No new business feature, dependency, API or migration. Remote CI now verified:442tests pass;
-a disposable probe fails exactly1intentional test, Maven/job failure and reports upload
-confirmed. Probe branch removed, all62issue checklist items checked. See
-docs/core-integration-testing.md and CURRENT_TASK.md for actual run links/evidence.
-
-## 15. Order management scope — Issue #27
-
-Machine-bound kiosk API keys (ADMIN issue/rotate/revoke, SHA-256 digest only, one ACTIVE per machine),
-kiosk identity and sellable catalog, kiosk order creation with atomic FEFO bowl reservation and
-server-side price snapshot, kiosk read/cancel, automatic expiry sweep and read-only ADMIN/STAFF order
-list/detail. Migrations V10 (kiosk_credentials) and V11 (orders.expires_at). Orders only move
-PENDING_PAYMENT -> CANCELLED; payment, QR, webhooks, PAID/DISPENSING/COMPLETED, dispense commands
-and MQTT are later issues. See docs/order-management.md and CURRENT_TASK.md for evidence.
-
-## 16. Payment service scope — Issue #29
-
-Provider-independent payment attempts: PaymentGateway abstraction with one configured gateway (MOCK for development/tests only),
-kiosk create-or-reuse QR attempt (no transaction during the provider call, amount from the order, deadline never after the
-reservation), PENDING -> FAILED/EXPIRED only, pending attempts expired when an order is cancelled or expires, `currentPayment`
-in kiosk order polling, payment summaries in order details, ADMIN payment list/detail, V12 unique (provider, payment_reference).
-No real provider, webhook, payment SUCCESS, Order PAID, refund or dispensing. See docs/payment-service.md and CURRENT_TASK.md.
-
-## 17. QR payment provider scope — Issue #31
-
-payOS adapter behind PaymentGateway selected by PAYMENT_PROVIDER=PAYOS (MOCK stays the default): VietQR attempt creation with an HMAC-SHA256 signed request, integer-VND
-amount rule (409 for fractional amounts), orderCode as payment_reference, best-effort link cancellation after commit, and webhook signature verifier/parser components.
-No webhook endpoint, payment SUCCESS, Order PAID, refund, reconciliation, schema change or new dependency. The manual real-payOS checks stay open until payOS access exists.
-See docs/payment-provider.md and CURRENT_TASK.md.
-
-## 18. Payment webhook scope — Issue #33
-
-Verified provider webhooks (payOS and the development MOCK) are the only source of payment SUCCESS and order PAID. Every attempt is logged, processing is idempotent and race-safe,
-late, duplicate, mismatched and conflicting payments are recorded for ADMIN review and never auto-resolved, ADMIN can read webhook logs and filter payments that require attention, and the kiosk sees PAID by polling.
-No dispense command, inventory SOLD, DISPENSING/COMPLETED, refund, reconciliation, replay or alert exists; PAID orders keep their bowls RESERVED. Real payOS webhook verification stays a manual check.
-See docs/payment-webhook.md and CURRENT_TASK.md.
-
-## 19. One bowl per order — Issue #35
-
-Hardware rules: one purchase = one bowl, and a slot (vertical column) can only release its bottom bowl. The kiosk order request
-is `{ "productId" }` only (breaking change, the kiosk has not shipped); every new order has one item of quantity 1. The backend reserves
-the head (bottom bowl) of a sellable slot, FEFO only between slot heads, at most one RESERVED bowl per slot, and the catalog lists only
-products with a sellable head. `app.order.max-total-quantity` and catalog `maxTotalQuantity` are removed. No schema change; historical
-multi-line orders stay readable. See docs/order-management.md.

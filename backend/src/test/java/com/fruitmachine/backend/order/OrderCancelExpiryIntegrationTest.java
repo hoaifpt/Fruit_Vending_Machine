@@ -10,12 +10,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class OrderCancelExpiryIntegrationTest extends AbstractOrderIntegrationTest {
     private record Shop(UUID machineId, UUID slotId, UUID productId, String key) {}
 
-    /** One or both columns (A, B) of one product, each loaded with {@code bowls} bowls; slotId is column A. */
+    /** {@code slots} columns A1..An of one product, each loaded with {@code bowls} bowls; slotId is A1. */
     private Shop shop(int slots, int bowls) throws Exception {
         UUID machine = fixtures.machine(admin.token());
         UUID product = createProduct("Cancel bowl", "15000"), batch = fixtures.batch(product, slots * bowls, staff.token()), first = null;
         for (int n = 1; n <= slots; n++) {
-            UUID slot = createSlot(machine, n == 1 ? "A" : "B", 20);
+            UUID slot = createSlot(machine, "A" + n, 20);
             load(batch, slot, bowls);
             if (first == null) first = slot;
         }
@@ -98,13 +98,12 @@ class OrderCancelExpiryIntegrationTest extends AbstractOrderIntegrationTest {
 
     @Test
     void sweepExpiresOnlyDuePendingOrdersAndReleasesTheirHeads() throws Exception {
-        // A machine has two columns, so the third order of this scenario (the PAID one) is placed on another machine.
-        Shop shop = shop(2, 2), paidShop = shop(1, 2);
+        Shop shop = shop(3, 2);
         UUID due = UUID.fromString(order(shop).path("id").asText());
         UUID dueBowl = reservedBowl(due);
         clock.advance(Duration.ofMinutes(3));
         UUID later = UUID.fromString(order(shop).path("id").asText());
-        UUID paid = UUID.fromString(order(paidShop).path("id").asText());
+        UUID paid = UUID.fromString(order(shop).path("id").asText());
         jdbc.update("UPDATE orders SET status='PAID', paid_at=now() WHERE id=?", paid);
 
         // Nothing is due yet: reads never write and the sweep ignores unexpired orders.
@@ -123,7 +122,7 @@ class OrderCancelExpiryIntegrationTest extends AbstractOrderIntegrationTest {
         var returns = jdbc.queryForList("SELECT reason FROM inventory_transactions WHERE reference_id=? AND type='RETURN'", due);
         assertThat(returns).hasSize(1).allSatisfy(row -> assertThat(row.get("reason")).isEqualTo("RESERVATION_EXPIRED"));
         String available = "SELECT count(*) FROM inventory_items i JOIN machine_slots s ON s.id=i.slot_id WHERE s.machine_id=? AND i.status='AVAILABLE'";
-        assertThat(count(available, shop.machineId())).isEqualTo(3);
+        assertThat(count(available, shop.machineId())).isEqualTo(4);
         assertThat(expiry.sweep()).isZero();
         // The expired head is the head again and is what the next order gets (its column is the only free one).
         assertThat(reservedBowl(UUID.fromString(order(shop).path("id").asText()))).isEqualTo(dueBowl);
@@ -131,15 +130,15 @@ class OrderCancelExpiryIntegrationTest extends AbstractOrderIntegrationTest {
         clock.advance(Duration.ofMinutes(10));
         assertThat(expiry.sweep()).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT status FROM orders WHERE id=?", String.class, later)).isEqualTo("CANCELLED");
-        assertThat(count(available, shop.machineId())).isEqualTo(4);
+        assertThat(count(available, shop.machineId())).isEqualTo(5);
     }
 
     @Test
     void sweepContinuesWhenOneOrderFails() throws Exception {
-        Shop shop = shop(2, 1), second = shop(1, 1);
+        Shop shop = shop(3, 1);
         UUID broken = UUID.fromString(order(shop).path("id").asText());
         UUID healthyA = UUID.fromString(order(shop).path("id").asText());
-        UUID healthyB = UUID.fromString(order(second).path("id").asText());
+        UUID healthyB = UUID.fromString(order(shop).path("id").asText());
         // Corrupt exactly one reservation: the bowl is no longer RESERVED, so releasing that order fails.
         jdbc.update("UPDATE inventory_items SET status='REMOVED', removed_at=now(), reserved_at=NULL WHERE id IN (SELECT a.inventory_item_id FROM order_item_allocations a JOIN order_items oi ON oi.id=a.order_item_id WHERE oi.order_id=?)", broken);
         // Make the broken order the first due one.

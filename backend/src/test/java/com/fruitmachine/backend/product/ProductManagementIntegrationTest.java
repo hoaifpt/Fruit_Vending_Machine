@@ -42,7 +42,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true",
         "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.fruitmachine.backend.product.ProductManagementIntegrationTest$ProductSqlCapture"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
-@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class ProductManagementIntegrationTest {
     public static class ProductSqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
@@ -52,7 +51,7 @@ class ProductManagementIntegrationTest {
             return sql;
         }
     }
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String PASSWORD = "Test-only-product-passphrase!";
     static final String KEY = newKey();
     static String newKey() {
@@ -430,7 +429,7 @@ class ProductManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(authorities = {"ROLE_ADMIN", "PRODUCT_READ", "PRODUCT_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidatesPositivePriceAndStrictMoneyPrecisionOutsideMvc() {
         assertThatThrownBy(() -> service.createProduct(new CreateProductRequest("BAD", "Name", null, BigDecimal.ZERO, null)))
                 .isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -442,7 +441,7 @@ class ProductManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(authorities = {"ROLE_STAFF", "PRODUCT_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWriteBoundaryAlsoEnforcesAdminWhenNotInvokedThroughController() {
         assertThatThrownBy(() -> service.createProduct(new CreateProductRequest("DENIED", "Name", null, BigDecimal.ONE, null)))
                 .isInstanceOf(AccessDeniedException.class);

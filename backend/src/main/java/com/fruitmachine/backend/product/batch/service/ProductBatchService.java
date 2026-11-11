@@ -16,7 +16,6 @@ import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -32,7 +31,7 @@ public class ProductBatchService {
     private final ProductBatchMapper mapper;
     private final Clock clock;
 
-    @Transactional @PreAuthorize(Permissions.HAS_BATCH_CREATE)
+    @Transactional @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
     public ProductBatchResponse createBatch(@Valid CreateProductBatchRequest request) {
         if (batches.existsByBatchCode(request.batchCode())) throw new ConflictException("Batch code is already in use");
         // Serialize with existing catalog writes so ACTIVE validation cannot race deactivation.
@@ -49,7 +48,7 @@ public class ProductBatchService {
         return mapper.toResponse(batches.saveAndFlush(batch));
     }
 
-    @Transactional(readOnly = true) @PreAuthorize(Permissions.HAS_BATCH_READ)
+    @Transactional(readOnly = true) @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
     public ProductBatchPageResponse listBatches(int page, int size, UUID productId, String sort) {
         if (page < 0 || size < 1 || size > 100) throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
         var pageable = PageRequest.of(page, size, approvedSort(sort));
@@ -64,7 +63,7 @@ public class ProductBatchService {
         var result = Sort.by(parts.length == 2 && parts[1].equalsIgnoreCase("desc") ? Sort.Direction.DESC : Sort.Direction.ASC, parts[0]);
         return parts[0].equals("id") ? result : result.and(Sort.by("id"));
     }
-    @Transactional(readOnly = true) @PreAuthorize(Permissions.HAS_BATCH_READ)
+    @Transactional(readOnly = true) @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
     public ProductBatchResponse getBatch(UUID id) {
         return mapper.toResponse(batches.findById(id).orElseThrow(() -> new ResourceNotFoundException("Product batch not found")));
     }

@@ -21,7 +21,6 @@ import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -29,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
 @Service @RequiredArgsConstructor @Validated
+@PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
 public class InventoryService {
     private static final Set<InventoryStatus> PHYSICAL = Set.of(InventoryStatus.AVAILABLE, InventoryStatus.RESERVED, InventoryStatus.EXPIRED, InventoryStatus.DISPENSE_FAILED);
     private final InventoryItemRepository items;
@@ -42,7 +42,6 @@ public class InventoryService {
     private final Clock clock;
 
     @Transactional
-    @PreAuthorize(Permissions.HAS_INVENTORY_WRITE)
     public InventoryLoadResponse loadInventory(@Valid LoadInventoryRequest request) {
         // Scalar lookup avoids managed stale snapshots before acquiring locks.
         UUID productId = batches.findProductIdById(request.batchId()).orElseThrow(() -> missing("Product batch"));
@@ -72,7 +71,6 @@ public class InventoryService {
         return new InventoryLoadResponse(operation, loaded.size(), loaded.stream().map(item -> mapper.item(item, now)).toList());
     }
     @Transactional
-    @PreAuthorize(Permissions.HAS_INVENTORY_WRITE)
     public InventoryItemResponse removeInventoryItem(UUID id, @Valid RemoveInventoryRequest request) {
         UUID slotId = items.findSlotIdById(id);
         // Removal only takes Slot -> Item locks; it cannot form a cycle with loading.
@@ -100,12 +98,10 @@ public class InventoryService {
         event.setReason(reason); event.setStatusBefore(before); event.setStatusAfter(after); history.save(event);
     }
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryItemResponse getInventoryItem(UUID id) {
         return mapper.item(items.findById(id).orElseThrow(() -> missing("Inventory item")), clock.instant());
     }
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryPageResponse listInventory(int page, int size, UUID machineId, UUID slotId, UUID batchId, InventoryStatus status, Boolean expired, String sort) {
         Instant now = clock.instant();
         Specification<InventoryItem> filter = (root, query, cb) -> {
@@ -121,20 +117,17 @@ public class InventoryService {
         return new InventoryPageResponse(result.getContent().stream().map(item -> mapper.item(item, now)).toList(), page, size, result.getTotalElements(), result.getTotalPages());
     }
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryPageResponse getMachineInventory(UUID machineId, int page, int size, InventoryStatus status, Boolean expired) {
         if (!machines.existsById(machineId)) throw missing("Machine");
         return listInventory(page, size, machineId, null, null, status, expired, null);
     }
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryPageResponse getSlotInventory(UUID machineId, UUID slotId, int page, int size, InventoryStatus status, Boolean expired) {
         requireSlot(machineId, slotId);
         return listInventory(page, size, machineId, slotId, null, status, expired, null);
     }
     /** REPEATABLE READ so the counts and the head come from one snapshot. */
     @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
-    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventorySummaryResponse getInventorySummary(UUID machineId, UUID slotId) {
         requireSlot(machineId, slotId); Instant now = clock.instant();
         var head = items.findHeadCandidates(slotId, PHYSICAL, PageRequest.of(0, 1)).stream().findFirst().orElse(null);
@@ -151,7 +144,6 @@ public class InventoryService {
         return slots.findByIdAndMachineId(slotId, machineId).orElseThrow(() -> missing("Slot in specified machine"));
     }
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryTransactionPageResponse listInventoryTransactions(int page, int size, UUID itemId, UUID machineId, UUID slotId, UUID referenceId, InventoryTransactionType type) {
         Specification<InventoryTransaction> filter = (root, query, cb) -> {
             var predicates = new ArrayList<jakarta.persistence.criteria.Predicate>();

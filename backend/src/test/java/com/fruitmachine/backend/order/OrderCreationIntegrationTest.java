@@ -20,7 +20,7 @@ class OrderCreationIntegrationTest extends AbstractOrderIntegrationTest {
 
     private Shop shop() throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        return new Shop(machine, createSlot(machine, "A", 30), issueKey(machine));
+        return new Shop(machine, createSlot(machine, "A1", 30), issueKey(machine));
     }
 
     private UUID stocked(Shop shop, String name, String price, int bowls) throws Exception {
@@ -170,7 +170,7 @@ class OrderCreationIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void reservedHeadMakesTheSlotBusyUntilAnotherSlotOrA409() throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID a1 = createSlot(machine, "A", 10), a2 = createSlot(machine, "B", 10);
+        UUID a1 = createSlot(machine, "A1", 10), a2 = createSlot(machine, "A2", 10);
         String key = issueKey(machine);
         UUID product = createProduct("Busy bowl", "10000"), batch = fixtures.batch(product, 6, staff.token());
         load(batch, a1, 3);
@@ -207,7 +207,7 @@ class OrderCreationIntegrationTest extends AbstractOrderIntegrationTest {
             kioskJson("POST", URL, shop.key(), orderBody(product), 409);
             assertThat(reservedIn(shop.slotId())).as(blocker).isZero();
             // A second, healthy column of the same product on the same machine is used instead.
-            UUID healthy = createSlot(shop.machineId(), "B", 10);
+            UUID healthy = createSlot(shop.machineId(), "B1", 10);
             load(fixtures.batch(product, 1, staff.token()), healthy, 1);
             assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, shop.key(), orderBody(product), 201))))).as(blocker).isEqualTo(healthy);
             assertThat(reservedIn(shop.slotId())).as(blocker).isZero();
@@ -224,35 +224,27 @@ class OrderCreationIntegrationTest extends AbstractOrderIntegrationTest {
 
     @Test
     void choosesTheSlotWhoseHeadExpiresFirstThenLoadedAtThenSlotCode() throws Exception {
-        UUID product = createProduct("FEFO heads", "10000");
-        UUID late = shortBatch(product, 6, 3 * 86400), early = shortBatch(product, 6, 86400);
-
-        // Head expiry decides first: B wins although A was loaded earlier, sorts first and hides earlier-expiring bowls behind its head.
         UUID machine = fixtures.machine(admin.token());
         String key = issueKey(machine);
-        UUID a = createSlot(machine, "A", 10), b = createSlot(machine, "B", 10);
-        load(late, a, 1); load(early, a, 2);
-        load(early, b, 1);
-        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, key, orderBody(product), 201))))).isEqualTo(b);
-        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, key, orderBody(product), 201))))).isEqualTo(a);
-
-        // Heads of the same batch: the earlier loaded head (B) wins before the slot code.
-        UUID second = fixtures.machine(admin.token());
-        String secondKey = issueKey(second);
-        UUID a2 = createSlot(second, "A", 10), b2 = createSlot(second, "B", 10);
-        load(late, b2, 1);
-        load(late, a2, 1);
-        jdbc.update("UPDATE inventory_items SET loaded_at = '2026-01-01T00:00:00Z' WHERE slot_id = ?", b2);
-        jdbc.update("UPDATE inventory_items SET loaded_at = '2026-01-02T00:00:00Z' WHERE slot_id = ?", a2);
-        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, secondKey, orderBody(product), 201))))).isEqualTo(b2);
+        UUID product = createProduct("FEFO heads", "10000");
+        UUID late = shortBatch(product, 6, 3 * 86400), early = shortBatch(product, 6, 86400);
+        UUID c1 = createSlot(machine, "C1", 10), b1 = createSlot(machine, "B1", 10), a1 = createSlot(machine, "A1", 10);
+        // C1 head expires latest; A1 head expires earliest but sits on top of nothing special; B1 deeper bowls expire earliest.
+        load(late, c1, 1);
+        load(late, b1, 1); load(early, b1, 2);
+        load(early, a1, 1);
+        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, key, orderBody(product), 201))))).isEqualTo(a1);
+        // A1 is busy now; B1 and C1 heads share the late batch: the earlier loaded head (C1) wins before slot code.
+        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, key, orderBody(product), 201))))).isEqualTo(c1);
+        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, key, orderBody(product), 201))))).isEqualTo(b1);
 
         // Same expiry and same loaded_at: slot code decides.
-        UUID third = fixtures.machine(admin.token());
-        String thirdKey = issueKey(third);
-        UUID a3 = createSlot(third, "A", 10), b3 = createSlot(third, "B", 10);
-        load(early, b3, 1); load(early, a3, 1);
-        jdbc.update("UPDATE inventory_items SET loaded_at = '2026-01-01T00:00:00Z' WHERE slot_id IN (?, ?)", a3, b3);
-        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, thirdKey, orderBody(product), 201))))).isEqualTo(a3);
+        UUID other = fixtures.machine(admin.token());
+        String otherKey = issueKey(other);
+        UUID z9 = createSlot(other, "Z9", 10), d4 = createSlot(other, "D4", 10);
+        load(early, z9, 1); load(early, d4, 1);
+        jdbc.update("UPDATE inventory_items SET loaded_at = '2026-01-01T00:00:00Z' WHERE slot_id IN (?, ?)", z9, d4);
+        assertThat(slotOf(reservedBowl(orderId(kioskData("POST", URL, otherKey, orderBody(product), 201))))).isEqualTo(d4);
     }
 
     @Test
@@ -284,7 +276,7 @@ class OrderCreationIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void laterProductPriceChangeDoesNotAlterExistingOrders() throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID a1 = createSlot(machine, "A", 10), a2 = createSlot(machine, "B", 10);
+        UUID a1 = createSlot(machine, "A1", 10), a2 = createSlot(machine, "A2", 10);
         String key = issueKey(machine);
         UUID product = createProduct("Price bowl", "10000"), batch = fixtures.batch(product, 2, staff.token());
         load(batch, a1, 1); load(batch, a2, 1);

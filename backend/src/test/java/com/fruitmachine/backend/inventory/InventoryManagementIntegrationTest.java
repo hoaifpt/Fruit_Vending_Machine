@@ -95,7 +95,7 @@ class InventoryManagementIntegrationTest {
     Product product() { var p=new Product(); p.setSku(UUID.randomUUID().toString()); p.setName("Fruit Box"); p.setPrice(BigDecimal.ONE); return products.saveAndFlush(p); }
     ProductBatch batch(Product p,int quantity) { var b=new ProductBatch(); b.setBatchCode(UUID.randomUUID().toString()); b.setProduct(p); b.setManufacturedAt(NOW.minus(Duration.ofDays(1))); b.setExpiresAt(NOW.plus(Duration.ofDays(2))); b.setQuantity(quantity); return batches.saveAndFlush(b); }
     Machine machine() { var m=new Machine(); m.setCode(UUID.randomUUID().toString()); m.setName("Test Machine"); m.setStatus(MachineStatus.ACTIVE); return machines.saveAndFlush(m); }
-    MachineSlot slot(Machine m,int capacity) { var s=new MachineSlot(); s.setMachine(m); s.setSlotCode("A"); s.setCapacity(capacity); s.setStatus(SlotStatus.ACTIVE); return slots.saveAndFlush(s); }
+    MachineSlot slot(Machine m,int capacity) { var s=new MachineSlot(); s.setMachine(m); s.setSlotCode("A1"); s.setCapacity(capacity); s.setStatus(SlotStatus.ACTIVE); return slots.saveAndFlush(s); }
     ObjectNode body(int quantity) { return json.createObjectNode().put("batchId",batch.getId().toString()).put("slotId",slot.getId().toString()).put("quantity",quantity); }
     MockHttpServletRequestBuilder auth(MockHttpServletRequestBuilder request,String token) { return request.header("Authorization","Bearer "+token); }
     ObjectNode load(int quantity,String token) throws Exception { return (ObjectNode) json.readTree(mvc.perform(auth(post(PATH+"/load"),token).contentType("application/json").content(body(quantity).toString())).andExpect(status().isCreated()).andReturn().getResponse().getContentAsString()).path("data"); }
@@ -310,7 +310,7 @@ class InventoryManagementIntegrationTest {
         try {
             assertThatThrownBy(()->service.loadInventory(new LoadInventoryRequest(batch.getId(),slot.getId(),1))).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
             assertThatThrownBy(()->service.getInventorySummary(machine.getId(),slot.getId())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
-            var principal=new AuthenticatedUser(staffId,"test@example.invalid","",com.fruitmachine.backend.user.enums.UserStatus.ACTIVE,com.fruitmachine.backend.support.SeededAuthorities.of("STAFF"));
+            var principal=new AuthenticatedUser(staffId,"test@example.invalid","",com.fruitmachine.backend.user.enums.UserStatus.ACTIVE,List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_STAFF")));
             context.setAuthentication(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(principal,null,principal.getAuthorities()));
             assertThatThrownBy(()->service.loadInventory(new LoadInventoryRequest(batch.getId(),slot.getId(),0))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
             assertThatThrownBy(()->service.removeInventoryItem(UUID.randomUUID(),new RemoveInventoryRequest(" "))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);

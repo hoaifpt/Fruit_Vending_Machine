@@ -69,12 +69,6 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
-        <!-- MQTT client for dispense commands and machine events (docs/mqtt-dispense.md). -->
-        <dependency>
-            <groupId>org.eclipse.paho</groupId>
-            <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
-            <version>1.2.5</version>
-        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -116,8 +110,6 @@
                 <configuration>
                     <systemPropertyVariables>
                         <user.timezone>UTC</user.timezone>
-                        <!-- Tests must never read the developer .env (it may select a real payment provider with real credentials). -->
-                        <APP_DOTENV_IMPORT>optional:file:./target/no-dotenv/.env[.properties]</APP_DOTENV_IMPORT>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>

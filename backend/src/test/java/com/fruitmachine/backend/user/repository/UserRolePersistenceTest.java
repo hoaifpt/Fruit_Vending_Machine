@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Testcontainers
 class UserRolePersistenceTest {
     @Container
-    static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
 
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
@@ -246,9 +246,9 @@ class UserRolePersistenceTest {
     void validatesAllAppliedMigrationsAndExistingEntityMappings() {
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Long.class))
-                .isEqualTo(15);
+                .isEqualTo(8);
         assertThat(entityManagerFactory.getProperties()).containsEntry("hibernate.hbm2ddl.auto", "validate");
-        assertThat(entityManagerFactory.getMetamodel().getEntities()).hasSize(22);
+        assertThat(entityManagerFactory.getMetamodel().getEntities()).hasSize(19);
     }
 
     private UserRole assign(User user, Role role) {

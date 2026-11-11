@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.*;
 @Testcontainers
 @ExtendWith(OutputCaptureExtension.class)
 class InitialAdminStartupTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String PASSWORD = "Startup-test-only-passphrase!";
     static final String EMAIL = "startup-admin@example.invalid";
     static final String KEY = key();

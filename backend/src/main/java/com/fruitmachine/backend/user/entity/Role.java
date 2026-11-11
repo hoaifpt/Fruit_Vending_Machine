@@ -5,7 +5,6 @@ import com.fruitmachine.backend.common.entity.CreatedEntity;
 import jakarta.persistence.*;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.stream.Collectors;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -26,13 +25,4 @@ public class Role extends CreatedEntity {
     @OneToMany(mappedBy = "role", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)
     private Set<UserRole> userMemberships = new HashSet<>();
-
-    // No cascade: grants are replaced explicitly by RolePermissionService.
-    @OneToMany(mappedBy = "role", fetch = FetchType.LAZY)
-    @Setter(AccessLevel.NONE)
-    private Set<RolePermission> permissionGrants = new HashSet<>();
-
-    public Set<Permission> getPermissions() {
-        return permissionGrants.stream().map(RolePermission::getPermission).collect(Collectors.toUnmodifiableSet());
-    }
 }

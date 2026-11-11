@@ -13,16 +13,7 @@ import org.springframework.data.repository.query.Param;
 public interface MachineRepository extends JpaRepository<Machine, UUID>, JpaSpecificationExecutor<Machine> {
     boolean existsByCode(String code);
 
-    /** Machine messages name the machine by code (topic and envelope); presence is written by MachinePresenceService. */
-    @Query("select m.id from Machine m where m.code = :code")
-    Optional<UUID> findIdByCode(@Param("code") String code);
-
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from Machine m where m.id = :id")
     Optional<Machine> findForUpdateById(@Param("id") UUID id);
-
-    /** Shared lock: serializes with status/configuration writes (PESSIMISTIC_WRITE) without blocking other orders. */
-    @Lock(LockModeType.PESSIMISTIC_READ)
-    @Query("select m from Machine m where m.id = :id")
-    Optional<Machine> findForShareById(@Param("id") UUID id);
 }

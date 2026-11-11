@@ -42,7 +42,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=",
         "spring.jpa.properties.hibernate.session_factory.statement_inspector=com.fruitmachine.backend.machine.MachineManagementIntegrationTest$SqlCapture"})
 @AutoConfigureMockMvc(print = org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint.NONE)
-@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class MachineManagementIntegrationTest {
     public static class SqlCapture implements org.hibernate.resource.jdbc.spi.StatementInspector {
@@ -52,7 +51,7 @@ class MachineManagementIntegrationTest {
             return sql;
         }
     }
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String PASSWORD = "Test-only-machine-passphrase!";
     static final String KEY = newKey();
     static String newKey() {
@@ -138,12 +137,8 @@ class MachineManagementIntegrationTest {
                 .andReturn().getResponse();
         var data = mapper.readTree(response.getContentAsString()).path("data");
         assertThat(data.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "code", "name", "location", "status",
-                "minTemperature", "maxTemperature", "minHumidity", "maxHumidity", "connectivity", "lastSeenAt", "lastHeartbeatAt",
-                "firmwareVersion", "uptimeSeconds", "wifiRssi", "freeHeapBytes", "createdAt", "updatedAt");
+                "minTemperature", "maxTemperature", "minHumidity", "maxHumidity", "lastSeenAt", "createdAt", "updatedAt");
         assertThat(data.path("lastSeenAt").isNull()).isTrue();
-        assertThat(data.path("connectivity").asText()).isEqualTo("NEVER_SEEN");
-        for (String diagnostic : List.of("lastHeartbeatAt", "firmwareVersion", "uptimeSeconds", "wifiRssi", "freeHeapBytes"))
-            assertThat(data.path(diagnostic).isNull()).as(diagnostic).isTrue();
         UUID id = UUID.fromString(data.path("id").asText());
         assertThat(response.getHeader("Location")).isEqualTo("/api/v1/machines/" + id);
         var saved = machines.findById(id).orElseThrow();
@@ -388,7 +383,7 @@ class MachineManagementIntegrationTest {
     @Test
     void configurationAndDeactivationPreserveRelatedRecordsAndHeartbeat() throws Exception {
         UUID slot = UUID.randomUUID(), product = UUID.randomUUID(), batch = UUID.randomUUID(), item = UUID.randomUUID(), order = UUID.randomUUID();
-        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A',5)", slot, campus.getId());
+        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A1',5)", slot, campus.getId());
         jdbc.update("INSERT INTO products(id,sku,name,price) VALUES (?,'FIXTURE','Fixture',1)", product);
         jdbc.update("INSERT INTO product_batches(id,batch_code,product_id,manufactured_at,expires_at,quantity) VALUES (?,'FIXTURE',?,now(),now()+interval '2 days',1)", batch, product);
         jdbc.update("INSERT INTO inventory_items(id,batch_id,slot_id,loaded_at) VALUES (?,?,?,now())", item, batch, slot);
@@ -406,7 +401,7 @@ class MachineManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(authorities = {"ROLE_ADMIN", "MACHINE_READ", "MACHINE_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidationAlsoProtectsNonMvcCalls() {
         assertThatThrownBy(() -> service.createMachine(new CreateMachineRequest("BAD", "Name", "Location", new BigDecimal("1.001"), BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.TEN)))
                 .isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -419,7 +414,7 @@ class MachineManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(authorities = {"ROLE_STAFF", "MACHINE_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWriteBoundaryRequiresAdmin() {
         assertThatThrownBy(() -> service.createMachine(new CreateMachineRequest("DENIED", "Name", "Location", BigDecimal.ONE, BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.TEN)))
                 .isInstanceOf(AccessDeniedException.class);

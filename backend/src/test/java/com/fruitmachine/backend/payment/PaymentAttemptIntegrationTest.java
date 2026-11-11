@@ -214,7 +214,7 @@ class PaymentAttemptIntegrationTest extends AbstractPaymentIntegrationTest {
     void anAmountTheProviderCannotChargeExactlyIsRejectedBeforeAnyAttemptIsInserted() throws Exception {
         gateway.wholeAmountsOnly(true);
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "A", 10), product = createProduct("Fractional bowl", "35000.50");
+        UUID slot = createSlot(machine, "F1", 10), product = createProduct("Fractional bowl", "35000.50");
         load(fixtures.batch(product, 3, staff.token()), slot, 3);
         String key = issueKey(machine);
         var fractional = new PlacedOrder(new Shop(machine, slot, product, key),

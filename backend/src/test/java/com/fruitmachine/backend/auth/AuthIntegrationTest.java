@@ -47,11 +47,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {"spring.config.import=", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"})
 @AutoConfigureMockMvc
 @Import(AuthIntegrationTest.ProtectedTestController.class)
-@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
 class AuthIntegrationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String KEY = newKey();
     static String newKey() {
         byte[] bytes = new byte[32];
@@ -112,7 +111,7 @@ class AuthIntegrationTest {
         assertThat(tokens.extractSubject(token)).isEqualTo(admin.getId());
         mvc.perform(get("/api/v1/test-only/principal").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(admin.getId().toString()))
-                .andExpect(jsonPath("$.authorities", org.hamcrest.Matchers.hasItems("ROLE_ADMIN", "PERMISSION_MANAGE")));
+                .andExpect(jsonPath("$.authorities[0]").value("ROLE_ADMIN"));
         assertThat(output.getAll()).doesNotContain("Test-only-bootstrap-passphrase!", admin.getPasswordHash(), token, KEY);
     }
 
@@ -126,7 +125,7 @@ class AuthIntegrationTest {
         assertThat(tokens.extractSubject(token)).isEqualTo(user.getId());
         mvc.perform(get("/api/v1/test-only/principal").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(user.getId().toString()))
-                .andExpect(jsonPath("$.authorities", org.hamcrest.Matchers.hasItems("ROLE_ADMIN", "PERMISSION_MANAGE")))
+                .andExpect(jsonPath("$.authorities[0]").value("ROLE_ADMIN"))
                 .andExpect(header().doesNotExist("Set-Cookie"));
         mvc.perform(get("/api/v1/test-only/principal")).andExpect(status().isUnauthorized());
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
@@ -229,14 +228,7 @@ class AuthIntegrationTest {
                 "/api/v1/products", "/api/v1/products/{id}", "/api/v1/products/{id}/status",
                 "/api/v1/machines", "/api/v1/machines/{id}", "/api/v1/machines/{id}/status",
                 "/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}", "/api/v1/machines/{machineId}/slots/{slotId}/status",
-                "/api/v1/product-batches", "/api/v1/product-batches/{id}",
-                "/api/v1/inventory", "/api/v1/inventory/{id}", "/api/v1/inventory/load", "/api/v1/inventory/{id}/remove", "/api/v1/inventory/transactions",
-                "/api/v1/machines/{machineId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary", "/api/v1/machines/{machineId}/kiosk-credentials", "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke",
-                "/api/v1/kiosk/me", "/api/v1/kiosk/catalog", "/api/v1/kiosk/orders", "/api/v1/kiosk/orders/{orderId}",
-                "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/kiosk/orders/{orderId}/payments", "/api/v1/payments", "/api/v1/payments/{id}",
-                "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}",
-                "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions",
-                "/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest");
+                "/api/v1/product-batches", "/api/v1/product-batches/{id}");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

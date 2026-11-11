@@ -17,7 +17,6 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +31,7 @@ public class ProductService {
     private final ProductMapper mapper;
 
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_PRODUCT_READ)
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
     public ProductPageResponse listProducts(int page, int size, ProductStatus status, String search, String sort) {
         if (page < 0 || size < 1 || size > 100) {
             throw new BadRequestException("Page must be nonnegative and size must be between 1 and 100");
@@ -64,13 +63,13 @@ public class ProductService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_PRODUCT_READ)
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
     public ProductResponse getProduct(UUID id) {
         return mapper.toResponse(products.findById(id).orElseThrow(this::notFound));
     }
 
     @Transactional
-    @PreAuthorize(Permissions.HAS_PRODUCT_WRITE)
+    @PreAuthorize("hasRole('ADMIN')")
     public ProductResponse createProduct(@Valid CreateProductRequest request) {
         if (products.existsBySku(request.sku())) throw new ConflictException("SKU is already in use");
         Product product = new Product();
@@ -84,7 +83,7 @@ public class ProductService {
     }
 
     @Transactional
-    @PreAuthorize(Permissions.HAS_PRODUCT_WRITE)
+    @PreAuthorize("hasRole('ADMIN')")
     public ProductResponse updateProduct(UUID id, @Valid UpdateProductRequest request) {
         Product product = products.findForUpdateById(id).orElseThrow(this::notFound);
         product.setName(request.name());
@@ -96,7 +95,7 @@ public class ProductService {
     }
 
     @Transactional
-    @PreAuthorize(Permissions.HAS_PRODUCT_WRITE)
+    @PreAuthorize("hasRole('ADMIN')")
     public ProductResponse updateStatus(UUID id, @Valid UpdateProductStatusRequest request) {
         Product product = products.findForUpdateById(id).orElseThrow(this::notFound);
         product.setStatus(request.status());

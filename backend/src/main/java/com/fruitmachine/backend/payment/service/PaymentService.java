@@ -36,7 +36,6 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
-import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -122,7 +121,7 @@ public class PaymentService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_PAYMENT_READ)
+    @PreAuthorize("hasRole('ADMIN')")
     public PaymentPageResponse listPayments(int page, int size, PaymentStatus status, String provider, UUID orderId, UUID machineId,
             Instant createdFrom, Instant createdTo, Boolean requiresAttention, String sort) {
         Specification<Payment> filter = (root, query, cb) -> {
@@ -151,7 +150,7 @@ public class PaymentService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize(Permissions.HAS_PAYMENT_READ)
+    @PreAuthorize("hasRole('ADMIN')")
     public PaymentDetailResponse getPayment(UUID id) {
         return mapper.detail(payments.findWithOrderById(id).orElseThrow(() -> new ResourceNotFoundException("Payment not found")));
     }

@@ -3,10 +3,8 @@ package com.fruitmachine.backend.mqtt;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fruitmachine.backend.config.properties.MqttProperties;
 import com.fruitmachine.backend.dispense.service.MachineCommandGateway;
-import com.fruitmachine.backend.mqtt.contract.MachineChannel;
-import com.fruitmachine.backend.mqtt.contract.MachineCommands;
-import com.fruitmachine.backend.mqtt.contract.MachineTopic;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -27,7 +25,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * MQTT transport (api-contract/mqtt-contract.md): publishes dispense commands to {@code <root>/<machineCode>/commands} and subscribes
+ * MQTT transport (docs/mqtt-dispense.md): publishes dispense commands to {@code <root>/<machineCode>/commands} and subscribes
  * to every machine's {@code events} and {@code status}. Connects in the background and keeps retrying, so the backend starts
  * even when the broker is down; commands created meanwhile stay PENDING and the dispense sweep re-sends them.
  */
@@ -87,10 +85,7 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
         // Clean session: subscriptions are lost on every reconnect, so subscribe each time.
         try {
             String root = properties.topicRoot();
-            String[] filters = MachineChannel.SUBSCRIBED.stream().map(channel -> MachineTopic.allMachines(root, channel)).toArray(String[]::new);
-            int[] qos = new int[filters.length];
-            java.util.Arrays.fill(qos, QOS);
-            client.subscribe(filters, qos);
+            client.subscribe(new String[] {root + "/+/events", root + "/+/status"}, new int[] {QOS, QOS});
             log.info("MQTT {} to {}", reconnect ? "reconnected" : "connected", serverUri);
         } catch (MqttException ex) {
             log.warn("MQTT subscribe failed (reason {})", ex.getReasonCode());
@@ -98,10 +93,14 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
     }
 
     @Override
-    public boolean sendDispense(String machineCode, String commandCode, String columnCode) {
+    public boolean sendDispense(String machineCode, String commandCode) {
         if (!client.isConnected()) return false;
         try {
-            byte[] body = json.writeValueAsBytes(MachineCommands.dispense(machineCode, commandCode, columnCode));
+            byte[] body = json.writeValueAsBytes(Map.of(
+                    "schemaVersion", 1,
+                    "messageId", UUID.randomUUID().toString(),
+                    "machineCode", machineCode,
+                    "payload", Map.of("type", "DISPENSE", "commandId", commandCode)));
             var message = new MqttMessage(body);
             message.setQos(QOS);
             message.setRetained(false);
@@ -117,9 +116,9 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
     public void messageArrived(String topic, MqttMessage message) {
         // <root>/<machineCode>/<channel>; never throw here, Paho would drop the connection.
         try {
-            var parsed = MachineTopic.parse(topic);
-            if (parsed.isEmpty()) return;
-            handler.getObject().handle(parsed.get().machineCode(), parsed.get().channel(), message.getPayload());
+            String[] parts = topic.split("/");
+            if (parts.length != 3) return;
+            handler.getObject().handle(parts[1], parts[2], message.getPayload());
         } catch (RuntimeException ex) {
             log.warn("Handling MQTT message on {} failed: {}", topic, ex.getMessage());
             log.debug("MQTT message body: {}", new String(message.getPayload(), StandardCharsets.UTF_8), ex);

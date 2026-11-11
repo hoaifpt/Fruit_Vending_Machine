@@ -22,10 +22,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {"spring.config.import=", "springdoc.api-docs.enabled=true", "springdoc.swagger-ui.enabled=true"})
 @AutoConfigureMockMvc
-@org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers
 class MachineSlotManagementDocumentationTest {
-    @Container static final PostgreSQLContainer<?> POSTGRES = com.fruitmachine.backend.support.TestPostgres.create();
+    @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18");
     static final String KEY = MachineSlotManagementIntegrationTest.KEY;
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -60,7 +59,7 @@ class MachineSlotManagementDocumentationTest {
         var create = actual.at("/components/schemas/CreateMachineSlotRequest");
         assertThat(create.path("additionalProperties").asBoolean(true)).isFalse();
         assertThat(create.path("required")).hasSize(2);
-        assertThat(create.at("/properties/slotCode/enum")).containsExactly(mapper.getNodeFactory().textNode("A"), mapper.getNodeFactory().textNode("B"));
+        assertThat(create.at("/properties/slotCode/maxLength").asInt()).isEqualTo(32);
         assertThat(create.at("/properties/capacity/type").asText()).isEqualTo("integer");
         assertThat(create.at("/properties/capacity/minimum").asInt()).isEqualTo(1);
         assertThat(create.at("/properties/capacity/maximum").asLong()).isEqualTo(Integer.MAX_VALUE);
