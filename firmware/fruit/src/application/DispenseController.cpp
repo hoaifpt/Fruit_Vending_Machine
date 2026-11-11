@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "app_config.h"
+#include "error_codes.h"
 
 DispenseController::DispenseController(ServoDriver &servoDriver)
     : servoDriver(servoDriver) {}
@@ -66,6 +67,11 @@ bool DispenseController::maintenanceAlreadyCompleted(const char *id, char column
 
 bool DispenseController::start(const char *id, char columnCode)
 {
+    if (!servoDriver.isReady())
+    {
+        current = DispenseState::FAULT;
+        return false;
+    }
     if (current != DispenseState::IDLE || id == nullptr ||
         !selectColumn(columnCode, dispenseLowerServos, dispenseUpperServos))
     {
@@ -104,6 +110,11 @@ bool DispenseController::startMaintenanceCloseRefill(const char *id, char column
 
 bool DispenseController::startMaintenance(const char *id, char columnCode, bool emptyColumn)
 {
+    if (!servoDriver.isReady())
+    {
+        current = DispenseState::FAULT;
+        return false;
+    }
     if (current != DispenseState::IDLE || id == nullptr)
     {
         return false;
@@ -139,6 +150,11 @@ bool DispenseController::startMaintenance(const char *id, char columnCode, bool 
 
 bool DispenseController::startMaintenanceRefill(const char *id, char columnCode, bool open)
 {
+    if (!servoDriver.isReady())
+    {
+        current = DispenseState::FAULT;
+        return false;
+    }
     if (current != DispenseState::IDLE || id == nullptr)
     {
         return false;
@@ -345,6 +361,15 @@ void DispenseController::finish(DispenseOutcome outcome)
             sizeof(result.maintenanceOperation) - 1);
     result.maintenanceOperation[sizeof(result.maintenanceOperation) - 1] = '\0';
     result.columnCode = maintenanceClear ? maintenanceColumn : dispenseColumn;
+    if (outcome == DispenseOutcome::ABORTED)
+    {
+        strncpy(result.errorCode, ErrorCode::ERR_DISPENSE_ABORTED, sizeof(result.errorCode) - 1);
+        result.errorCode[sizeof(result.errorCode) - 1] = '\0';
+    }
+    else
+    {
+        result.errorCode[0] = '\0';
+    }
     if (maintenanceClear)
     {
         strncpy(lastMaintenanceCommandId, commandId, COMMAND_ID_SIZE - 1);

@@ -10,4 +10,5 @@ namespace PinConfig
     constexpr uint8_t SERVO_3 = 21;
     constexpr uint8_t SERVO_4 = 22;
     constexpr uint8_t SENSOR = 23;
+    constexpr uint8_t TEMPERATURE_SENSOR = 4;
 }

@@ -4,6 +4,8 @@
 #include <PubSubClient.h>
 #include <WiFiClient.h>
 
+class ConfigPortalService;
+
 // Machine <-> backend MQTT (docs/mqtt-dispense.md, envelope schemaVersion 1).
 // Publishes status, events and telemetry; subscribes to <root>/<machineCode>/commands for DISPENSE commands from the backend.
 class MqttService
@@ -15,7 +17,7 @@ public:
 
     MqttService();
 
-    bool begin();
+    bool begin(ConfigPortalService &config);
     void loop();
     bool connected();
     void onDispense(DispenseHandler handler) { dispenseHandler = handler; }
@@ -23,7 +25,13 @@ public:
 
     // payloadJson must be a JSON object built from trusted values (numbers, validated ids).
     bool publishTelemetry(float temperatureC, float humidityPercent);
+    bool publishTemperatureTelemetry(float temperatureC);
     bool publishEvent(const char *eventType, const char *detailsJson);
+    bool publishError(const char *errorCode, const char *message, const char *commandId = nullptr, char columnCode = '\0');
+
+    void setLastError(const char *code);
+    const char *getLastError() const { return lastError; }
+    void clearLastError() { lastError[0] = '\0'; }
 
 private:
     bool connect();
@@ -39,10 +47,12 @@ private:
     char commandTopic[96] = {};
     char willMessage[256] = {};
     char bootId[9] = {};
+    char lastError[32] = {};
     unsigned long sequence = 0;
     unsigned long lastAttemptAt = 0;
     unsigned long lastHeartbeatAt = 0;
     bool configured = false;
     DispenseHandler dispenseHandler = nullptr;
     MaintenanceHandler maintenanceHandler = nullptr;
+    ConfigPortalService *configPortal = nullptr;
 };

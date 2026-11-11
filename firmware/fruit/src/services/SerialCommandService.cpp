@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "app_config.h"
+#include "error_codes.h"
 #include "utils/Logger.h"
 
 SerialCommandService::SerialCommandService(DispenseController &dispenser)
@@ -28,6 +29,7 @@ void SerialCommandService::loop()
         {
             if (overflow)
             {
+                Logger::error(ErrorCode::ERR_LINE_TOO_LONG, "Serial line buffer overflow (exceeded %u bytes)", LINE_SIZE);
                 Serial.println("ERR LINE_TOO_LONG");
             }
             else if (length > 0)
@@ -107,6 +109,7 @@ void SerialCommandService::handleLine(char *text)
     }
     else
     {
+        Logger::error(ErrorCode::ERR_UNKNOWN_COMMAND, "Unknown serial command: %s", command);
         Serial.println("ERR UNKNOWN_COMMAND");
     }
 }

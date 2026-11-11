@@ -3,22 +3,36 @@
 #include <WiFi.h>
 
 #include "app_config.h"
+#include "services/ConfigPortalService.h"
+#include "error_codes.h"
 #include "utils/Logger.h"
 
-bool WifiService::begin()
+bool WifiService::begin(ConfigPortalService &config)
 {
-    if (AppConfig::WIFI_SSID[0] == '\0')
+    configPortal = &config;
+    if (config.wifiSsid()[0] == '\0')
     {
-        Logger::info("Wi-Fi not configured (include/secrets.h); running Serial-only");
+        Logger::warn("Wi-Fi is not configured; starting configuration portal");
         return false;
     }
 
     WiFi.mode(WIFI_STA);
     WiFi.setAutoReconnect(true);
-    WiFi.begin(AppConfig::WIFI_SSID, AppConfig::WIFI_PASSWORD);
+    WiFi.begin(config.wifiSsid(), config.wifiPassword());
     lastAttemptAt = millis();
     configured = true;
-    Logger::info("Connecting to Wi-Fi %s...", AppConfig::WIFI_SSID);
+    Logger::info("Connecting to Wi-Fi %s...", config.wifiSsid());
+    const unsigned long deadline = millis() + 15000UL;
+    while (WiFi.status() != WL_CONNECTED && millis() < deadline)
+    {
+        delay(100);
+    }
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        configured = false;
+        Logger::warn("Wi-Fi connection timed out after 15 seconds");
+        return false;
+    }
     return true;
 }
 
@@ -41,7 +55,7 @@ void WifiService::loop()
 
     if (connectionLogged)
     {
-        Logger::info("Wi-Fi connection lost; the driver reconnects automatically");
+        Logger::error(ErrorCode::ERR_WIFI_DISCONNECTED, "Wi-Fi connection lost; driver reconnecting automatically");
         connectionLogged = false;
         lastAttemptAt = millis();
     }

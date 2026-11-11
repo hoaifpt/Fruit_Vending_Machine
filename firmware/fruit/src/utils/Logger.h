@@ -6,4 +6,6 @@
 namespace Logger
 {
     void info(const char *format, ...);
+    void warn(const char *format, ...);
+    void error(const char *errorCode, const char *format, ...);
 }

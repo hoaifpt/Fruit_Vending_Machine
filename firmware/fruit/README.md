@@ -20,10 +20,16 @@ Without Wi-Fi/MQTT settings the firmware runs Serial-only, which is enough to te
 | Upper gate servo (holds the rest of the column) | GPIO 19 (servo 2) |
 | Spare servos 3, 4 | GPIO 21, 22 (unused by default) |
 | Bowl sensor (active LOW, internal pull-up) | GPIO 23 |
+| Waterproof DS18B20 DATA | GPIO 4 |
 
 Power the servos from a separate 5–6 V supply (not the ESP32 3.3 V pin, not the USB port) and connect its GND to the ESP32 GND.
 Servos are continuous-rotation: 1500 µs stops, 2000 µs turns the "open" way, 1000 µs the "close" way (`include/app_config.h`).
 Which servos form each gate is set by `LOWER_GATE_SERVOS` / `UPPER_GATE_SERVOS` (bit masks) in `include/app_config.h`.
+
+The waterproof probe is a DS18B20 temperature sensor. Connect red to 3.3 V,
+black to GND, yellow to GPIO 4, and add a 4.7 kOhm pull-up resistor between
+DATA and 3.3 V. DS18B20 measures temperature only; it cannot measure
+humidity. Each valid reading is logged as `Temperature: xx.xx C`.
 
 ## Build and flash
 
@@ -68,10 +74,21 @@ Send one command per line (`\n`). Lines starting with `# ` are logs. At boot the
 ## MQTT test (optional)
 
 Backend repo: create machine `FV-DEV-001`, start the broker (`infra/mosquitto`, reachable from the LAN) and the backend with
-`MQTT_ENABLED=true` (see `docs/mqtt-integration.md`). In `secrets.h` set Wi-Fi, `APP_MQTT_HOST` (computer IP), `APP_MACHINE_CODE`
-and the machine broker password. Expected: `# MQTT connected as FV-DEV-001`; the backend receives `status` ONLINE at every connect,
+the machine broker password. Expected: `# MQTT connected as FV-DEV-001`; the backend receives `status` ONLINE at every connect,
 `events` DISPENSE_COMPLETED / DISPENSE_ABORTED / BOWL_SENSOR_TRIGGERED, and `status` OFFLINE (Last Will) when the board loses power.
-Telemetry starts once a temperature/humidity sensor is added (`MqttService::publishTelemetry`).
+Telemetry starts after DS18B20 initialization. The MQTT telemetry payload is
+`{"temperature":23.50,"humidity":null}`. A separate humidity-capable sensor is
+required if the backend needs humidity values.
+
+### Captive portal cấu hình
+
+Thiết bị lưu cấu hình Wi-Fi/MQTT vào NVS của ESP32. Khi chưa có SSID hoặc kết nối
+Wi-Fi thất bại sau 15 giây, máy phát Access Point `FreshVend-Setup`. Kết nối điện
+thoại vào AP và mở `http://192.168.4.1` để nhập SSID/mật khẩu Wi-Fi, MQTT host/port,
+machine code và MQTT password. Sau khi lưu, máy tự khởi động lại.
+
+Các giá trị `APP_WIFI_SSID`, `APP_WIFI_PASSWORD`, `APP_MQTT_HOST`, `APP_MACHINE_CODE`
+trong `include/secrets.h` (nếu có) chỉ được dùng làm fallback cho lần khởi động đầu tiên.
 
 ## Maintenance operations
 

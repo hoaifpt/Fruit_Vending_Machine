@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <Arduino.h>
@@ -12,6 +11,7 @@ public:
     static constexpr uint8_t SERVO_COUNT = 4;
 
     bool begin(uint8_t pin1, uint8_t pin2, uint8_t pin3, uint8_t pin4);
+    bool isReady() const { return initialized; }
 
     void openGate(uint8_t servoMask);
     void closeGate(uint8_t servoMask);

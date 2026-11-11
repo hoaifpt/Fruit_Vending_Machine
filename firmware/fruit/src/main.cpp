@@ -3,10 +3,13 @@
 
 #include "app_config.h"
 #include "pin_config.h"
+#include "error_codes.h"
 #include "application/DispenseController.h"
 #include "hal/SensorDriver.h"
+#include "hal/TemperatureSensorDriver.h"
 #include "hal/ServoDriver.h"
 #include "services/MqttService.h"
+#include "services/ConfigPortalService.h"
 #include "services/SerialCommandService.h"
 #include "services/WifiService.h"
 #include "utils/Logger.h"
@@ -15,15 +18,19 @@
 // (docs/mqtt-dispense.md). USB Serial keeps the same idempotent DISPENSE for tests and calibration; runs Serial-only without Wi-Fi/MQTT.
 ServoDriver servoDriver;
 SensorDriver sensorDriver;
+TemperatureSensorDriver temperatureSensor;
 DispenseController dispenser(servoDriver);
 SerialCommandService serialCommands(dispenser);
 WifiService wifiService;
 MqttService mqttService;
+ConfigPortalService configPortal;
+
+static bool bootErrorPublished = false;
 
 // Backend command over MQTT: answer with an event so the backend knows the command arrived (or why it did not start).
 void onMqttDispense(const char *commandId, char columnCode)
 {
-    char details[128];
+    char details[160];
     snprintf(details, sizeof(details), "{\"commandId\":\"%s\",\"columnCode\":\"%c\"}", commandId, columnCode);
     switch (serialCommands.requestDispense(commandId, columnCode))
     {
@@ -36,22 +43,39 @@ void onMqttDispense(const char *commandId, char columnCode)
         mqttService.publishEvent("DISPENSE_COMPLETED", details);
         break;
     case SerialCommandService::DispenseReply::DONE_ABORTED:
+        snprintf(details, sizeof(details),
+                 "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"errorCode\":\"%s\"}",
+                 commandId, columnCode, ErrorCode::ERR_DISPENSE_ABORTED);
+        mqttService.setLastError(ErrorCode::ERR_DISPENSE_ABORTED);
         mqttService.publishEvent("DISPENSE_ABORTED", details);
         break;
     case SerialCommandService::DispenseReply::BUSY:
-        snprintf(details, sizeof(details), "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"state\":\"%s\"}",
-                 commandId, columnCode, dispenser.stateName());
+    {
+        const char *err = (dispenser.state() == DispenseState::FAULT)
+                              ? ErrorCode::ERR_SYSTEM_FAULT
+                              : ErrorCode::ERR_MACHINE_BUSY;
+        snprintf(details, sizeof(details),
+                 "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"state\":\"%s\",\"errorCode\":\"%s\"}",
+                 commandId, columnCode, dispenser.stateName(), err);
+        mqttService.setLastError(err);
         mqttService.publishEvent("DISPENSE_REJECTED", details);
+        Logger::warn("MQTT dispense rejected for %s: state %s (%s)", commandId, dispenser.stateName(), err);
         break;
+    }
     case SerialCommandService::DispenseReply::INVALID:
-        Logger::info("MQTT dispense ignored: invalid commandId");
+        snprintf(details, sizeof(details),
+                 "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"errorCode\":\"%s\"}",
+                 commandId, columnCode, ErrorCode::ERR_INVALID_COMMAND_ID);
+        mqttService.setLastError(ErrorCode::ERR_INVALID_COMMAND_ID);
+        mqttService.publishEvent("DISPENSE_REJECTED", details);
+        Logger::error(ErrorCode::ERR_INVALID_COMMAND_ID, "MQTT dispense ignored: invalid commandId '%s'", commandId);
         break;
     }
 }
 
 void onMqttMaintenance(const char *commandId, char columnCode, const char *operation)
 {
-    char details[160];
+    char details[192];
     const char *prefix = nullptr;
     if (strcmp(operation, "OPEN_REFILL") == 0)
     {
@@ -71,7 +95,12 @@ void onMqttMaintenance(const char *commandId, char columnCode, const char *opera
     }
     else
     {
-        Logger::info("MQTT maintenance ignored: invalid operation");
+        Logger::error(ErrorCode::ERR_INVALID_OPERATION, "MQTT maintenance ignored: invalid operation '%s'", operation ? operation : "null");
+        snprintf(details, sizeof(details),
+                 "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"operation\":\"%s\",\"errorCode\":\"%s\"}",
+                 commandId, columnCode, operation ? operation : "", ErrorCode::ERR_INVALID_OPERATION);
+        mqttService.setLastError(ErrorCode::ERR_INVALID_OPERATION);
+        mqttService.publishEvent("MAINTENANCE_REJECTED", details);
         return;
     }
     snprintf(details, sizeof(details),
@@ -125,11 +154,17 @@ void onMqttMaintenance(const char *commandId, char columnCode, const char *opera
         return;
     }
 
-    snprintf(details, sizeof(details), "{\"commandId\":\"%s\",\"state\":\"%s\"}",
-             commandId, dispenser.stateName());
+    const char *err = (dispenser.state() == DispenseState::FAULT)
+                          ? ErrorCode::ERR_SYSTEM_FAULT
+                          : ErrorCode::ERR_MACHINE_BUSY;
+    snprintf(details, sizeof(details),
+             "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"state\":\"%s\",\"errorCode\":\"%s\"}",
+             commandId, columnCode, dispenser.stateName(), err);
+    mqttService.setLastError(err);
     char eventType[48];
     snprintf(eventType, sizeof(eventType), "%sREJECTED", prefix);
     mqttService.publishEvent(eventType, details);
+    Logger::warn("MQTT maintenance rejected for %s: state %s (%s)", commandId, dispenser.stateName(), err);
 }
 
 void setup()
@@ -139,14 +174,20 @@ void setup()
 
     if (!servoDriver.begin(PinConfig::SERVO_1, PinConfig::SERVO_2, PinConfig::SERVO_3, PinConfig::SERVO_4))
     {
-        Logger::info("Servo initialization failed; check pins in include/pin_config.h");
+        Logger::error(ErrorCode::ERR_SERVO_INIT, "Servo initialization failed; check pins in include/pin_config.h");
+        mqttService.setLastError(ErrorCode::ERR_SERVO_INIT);
     }
     sensorDriver.begin(PinConfig::SENSOR);
+    temperatureSensor.begin(PinConfig::TEMPERATURE_SENSOR);
     dispenser.begin();
-    wifiService.begin();
+    configPortal.begin();
+    if (!wifiService.begin(configPortal))
+    {
+        configPortal.startPortal();
+    }
     mqttService.onDispense(onMqttDispense);
     mqttService.onMaintenance(onMqttMaintenance);
-    mqttService.begin();
+    mqttService.begin(configPortal);
     serialCommands.begin();
 }
 
@@ -155,16 +196,44 @@ void loop()
     serialCommands.loop();
     dispenser.update();
 
+    // Check if initial boot error needs to be reported to backend once MQTT connects
+    if (!bootErrorPublished && mqttService.connected())
+    {
+        bootErrorPublished = true;
+        if (!servoDriver.isReady())
+        {
+            mqttService.publishError(ErrorCode::ERR_SERVO_INIT, "Hardware servo driver initialization failed at boot");
+        }
+    }
+
     DispenseController::Result result;
     if (dispenser.takeResult(result))
     {
+        if (result.outcome != DispenseOutcome::OK)
+        {
+            mqttService.setLastError(ErrorCode::ERR_DISPENSE_ABORTED);
+            Logger::error(ErrorCode::ERR_DISPENSE_ABORTED, "Cycle aborted for commandId: %s (col %c)",
+                          result.commandId, result.columnCode);
+        }
+
         if (result.maintenanceClear)
         {
-            char maintenanceDetails[160];
-            snprintf(maintenanceDetails, sizeof(maintenanceDetails),
-                     "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"operation\":\"%s\"}",
-                     result.commandId, result.columnCode,
-                     result.maintenanceOperation);
+            char maintenanceDetails[192];
+            if (result.outcome == DispenseOutcome::OK)
+            {
+                snprintf(maintenanceDetails, sizeof(maintenanceDetails),
+                         "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"operation\":\"%s\"}",
+                         result.commandId, result.columnCode,
+                         result.maintenanceOperation);
+            }
+            else
+            {
+                snprintf(maintenanceDetails, sizeof(maintenanceDetails),
+                         "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"operation\":\"%s\",\"errorCode\":\"%s\"}",
+                         result.commandId, result.columnCode,
+                         result.maintenanceOperation,
+                         result.errorCode[0] != '\0' ? result.errorCode : ErrorCode::ERR_DISPENSE_ABORTED);
+            }
             const char *prefix = nullptr;
             if (strcmp(result.maintenanceOperation, "OPEN_REFILL") == 0)
             {
@@ -189,9 +258,19 @@ void loop()
         }
         else
         {
-            char details[128];
-            snprintf(details, sizeof(details), "{\"commandId\":\"%s\",\"columnCode\":\"%c\"}",
-                     result.commandId, result.columnCode);
+            char details[160];
+            if (result.outcome == DispenseOutcome::OK)
+            {
+                snprintf(details, sizeof(details), "{\"commandId\":\"%s\",\"columnCode\":\"%c\"}",
+                         result.commandId, result.columnCode);
+            }
+            else
+            {
+                snprintf(details, sizeof(details),
+                         "{\"commandId\":\"%s\",\"columnCode\":\"%c\",\"errorCode\":\"%s\"}",
+                         result.commandId, result.columnCode,
+                         result.errorCode[0] != '\0' ? result.errorCode : ErrorCode::ERR_DISPENSE_ABORTED);
+            }
             serialCommands.reportResult(result);
             mqttService.publishEvent(
                 result.outcome == DispenseOutcome::OK ? "DISPENSE_COMPLETED" : "DISPENSE_ABORTED",
@@ -208,6 +287,14 @@ void loop()
         mqttService.publishEvent("BOWL_SENSOR_TRIGGERED", details);
     }
 
+    float temperatureC = 0.0F;
+    if (temperatureSensor.update(temperatureC))
+    {
+        Logger::info("Temperature: %.2f C", temperatureC);
+        mqttService.publishTemperatureTelemetry(temperatureC);
+    }
+
     wifiService.loop();
     mqttService.loop();
+    configPortal.loop();
 }

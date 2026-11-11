@@ -35,7 +35,7 @@ public:
 
 private:
     static constexpr size_t LINE_SIZE = 96;
-    static constexpr size_t REMEMBERED = 8;
+    static constexpr size_t REMEMBERED = 16;
 
     struct Completed
     {

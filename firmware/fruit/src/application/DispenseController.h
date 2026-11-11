@@ -19,6 +19,7 @@ public:
         bool maintenanceEmptyColumn = false;
         char maintenanceOperation[20] = {};
         char columnCode = '\0';
+        char errorCode[32] = {};
     };
 
     explicit DispenseController(ServoDriver &servoDriver);
