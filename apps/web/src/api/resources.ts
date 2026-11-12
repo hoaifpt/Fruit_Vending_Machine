@@ -5,6 +5,8 @@ import type { components as RolesDraft } from './drafts/roles-permissions'
 import type { components as DispenseDraft } from './drafts/dispense-commands'
 import type { components as AlertsDraft, operations as AlertOperations } from './drafts/alerts'
 import type { components as TelemetryDraft, operations as TelemetryOperations } from './drafts/machine-telemetry'
+import type { components as RefundsDraft, operations as RefundOperations } from './drafts/refunds'
+import type { components as IncidentDraft } from './drafts/incident-reports'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -159,4 +161,26 @@ export const telemetryApi = {
   events: (machineId: string, query: MachineEventQuery, signal?: AbortSignal) => list<MachineEvent>(`/machines/${id(machineId)}/events`, query, signal),
 }
 
+// Manual refunds (screen T3 / W-12, FE 8.1): draft contract api-contract/drafts/refunds.yaml, waiting for backend issue
+// 5.1. Until it ships the real backend answers 404 here; the refunds screen then says the feature is not there yet (see
+// refundsAvailability in src/admin/refunds.ts). When 5.1 lands: move the paths into api.yaml, run gen:api, switch these
+// types to schema.d.ts and delete the draft.
+export type Refund = RefundsDraft['schemas']['RefundResponse']
+export type RefundBody = RefundsDraft['schemas']['RefundRequest']
+export type RefundListQuery = NonNullable<RefundOperations['listRefunds']['parameters']['query']>
+
+export const refundsApi = {
+  list: (query: RefundListQuery, signal?: AbortSignal) => list<Refund>('/refunds', query, signal),
+  /** REFUND_RECORD (ADMIN): payment SUCCESS → REFUNDED; 409 when already refunded or not a refund case. Never retried. */
+  record: (orderId: string, body: RefundBody) => api.post<Refund>(`/orders/${id(orderId)}/refund`, body),
+}
+
 export type { Q as QueryParams }
+
+// Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml, FE 8.2): public, no Authorization header, body is
+// multipart/form-data built by features/incident/incident.ts (buildIncidentForm). When 5.2 lands: move the path into
+// api.yaml, run gen:api, switch the type to schema.d.ts and delete the draft.
+export type IncidentReportReceipt = IncidentDraft['schemas']['IncidentReportReceipt']
+export const incidentReportsApi = {
+  create: (form: FormData, signal?: AbortSignal) => request<IncidentReportReceipt>('POST', '/public/incident-reports', { body: form, auth: false, signal }),
+}

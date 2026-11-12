@@ -61,7 +61,8 @@ test('the draft contract follows table alerts and records who acknowledged and c
 
 test('ALERT_READ / ALERT_WRITE are draft codes: both roles hold them, the 15 codes of #48 are unchanged', () => {
   assert.equal(PERMISSIONS.length, 15)
-  assert.deepEqual([...DRAFT_PERMISSIONS], ['ALERT_READ', 'ALERT_WRITE'])
+  // REFUND_RECORD (FE 8.1) joined the draft codes; it is ADMIN only (tests/refunds.test.mjs).
+  assert.deepEqual([...DRAFT_PERMISSIONS], ['ALERT_READ', 'ALERT_WRITE', 'REFUND_RECORD'])
   for (const role of ['ADMIN', 'STAFF']) {
     assert.equal(can([role], 'ALERT_READ'), true, role)
     assert.equal(can([role], 'ALERT_WRITE'), true, role)

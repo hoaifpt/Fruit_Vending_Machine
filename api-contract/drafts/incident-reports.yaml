@@ -1,0 +1,192 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - public incident report
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 8.2, screen P1 / K-09 "Báo sự cố") for backend issue 5.2; the backend has
+    not implemented this endpoint yet. SRS 3.6.4, table incident_reports (proposed migration V18), messages MSG46/47/48,
+    rules BR-32 (rate limit) and BR-15 (a report never changes an order, payment or machine by itself). Used by the mock
+    layer until the backend ships it, then this file is deleted and the path moves to api.yaml.
+
+
+    The customer reaches the form by scanning the QR shown on the kiosk ("Báo sự cố" button). The QR carries the
+    machine's public code in the query parameter `machine` (https://<web>/bao-su-co?machine=FV-HCM-001), never the
+    internal machine id. Without a valid code the form asks the customer to type the code printed on the machine.
+
+
+    Proposed storage (V18): incident_reports(id uuid pk, report_code varchar(32) unique, machine_id fk machines,
+    order_id fk orders null, type varchar(32), description varchar(500) null, contact_phone varchar(20) null,
+    photo_object_key varchar(255) null, photo_content_type varchar(64) null, client_fingerprint varchar(64) null (hash
+    of the client IP, for rate limiting and abuse review only), created_at timestamptz). The admin workflow on these
+    rows (status, assignment, resolution) belongs to a later issue and is not part of this draft.
+paths:
+  /api/v1/public/incident-reports:
+    post:
+      tags: [Public]
+      operationId: createPublicIncidentReport
+      summary: Customer reports an incident on a machine (draft, no authentication)
+      description: >-
+        Public endpoint, no Authorization header and no kiosk key (the request comes from the customer's phone).
+        Sent as multipart/form-data with plain form fields so an optional photo travels in the same request (Spring
+        @ModelAttribute with a MultipartFile; no JSON part, no separate upload step, no orphan files).
+
+
+        Rules: `type` decides the required fields. PAID_NOT_RECEIVED requires `orderCode`; OTHER requires
+        `description`; every other field is optional. When `orderCode` is sent (any type) it must be an order of the
+        machine named by `machineCode`, otherwise 422 with fieldErrors.orderCode (MSG46 "Không tìm thấy mã đơn của máy
+        này."). Text fields are stripped; blank optional fields count as absent. `machineCode` and `orderCode` are
+        compared upper-cased (Locale.ROOT), like machine codes elsewhere.
+
+
+        Effects (BR-15): the report is stored and the backend opens an INCIDENT ticket for the admin. It never changes
+        the order, its payments, the inventory or the machine status. When the report names an order in PAID or
+        DISPENSE_FAILED, that order is flagged for the admin's attention on screen W-12 (flag only; refunds stay a
+        manual admin action). The answer never reveals anything about the order (status, amount) to the reporter.
+
+
+        Rate limit (BR-32): at most 5 requests per minute per client (client IP after the trusted proxy), counted on
+        every POST to this path whatever its outcome; the 6th within the window gets 429 with a Retry-After header in
+        seconds (MSG48 "Bạn gửi quá nhiều báo cáo. Vui lòng thử lại sau một phút.").
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CreateIncidentReportForm"
+            encoding:
+              photo:
+                contentType: image/jpeg, image/png, image/webp
+      responses:
+        "201":
+          description: Report stored; the customer is shown MSG47 "Cảm ơn bạn. Mã báo cáo của bạn là {reportCode}."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseIncidentReportReceipt"
+        "400":
+          description: >-
+            Validation failed, with fieldErrors keyed by form field (machineCode, type, orderCode, description,
+            contactPhone, photo), including a missing field required by the chosen type, an unknown field and a photo
+            that is not JPEG/PNG/WebP.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: No machine has this machineCode (fieldErrors.machineCode is set).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "413":
+          description: The photo is larger than 5 MB (or the whole request larger than 6 MB).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "422":
+          description: orderCode is well formed but is not an order of this machine (fieldErrors.orderCode, MSG46).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "429":
+          description: More than 5 reports per minute from this client (MSG48).
+          headers:
+            Retry-After:
+              description: Seconds until the client may send again.
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+components:
+  schemas:
+    IncidentType:
+      type: string
+      description: >-
+        PAID_NOT_RECEIVED "Đã trả tiền nhưng không nhận hàng", SPOILED_FRUIT "Trái cây hỏng", MACHINE_FAULT "Máy lỗi",
+        OTHER "Khác".
+      enum: [PAID_NOT_RECEIVED, SPOILED_FRUIT, MACHINE_FAULT, OTHER]
+    CreateIncidentReportForm:
+      type: object
+      additionalProperties: false
+      required: [machineCode, type]
+      properties:
+        machineCode:
+          type: string
+          description: Public machine code from the QR or printed on the machine; stripped and upper-cased.
+          minLength: 1
+          maxLength: 64
+          examples: ["FV-HCM-001"]
+        type:
+          $ref: "#/components/schemas/IncidentType"
+        orderCode:
+          type: string
+          description: Required when type is PAID_NOT_RECEIVED. Shown on the kiosk after payment.
+          pattern: "^ORD-[0-9]{8}-[A-Z0-9]{8}$"
+          examples: ["ORD-20261109-AB12CD34"]
+        description:
+          type: string
+          description: Free text, at most 500 characters (UTF-16 units, as @Size counts). Required when type is OTHER.
+          maxLength: 500
+        contactPhone:
+          type: string
+          description: >-
+            Optional Vietnamese mobile number so the operator can call back, sent normalised by the web as 0 followed by
+            9 digits (+84/84 prefixes converted). Visible to admins only; never shown back to the reporter.
+          pattern: "^0[35789][0-9]{8}$"
+          examples: ["0912345678"]
+        photo:
+          type: string
+          format: binary
+          description: Optional single photo, JPEG, PNG or WebP, at most 5 MB. Stored by the backend (object storage), never served publicly.
+    IncidentReportReceipt:
+      type: object
+      required: [reportCode, createdAt]
+      properties:
+        reportCode:
+          type: string
+          description: Code the customer can quote to support, "INC-" + creation date (same date convention as orderCode) + "-" + 4 upper-case letters/digits.
+          pattern: "^INC-[0-9]{8}-[A-Z0-9]{4}$"
+          examples: ["INC-20261109-7KQ2"]
+        createdAt:
+          type: string
+          format: date-time
+    ApiResponseIncidentReportReceipt:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/IncidentReportReceipt"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

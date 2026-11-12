@@ -165,7 +165,7 @@ export function paymentFindings(
   if (payment.status === 'SUCCESS' && order) {
     // PAYMENT_LATE: the backend's rule is a SUCCESS on a CANCELLED order (PaymentConfirmationService).
     if (order.status === 'CANCELLED') {
-      result.push({ kind: 'late', refundCandidate: true, text: 'Thanh toán đến muộn: tiền về khi đơn đã hủy, khách không nhận hộp. Đối soát với nhà cung cấp rồi hoàn tiền thủ công; web không có thao tác hoàn tiền.' })
+      result.push({ kind: 'late', refundCandidate: true, text: 'Thanh toán đến muộn: tiền về khi đơn đã hủy, khách không nhận hộp. Đối soát với nhà cung cấp, hoàn tiền thủ công (chuyển khoản) rồi ghi nhận ở màn Hoàn tiền.' })
     }
     const successes = (order.payments ?? []).filter(other => other.status === 'SUCCESS')
     if (successes.length > 1 && successes.some(other => other.id === payment.id)) {

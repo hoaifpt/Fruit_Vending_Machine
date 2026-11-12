@@ -20,6 +20,7 @@ import type { AmountCheck } from '../payments.ts'
 import { useApi } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
+import { refundEntry, refundPathFor } from '../refunds.ts'
 
 const BACK = { to: '/admin/payments', label: 'Danh sách thanh toán' }
 /** Webhooks read for one payment (a payment normally has one to three). */
@@ -72,13 +73,19 @@ function PaymentDetailPage({ paymentId }: { paymentId: string }) {
   const orderUnknown = canOrders && !!order.error && !order.data
   return <>
     <PageHead title={`Thanh toán ${data.provider ?? ''}`} back={BACK}
-      subtitle="Chỉ xem. Không có thao tác đánh dấu đã thanh toán hay hoàn tiền trên web." />
+      subtitle="Chỉ xem. Không có thao tác đánh dấu đã thanh toán; hoàn tiền được ghi nhận ở màn Hoàn tiền." />
     {findings.length > 0 && <section aria-labelledby="pay-attention" className="mb-5 rounded-xl border border-destructive/40 bg-destructive/8 p-4">
       <h2 id="pay-attention" className="mb-2! flex items-center gap-2 text-base font-semibold text-destructive"><TriangleAlert aria-hidden="true" className="size-4" />Cần xử lý</h2>
       <ul className="grid gap-1.5 pl-0">
         {findings.map(finding => <li key={finding.kind} data-finding={finding.kind} className="list-none text-[14px]">{finding.text}</li>)}
       </ul>
     </section>}
+    {/* FE 8.1: ADMIN only (REFUND_RECORD). A payment to refund links to the refund screen; a refunded one to its record. */}
+    {can('REFUND_RECORD') && order.data && refundEntry(order.data, data.id) && <p data-refund-entry className="mb-4! text-[14px]">
+      {refundEntry(order.data, data.id) === 'record'
+        ? <>Khoản này cần hoàn cho khách. <Link to={refundPathFor(data.orderId)} className={LINK}>Ghi nhận hoàn tiền</Link></>
+        : <>Khoản này đã được hoàn tiền. <Link to={refundPathFor(data.orderId)} className={LINK}>Xem mã chuyển khoản và người ghi nhận</Link></>}
+    </p>}
     {orderUnknown && data.status === 'SUCCESS' && <p role="status" className="mb-4! text-[13px] text-muted-foreground">Chưa đọc được đơn hàng nên chưa kiểm tra được thanh toán muộn hoặc trùng (xem mục Đơn hàng bên dưới).</p>}
     <div className="grid gap-x-5 lg:grid-cols-2">
       <section className={PANEL} aria-labelledby="pay-info">

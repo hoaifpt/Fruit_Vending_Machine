@@ -104,7 +104,9 @@ export async function requestWithMeta<T>(method: string, path: string, options: 
 async function send<T>(method: string, path: string, options: RequestOptions): Promise<ApiResult<T>> {
   const { query, body, signal, auth = true, timeoutMs = TIMEOUT_MS } = options
   const headers: Record<string, string> = { Accept: 'application/json', ...options.headers }
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  // FormData (multipart, e.g. the public incident report with a photo) goes as is: the browser sets the boundary.
+  const multipart = typeof FormData !== 'undefined' && body instanceof FormData
+  if (body !== undefined && !multipart) headers['Content-Type'] = 'application/json'
   const token = auth ? config.getToken() : null
   if (token) headers.Authorization = `Bearer ${token}`
   const timeout = AbortSignal.timeout(timeoutMs)
@@ -112,7 +114,7 @@ async function send<T>(method: string, path: string, options: RequestOptions): P
   try {
     response = await config.fetcher(buildUrl(path, query), {
       method, headers, cache: 'no-store',
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : multipart ? body as FormData : JSON.stringify(body),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     })
   } catch (error) {

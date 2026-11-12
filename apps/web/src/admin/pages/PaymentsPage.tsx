@@ -52,7 +52,7 @@ function PaymentsPage() {
   ]
 
   return <>
-    <PageHead title="Thanh toán" subtitle="Chỉ xem. Không có thao tác đánh dấu đã thanh toán hay hoàn tiền trên web." />
+    <PageHead title="Thanh toán" subtitle="Chỉ xem. Không có thao tác đánh dấu đã thanh toán; hoàn tiền được ghi nhận ở màn Hoàn tiền." />
     <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
       <span id="payments-quick" className="text-muted-foreground">Lọc nhanh</span>
       <div role="group" aria-labelledby="payments-quick">
@@ -68,7 +68,7 @@ function PaymentsPage() {
         <li><strong className="font-medium">Lệch số tiền</strong> không có trong danh sách này: hệ thống giữ nguyên thanh toán và máy chủ chưa có API liệt kê.
           Chỉ xem được ở mục “Đối chiếu webhook” trong chi tiết từng thanh toán.</li>
       </ul>
-      <p className="mt-1.5! text-[13px] text-muted-foreground">Đối soát với nhà cung cấp rồi hoàn tiền thủ công; web không có thao tác hoàn tiền.</p>
+      <p className="mt-1.5! text-[13px] text-muted-foreground">Đối soát với nhà cung cấp, hoàn tiền thủ công (chuyển khoản) rồi ghi nhận ở màn Hoàn tiền.</p>
     </section>}
     {!forbidden && <FilterBar activeCount={activeFilterCount(PAYMENT_FILTER_KEYS.map(key => filters[key]))} onClear={() => update(clearFiltersPatch(PAYMENT_FILTER_KEYS))}>
       <SelectFilter label="Trạng thái" value={filters.status} onChange={value => update({ status: value })} options={enumOptions('payment', PAYMENT_STATUSES)} />

@@ -1,0 +1,373 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - manual refunds
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 8.1, screen T3 / W-12 "Hoàn tiền") for backend issue 5.1 (SRS 3.6.3, SDD
+    RefundService / RefundController, MSG36); the backend has not implemented these endpoints yet. The money is given
+    back outside the system: an ADMIN makes a bank transfer to the customer, then records it here with the bank's
+    transfer reference. Recording moves the payment SUCCESS -> REFUNDED and, when the order is DISPENSE_FAILED and no
+    other SUCCESS payment remains on it, the order DISPENSE_FAILED -> REFUNDED. A late payment (order CANCELLED) or a
+    duplicate payment keeps the order status unchanged. Every recording writes audit_logs (action REFUND_RECORDED,
+    entity PAYMENT, actor = the admin, old/new status, transferRef, reason).
+    Refundable payment (anything else is 409): status SUCCESS and one of DISPENSE_FAILED (the order is DISPENSE_FAILED),
+    PAYMENT_LATE (the order is CANCELLED, same rule as GET /payments?requiresAttention=true) or PAYMENT_DUPLICATE (the
+    order has another SUCCESS payment; both are refundable while two SUCCESS remain, the web offers the one paid last,
+    as the requiresAttention description says).
+    Which payment: the path names the order (the refund is about the order, it may change the order status and the
+    audit reads per order) and the body names the payment with paymentId. paymentId is optional only to keep the
+    simple case simple: without it the server refunds the order's only SUCCESS payment, and answers 400
+    (fieldErrors.paymentId) when the order has two or more SUCCESS payments (duplicate payment), because the server must
+    never guess which of two transfers the admin refunded. The web always sends paymentId.
+    Proposed storage: a new table refunds (id UUID PK, payment_id UUID NOT NULL UNIQUE REFERENCES payments(id), order_id
+    UUID NOT NULL REFERENCES orders(id), amount NUMERIC(12,2) NOT NULL CHECK (amount >= 0) = the payment amount,
+    reason VARCHAR(30) NOT NULL CHECK (reason IN ('DISPENSE_FAILED','PAYMENT_LATE','PAYMENT_DUPLICATE')), transfer_ref
+    VARCHAR(64) NOT NULL, note VARCHAR(500) NULL, refunded_at TIMESTAMPTZ NOT NULL, refunded_by UUID NOT NULL
+    REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL), index on (refunded_at DESC). UNIQUE(payment_id) plus a
+    row lock on the payment (SELECT ... FOR UPDATE) make a second recording of the same payment a 409, also when two
+    admins submit at the same time. transfer_ref is not unique (one bank transfer could in theory cover two refunds).
+    Proposed permission (not in backend #48 yet): REFUND_RECORD, ADMIN only; payments and refunds are never granted to
+    STAFF (BR-19/20). Reading refunds needs PAYMENT_READ (ADMIN only), like the payments they belong to. Used by the mock
+    layer until the backend ships it, then this file is deleted and the paths move to api.yaml.
+paths:
+  /api/v1/orders/{orderId}/refund:
+    post:
+      tags: [Refunds]
+      operationId: recordOrderRefund
+      summary: Record a manual refund of one payment of an order (draft)
+      description: >-
+        REFUND_RECORD (ADMIN). Records that the admin has already transferred the money back. Effects in one
+        transaction: lock the payment, check it is refundable (see the file description), insert the refunds row,
+        payment.status = REFUNDED (transaction_id and paid_at are kept: the V-constraint "SUCCESS/REFUNDED need
+        transaction_id, paid_at" already holds), order.status = REFUNDED only when the order is DISPENSE_FAILED and no
+        SUCCESS payment remains, audit_logs REFUND_RECORDED. Answers 201 with the refund as recorded, including the
+        order and payment status after the change. Not idempotent: a second call for the same payment is 409, the web
+        does not retry by itself.
+      x-required-permission: REFUND_RECORD
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
+      responses:
+        "201":
+          description: Refund recorded; payment REFUNDED (order REFUNDED when it was DISPENSE_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseRefundResponse"
+        "400":
+          description: >-
+            Validation failed (fieldErrors: transferRef blank, too long or with other characters; note over 500
+            characters; paymentId not a UUID; paymentId missing while the order has two or more SUCCESS payments;
+            unknown field), or orderId is not a UUID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: Missing, invalid or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: The account lacks REFUND_RECORD (every STAFF account)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Order not found, or paymentId is not a payment of this order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: >-
+            Nothing to refund: the payment is already REFUNDED (recorded before, possibly by another admin a moment
+            ago), the payment is not SUCCESS, or the order is not a refund case (not DISPENSE_FAILED, not CANCELLED and
+            no duplicate). The message says which, e.g. "Payment is already REFUNDED".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+  /api/v1/refunds:
+    get:
+      tags: [Refunds]
+      operationId: listRefunds
+      summary: List recorded refunds (draft)
+      description: >-
+        PAYMENT_READ (ADMIN). The refunds already recorded, newest first: the "Đã hoàn tiền" view of W-12 and the reason
+        a payment can no longer be refunded (when, which transfer, by whom). Database pagination page0/size20/max100.
+        Filters combine: orderId, paymentId, machineId (through the order), reason, refundedFrom (inclusive),
+        refundedTo (exclusive). Approved sort: refundedAt (default desc), amount, with a UUID tie-break.
+      x-required-permission: PAYMENT_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Zero-based page.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size 1..100.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: orderId
+          in: query
+          description: Order UUID filter.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: paymentId
+          in: query
+          description: Payment UUID filter (at most one refund per payment).
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: machineId
+          in: query
+          description: Machine UUID filter, resolved through the order.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: reason
+          in: query
+          description: Exact refund reason.
+          required: false
+          schema:
+            type: string
+            enum: [DISPENSE_FAILED, PAYMENT_LATE, PAYMENT_DUPLICATE]
+        - name: refundedFrom
+          in: query
+          description: ISO-8601 instant, inclusive lower bound of refundedAt.
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: refundedTo
+          in: query
+          description: ISO-8601 instant, exclusive upper bound of refundedAt.
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: sort
+          in: query
+          description: One of refundedAt, amount with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: refundedAt,desc
+      responses:
+        "200":
+          description: Page of refunds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageRefundResponse"
+        "400":
+          description: Invalid filter, paging or sort value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: Missing, invalid or expired access token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: The account lacks PAYMENT_READ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    RefundRequest:
+      type: object
+      description: >-
+        What the admin did outside the system. Unknown fields are rejected (400), like every request of the backend.
+      additionalProperties: false
+      required: [transferRef]
+      properties:
+        transferRef:
+          type: string
+          description: >-
+            Reference of the bank transfer that gave the money back (mã giao dịch chuyển khoản), trimmed, 3 to 64
+            characters: letters, digits and . _ / - (no spaces), starting with a letter or digit.
+          minLength: 3
+          maxLength: 64
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._/-]{2,63}$"
+          examples: ["FT26316123456789"]
+        note:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          description: Optional free text (bank, account holder, customer contact). Blank is stored as null.
+        paymentId:
+          type: string
+          format: uuid
+          description: >-
+            The payment refunded; must belong to the order. Optional when the order has exactly one SUCCESS payment,
+            required (400) when it has two or more (duplicate payment). The web always sends it.
+    RefundResponse:
+      type: object
+      description: One recorded refund. Times are UTC instants.
+      required: [id, orderId, orderCode, orderStatus, paymentId, paymentStatus, amount, reason, transferRef, refundedAt, refundedById]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        orderCode:
+          type: string
+        orderStatus:
+          type: string
+          description: Order status now (after the refund for the POST answer).
+          enum: [PENDING_PAYMENT, PAID, DISPENSING, COMPLETED, CANCELLED, PAYMENT_FAILED, DISPENSE_FAILED, REFUNDED]
+        machineId:
+          type: string
+          format: uuid
+        machineCode:
+          type: string
+        paymentId:
+          type: string
+          format: uuid
+        paymentProvider:
+          type: string
+          examples: ["MOCK"]
+        paymentStatus:
+          type: string
+          description: Always REFUNDED today; kept for symmetry with orderStatus.
+          enum: [PENDING, SUCCESS, FAILED, EXPIRED, REFUNDED]
+        amount:
+          type: number
+          description: Amount given back, equal to the payment amount (VND).
+        reason:
+          type: string
+          description: Why it was refundable when recorded, decided by the server.
+          enum: [DISPENSE_FAILED, PAYMENT_LATE, PAYMENT_DUPLICATE]
+        transferRef:
+          type: string
+        note:
+          type:
+            - string
+            - "null"
+        refundedAt:
+          type: string
+          format: date-time
+          description: When it was recorded (server time).
+        refundedById:
+          type: string
+          format: uuid
+        refundedByName:
+          type:
+            - string
+            - "null"
+          description: fullName of the admin who recorded it.
+    ApiResponseRefundResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/RefundResponse"
+    PageRefundResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/RefundResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponsePageRefundResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageRefundResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

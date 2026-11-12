@@ -18,10 +18,11 @@ export const PERMISSIONS = [
 
 /**
  * Codes proposed by the web's draft contracts, not in the backend yet (so not in PERMISSIONS, which mirrors V13 of #48):
- * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6). When the backend adds
- * them to its permissions table, move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
+ * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6) and REFUND_RECORD of
+ * api-contract/drafts/refunds.yaml (FE 8.1, waiting for BE 5.1). When the backend adds them to its permissions table,
+ * move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
  */
-export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE'] as const
+export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE', 'REFUND_RECORD'] as const
 export type DraftPermission = (typeof DRAFT_PERMISSIONS)[number]
 export type Permission = (typeof PERMISSIONS)[number] | DraftPermission
 
@@ -37,7 +38,10 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   STAFF: ['PRODUCT_READ', 'MACHINE_READ', 'BATCH_READ', 'BATCH_CREATE', 'INVENTORY_READ', 'INVENTORY_WRITE', 'ORDER_READ'],
 }
 
-/** Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do. */
+/**
+ * Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do. Recording a refund
+ * (REFUND_RECORD) is ADMIN only and never granted to STAFF (BR-19/20: payments and refunds are admin-only).
+ */
 export const DRAFT_ROLE_PERMISSIONS: Readonly<Record<Role, readonly DraftPermission[]>> = {
   ADMIN: DRAFT_PERMISSIONS,
   STAFF: ['ALERT_READ', 'ALERT_WRITE'],

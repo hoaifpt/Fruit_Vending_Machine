@@ -286,7 +286,7 @@ export function orderAttention(order: OrderDetail, commands?: readonly DispenseC
   const successes = (order.payments ?? []).filter(payment => payment.status === 'SUCCESS')
   const failed = failedCommands(commands)
   if (order.status === 'DISPENSE_FAILED') {
-    result.push({ key: 'dispense-failed', paymentId: successes[0]?.id, text: 'Khách đã trả tiền nhưng máy chưa nhả được hộp. Kiểm tra ngăn tại máy (hộp nhả lỗi đang chặn ngăn), rồi hoàn tiền thủ công cho khách; web chưa có thao tác hoàn tiền.' })
+    result.push({ key: 'dispense-failed', paymentId: successes[0]?.id, text: 'Khách đã trả tiền nhưng máy chưa nhả được hộp. Kiểm tra ngăn tại máy (hộp nhả lỗi đang chặn ngăn), rồi hoàn tiền thủ công cho khách (chuyển khoản) và ghi nhận ở màn Hoàn tiền.' })
   } else if (failed.length) {
     result.push({ key: 'box-failed', paymentId: successes[0]?.id, text: `${failed.length} hộp của đơn nhả lỗi (lệnh thất bại hoặc quá thời gian) dù đơn đang ở trạng thái khác: hộp đó chặn ngăn và khách chưa nhận. Kiểm tra ngăn tại máy, rồi hoàn tiền thủ công phần hộp lỗi.` })
   }

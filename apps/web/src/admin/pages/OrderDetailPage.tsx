@@ -20,6 +20,7 @@ import {
   paymentPath, shortId, slotIdsByCode, wasPaid,
 } from '../order-detail.ts'
 import type { AllocationRow, StepState, TimelineStep } from '../order-detail.ts'
+import { refundEntry, refundPathFor } from '../refunds.ts'
 import { useApi } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
@@ -83,6 +84,8 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
           {item.paymentId && canPayments && <Link to={paymentPath(item.paymentId)} className={LINK}>Mở thanh toán</Link>}
         </li>)}
       </ul>
+      {/* FE 8.1: ADMIN only (REFUND_RECORD), when the order still has a payment to refund. */}
+      {can('REFUND_RECORD') && refundEntry(current) === 'record' && <p className="mt-2! text-[14px]"><Link to={refundPathFor(current.id)} className={LINK}>Ghi nhận hoàn tiền</Link></p>}
     </section>}
     <div className="grid gap-x-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
       <section className={PANEL} aria-labelledby="timeline-title">

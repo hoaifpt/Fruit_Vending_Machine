@@ -18,6 +18,7 @@ export const conflict = (message: string) => new MockHttpError(409, message)
 
 const REASONS: Record<number, string> = {
   400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict',
+  413: 'Payload Too Large', 422: 'Unprocessable Entity', 429: 'Too Many Requests',
   500: 'Internal Server Error', 501: 'Not Implemented', 502: 'Bad Gateway',
 }
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })

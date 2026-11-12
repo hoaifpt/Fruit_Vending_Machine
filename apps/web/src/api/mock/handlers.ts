@@ -6,6 +6,8 @@ import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, Moc
 import type { components as AuthMe } from '../drafts/auth-me'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
+import { incidentReportRoutes } from './incident-reports.ts'
+import { refundRoutes } from './refunds.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -719,6 +721,12 @@ export const routes: Route[] = [
     store.payments.push(payment)
     return created(kioskPaymentView(payment))
   }),
+
+  // ---- public incident report (FE 8.2, draft api-contract/drafts/incident-reports.yaml)
+  ...incidentReportRoutes,
+
+  // ---- manual refunds (FE 8.1, draft api-contract/drafts/refunds.yaml)
+  ...refundRoutes,
 ]
 
 export interface RaiseAlertInput { type?: MockAlert['type']; severity?: MockAlert['severity']; machineId?: string; title?: string; message?: string | null }
