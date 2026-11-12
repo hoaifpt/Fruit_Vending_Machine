@@ -1,14 +1,14 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceOrders, draftPermissionsOfUser, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
+import { advanceMaintenanceCommands, advanceOrders, draftPermissionsOfUser, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
 import type { HandlerContext, KioskSimulation, Policy, RaiseAlertInput } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
 import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -29,6 +29,8 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   alerts: 'alerts',
   // Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
   'work-tickets': 'tickets',
+  // Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml).
+  'maintenance-schedules': 'maintenance-schedules',
 }
 
 export function groupOf(path: string): MockGroup | null {
@@ -38,6 +40,8 @@ export function groupOf(path: string): MockGroup | null {
   if (/^\/orders\/[^/]+\/dispense-commands(\/|$)/.test(path)) return 'dispense-commands'
   // Draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml): its own group, like dispense-commands.
   if (/^\/machines\/[^/]+\/(heartbeat|sensor-readings|events)(\/|$)/.test(path)) return 'telemetry'
+  // Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): its own group, like telemetry.
+  if (/^\/machines\/[^/]+\/maintenance-commands(\/|$)/.test(path)) return 'maintenance-commands'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
 }
 
@@ -198,6 +202,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       if (route.policy === 'kiosk') ctx.machineId = kioskMachineId(headers.get('x-kiosk-key'))
       else if (route.policy !== 'public') ctx.user = authenticate(route.policy, headers.get('authorization'))
       advanceOrders(ctx)
+      advanceMaintenanceCommands(ctx)
       syncHeartbeats(store, ctx.now)
       return route.handle(ctx)
     }

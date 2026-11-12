@@ -17,9 +17,12 @@ const slot = (patch = {}) => ({ slotCode: ' a1 ', capacity: ' 6 ', ...patch })
 
 test('tabs in the URL: unknown or not-allowed tab opens the overview; STAFF never gets the kiosk keys tab', () => {
   // FE 6.4 added "Cảm biến & Sự kiện" (MACHINE_READ, so STAFF too) right after the overview.
-  assert.deepEqual(visibleTabs(true), ['overview', 'sensors', 'slots', 'kiosk'])
-  assert.deepEqual(visibleTabs(false), ['overview', 'sensors', 'slots'])
+  // FE 7.4 added "Bảo trì" (history MACHINE_READ, so STAFF too) after it; the slots and kiosk tabs keep their order.
+  assert.deepEqual(visibleTabs(true), ['overview', 'sensors', 'maintenance', 'slots', 'kiosk'])
+  assert.deepEqual(visibleTabs(false), ['overview', 'sensors', 'maintenance', 'slots'])
   assert.equal(readDetailTab(new URLSearchParams('tab=sensors'), false), 'sensors')
+  assert.equal(readDetailTab(new URLSearchParams('tab=maintenance'), false), 'maintenance')
+  assert.equal(tabSearch('maintenance'), '?tab=maintenance')
   assert.equal(tabSearch('sensors'), '?tab=sensors')
   assert.equal(readDetailTab(new URLSearchParams('tab=slots'), false), 'slots')
   assert.equal(readDetailTab(new URLSearchParams('tab=kiosk'), true), 'kiosk')

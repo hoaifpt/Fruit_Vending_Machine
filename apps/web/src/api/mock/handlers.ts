@@ -4,6 +4,9 @@ import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from '
 import type { Reply } from './http.ts'
 import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockTicket, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
+import type { MockSchedule } from './seed.ts'
+import type { MockMaintenanceCommand } from './seed.ts'
+import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
 
@@ -329,6 +332,64 @@ function onlyAssignee(ctx: HandlerContext, ticket: MockTicket) {
   if (ticket.assigneeId !== ctx.user!.id) throw new MockHttpError(403, 'Only the assignee can do this')
 }
 
+// ---- maintenance schedules (draft of backend 4.5, api-contract/drafts/maintenance-schedules.yaml). English messages.
+const SCHEDULE_FIELDS = ['machineId', 'title', 'intervalDays', 'startDate', 'assigneeId', 'note'] as const
+function findSchedule(ctx: HandlerContext): MockSchedule {
+  if (!UUID_PATTERN.test(decode(ctx.params.id))) throw new MockHttpError(400, 'Invalid request parameter', { id: 'Must be a valid UUID' })
+  return byId(ctx.store.schedules, ctx.params.id, 'Maintenance schedule not found')
+}
+const dueDateOf = (schedule: MockSchedule) => vietnamDateOf(schedule.nextDueAt)
+/** What the server answers: the stored row plus `overdue` as of now (active and the due day is before today). */
+function scheduleView(schedule: MockSchedule, now: number) {
+  const due = dueDateOf(schedule)
+  return { ...schedule, overdue: schedule.active && !!due && due < vietnamDate(now) }
+}
+/** The due date rule of the draft (same function as the web's preview). */
+function recomputeDue(schedule: MockSchedule, now: number) {
+  schedule.nextDueAt = schedule.active ? dueInstant(nextDueDate(scheduleBase(schedule), schedule.intervalDays, vietnamDate(now))) : null
+}
+/** 409 when another active schedule of the same machine already has this title (case-insensitive). */
+function duplicateTitle(store: MockStore, machineId: string, title: string, except?: string): boolean {
+  return store.schedules.some(other => other.active && other.id !== except && other.machineId === machineId && other.title.toLowerCase() === title.toLowerCase())
+}
+/** The daily job of the draft: one MAINTENANCE ticket for a schedule due today or earlier, given to its assignee. */
+function openScheduleTicket(store: MockStore, schedule: MockSchedule, now: number) {
+  const at = iso(now)
+  const assignee = schedule.assigneeId ? store.users.find(user => user.id === schedule.assigneeId && user.status === 'ACTIVE' && user.roles.includes('STAFF')) : undefined
+  const ticket: MockTicket = {
+    id: newId(), type: 'MAINTENANCE', status: assignee ? 'ASSIGNED' : 'OPEN', title: `${schedule.title} · máy ${schedule.machineCode}`.slice(0, 200),
+    description: [`Bảo trì định kỳ theo lịch (mỗi ${schedule.intervalDays} ngày).`, schedule.note].filter(Boolean).join(' '),
+    machineId: schedule.machineId, machineCode: schedule.machineCode, machineName: schedule.machineName ?? null, alertId: null,
+    dueAt: dueInstant(addDays(dueDateOf(schedule)!, 1)), assigneeId: assignee?.id ?? null, assigneeName: assignee?.fullName ?? null,
+    createdById: schedule.createdById, createdByName: schedule.createdByName ?? null,
+    assignedAt: assignee ? at : null, assignedById: assignee ? schedule.createdById : null, assignedByName: assignee ? schedule.createdByName ?? null : null,
+    startedAt: null, startedById: null, startedByName: null, completedAt: null, completedById: null, completedByName: null, completionNote: null,
+    cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: at, updatedAt: at,
+  }
+  store.tickets.push(ticket)
+  Object.assign(schedule, { openTicketId: ticket.id, openTicketStatus: ticket.status })
+}
+/**
+ * Plays the server's background work whenever schedules are read or written: a COMPLETED ticket moves its schedule
+ * (lastCompletedAt, nextDueAt = completed day + N), a CANCELLED one only frees it, and a due schedule without a ticket
+ * gets one. Not run on other endpoints, so the work ticket screens see the seed unchanged until schedules are opened.
+ */
+function syncSchedules(store: MockStore, now: number) {
+  const today = vietnamDate(now)
+  for (const schedule of store.schedules) {
+    if (schedule.openTicketId) {
+      const ticket = store.tickets.find(candidate => candidate.id === schedule.openTicketId)
+      if (!ticket || ticket.status === 'CANCELLED') Object.assign(schedule, { openTicketId: null, openTicketStatus: null })
+      else if (ticket.status === 'COMPLETED') {
+        Object.assign(schedule, { openTicketId: null, openTicketStatus: null, lastCompletedAt: ticket.completedAt, updatedAt: ticket.completedAt ?? iso(now) })
+        recomputeDue(schedule, now)
+      } else schedule.openTicketStatus = ticket.status
+    }
+    const due = dueDateOf(schedule)
+    if (schedule.active && !schedule.openTicketId && due && due <= today) openScheduleTicket(store, schedule, now)
+  }
+}
+
 function route(method: string, template: string, policy: Policy, handle: Route['handle']): Route {
   const source = template.replace(/:(\w+)/g, '(?<$1>[^/]+)')
   return { method, pattern: new RegExp(`^${source}/?$`), policy, handle }
@@ -560,6 +621,14 @@ export const routes: Route[] = [
     return ok(paginate(rows, ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc' }))
   }),
 
+  // ---- maintenance commands: draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml), FE 7.4
+  route('GET', '/machines/:machineId/maintenance-commands', { permission: 'MACHINE_READ' }, ctx => {
+    const machine = findMachine(ctx)
+    const rows = ctx.store.maintenanceCommands.filter(command => command.machineId === machine.id)
+    return ok(paginate(rows.map(command => ({ ...command })), ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc', fixedSort: true }))
+  }),
+  route('POST', '/machines/:machineId/maintenance-commands', { draftPermission: 'MACHINE_MAINTENANCE' }, ctx => created(createMaintenanceCommand(ctx))),
+
   // ---- product batches
   route('GET', '/product-batches', 'any', ctx => {
     const rows = ctx.store.batches.filter(batch => eq(ctx.query, 'productId', batch.productId))
@@ -783,6 +852,88 @@ export const routes: Route[] = [
     return ok({ ...ticket })
   }),
 
+  // ---- maintenance schedules: draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml). Never deleted.
+  route('GET', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_SCHEDULE_READ' }, ctx => {
+    const { query } = ctx
+    const errors: Record<string, string> = {}
+    if (query.get('machineId') && !UUID_PATTERN.test(query.get('machineId')!)) errors.machineId = 'Must be a valid UUID'
+    if (query.get('active') && !['true', 'false'].includes(query.get('active')!)) errors.active = 'Must be true or false'
+    if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
+    syncSchedules(ctx.store, ctx.now)
+    const rows = ctx.store.schedules.filter(schedule => eq(query, 'machineId', schedule.machineId) && flag(query, 'active', schedule.active)).map(schedule => scheduleView(schedule, ctx.now))
+    return ok(paginate(rows, query, { sorts: { nextDueAt: row => row.nextDueAt, createdAt: row => row.createdAt }, defaultSort: 'nextDueAt,asc' }))
+  }),
+  route('GET', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_SCHEDULE_READ' }, ctx => {
+    const schedule = findSchedule(ctx)
+    syncSchedules(ctx.store, ctx.now)
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+  route('POST', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const form = new Form(ctx.body, SCHEDULE_FIELDS)
+    const data = ctx.body as Record<string, unknown>
+    const title = form.text('title', 200)
+    const intervalDays = form.integer('intervalDays', 1, 365)
+    if (!isDateString(typeof data.startDate === 'string' ? data.startDate : '')) form.reject('startDate', 'Must be a date (yyyy-MM-dd)')
+    const note = form.optionalText('note', 1000)
+    const machineIdValid = typeof data.machineId === 'string' && UUID_PATTERN.test(data.machineId)
+    const machine = machineIdValid ? ctx.store.machines.find(candidate => candidate.id === data.machineId) : undefined
+    if (!machine) form.reject('machineId', machineIdValid ? 'Machine not found' : 'Must be a valid UUID')
+    const assignee = data.assigneeId !== undefined && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    form.done()
+    if (duplicateTitle(ctx.store, machine!.id, title)) throw conflict('An active schedule with this title already exists for this machine')
+    const at = iso(ctx.now)
+    const schedule: MockSchedule = {
+      id: newId(), machineId: machine!.id, machineCode: machine!.code, machineName: machine!.name ?? null, title, note, intervalDays, startDate: data.startDate as string,
+      assigneeId: assignee?.id ?? null, assigneeName: assignee?.fullName ?? null, active: true, nextDueAt: null, lastCompletedAt: null,
+      openTicketId: null, openTicketStatus: null, createdById: ctx.user!.id, createdByName: ctx.user!.fullName,
+      deactivatedAt: null, deactivatedById: null, deactivatedByName: null, createdAt: at, updatedAt: at,
+    }
+    recomputeDue(schedule, ctx.now)
+    ctx.store.schedules.push(schedule)
+    syncSchedules(ctx.store, ctx.now)
+    return created(scheduleView(schedule, ctx.now))
+  }),
+  route('PATCH', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const form = new Form(ctx.body, SCHEDULE_FIELDS.filter(field => field !== 'machineId'))
+    const data = ctx.body as Record<string, unknown>
+    if (!Object.keys(data).length) throw new MockHttpError(400, 'At least one field is required', {})
+    const has = (field: string) => Object.hasOwn(data, field)
+    const title = has('title') ? form.text('title', 200) : undefined
+    const intervalDays = has('intervalDays') ? form.integer('intervalDays', 1, 365) : undefined
+    if (has('startDate') && !isDateString(typeof data.startDate === 'string' ? data.startDate : '')) form.reject('startDate', 'Must be a date (yyyy-MM-dd)')
+    const assignee = has('assigneeId') && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    const note = has('note') ? form.optionalText('note', 1000) : undefined
+    form.done()
+    const schedule = findSchedule(ctx)
+    if (title !== undefined && schedule.active && duplicateTitle(ctx.store, schedule.machineId, title, schedule.id)) throw conflict('An active schedule with this title already exists for this machine')
+    const cycleChanged = (intervalDays !== undefined && intervalDays !== schedule.intervalDays) || (has('startDate') && data.startDate !== schedule.startDate)
+    if (title !== undefined) schedule.title = title
+    if (intervalDays !== undefined) schedule.intervalDays = intervalDays
+    if (has('startDate')) schedule.startDate = data.startDate as string
+    if (has('assigneeId')) Object.assign(schedule, { assigneeId: assignee?.id ?? null, assigneeName: assignee?.fullName ?? null })
+    if (note !== undefined) schedule.note = note
+    schedule.updatedAt = iso(ctx.now)
+    if (cycleChanged) recomputeDue(schedule, ctx.now)
+    syncSchedules(ctx.store, ctx.now)
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+  route('POST', '/maintenance-schedules/:id/deactivate', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const schedule = findSchedule(ctx)
+    if (!schedule.active) throw conflict('Schedule is already inactive')
+    const at = iso(ctx.now)
+    Object.assign(schedule, { active: false, nextDueAt: null, deactivatedAt: at, deactivatedById: ctx.user!.id, deactivatedByName: ctx.user!.fullName, updatedAt: at })
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+  route('POST', '/maintenance-schedules/:id/activate', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const schedule = findSchedule(ctx)
+    if (schedule.active) throw conflict('Schedule is already active')
+    if (duplicateTitle(ctx.store, schedule.machineId, schedule.title, schedule.id)) throw conflict('An active schedule with this title already exists for this machine')
+    Object.assign(schedule, { active: true, deactivatedAt: null, deactivatedById: null, deactivatedByName: null, updatedAt: iso(ctx.now) })
+    recomputeDue(schedule, ctx.now)
+    syncSchedules(ctx.store, ctx.now)
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+
   // ---- payments (ADMIN)
   route('GET', '/payments', 'admin', ctx => {
     const { store, query } = ctx
@@ -941,4 +1092,119 @@ export function setHeartbeat(store: MockStore, now: number, machine: string, liv
   Object.assign(heartbeat, { live, lastSeenAt: at, reportedAt: at, state: 'ONLINE', bootedAt: heartbeat.bootedAt ?? at })
   target.lastSeenAt = at
   return at
+}
+
+// ---- maintenance commands (draft of backend 4.2, api-contract/drafts/machine-maintenance.yaml, FE 7.4). Messages in
+// English as the backend would send them.
+const MAINTENANCE_TYPES = ['OPEN_REFILL', 'CLOSE_REFILL', 'REMOVE_ITEM', 'EMPTY_COLUMN', 'RESET'] as const
+const MAINTENANCE_SLOT_TYPES: readonly string[] = ['REMOVE_ITEM', 'EMPTY_COLUMN']
+const MAINTENANCE_UNFINISHED: readonly string[] = ['PENDING', 'SENT', 'ACKNOWLEDGED']
+const REMOVABLE: readonly MockItem['status'][] = ['AVAILABLE', 'EXPIRED']
+/** Same as DISPENSE_TIMEOUT (60 s from createdAt), and the web's OFFLINE rule (180 s without a message). */
+const MAINTENANCE_TIMEOUT_MS = 60_000
+const MACHINE_OFFLINE_AFTER_MS = 180_000
+
+/** Physically present bowls of a slot, head (next out) first. */
+function presentItems(store: MockStore, slotId: string): MockItem[] {
+  return store.items.filter(item => item.slotId === slotId && PRESENT_STATUSES.includes(item.status))
+    .sort((a, b) => a.loadedAt.localeCompare(b.loadedAt) || a.id.localeCompare(b.id))
+}
+
+function createMaintenanceCommand(ctx: HandlerContext): MockMaintenanceCommand {
+  const { store, now } = ctx
+  const machine = findMachine(ctx)
+  const form = new Form(ctx.body, ['type', 'slotId', 'inventoryItemId', 'reason'])
+  const body = ctx.body as Record<string, unknown>
+  const type = form.oneOf('type', MAINTENANCE_TYPES)
+  const slotCommand = MAINTENANCE_SLOT_TYPES.includes(type)
+  const { slotId, inventoryItemId } = body
+  if (slotCommand) {
+    if (slotId === undefined || slotId === null) form.reject('slotId', `must not be null for ${type}`)
+    else if (typeof slotId !== 'string' || !UUID_PATTERN.test(slotId)) form.reject('slotId', 'Must be a valid UUID')
+  } else if (slotId !== undefined && slotId !== null) form.reject('slotId', `must be null for ${type}`)
+  if (inventoryItemId !== undefined && inventoryItemId !== null) {
+    if (type !== 'REMOVE_ITEM') form.reject('inventoryItemId', `must be null for ${type}`)
+    else if (typeof inventoryItemId !== 'string' || !UUID_PATTERN.test(inventoryItemId)) form.reject('inventoryItemId', 'Must be a valid UUID')
+  }
+  const reason = form.optionalText('reason', 500)
+  form.done()
+  if (machine.status !== 'MAINTENANCE') throw conflict('Machine is not in MAINTENANCE')
+  const seen = machine.lastSeenAt ? Date.parse(machine.lastSeenAt) : NaN
+  if (!Number.isFinite(seen) || now - seen > MACHINE_OFFLINE_AFTER_MS) throw conflict('Machine is offline')
+  if (store.maintenanceCommands.some(command => command.machineId === machine.id && MAINTENANCE_UNFINISHED.includes(command.status))) throw conflict('Another maintenance command is still running')
+  let slot: MockStore['slots'][number] | undefined
+  let items: MockItem[] = []
+  if (slotCommand) {
+    slot = store.slots.find(candidate => candidate.id === slotId && candidate.machineId === machine.id)
+    if (!slot) throw notFound('Slot not found in specified machine')
+    const present = presentItems(store, slot.id)
+    if (!present.length) throw conflict('Slot is empty')
+    if (type === 'REMOVE_ITEM') {
+      if (!REMOVABLE.includes(present[0].status)) throw conflict('Slot head cannot be removed')
+      if (inventoryItemId && inventoryItemId !== present[0].id) throw conflict('Inventory item is not the slot head')
+      items = [present[0]]
+    } else {
+      if (present.some(item => !REMOVABLE.includes(item.status))) throw conflict('Slot holds reserved or dispense-failed bowls')
+      items = present
+    }
+  }
+  const at = iso(now)
+  const command: MockMaintenanceCommand = {
+    id: newId(), commandCode: `M-${Array.from({ length: 16 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('')}`, machineId: machine.id, type,
+    slotId: slot?.id ?? null, slotCode: slot?.slotCode ?? null, inventoryItemId: type === 'REMOVE_ITEM' ? items[0].id : null, itemCount: slotCommand ? items.length : null,
+    removedCount: null, reason, status: 'PENDING', failureCode: null, requestedById: ctx.user!.id, requestedByName: ctx.user!.fullName,
+    createdAt: at, sentAt: null, acknowledgedAt: null, completedAt: null, updatedAt: at,
+  }
+  store.maintenanceCommands.push(command)
+  return { ...command }
+}
+
+/** The machine reports success: bowls taken out become REMOVED with a REMOVE transaction (reference = the command). */
+function completeMaintenanceCommand(store: MockStore, command: MockMaintenanceCommand, now: number) {
+  const at = iso(now)
+  const heartbeat = store.heartbeats.find(candidate => candidate.machineId === command.machineId)
+  if (command.type === 'RESET' && heartbeat?.dispenseState !== 'FAULT') {
+    Object.assign(command, { status: 'FAILED', failureCode: 'NOT_IN_FAULT', completedAt: at, updatedAt: at })
+    return
+  }
+  if (command.type === 'RESET' && heartbeat) heartbeat.dispenseState = 'IDLE'
+  let removed: number | null = null
+  if (command.slotId) {
+    const present = presentItems(store, command.slotId).filter(item => REMOVABLE.includes(item.status))
+    const taken = command.type === 'REMOVE_ITEM' ? present.filter(item => item.id === command.inventoryItemId) : present.slice(0, command.itemCount ?? present.length)
+    for (const item of taken) {
+      const before = item.status
+      setItemStatus(item, 'REMOVED', now)
+      item.removedAt = at
+      history(store, item, 'REMOVE', now, { referenceId: command.id, performedBy: command.requestedById, reason: command.reason ?? `Maintenance command ${command.commandCode} (${command.type})`, statusBefore: before, statusAfter: 'REMOVED' })
+    }
+    removed = taken.length
+  }
+  Object.assign(command, { status: 'SUCCESS', removedCount: removed, completedAt: at, updatedAt: at })
+}
+
+/**
+ * What the backend and the machine do in the background, applied before each request (like advanceOrders): a command
+ * is published (SENT) after a quarter of dispenseMs, accepted (ACKNOWLEDGED) after half, and ends after dispenseMs.
+ * A silent machine (heartbeat stopped) or scenario `dispense-slow` never answers, so the command becomes TIMEOUT 60 s
+ * after createdAt; scenario `dispense-failed` makes the machine abort (FAILED, ABORTED); RESET on a controller that is
+ * not in FAULT is refused (FAILED, NOT_IN_FAULT).
+ */
+export function advanceMaintenanceCommands(ctx: HandlerContext) {
+  const { store, now, options } = ctx
+  for (const command of store.maintenanceCommands) {
+    if (!MAINTENANCE_UNFINISHED.includes(command.status)) continue
+    const created = Date.parse(command.createdAt)
+    const answers = options.dispense !== 'slow' && !!store.heartbeats.find(candidate => candidate.machineId === command.machineId)?.live
+    if (command.status === 'PENDING' && created + options.dispenseMs / 4 <= now) Object.assign(command, { status: 'SENT', sentAt: iso(created + options.dispenseMs / 4), updatedAt: iso(now) })
+    if (answers && command.status === 'SENT' && created + options.dispenseMs / 2 <= now) Object.assign(command, { status: 'ACKNOWLEDGED', acknowledgedAt: iso(created + options.dispenseMs / 2), updatedAt: iso(now) })
+    if (answers && command.status === 'ACKNOWLEDGED' && created + options.dispenseMs <= now) {
+      if (options.dispense === 'fail') Object.assign(command, { status: 'FAILED', failureCode: 'ABORTED', completedAt: iso(now), updatedAt: iso(now) })
+      else completeMaintenanceCommand(store, command, now)
+      continue
+    }
+    if (MAINTENANCE_UNFINISHED.includes(command.status) && created + MAINTENANCE_TIMEOUT_MS <= now) {
+      Object.assign(command, { status: 'TIMEOUT', completedAt: iso(now), updatedAt: iso(now) })
+    }
+  }
 }

@@ -1,0 +1,342 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - machine maintenance commands
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 7.4, screen O6 "Điều khiển bảo trì máy") for backend issue 4.2; the
+    backend has not implemented these endpoints yet and has no table for them. A maintenance command is sent by staff to
+    one machine over the same MQTT channel as dispense commands (docs/mqtt-dispense.md, topic
+    vending/<machineCode>/commands, payload {"type": "<type>", "commandId": "M-…"}, plus "column" for slot commands)
+    and follows the same delivery life cycle as DispenseCommand: PENDING -> SENT -> ACKNOWLEDGED -> SUCCESS | FAILED |
+    TIMEOUT (re-sent with the same commandCode every DISPENSE_RESEND_AFTER while unanswered, TIMEOUT after
+    DISPENSE_TIMEOUT counted from createdAt). Types:
+    OPEN_REFILL (the machine unlocks its refill door and pauses its bowl sensors so staff can load bowls; whole machine),
+    CLOSE_REFILL (locks the refill door again and resumes the sensors; whole machine),
+    REMOVE_ITEM (the machine releases the head bowl of one slot, the physically present bowl that would be dispensed next,
+    into the service tray instead of the customer tray; on SUCCESS that bowl becomes REMOVED with a REMOVE inventory
+    transaction),
+    EMPTY_COLUMN (the machine releases every bowl of one slot into the service tray; on SUCCESS each of them becomes
+    REMOVED with a REMOVE transaction),
+    RESET (clears a FAULT of the dispense controller, like the serial command RESET of the firmware; the machine answers
+    FAILED with failureCode NOT_IN_FAULT when it was not in FAULT).
+    Commands are only accepted while the machine is in MAINTENANCE (the kiosk does not sell, so nobody buys from an open
+    or emptied column) and online (last_seen_at not older than 180 s, the web's OFFLINE rule). One unfinished command
+    per machine at a time. REMOVE_ITEM / EMPTY_COLUMN only take AVAILABLE or EXPIRED bowls, like POST
+    /inventory/{id}/remove (docs/inventory-management.md): a RESERVED bowl belongs to an open order and a DISPENSE_FAILED
+    one must be reconciled first. Inventory only changes when the machine reports success (it is the witness of the bowls
+    leaving the column); FAILED or TIMEOUT change nothing. The firmware today (firmware/fruit) only handles DISPENSE over
+    MQTT and RESET over USB serial; the other types, the "column" field and the events MAINTENANCE_ACCEPTED /
+    MAINTENANCE_COMPLETED / MAINTENANCE_ABORTED (details {commandId, code}) are proposed for the firmware too. Proposed
+    table maintenance_commands (id UUID PK, command_code VARCHAR(39) UNIQUE, machine_id FK machines, type, slot_id FK
+    machine_slots NULL, inventory_item_id FK inventory_items NULL, item_count INT NULL, reason VARCHAR(500) NULL, status,
+    failure_code VARCHAR(64) NULL, removed_count INT NULL, requested_by FK users, created_at, sent_at, acknowledged_at,
+    completed_at, updated_at) with CHECK (slot_id IS NOT NULL) = (type IN ('REMOVE_ITEM', 'EMPTY_COLUMN')) and an index
+    on (machine_id, created_at DESC). Commands are never deleted. Proposed permission (not in backend #48 yet):
+    MACHINE_MAINTENANCE for ADMIN and STAFF (staff on site operate the machine; FE 7.2 restock tickets use OPEN_REFILL /
+    CLOSE_REFILL / REMOVE_ITEM). Reading the history needs MACHINE_READ. Used by the mock layer until the backend ships
+    it, then this file is deleted and the paths move to api.yaml.
+paths:
+  /api/v1/machines/{machineId}/maintenance-commands:
+    get:
+      tags: [Machines]
+      operationId: listMachineMaintenanceCommands
+      summary: Maintenance commands of one machine, newest first (draft)
+      description: >-
+        MACHINE_READ. Database pagination page0/size20/max100, fixed order createdAt desc then id. Includes unfinished
+        commands, so a screen can poll this list until they end.
+      x-required-permission: MACHINE_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MachineId"
+        - name: page
+          in: query
+          description: Zero-based page.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size 1..100.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: One page of commands (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageMaintenanceCommandResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Machines]
+      operationId: createMachineMaintenanceCommand
+      summary: Send a maintenance command to the machine (draft)
+      description: >-
+        MACHINE_MAINTENANCE. Creates the command PENDING and publishes it after commit. Unknown fields are rejected
+        (400). slotId is required for REMOVE_ITEM and EMPTY_COLUMN and must be absent for the other types;
+        inventoryItemId is only accepted for REMOVE_ITEM and, when sent, must be the current head bowl of the slot (a
+        guard against a stale screen). For REMOVE_ITEM the response carries the head bowl in inventoryItemId and
+        itemCount 1; for EMPTY_COLUMN itemCount is the number of bowls that will be taken out. 409 when the machine is
+        not in MAINTENANCE ("Machine is not in MAINTENANCE"), is offline ("Machine is offline"), already has an
+        unfinished maintenance command ("Another maintenance command is still running"), the slot is empty ("Slot is
+        empty"), the head bowl cannot be removed ("Slot head cannot be removed", RESERVED or DISPENSE_FAILED), the slot
+        holds RESERVED or DISPENSE_FAILED bowls for EMPTY_COLUMN ("Slot holds reserved or dispense-failed bowls"), or
+        inventoryItemId is not the head any more ("Inventory item is not the slot head").
+      x-required-permission: MACHINE_MAINTENANCE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MachineId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMaintenanceCommandRequest"
+      responses:
+        "201":
+          description: Command created (PENDING)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Machine not found, or the slot is not a slot of this machine ("Slot not found in specified machine")
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Business conflict (see the description)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    MachineId:
+      name: machineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid body, path or paging parameter (fieldErrors per field)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Forbidden:
+      description: The account lacks the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    NotFound:
+      description: Machine not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+  schemas:
+    MaintenanceCommandType:
+      type: string
+      enum: [OPEN_REFILL, CLOSE_REFILL, REMOVE_ITEM, EMPTY_COLUMN, RESET]
+    CreateMaintenanceCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/MaintenanceCommandType"
+        slotId:
+          type: string
+          format: uuid
+          description: Required for REMOVE_ITEM and EMPTY_COLUMN; must be absent for the other types.
+        inventoryItemId:
+          type: string
+          format: uuid
+          description: REMOVE_ITEM only, optional; when sent it must be the current head bowl of the slot.
+        reason:
+          type: string
+          maxLength: 500
+          description: Optional note (why), trimmed; blank is stored as null. Used as the reason of the REMOVE transactions.
+    MaintenanceCommandResponse:
+      type: object
+      description: One maintenance command. Times are UTC instants.
+      required: [id, commandCode, machineId, type, status, requestedById, requestedByName, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        commandCode:
+          type: string
+          description: The commandId sent to the machine over MQTT, "M-" followed by 16 upper-case hex digits.
+          pattern: "^[A-Za-z0-9_-]{1,39}$"
+          examples: ["M-7C21A90F3B5E4D10"]
+        machineId:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/MaintenanceCommandType"
+        slotId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        slotCode:
+          type:
+            - string
+            - "null"
+          description: Code of the slot, for display.
+        inventoryItemId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: REMOVE_ITEM, the head bowl at creation time.
+        itemCount:
+          type:
+            - integer
+            - "null"
+          format: int32
+          description: Bowls the command takes out (REMOVE_ITEM 1, EMPTY_COLUMN the AVAILABLE/EXPIRED bowls at creation); null for the other types.
+        removedCount:
+          type:
+            - integer
+            - "null"
+          format: int32
+          description: Bowls marked REMOVED when the machine reported success; null until then and for the other types.
+        reason:
+          type:
+            - string
+            - "null"
+        status:
+          type: string
+          enum: [PENDING, SENT, ACKNOWLEDGED, SUCCESS, FAILED, TIMEOUT]
+        failureCode:
+          type:
+            - string
+            - "null"
+          description: Code reported by the machine with a FAILED command (e.g. NOT_IN_FAULT, BUSY, DOOR_OPEN, ABORTED); null otherwise.
+          examples: ["NOT_IN_FAULT"]
+        requestedById:
+          type: string
+          format: uuid
+        requestedByName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        sentAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        acknowledgedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PageMaintenanceCommandResponse:
+      type: object
+      required: [content, page, size, totalElements, totalPages]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/MaintenanceCommandResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponseMaintenanceCommandResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/MaintenanceCommandResponse"
+    ApiResponsePageMaintenanceCommandResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageMaintenanceCommandResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

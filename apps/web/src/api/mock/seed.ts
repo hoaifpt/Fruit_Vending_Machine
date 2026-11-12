@@ -6,6 +6,9 @@ import type { components as DispenseDraft } from '../drafts/dispense-commands'
 import type { components as AlertsDraft } from '../drafts/alerts'
 import type { components as TelemetryDraft } from '../drafts/machine-telemetry'
 import type { components as TicketsDraft } from '../drafts/work-tickets'
+import type { components as SchedulesDraft } from '../drafts/maintenance-schedules'
+import type { components as MaintenanceDraft } from '../drafts/machine-maintenance'
+import { addDays, dueInstant, nextDueDate, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 
 type S = components['schemas']
 
@@ -45,6 +48,10 @@ export type MockReading = TelemetryDraft['schemas']['SensorReadingResponse']
 export type MockMachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
 /** Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml): a job at one machine, people named by fullName. */
 export type MockTicket = TicketsDraft['schemas']['WorkTicketResponse']
+/** Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml); `overdue` is computed when read. */
+export type MockSchedule = Omit<SchedulesDraft['schemas']['MaintenanceScheduleResponse'], 'overdue'>
+/** Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): a command sent to a machine by staff. */
+export type MockMaintenanceCommand = MaintenanceDraft['schemas']['MaintenanceCommandResponse']
 
 export interface MockStore {
   users: MockUser[]
@@ -60,6 +67,8 @@ export interface MockStore {
   dispenseCommands: MockDispenseCommand[]
   alerts: MockAlert[]
   tickets: MockTicket[]
+  schedules: MockSchedule[]
+  maintenanceCommands: MockMaintenanceCommand[]
   heartbeats: MockHeartbeat[]
   readings: MockReading[]
   machineEvents: MockMachineEvent[]
@@ -321,10 +330,11 @@ export function createStore(nowMs: number): MockStore {
   const alerts = seedAlerts(nowMs, { machines, slots, orders, admin: users[0], staff: users[1] })
   const { heartbeats, readings, machineEvents } = seedTelemetry(nowMs, machines)
   const tickets = seedTickets(nowMs, { machines, alerts, users })
+  const schedules = seedSchedules(nowMs, { machines, users, tickets })
 
   return {
-    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, tickets, webhookLogs,
-    heartbeats, readings, machineEvents,
+    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, tickets, schedules, webhookLogs,
+    heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, slots, users }),
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
 }
@@ -440,6 +450,39 @@ function seedTickets(nowMs: number, { machines, alerts, users }: { machines: S['
 }
 
 /**
+ * Maintenance schedules of the draft of backend 4.5 (FE 7.3), dates relative to today in Vietnam:
+ * 1. DEV-MACHINE-01 every 7 days, last done by the COMPLETED ticket 4 (so due 7 days after it, "later").
+ * 2. DEV-MACHINE-01 every 14 days, due in 2 days ("sắp đến hạn"), no assignee.
+ * 3. DEV-MACHINE-02 every 30 days, 3 days overdue, its open ticket is ticket 5 (ASSIGNED).
+ * 4. DEV-MACHINE-03 every 90 days, paused by the admin yesterday (nextDueAt null).
+ * None is due today without a ticket, so reading schedules does not open new tickets on the seed.
+ */
+function seedSchedules(nowMs: number, { machines, users, tickets }: { machines: S['MachineResponse'][]; users: MockUser[]; tickets: MockTicket[] }): MockSchedule[] {
+  const iso = (offset: number) => new Date(nowMs + offset).toISOString()
+  const today = vietnamDate(nowMs)
+  const [m1, m2, m3] = machines
+  const [admin, staff] = users
+  const restocker = users.find(user => user.id === uuid('11000000', 7))!
+  const done = tickets.find(ticket => ticket.id === uuid('61000000', 4))!
+  const open = tickets.find(ticket => ticket.id === uuid('61000000', 5))!
+  const blank = {
+    note: null, assigneeId: null, assigneeName: null, lastCompletedAt: null, openTicketId: null, openTicketStatus: null,
+    deactivatedAt: null, deactivatedById: null, deactivatedByName: null,
+  }
+  const schedule = (n: number, machine: S['MachineResponse'], fields: Partial<MockSchedule> & Pick<MockSchedule, 'title' | 'intervalDays' | 'startDate' | 'active' | 'nextDueAt'>, created: number): MockSchedule => ({
+    ...blank, id: uuid('62000000', n), machineId: machine.id, machineCode: machine.code, machineName: machine.name,
+    createdById: admin.id, createdByName: admin.fullName, createdAt: iso(created), updatedAt: iso(created), ...fields,
+  })
+  const doneDate = vietnamDateOf(done.completedAt)!
+  return [
+    schedule(1, m1, { title: 'Vệ sinh khay nhả hàng', intervalDays: 7, startDate: addDays(doneDate, -7), active: true, nextDueAt: dueInstant(nextDueDate(doneDate, 7, today)), lastCompletedAt: done.completedAt, assigneeId: staff.id, assigneeName: staff.fullName, note: 'Lau khay, kiểm tra cảm biến rơi hộp, thử nhả 2 hộp.' }, -30 * DAY),
+    schedule(2, m1, { title: 'Kiểm tra cảm biến nhiệt độ và độ ẩm', intervalDays: 14, startDate: addDays(today, -12), active: true, nextDueAt: dueInstant(addDays(today, 2)), note: 'So nhiệt kế cầm tay với số đo của máy; lệch quá 1 °C thì báo quản trị viên.' }, -12 * DAY),
+    schedule(3, m2, { title: 'Kiểm tra gioăng cửa và khay nước ngưng', intervalDays: 30, startDate: addDays(today, -33), active: true, nextDueAt: dueInstant(addDays(today, -3)), assigneeId: restocker.id, assigneeName: restocker.fullName, openTicketId: open.id, openTicketStatus: 'ASSIGNED' }, -60 * DAY),
+    schedule(4, m3, { title: 'Vệ sinh tổng thể khoang lạnh', intervalDays: 90, startDate: addDays(today, -20), active: false, nextDueAt: null, deactivatedAt: iso(-DAY), deactivatedById: admin.id, deactivatedByName: admin.fullName, updatedAt: iso(-DAY) }, -20 * DAY),
+  ]
+}
+
+/**
  * Heartbeats, readings and events of the draft of backend 3.4/3.5 (FE 6.4):
  * - DEV-MACHINE-01: online (live heartbeat, firmware 0.3.0 like app_config.h, good Wi-Fi), the 24 hourly readings of
  *   backend/db/dev/seed.sql (9.50 °C two hours ago, above its 8 °C maximum), dispense events and a FAULT
@@ -487,4 +530,41 @@ function seedTelemetry(nowMs: number, machines: S['MachineResponse'][]): { heart
     event(m2, 'OFFLINE', {}, -34 * MIN),
   ]
   return { heartbeats, readings, machineEvents }
+}
+
+/** `M-` and 16 upper-case hex digits for maintenance commands (FE 7.4), deterministic for seed rows like seedCommandCode. */
+export function seedMaintenanceCode(n: number): string {
+  return `M-${seedCommandCode(5000 + n).slice(2)}`
+}
+
+/**
+ * Maintenance commands of the draft of backend 4.2 (FE 7.4), none unfinished so a new one can be sent right away:
+ * - DEV-MACHINE-01: last week's maintenance, refill opened and closed by staff, then a RESET the machine refused because
+ *   its controller was not in FAULT (NOT_IN_FAULT).
+ * - DEV-MACHINE-02 (MAINTENANCE, silent for 35 minutes, controller in FAULT): refill opened and closed two hours ago, then
+ *   a RESET sent just before the machine went quiet that timed out (the FAULT is still there).
+ * - DEV-MACHINE-03: none.
+ */
+function seedMaintenanceCommands(nowMs: number, { machines, users }: { machines: S['MachineResponse'][]; slots: S['MachineSlotResponse'][]; users: MockUser[] }): MockMaintenanceCommand[] {
+  const iso = (offset: number) => new Date(nowMs + offset).toISOString()
+  const MINUTE = 60_000
+  const [m1, m2] = machines
+  const [admin, staff] = users
+  const command = (n: number, machine: S['MachineResponse'], by: MockUser, type: MockMaintenanceCommand['type'], status: MockMaintenanceCommand['status'], created: number, fields: Partial<MockMaintenanceCommand> = {}): MockMaintenanceCommand => {
+    const timedOut = status === 'TIMEOUT'
+    const completedAt = iso(created + (timedOut ? 60_000 : 8_000))
+    return {
+      id: uuid('c7400000', n), commandCode: seedMaintenanceCode(n), machineId: machine.id, type, status, slotId: null, slotCode: null, inventoryItemId: null,
+      itemCount: null, removedCount: null, reason: null, failureCode: null, requestedById: by.id, requestedByName: by.fullName,
+      createdAt: iso(created), sentAt: iso(created + 1_000), acknowledgedAt: timedOut ? null : iso(created + 2_000), completedAt, updatedAt: completedAt, ...fields,
+    }
+  }
+  return [
+    command(1, m1, staff, 'OPEN_REFILL', 'SUCCESS', -7 * DAY),
+    command(2, m1, staff, 'CLOSE_REFILL', 'SUCCESS', -7 * DAY + 20 * MINUTE),
+    command(3, m1, admin, 'RESET', 'FAILED', -7 * DAY + 25 * MINUTE, { failureCode: 'NOT_IN_FAULT', reason: 'Khởi động lại bộ nhả hàng sau khi vệ sinh khay.' }),
+    command(4, m2, staff, 'OPEN_REFILL', 'SUCCESS', -2 * HOUR),
+    command(5, m2, staff, 'CLOSE_REFILL', 'SUCCESS', -2 * HOUR + 15 * MINUTE),
+    command(6, m2, staff, 'RESET', 'TIMEOUT', -36 * MINUTE, { reason: 'Xóa lỗi FAULT sau khi kiểm tra hai cửa.' }),
+  ]
 }

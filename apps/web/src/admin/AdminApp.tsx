@@ -31,6 +31,7 @@ const AlertsPage = lazy(() => import('./pages/AlertsPage.tsx'))
 const AlertDetailPage = lazy(() => import('./pages/AlertDetailPage.tsx'))
 const TicketsPage = lazy(() => import('./pages/TicketsPage.tsx'))
 const TicketDetailPage = lazy(() => import('./pages/TicketDetailPage.tsx'))
+const MaintenanceSchedulesPage = lazy(() => import('./pages/MaintenanceSchedulesPage.tsx'))
 // Component reference at /admin/_kit: the literal condition drops this chunk from production builds.
 const KitPage = import.meta.env.DEV || import.meta.env.MODE === 'mock' ? lazy(() => import('./pages/KitPage.tsx')) : null
 
@@ -93,6 +94,7 @@ function AdminApp() {
       'alert-detail': <AlertDetailPage key={id} alertId={id} />,
       tickets: <TicketsPage />,
       'ticket-detail': <TicketDetailPage key={id} ticketId={id} />,
+      'maintenance-schedules': <MaintenanceSchedulesPage />,
     }[route.page]
   }
 

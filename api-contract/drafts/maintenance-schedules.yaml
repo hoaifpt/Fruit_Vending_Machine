@@ -1,0 +1,566 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - maintenance schedules
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 7.3, screen O5 "Lịch bảo trì") for backend issue 4.5; the backend has not
+    implemented these endpoints yet and has no table for them. A maintenance schedule repeats one maintenance job at one
+    machine every N days (intervalDays 1..365). Schedules are never deleted: they are paused (deactivate) and resumed
+    (activate), each change recording who and when.
+
+    Due date rule (the server computes nextDueAt; the web previews it with the same rule). Dates are calendar days in
+    Asia/Ho_Chi_Minh (UTC+7, no DST). base = the local date of lastCompletedAt when there is one, else startDate.
+    next = base + intervalDays; while next is before today, next += intervalDays (a schedule never starts out overdue).
+    nextDueAt is the start of that day (00:00+07:00) as a UTC instant. It is recomputed only on create, on an update
+    that changes intervalDays or startDate, on activate, and when the schedule's ticket is COMPLETED; between those
+    events it stays fixed, so time passing makes a schedule overdue. overdue = active and today (Vietnam) is after the
+    due date. A paused schedule has nextDueAt null and overdue false.
+
+    Link with work tickets (api-contract/drafts/work-tickets.yaml, FE 7.1 / BE 4.3), proposed: a daily server job opens
+    one MAINTENANCE work ticket for every active schedule whose due date is today or earlier and that has no open ticket
+    yet (title = schedule title, machine = schedule machine, dueAt = end of the due day, assignee = the schedule's
+    assignee so the ticket starts ASSIGNED, else OPEN; createdBy = the schedule's creator). The schedule then exposes it
+    as openTicketId / openTicketStatus. When that ticket becomes COMPLETED the server sets lastCompletedAt =
+    ticket.completedAt, recomputes nextDueAt (= completed date + intervalDays) and clears openTicketId. When it is
+    CANCELLED the schedule keeps its due date (still overdue) and clears openTicketId, so the next daily run opens a new
+    ticket. Pausing a schedule does not cancel its open ticket. Proposed new nullable column work_tickets.schedule_id
+    (FK maintenance_schedules) so a ticket can name its schedule; not part of the work-tickets draft yet.
+
+    Proposed table maintenance_schedules (id UUID PK, machine_id FK machines, title VARCHAR(200), note TEXT NULL,
+    interval_days INT CHECK (interval_days BETWEEN 1 AND 365), start_date DATE, assignee_id FK users NULL, active
+    BOOLEAN, next_due_at TIMESTAMPTZ NULL, last_completed_at TIMESTAMPTZ NULL, open_ticket_id FK work_tickets NULL,
+    created_by FK users, deactivated_at / deactivated_by NULL, created_at, updated_at) with CHECK (active OR next_due_at
+    IS NULL), a partial unique index on (machine_id, lower(title)) WHERE active, and an index on (active, next_due_at).
+    Proposed permissions (not in backend #48 yet): MAINTENANCE_SCHEDULE_READ (ADMIN, STAFF) and
+    MAINTENANCE_SCHEDULE_WRITE (ADMIN). Used by the mock layer until the backend ships it, then this file is deleted and
+    the paths move to api.yaml.
+paths:
+  /api/v1/maintenance-schedules:
+    get:
+      tags: [MaintenanceSchedules]
+      operationId: listMaintenanceSchedules
+      summary: List and filter maintenance schedules (draft)
+      description: >-
+        MAINTENANCE_SCHEDULE_READ. Database pagination page0/size20/max100. Filters combine: machineId, active. Approved
+        sort: nextDueAt (default asc, nulls last so paused schedules come last) or createdAt, with a UUID tie-break.
+      x-required-permission: MAINTENANCE_SCHEDULE_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Zero-based page.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size 1..100.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: machineId
+          in: query
+          description: Machine UUID filter.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: active
+          in: query
+          description: true = running schedules, false = paused ones; absent = both.
+          required: false
+          schema:
+            type: boolean
+        - name: sort
+          in: query
+          description: nextDueAt or createdAt with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: nextDueAt,asc
+      responses:
+        "200":
+          description: One page of maintenance schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageMaintenanceScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    post:
+      tags: [MaintenanceSchedules]
+      operationId: createMaintenanceSchedule
+      summary: Create a maintenance schedule (draft)
+      description: >-
+        MAINTENANCE_SCHEDULE_WRITE. Creates an active schedule; the response already carries nextDueAt computed with the
+        due date rule. machineId must be an existing machine; assigneeId, when given, must be an ACTIVE account holding
+        the STAFF role. Unknown or invalid references are reported as fieldErrors (400). Unknown fields are rejected
+        (400). If the new schedule is due today, the server opens its ticket right away (openTicketId is then set).
+      x-required-permission: MAINTENANCE_SCHEDULE_WRITE
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMaintenanceScheduleRequest"
+      responses:
+        "201":
+          description: The new schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMaintenanceScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The machine already has an active schedule with this title (case-insensitive)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: An active schedule with this title already exists for this machine
+                path: /api/v1/maintenance-schedules
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/maintenance-schedules/{id}:
+    get:
+      tags: [MaintenanceSchedules]
+      operationId: getMaintenanceSchedule
+      summary: One maintenance schedule (draft)
+      description: MAINTENANCE_SCHEDULE_READ.
+      x-required-permission: MAINTENANCE_SCHEDULE_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMaintenanceScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    patch:
+      tags: [MaintenanceSchedules]
+      operationId: updateMaintenanceSchedule
+      summary: Change a maintenance schedule (draft)
+      description: >-
+        MAINTENANCE_SCHEDULE_WRITE. Partial update: only the fields present change; at least one field is required
+        (400 otherwise). assigneeId null removes the assignee, note null clears it. The machine cannot be changed (pause
+        this schedule and create another one). Changing intervalDays or startDate recomputes nextDueAt of an active
+        schedule with the due date rule; a paused schedule keeps nextDueAt null. The new assignee applies to tickets
+        opened from now on; an already open ticket keeps its own assignee. Works on paused schedules too.
+      x-required-permission: MAINTENANCE_SCHEDULE_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMaintenanceScheduleRequest"
+      responses:
+        "200":
+          description: The changed schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMaintenanceScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Another active schedule of the same machine already has this title
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/maintenance-schedules/{id}/deactivate:
+    post:
+      tags: [MaintenanceSchedules]
+      operationId: deactivateMaintenanceSchedule
+      summary: Pause a schedule (draft)
+      description: >-
+        MAINTENANCE_SCHEDULE_WRITE. active -> paused; records deactivatedAt (now) and deactivatedBy (the caller), sets
+        nextDueAt null and overdue false. No ticket is opened while paused; an open ticket is left as it is. No request
+        body. This is the only way to stop a schedule: schedules are never deleted.
+      x-required-permission: MAINTENANCE_SCHEDULE_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: The paused schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMaintenanceScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The schedule is already paused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Schedule is already inactive
+                path: /api/v1/maintenance-schedules/62000000-0000-0000-0000-000000000004/deactivate
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/maintenance-schedules/{id}/activate:
+    post:
+      tags: [MaintenanceSchedules]
+      operationId: activateMaintenanceSchedule
+      summary: Resume a paused schedule (draft)
+      description: >-
+        MAINTENANCE_SCHEDULE_WRITE. paused -> active; clears deactivatedAt/By and recomputes nextDueAt with the due date
+        rule (so it is today or later). No request body. 409 when another active schedule of the same machine has the
+        same title.
+      x-required-permission: MAINTENANCE_SCHEDULE_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ScheduleId"
+      responses:
+        "200":
+          description: The resumed schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseMaintenanceScheduleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The schedule is already active, or another active schedule of the machine has the same title
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Schedule is already active
+                path: /api/v1/maintenance-schedules/62000000-0000-0000-0000-000000000001/activate
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ScheduleId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid parameters or body (fieldErrors per field)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Forbidden:
+      description: The account lacks the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    NotFound:
+      description: Schedule not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    ServerError:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+  schemas:
+    MaintenanceScheduleResponse:
+      type: object
+      description: One maintenance schedule. Instants are UTC; startDate is a Vietnam calendar date. People are named by their fullName.
+      required: [id, machineId, machineCode, title, intervalDays, startDate, active, overdue, createdAt, createdById, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        machineId:
+          type: string
+          format: uuid
+        machineCode:
+          type: string
+        machineName:
+          type:
+            - string
+            - "null"
+        title:
+          type: string
+          maxLength: 200
+        note:
+          type:
+            - string
+            - "null"
+          description: Instructions for whoever does the job. Plain text; clients show it as text, never as HTML.
+        intervalDays:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 365
+        startDate:
+          type: string
+          format: date
+          description: Day the cycle is counted from (usually the last time the job was done), Asia/Ho_Chi_Minh.
+        assigneeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: Staff account given the tickets this schedule opens.
+        assigneeName:
+          type:
+            - string
+            - "null"
+        active:
+          type: boolean
+        nextDueAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Start (00:00 Asia/Ho_Chi_Minh) of the next due day, computed by the server; null while paused.
+        overdue:
+          type: boolean
+          description: Active and the due day is before today (Asia/Ho_Chi_Minh).
+        lastCompletedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: completedAt of the last COMPLETED ticket of this schedule.
+        openTicketId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: The schedule's work ticket that is not COMPLETED or CANCELLED yet, if any.
+        openTicketStatus:
+          type:
+            - string
+            - "null"
+          enum: [OPEN, ASSIGNED, IN_PROGRESS, null]
+        createdById:
+          type: string
+          format: uuid
+        createdByName:
+          type:
+            - string
+            - "null"
+        deactivatedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        deactivatedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        deactivatedByName:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateMaintenanceScheduleRequest:
+      type: object
+      additionalProperties: false
+      required: [machineId, title, intervalDays, startDate]
+      properties:
+        machineId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        intervalDays:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 365
+        startDate:
+          type: string
+          format: date
+          description: Asia/Ho_Chi_Minh calendar date; past or future.
+        assigneeId:
+          type: string
+          format: uuid
+        note:
+          type: string
+          maxLength: 1000
+          description: Blank is stored as null.
+    UpdateMaintenanceScheduleRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        intervalDays:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 365
+        startDate:
+          type: string
+          format: date
+        assigneeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: null removes the assignee.
+        note:
+          type:
+            - string
+            - "null"
+          maxLength: 1000
+          description: null or blank clears the note.
+    PageMaintenanceScheduleResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/MaintenanceScheduleResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponsePageMaintenanceScheduleResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageMaintenanceScheduleResponse"
+    ApiResponseMaintenanceScheduleResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/MaintenanceScheduleResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string
