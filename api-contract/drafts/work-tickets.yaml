@@ -1,0 +1,661 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - work tickets
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 7.1, screen O3 "Phiếu công việc") for backend issue 4.3; the backend has
+    not implemented these endpoints yet and has no table for them. A work ticket is a job at one machine (restock or
+    maintenance), optionally raised from an alert. Lifecycle: OPEN (no assignee) -> ASSIGNED -> IN_PROGRESS ->
+    COMPLETED; CANCELLED from any state before COMPLETED. Statuses follow the SRS vocabulary already used by the web
+    (OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED). Every step records who and when (assignedAt/By,
+    startedAt/By, completedAt/By with an optional note, cancelledAt/By with a mandatory reason); tickets are never
+    deleted. Proposed table work_tickets (id UUID PK, type, status, machine_id FK machines, alert_id FK alerts NULL,
+    title VARCHAR(200), description TEXT NULL, due_at TIMESTAMPTZ NULL, assignee_id FK users NULL, created_by FK users,
+    assigned_at/assigned_by, started_at/started_by, completed_at/completed_by, completion_note, cancelled_at/cancelled_by,
+    cancel_reason, created_at, updated_at) with CHECK (status <> 'OPEN' OR assignee_id IS NULL), CHECK (assignee_id IS
+    NOT NULL OR status IN ('OPEN', 'CANCELLED')) (a ticket cancelled while OPEN has no assignee), CHECK (status <> 'COMPLETED' OR completed_at IS NOT NULL),
+    CHECK (status <> 'CANCELLED' OR (cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL)), and indexes on
+    (assignee_id, status) and (machine_id, status). Restock lines (which slot, which batch, how many bowls) belong to
+    issue FE 7.2 / BE 4.3 and are not part of this draft yet. Proposed permissions (not in backend #48 yet):
+    TICKET_READ (ADMIN, STAFF) and TICKET_WRITE (ADMIN). A caller without TICKET_WRITE only ever sees tickets assigned
+    to itself (the server filters; the web never relies on its own filtering). Starting and completing a ticket is done
+    by its assignee only. Used by the mock layer until the backend ships it, then this file is deleted and the paths
+    move to api.yaml.
+paths:
+  /api/v1/work-tickets:
+    get:
+      tags: [WorkTickets]
+      operationId: listWorkTickets
+      summary: List and filter work tickets (draft)
+      description: >-
+        TICKET_READ. Database pagination page0/size20/max100. Filters combine: status, type, machineId, assigneeId.
+        Approved sort: createdAt (default desc) or dueAt (nulls last), with a UUID tie-break. A caller without
+        TICKET_WRITE only receives tickets whose assignee is the caller: the server replaces any assigneeId filter with
+        the caller's own id (no 403, the list is simply theirs).
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Zero-based page.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size 1..100.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          description: Exact ticket status.
+          required: false
+          schema:
+            type: string
+            enum: [OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED]
+        - name: type
+          in: query
+          description: Exact ticket type.
+          required: false
+          schema:
+            type: string
+            enum: [RESTOCK, MAINTENANCE]
+        - name: machineId
+          in: query
+          description: Machine UUID filter.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: assigneeId
+          in: query
+          description: Assignee account UUID filter (ignored and replaced by the caller for callers without TICKET_WRITE).
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: sort
+          in: query
+          description: createdAt or dueAt with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        "200":
+          description: One page of work tickets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    post:
+      tags: [WorkTickets]
+      operationId: createWorkTicket
+      summary: Open a work ticket (draft)
+      description: >-
+        TICKET_WRITE. Creates an OPEN ticket, or an ASSIGNED one when assigneeId is given (assignedAt/assignedBy are then
+        the creation time and the caller). machineId must be an existing machine; alertId, when given, must be an alert
+        of that same machine that is not RESOLVED; assigneeId must be an ACTIVE account holding the STAFF role. Unknown
+        or invalid references are reported as fieldErrors (400). dueAt must be in the future. Unknown fields are rejected
+        (400).
+      x-required-permission: TICKET_WRITE
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkTicketRequest"
+      responses:
+        "201":
+          description: The new ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The alert given in alertId is already RESOLVED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}:
+    get:
+      tags: [WorkTickets]
+      operationId: getWorkTicket
+      summary: One work ticket (draft)
+      description: >-
+        TICKET_READ. A caller without TICKET_WRITE gets 404 for a ticket not assigned to it (its existence is not
+        disclosed).
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      responses:
+        "200":
+          description: The ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/assign:
+    post:
+      tags: [WorkTickets]
+      operationId: assignWorkTicket
+      summary: Assign or reassign a ticket (draft)
+      description: >-
+        TICKET_WRITE. OPEN or ASSIGNED -> ASSIGNED; records assignedAt (now) and assignedBy (the caller), replacing the
+        previous assignee. assigneeId must be an ACTIVE account holding the STAFF role (400 otherwise). Assigning to the
+        current assignee again is accepted and only refreshes assignedAt/By. The row is locked while changing.
+      x-required-permission: TICKET_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignWorkTicketRequest"
+      responses:
+        "200":
+          description: The assigned ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is already IN_PROGRESS, COMPLETED or CANCELLED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket can only be assigned while OPEN or ASSIGNED
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000001/assign
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/start:
+    post:
+      tags: [WorkTickets]
+      operationId: startWorkTicket
+      summary: Start working on a ticket (draft)
+      description: >-
+        TICKET_READ and the caller must be the assignee (403 otherwise, also for admins). ASSIGNED -> IN_PROGRESS;
+        records startedAt (now) and startedBy (the caller). No request body.
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      responses:
+        "200":
+          description: The started ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not the assignee of this ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is not ASSIGNED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket is not ASSIGNED
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000002/start
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/complete:
+    post:
+      tags: [WorkTickets]
+      operationId: completeWorkTicket
+      summary: Complete a ticket (draft)
+      description: >-
+        TICKET_READ and the caller must be the assignee (403 otherwise). IN_PROGRESS -> COMPLETED; records completedAt
+        (now), completedBy (the caller) and the optional note. The body may be omitted. Not reversible.
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteWorkTicketRequest"
+      responses:
+        "200":
+          description: The completed ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not the assignee of this ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is not IN_PROGRESS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket is not IN_PROGRESS
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000003/complete
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/cancel:
+    post:
+      tags: [WorkTickets]
+      operationId: cancelWorkTicket
+      summary: Cancel a ticket (draft)
+      description: >-
+        TICKET_WRITE. OPEN, ASSIGNED or IN_PROGRESS -> CANCELLED; records cancelledAt (now), cancelledBy (the caller) and
+        the mandatory reason. The assignee is kept for the record. Not reversible; tickets are never deleted.
+      x-required-permission: TICKET_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelWorkTicketRequest"
+      responses:
+        "200":
+          description: The cancelled ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is already COMPLETED or CANCELLED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket is already COMPLETED or CANCELLED
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000001/cancel
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TicketId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid parameters or body (fieldErrors per field)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Forbidden:
+      description: The account lacks the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    NotFound:
+      description: Ticket not found (or not visible to the caller)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    ServerError:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+  schemas:
+    WorkTicketResponse:
+      type: object
+      description: One work ticket. Times are UTC instants. People are named by their fullName.
+      required: [id, type, status, title, machineId, machineCode, createdAt, createdById, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [RESTOCK, MAINTENANCE]
+        status:
+          type: string
+          enum: [OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED]
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type:
+            - string
+            - "null"
+          description: Plain text; clients show it as text, never as HTML.
+        machineId:
+          type: string
+          format: uuid
+        machineCode:
+          type: string
+        machineName:
+          type:
+            - string
+            - "null"
+        alertId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: The alert this ticket was opened from, when there is one.
+        dueAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        assigneeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        assigneeName:
+          type:
+            - string
+            - "null"
+          description: fullName of the assignee.
+        createdById:
+          type: string
+          format: uuid
+        createdByName:
+          type:
+            - string
+            - "null"
+        assignedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Last (re)assignment.
+        assignedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        assignedByName:
+          type:
+            - string
+            - "null"
+        startedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        startedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        startedByName:
+          type:
+            - string
+            - "null"
+        completedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        completedByName:
+          type:
+            - string
+            - "null"
+        completionNote:
+          type:
+            - string
+            - "null"
+        cancelledAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        cancelledById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        cancelledByName:
+          type:
+            - string
+            - "null"
+        cancelReason:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CreateWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [type, machineId, title]
+      properties:
+        type:
+          type: string
+          enum: [RESTOCK, MAINTENANCE]
+        machineId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+          description: Blank is stored as null.
+        dueAt:
+          type: string
+          format: date-time
+          description: Must be in the future.
+        alertId:
+          type: string
+          format: uuid
+        assigneeId:
+          type: string
+          format: uuid
+          description: When given the ticket starts ASSIGNED.
+    AssignWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [assigneeId]
+      properties:
+        assigneeId:
+          type: string
+          format: uuid
+    CompleteWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 500
+          description: What was done; blank is stored as null.
+    CancelWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    PageWorkTicketResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkTicketResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponsePageWorkTicketResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageWorkTicketResponse"
+    ApiResponseWorkTicketResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/WorkTicketResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

@@ -130,16 +130,21 @@ test('Tiêu chí xong: STAFF xác nhận rồi đóng cảnh báo, ghi tên ngư
   await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
 })
 
-test('ADMIN đóng thẳng cảnh báo đang mở từ trang chi tiết; "Mở phiếu" vô hiệu kèm lý do (FM7); link máy, đơn', async ({ page }) => {
+test('ADMIN đóng thẳng cảnh báo đang mở từ trang chi tiết; "Mở phiếu" mở form phiếu bằng bàn phím (FE 7.1); link máy, đơn', async ({ page }) => {
   await loginAs(page, 'ADMIN')
   await page.goto(`/admin/alerts/${OFFLINE}`)
   const ticket = page.getByRole('button', { name: 'Mở phiếu' })
-  await expect(ticket).toHaveAttribute('aria-disabled', 'true')
-  await expect(ticket).toHaveAccessibleDescription(/phiếu sẽ có trong đợt cập nhật Phiếu công việc \(FM7\)/)
-  // Focusable (aria-disabled), so keyboard users reach the reason; pressing it does nothing.
+  await expect(ticket).toBeEnabled()
+  await expect(ticket).not.toHaveAttribute('aria-disabled', 'true')
+  // Keyboard: Enter opens the create-ticket sheet pre-filled for this machine; Hủy closes it and focus comes back.
   await ticket.focus()
-  await expect(ticket).toBeFocused()
   await page.keyboard.press('Enter')
+  const sheet = page.getByRole('dialog', { name: 'Tạo phiếu công việc' })
+  await expect(sheet).toContainText('Mở từ cảnh báo: Máy mất kết nối · máy DEV-MACHINE-02')
+  await expect(sheet.getByLabel('Loại phiếu')).toHaveValue('MAINTENANCE')
+  await sheet.getByRole('button', { name: 'Hủy' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(ticket).toBeFocused()
   await expect(page).toHaveURL(`/admin/alerts/${OFFLINE}`)
   await page.getByRole('button', { name: 'Đóng cảnh báo' }).click()
   await page.getByRole('dialog', { name: 'Đóng cảnh báo' }).getByRole('button', { name: 'Đóng cảnh báo' }).click()

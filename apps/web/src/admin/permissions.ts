@@ -18,10 +18,11 @@ export const PERMISSIONS = [
 
 /**
  * Codes proposed by the web's draft contracts, not in the backend yet (so not in PERMISSIONS, which mirrors V13 of #48):
- * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6). When the backend adds
- * them to its permissions table, move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
+ * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6) and TICKET_READ /
+ * TICKET_WRITE of api-contract/drafts/work-tickets.yaml (FE 7.1, waiting for BE 4.3). When the backend adds them to its
+ * permissions table, move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
  */
-export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE'] as const
+export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE', 'TICKET_READ', 'TICKET_WRITE'] as const
 export type DraftPermission = (typeof DRAFT_PERMISSIONS)[number]
 export type Permission = (typeof PERMISSIONS)[number] | DraftPermission
 
@@ -37,10 +38,13 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
   STAFF: ['PRODUCT_READ', 'MACHINE_READ', 'BATCH_READ', 'BATCH_CREATE', 'INVENTORY_READ', 'INVENTORY_WRITE', 'ORDER_READ'],
 }
 
-/** Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do. */
+/**
+ * Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do; they read (only their
+ * own, the server filters) and carry out work tickets, while opening, assigning and cancelling tickets is for admins.
+ */
 export const DRAFT_ROLE_PERMISSIONS: Readonly<Record<Role, readonly DraftPermission[]>> = {
   ADMIN: DRAFT_PERMISSIONS,
-  STAFF: ['ALERT_READ', 'ALERT_WRITE'],
+  STAFF: ['ALERT_READ', 'ALERT_WRITE', 'TICKET_READ'],
 }
 const KNOWN: readonly string[] = [...PERMISSIONS, ...DRAFT_PERMISSIONS]
 

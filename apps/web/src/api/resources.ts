@@ -5,6 +5,7 @@ import type { components as RolesDraft } from './drafts/roles-permissions'
 import type { components as DispenseDraft } from './drafts/dispense-commands'
 import type { components as AlertsDraft, operations as AlertOperations } from './drafts/alerts'
 import type { components as TelemetryDraft, operations as TelemetryOperations } from './drafts/machine-telemetry'
+import type { components as TicketsDraft, operations as TicketOperations } from './drafts/work-tickets'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -157,6 +158,33 @@ export const telemetryApi = {
   heartbeat: (machineId: string, signal?: AbortSignal) => api.get<MachineHeartbeat>(`/machines/${id(machineId)}/heartbeat`, undefined, signal),
   readings: (machineId: string, query: SensorReadingQuery, signal?: AbortSignal) => list<SensorReading>(`/machines/${id(machineId)}/sensor-readings`, query, signal),
   events: (machineId: string, query: MachineEventQuery, signal?: AbortSignal) => list<MachineEvent>(`/machines/${id(machineId)}/events`, query, signal),
+}
+
+// Work tickets (screen O3, FE 7.1): draft contract api-contract/drafts/work-tickets.yaml, waiting for backend issue 4.3.
+// Until it ships the real backend answers 404 here; the screens then say "chưa có dữ liệu" (ticketsAvailability in
+// src/admin/tickets.ts). A caller without TICKET_WRITE only receives its own tickets (server-side). When 4.3 lands: move
+// the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
+type T = TicketsDraft['schemas']
+export type WorkTicket = T['WorkTicketResponse']
+export type WorkTicketListQuery = NonNullable<TicketOperations['listWorkTickets']['parameters']['query']>
+export type CreateWorkTicketBody = T['CreateWorkTicketRequest']
+export type AssignWorkTicketBody = T['AssignWorkTicketRequest']
+export type CompleteWorkTicketBody = T['CompleteWorkTicketRequest']
+export type CancelWorkTicketBody = T['CancelWorkTicketRequest']
+
+export const ticketsApi = {
+  list: (query: WorkTicketListQuery, signal?: AbortSignal) => list<WorkTicket>('/work-tickets', query, signal),
+  get: (ticketId: string, signal?: AbortSignal) => api.get<WorkTicket>(`/work-tickets/${id(ticketId)}`, undefined, signal),
+  /** OPEN, or ASSIGNED when assigneeId is sent. Only fields of CreateWorkTicketRequest. */
+  create: (body: CreateWorkTicketBody) => api.post<WorkTicket>('/work-tickets', body),
+  /** OPEN/ASSIGNED → ASSIGNED (also a reassignment). */
+  assign: (ticketId: string, body: AssignWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/assign`, body),
+  /** ASSIGNED → IN_PROGRESS, assignee only, no body. */
+  start: (ticketId: string) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/start`),
+  /** IN_PROGRESS → COMPLETED, assignee only; the note only when there is one. */
+  complete: (ticketId: string, body: CompleteWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/complete`, body),
+  /** Any state before COMPLETED → CANCELLED, with a mandatory reason. */
+  cancel: (ticketId: string, body: CancelWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/cancel`, body),
 }
 
 export type { Q as QueryParams }

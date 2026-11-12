@@ -1,5 +1,5 @@
 // O2 Chi tiết cảnh báo (FE 6.3): what happened, where (machine, slot, order: one click each), what to do next, and who
-// acknowledged and closed it, with the note. Acknowledge / close from here too; "Mở phiếu" waits for FM7.
+// acknowledged and closed it, with the note. Acknowledge / close from here too; "Mở phiếu" opens a work ticket (FE 7.1).
 // API: GET /alerts/{id} of the draft contract api-contract/drafts/alerts.yaml (waiting for BE 3.6).
 import { ApiError } from '../../api/client.ts'
 import { alertsApi } from '../../api/resources.ts'
@@ -86,7 +86,7 @@ function AlertDetailPage({ alertId }: { alertId: string }) {
         {alert.status !== 'RESOLVED' && <p className={HINT}><strong className="font-medium text-foreground">Việc cần làm: </strong>{alertTypeHint(alert.type)}</p>}
         <HandledBy alert={alert} withNote className="mb-4 text-[14px]!" />
         {!canWrite && alert.status !== 'RESOLVED' && <p className={HINT}>Tài khoản của bạn chỉ xem được cảnh báo, không xác nhận hay đóng được. Hãy báo quản trị viên.</p>}
-        {alert.status !== 'RESOLVED' && <OpenTicketButton />}
+        {alert.status !== 'RESOLVED' && <OpenTicketButton alert={alert} />}
       </section>
     </div>
     {action.value === 'acknowledge' && <AcknowledgeDialog alert={alert} close={action.close} changed={state.reload} screen="detail" />}

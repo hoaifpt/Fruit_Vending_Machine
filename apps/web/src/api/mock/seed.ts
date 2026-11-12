@@ -5,6 +5,7 @@ import type { components } from '../schema'
 import type { components as DispenseDraft } from '../drafts/dispense-commands'
 import type { components as AlertsDraft } from '../drafts/alerts'
 import type { components as TelemetryDraft } from '../drafts/machine-telemetry'
+import type { components as TicketsDraft } from '../drafts/work-tickets'
 
 type S = components['schemas']
 
@@ -42,6 +43,8 @@ export type MockAlert = AlertsDraft['schemas']['AlertResponse']
 export type MockHeartbeat = TelemetryDraft['schemas']['MachineHeartbeatResponse'] & { live: boolean; bootedAt: string | null }
 export type MockReading = TelemetryDraft['schemas']['SensorReadingResponse']
 export type MockMachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
+/** Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml): a job at one machine, people named by fullName. */
+export type MockTicket = TicketsDraft['schemas']['WorkTicketResponse']
 
 export interface MockStore {
   users: MockUser[]
@@ -56,6 +59,7 @@ export interface MockStore {
   payments: MockPayment[]
   dispenseCommands: MockDispenseCommand[]
   alerts: MockAlert[]
+  tickets: MockTicket[]
   heartbeats: MockHeartbeat[]
   readings: MockReading[]
   machineEvents: MockMachineEvent[]
@@ -316,9 +320,10 @@ export function createStore(nowMs: number): MockStore {
   const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
   const alerts = seedAlerts(nowMs, { machines, slots, orders, admin: users[0], staff: users[1] })
   const { heartbeats, readings, machineEvents } = seedTelemetry(nowMs, machines)
+  const tickets = seedTickets(nowMs, { machines, alerts, users })
 
   return {
-    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, webhookLogs,
+    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, tickets, webhookLogs,
     heartbeats, readings, machineEvents,
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
@@ -395,6 +400,42 @@ function seedAlerts(nowMs: number, { machines, slots, orders, admin, staff }: { 
     alert(5, m1, { type: 'LOW_STOCK', severity: 'INFO', title: 'Low stock', message: 'Slot A2 has 1 bowl left.', status: 'OPEN', ...slot(m1, 'A2') }, -50 * 60_000),
     alert(6, m1, { type: 'PRODUCT_EXPIRING', severity: 'INFO', title: 'Bowls expiring soon', message: 'Bowls in slot A1 expire within 2 days.', status: 'RESOLVED', ...slot(m1, 'A1'), ...ack(staff, -23 * HOUR), ...done(staff, -20 * HOUR) }, -DAY),
     alert(7, m2, { type: 'HIGH_HUMIDITY', severity: 'WARNING', title: 'Humidity above range', message: 'Humidity stayed at the configured maximum for 15 minutes.', status: 'RESOLVED', ...done(admin, -3 * DAY + 2 * HOUR) }, -3 * DAY),
+  ]
+}
+
+/**
+ * Work tickets of the draft of backend 4.3 (FE 7.1), every status. The documented STAFF account (staff@freshvend.test)
+ * has three: ASSIGNED (from the LOW_STOCK alert), IN_PROGRESS (from the expired-bowl alert) and COMPLETED with a note.
+ * Three others belong to other staff (ASSIGNED, IN_PROGRESS, CANCELLED with a reason) and one is OPEN (from the
+ * MACHINE_OFFLINE alert), so a staff account visibly sees only its own.
+ */
+function seedTickets(nowMs: number, { machines, alerts, users }: { machines: S['MachineResponse'][]; alerts: MockAlert[]; users: MockUser[] }): MockTicket[] {
+  const iso = (offset: number) => new Date(nowMs + offset).toISOString()
+  const [m1, m2, m3] = machines
+  const [admin, staff] = users
+  const restocker = users.find(user => user.id === uuid('11000000', 7))!
+  const night = users.find(user => user.id === uuid('11000000', 8))!
+  const alertOf = (n: number) => alerts.find(alert => alert.id === uuid('60000000', n))?.id ?? null
+  const blank = {
+    description: null, machineName: null, alertId: null, dueAt: null, assigneeId: null, assigneeName: null,
+    assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
+    completedAt: null, completedById: null, completedByName: null, completionNote: null,
+    cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null,
+  }
+  const ticket = (n: number, machine: S['MachineResponse'], fields: Partial<MockTicket> & Pick<MockTicket, 'type' | 'status' | 'title'>, created: number): MockTicket => ({
+    ...blank, id: uuid('61000000', n), machineId: machine.id, machineCode: machine.code, machineName: machine.name,
+    createdById: admin.id, createdByName: admin.fullName, createdAt: iso(created), updatedAt: iso(created), ...fields,
+  })
+  const assigned = (user: MockUser, at: number) => ({ assigneeId: user.id, assigneeName: user.fullName, assignedAt: iso(at), assignedById: admin.id, assignedByName: admin.fullName, updatedAt: iso(at) })
+  const started = (user: MockUser, at: number) => ({ startedAt: iso(at), startedById: user.id, startedByName: user.fullName, updatedAt: iso(at) })
+  return [
+    ticket(1, m2, { type: 'MAINTENANCE', status: 'OPEN', title: 'Máy mất kết nối · máy DEV-MACHINE-02', description: 'Kiểm tra nguồn điện và Wi-Fi của máy, khởi động lại bộ điều khiển nếu cần.', alertId: alertOf(2), dueAt: iso(3 * HOUR) }, -30 * 60_000),
+    ticket(2, m1, { type: 'RESTOCK', status: 'ASSIGNED', title: 'Nạp thêm hộp ngăn A2 · máy DEV-MACHINE-01', description: 'Ngăn A2 còn 1 hộp. Mang hộp từ lô mới nhất tới máy.', alertId: alertOf(5), dueAt: iso(5 * HOUR), ...assigned(staff, -40 * 60_000) }, -45 * 60_000),
+    ticket(3, m1, { type: 'RESTOCK', status: 'IN_PROGRESS', title: 'Rút hộp hết hạn ngăn B1 · máy DEV-MACHINE-01', description: 'Hộp ở đáy ngăn B1 đã hết hạn và chặn cả ngăn. Rút hộp rồi nạp hộp còn hạn.', alertId: alertOf(3), dueAt: iso(-HOUR), ...assigned(staff, -4 * HOUR), ...started(staff, -3 * HOUR) }, -4 * HOUR - 10 * 60_000),
+    ticket(4, m1, { type: 'MAINTENANCE', status: 'COMPLETED', title: 'Vệ sinh khay nhả hàng · máy DEV-MACHINE-01', ...assigned(staff, -2 * DAY), ...started(staff, -2 * DAY + 2 * HOUR), completedAt: iso(-2 * DAY + 3 * HOUR), completedById: staff.id, completedByName: staff.fullName, completionNote: 'Đã vệ sinh khay và thử nhả 2 hộp, máy chạy bình thường.', updatedAt: iso(-2 * DAY + 3 * HOUR) }, -2 * DAY - HOUR),
+    ticket(5, m2, { type: 'MAINTENANCE', status: 'ASSIGNED', title: 'Kiểm tra gioăng cửa · máy DEV-MACHINE-02', description: 'Độ ẩm từng chạm ngưỡng tối đa; kiểm tra gioăng cửa và khay nước ngưng.', ...assigned(restocker, -20 * HOUR) }, -DAY),
+    ticket(6, m1, { type: 'MAINTENANCE', status: 'IN_PROGRESS', title: 'Thay bóng đèn khoang hàng · máy DEV-MACHINE-01', ...assigned(night, -6 * HOUR), ...started(night, -5 * HOUR) }, -7 * HOUR),
+    ticket(7, m3, { type: 'RESTOCK', status: 'CANCELLED', title: 'Nạp hàng lần đầu · máy DEV-MACHINE-03', ...assigned(restocker, -2 * DAY), cancelledAt: iso(-DAY - 2 * HOUR), cancelledById: admin.id, cancelledByName: admin.fullName, cancelReason: 'Máy chưa lắp đặt xong, chưa có ngăn nào. Sẽ mở phiếu mới khi máy sẵn sàng.', updatedAt: iso(-DAY - 2 * HOUR) }, -2 * DAY - 30 * 60_000),
   ]
 }
 

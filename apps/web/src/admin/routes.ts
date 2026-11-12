@@ -7,7 +7,7 @@ import type { Permission, Subject } from './permissions.ts'
 export type PageKey =
   | 'overview' | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
   | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
-  | 'alerts' | 'alert-detail'
+  | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail'
 
 /** `roles` lists the roles that hold `permission` today (derived, for display and older callers). */
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
@@ -25,6 +25,9 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/inventory\/history$/, page: 'inventory-history', permission: 'INVENTORY_READ' },
   { pattern: /^\/admin\/alerts$/, page: 'alerts', permission: 'ALERT_READ' },
   { pattern: /^\/admin\/alerts\/([^/]+)$/, page: 'alert-detail', permission: 'ALERT_READ' },
+  // O3 (FE 7.1): draft permission of api-contract/drafts/work-tickets.yaml; staff only receive their own tickets.
+  { pattern: /^\/admin\/tickets$/, page: 'tickets', permission: 'TICKET_READ' },
+  { pattern: /^\/admin\/tickets\/([^/]+)$/, page: 'ticket-detail', permission: 'TICKET_READ' },
   { pattern: /^\/admin\/orders$/, page: 'orders', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/orders\/([^/]+)$/, page: 'order-detail', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/payments$/, page: 'payments', permission: 'PAYMENT_READ' },
@@ -54,6 +57,8 @@ export const NAV: NavItem[] = [
   { to: '/admin/inventory', label: 'Tồn kho', group: 'Vận hành', permission: 'INVENTORY_READ', match: ['inventory', 'inventory-history'] },
   // Draft permission (api-contract/drafts/alerts.yaml, BE 3.6): see DRAFT_PERMISSIONS in permissions.ts.
   { to: '/admin/alerts', label: 'Cảnh báo', group: 'Vận hành', permission: 'ALERT_READ', match: ['alerts', 'alert-detail'] },
+  // Draft permission (api-contract/drafts/work-tickets.yaml, BE 4.3).
+  { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'TICKET_READ', match: ['tickets', 'ticket-detail'] },
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },

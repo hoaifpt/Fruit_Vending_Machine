@@ -2,7 +2,7 @@
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
 import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
-import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
+import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockTicket, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
@@ -31,7 +31,8 @@ export interface KioskSimulation {
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
  * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_WRITE of
- * drafts/alerts.yaml); checked against the web's proposed seed DRAFT_ROLE_PERMISSIONS.
+ * drafts/alerts.yaml, TICKET_READ/TICKET_WRITE of drafts/work-tickets.yaml); checked against the web's proposed seed
+ * DRAFT_ROLE_PERMISSIONS.
  */
 export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
 export interface Route { method: string; pattern: RegExp; policy: Policy; handle: (ctx: HandlerContext) => Reply }
@@ -300,6 +301,32 @@ function statusForm<T extends string>(ctx: HandlerContext, values: readonly T[])
   const status = form.oneOf('status', values)
   form.done()
   return status
+}
+
+// ---- work tickets (draft of backend 4.3, api-contract/drafts/work-tickets.yaml). Messages in English as the backend would send.
+const TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const
+const TICKET_TYPES = ['RESTOCK', 'MAINTENANCE'] as const
+/** Holds TICKET_WRITE: sees every ticket, opens, assigns and cancels. Everyone else only ever gets their own. */
+const managesTickets = (user: MockUser) => draftPermissionsOfUser(user).includes('TICKET_WRITE')
+function findTicket(ctx: HandlerContext): MockTicket {
+  if (!UUID_PATTERN.test(decode(ctx.params.id))) throw new MockHttpError(400, 'Invalid request parameter', { id: 'Must be a valid UUID' })
+  const ticket = byId(ctx.store.tickets, ctx.params.id, 'Work ticket not found')
+  // Not disclosed to someone who may not see it: the same 404 as an unknown id.
+  if (!managesTickets(ctx.user!) && ticket.assigneeId !== ctx.user!.id) throw notFound('Work ticket not found')
+  return ticket
+}
+/** assigneeId of a body: an ACTIVE account holding STAFF; otherwise a field error (and null). */
+function ticketAssignee(ctx: HandlerContext, form: Form, value: unknown): MockUser | null {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) { form.reject('assigneeId', 'Must be a valid UUID'); return null }
+  const user = ctx.store.users.find(candidate => candidate.id === value)
+  if (!user || user.status !== 'ACTIVE' || !user.roles.includes('STAFF')) { form.reject('assigneeId', 'Assignee must be an active STAFF account'); return null }
+  return user
+}
+function assignTo(ticket: MockTicket, assignee: MockUser, by: MockUser, at: string) {
+  Object.assign(ticket, { status: 'ASSIGNED', assigneeId: assignee.id, assigneeName: assignee.fullName, assignedAt: at, assignedById: by.id, assignedByName: by.fullName, updatedAt: at })
+}
+function onlyAssignee(ctx: HandlerContext, ticket: MockTicket) {
+  if (ticket.assigneeId !== ctx.user!.id) throw new MockHttpError(403, 'Only the assignee can do this')
 }
 
 function route(method: string, template: string, policy: Policy, handle: Route['handle']): Route {
@@ -661,6 +688,99 @@ export const routes: Route[] = [
     const at = iso(Math.max(ctx.now, Date.parse(alert.triggeredAt)))
     Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedById: ctx.user!.id, resolvedByName: ctx.user!.fullName, resolutionNote: note, updatedAt: at })
     return ok({ ...alert })
+  }),
+
+  // ---- work tickets: draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
+  route('GET', '/work-tickets', { draftPermission: 'TICKET_READ' }, ctx => {
+    const { query } = ctx
+    const errors: Record<string, string> = {}
+    if (query.get('status') && !(TICKET_STATUSES as readonly string[]).includes(query.get('status')!)) errors.status = `Must be one of: ${TICKET_STATUSES.join(', ')}`
+    if (query.get('type') && !(TICKET_TYPES as readonly string[]).includes(query.get('type')!)) errors.type = `Must be one of: ${TICKET_TYPES.join(', ')}`
+    for (const name of ['machineId', 'assigneeId']) if (query.get(name) && !UUID_PATTERN.test(query.get(name)!)) errors[name] = 'Must be a valid UUID'
+    if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
+    // Server-side scope: without TICKET_WRITE the assignee filter is always the caller.
+    const assignee = managesTickets(ctx.user!) ? query.get('assigneeId') : ctx.user!.id
+    const rows = ctx.store.tickets.filter(ticket => eq(query, 'status', ticket.status) && eq(query, 'type', ticket.type) && eq(query, 'machineId', ticket.machineId)
+      && (!assignee || ticket.assigneeId === assignee)).map(ticket => ({ ...ticket }))
+    return ok(paginate(rows, query, { sorts: { createdAt: row => row.createdAt, dueAt: row => row.dueAt }, defaultSort: 'createdAt,desc' }))
+  }),
+  route('GET', '/work-tickets/:id', { draftPermission: 'TICKET_READ' }, ctx => ok({ ...findTicket(ctx) })),
+  route('POST', '/work-tickets', { draftPermission: 'TICKET_WRITE' }, ctx => {
+    const form = new Form(ctx.body, ['type', 'machineId', 'title', 'description', 'dueAt', 'alertId', 'assigneeId'])
+    const data = ctx.body as Record<string, unknown>
+    const type = form.oneOf('type', TICKET_TYPES)
+    const title = form.text('title', 200)
+    const description = form.optionalText('description', 1000)
+    const machineIdValid = typeof data.machineId === 'string' && UUID_PATTERN.test(data.machineId)
+    const machine = machineIdValid ? ctx.store.machines.find(candidate => candidate.id === data.machineId) : undefined
+    if (!machine) form.reject('machineId', machineIdValid ? 'Machine not found' : 'Must be a valid UUID')
+    let dueAt: string | null = null
+    if (data.dueAt !== undefined && data.dueAt !== null) {
+      const due = form.instant('dueAt')
+      if (due && due <= ctx.now) form.reject('dueAt', 'Must be in the future')
+      else if (due) dueAt = iso(due)
+    }
+    let alert: MockAlert | undefined
+    if (data.alertId !== undefined && data.alertId !== null) {
+      alert = typeof data.alertId === 'string' ? ctx.store.alerts.find(candidate => candidate.id === data.alertId) : undefined
+      if (!alert) form.reject('alertId', 'Alert not found')
+      else if (machine && alert.machineId !== machine.id) form.reject('alertId', 'Alert belongs to another machine')
+    }
+    const assignee = data.assigneeId !== undefined && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    form.done()
+    if (alert?.status === 'RESOLVED') throw conflict('Alert is already RESOLVED')
+    const at = iso(ctx.now)
+    const ticket: MockTicket = {
+      id: newId(), type, status: 'OPEN', title, description, machineId: machine!.id, machineCode: machine!.code, machineName: machine!.name,
+      alertId: alert?.id ?? null, dueAt, assigneeId: null, assigneeName: null, createdById: ctx.user!.id, createdByName: ctx.user!.fullName,
+      assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
+      completedAt: null, completedById: null, completedByName: null, completionNote: null,
+      cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: at, updatedAt: at,
+    }
+    if (assignee) assignTo(ticket, assignee, ctx.user!, at)
+    ctx.store.tickets.push(ticket)
+    return created({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/assign', { draftPermission: 'TICKET_WRITE' }, ctx => {
+    const form = new Form(ctx.body, ['assigneeId'])
+    const assignee = ticketAssignee(ctx, form, (ctx.body as Record<string, unknown>).assigneeId)
+    form.done()
+    const ticket = findTicket(ctx)
+    if (ticket.status !== 'OPEN' && ticket.status !== 'ASSIGNED') throw conflict('Ticket can only be assigned while OPEN or ASSIGNED')
+    assignTo(ticket, assignee!, ctx.user!, iso(ctx.now))
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/start', { draftPermission: 'TICKET_READ' }, ctx => {
+    const ticket = findTicket(ctx)
+    onlyAssignee(ctx, ticket)
+    if (ticket.status !== 'ASSIGNED') throw conflict('Ticket is not ASSIGNED')
+    const at = iso(ctx.now)
+    Object.assign(ticket, { status: 'IN_PROGRESS', startedAt: at, startedById: ctx.user!.id, startedByName: ctx.user!.fullName, updatedAt: at })
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/complete', { draftPermission: 'TICKET_READ' }, ctx => {
+    let note: string | null = null
+    if (ctx.body !== undefined) {
+      const form = new Form(ctx.body, ['note'])
+      note = form.optionalText('note', 500)
+      form.done()
+    }
+    const ticket = findTicket(ctx)
+    onlyAssignee(ctx, ticket)
+    if (ticket.status !== 'IN_PROGRESS') throw conflict('Ticket is not IN_PROGRESS')
+    const at = iso(ctx.now)
+    Object.assign(ticket, { status: 'COMPLETED', completedAt: at, completedById: ctx.user!.id, completedByName: ctx.user!.fullName, completionNote: note, updatedAt: at })
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/cancel', { draftPermission: 'TICKET_WRITE' }, ctx => {
+    const form = new Form(ctx.body, ['reason'])
+    const reason = form.text('reason', 500)
+    form.done()
+    const ticket = findTicket(ctx)
+    if (ticket.status === 'COMPLETED' || ticket.status === 'CANCELLED') throw conflict('Ticket is already COMPLETED or CANCELLED')
+    const at = iso(ctx.now)
+    Object.assign(ticket, { status: 'CANCELLED', cancelledAt: at, cancelledById: ctx.user!.id, cancelledByName: ctx.user!.fullName, cancelReason: reason, updatedAt: at })
+    return ok({ ...ticket })
   }),
 
   // ---- payments (ADMIN)

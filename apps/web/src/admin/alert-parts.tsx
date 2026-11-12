@@ -1,18 +1,22 @@
 // Pieces shared by the alert list and detail screens (FE 6.3): acknowledge / close dialogs, who handled the alert, and
-// the "Mở phiếu" button that stays disabled until work tickets exist (FM7). No delete anywhere: an alert only moves
+// the "Mở phiếu" button that opens a work ticket for the alert (FE 7.1). No delete anywhere: an alert only moves
 // OPEN → ACKNOWLEDGED → RESOLVED (or straight to RESOLVED).
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import { alertsApi } from '../api/resources.ts'
-import type { Alert } from '../api/resources.ts'
+import type { Alert, WorkTicket } from '../api/resources.ts'
 import { Button } from '../components/ui/button.tsx'
 import { FormField } from '../components/ui/form-field.tsx'
 import { Textarea } from '../components/ui/input.tsx'
 import { cn } from '../lib/cn.ts'
 import { notifyAlertsChanged } from './alert-bell.ts'
 import type { AlertAction, AlertScreen } from './alerts.ts'
-import { RESOLUTION_NOTE_MAX, TICKETS_AVAILABLE, TICKET_PENDING_TEXT, alertActionError, alertTypeLabel, handlingSteps, isConflict, resolveBody } from './alerts.ts'
-import { ConfirmDialog, FormSheet, useForm } from './kit.tsx'
+import { RESOLUTION_NOTE_MAX, TICKETS_AVAILABLE, TICKET_ADMIN_ONLY_TEXT, TICKET_PENDING_TEXT, alertActionError, alertTypeLabel, handlingSteps, isConflict, resolveBody } from './alerts.ts'
+import { ConfirmDialog, FormSheet, Link, useDialog, useForm } from './kit.tsx'
+import { LINK } from './payment-parts.tsx'
+import { CreateTicketSheet } from './ticket-parts.tsx'
+import { ticketFromAlert, ticketPath } from './tickets.ts'
+import { useSession } from './useSession.ts'
 
 const summary = (alert: Alert) => `${alertTypeLabel(alert.type)} · máy ${alert.machineCode}`
 
@@ -84,12 +88,24 @@ export function HandledBy({ alert, withNote = false, className }: { alert: Alert
 }
 
 /**
- * "Mở phiếu": work tickets are FM7 (FE 7.1, backend 4.3). Until then the button stays focusable but disabled
- * (aria-disabled) and the reason is shown next to it, so keyboard and screen-reader users learn why.
+ * "Mở phiếu" (FE 7.1): opens the create-ticket form pre-filled with the alert's machine and id (ticketFromAlert), for
+ * accounts with TICKET_WRITE; others read who opens tickets. After creating, a link to the new ticket stays in place.
+ * With TICKETS_AVAILABLE off the button stays focusable but disabled (aria-disabled) with the reason next to it.
  */
-export function OpenTicketButton() {
+export function OpenTicketButton({ alert }: { alert: Alert }) {
   const hintId = useId()
-  if (TICKETS_AVAILABLE) return null
+  const { can } = useSession()
+  const sheet = useDialog()
+  const [opened, setOpened] = useState<WorkTicket | null>(null)
+  if (TICKETS_AVAILABLE) {
+    if (!can('TICKET_WRITE')) return <p className="max-w-[60ch] text-xs text-muted-foreground">{TICKET_ADMIN_ONLY_TEXT}</p>
+    return <div className="grid gap-2">
+      <Button type="button" variant="outline" size="sm" className="w-fit max-sm:h-11" data-focus-key={`alert-ticket-${alert.id}`} onClick={() => sheet.open()}>Mở phiếu</Button>
+      {opened && <p role="status" className="text-[13px]">Đã mở phiếu “{opened.title}”. <Link to={ticketPath(opened.id)} className={LINK}>Xem phiếu</Link></p>}
+      {sheet.value && <CreateTicketSheet initial={ticketFromAlert(alert)} alertLabel={`${alertTypeLabel(alert.type)} · máy ${alert.machineCode}`}
+        close={sheet.close} created={setOpened} />}
+    </div>
+  }
   return <div className="grid gap-1">
     <Button type="button" variant="outline" size="sm" aria-disabled="true" aria-describedby={hintId} className="w-fit cursor-not-allowed border-dashed text-muted-foreground hover:bg-card hover:text-muted-foreground max-sm:h-11"
       onClick={event => event.preventDefault()}>Mở phiếu</Button>

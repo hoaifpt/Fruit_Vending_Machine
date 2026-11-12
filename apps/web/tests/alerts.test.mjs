@@ -61,7 +61,8 @@ test('the draft contract follows table alerts and records who acknowledged and c
 
 test('ALERT_READ / ALERT_WRITE are draft codes: both roles hold them, the 15 codes of #48 are unchanged', () => {
   assert.equal(PERMISSIONS.length, 15)
-  assert.deepEqual([...DRAFT_PERMISSIONS], ['ALERT_READ', 'ALERT_WRITE'])
+  // FE 7.1 added the work ticket codes after the alert ones (tests/tickets.test.mjs).
+  assert.deepEqual(DRAFT_PERMISSIONS.slice(0, 2), ['ALERT_READ', 'ALERT_WRITE'])
   for (const role of ['ADMIN', 'STAFF']) {
     assert.equal(can([role], 'ALERT_READ'), true, role)
     assert.equal(can([role], 'ALERT_WRITE'), true, role)
@@ -115,7 +116,7 @@ test('actions follow the status: acknowledge only OPEN, close OPEN or ACKNOWLEDG
   assert.deepEqual(ALERT_STATUSES.map(status => [canAcknowledge({ status }), canResolve({ status })]), [[true, true], [false, true], [false, false]])
   assert.deepEqual(resolveBody('   '), {})
   assert.deepEqual(resolveBody('  Đã rút hộp  '), { note: 'Đã rút hộp' })
-  assert.equal(TICKETS_AVAILABLE, false, '"Mở phiếu" waits for FM7')
+  assert.equal(TICKETS_AVAILABLE, true, '"Mở phiếu" is on since FE 7.1')
 })
 test('detail 404: "chưa có chức năng" only when the list is missing too; otherwise the neutral "không tìm thấy"', () => {
   assert.equal(detailFailure(new ApiError(404, 'x')), 'missing')

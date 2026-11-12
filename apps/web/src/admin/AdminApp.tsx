@@ -29,6 +29,8 @@ const WebhookLogsPage = lazy(() => import('./pages/WebhookLogsPage.tsx'))
 const WebhookLogDetailPage = lazy(() => import('./pages/WebhookLogDetailPage.tsx'))
 const AlertsPage = lazy(() => import('./pages/AlertsPage.tsx'))
 const AlertDetailPage = lazy(() => import('./pages/AlertDetailPage.tsx'))
+const TicketsPage = lazy(() => import('./pages/TicketsPage.tsx'))
+const TicketDetailPage = lazy(() => import('./pages/TicketDetailPage.tsx'))
 // Component reference at /admin/_kit: the literal condition drops this chunk from production builds.
 const KitPage = import.meta.env.DEV || import.meta.env.MODE === 'mock' ? lazy(() => import('./pages/KitPage.tsx')) : null
 
@@ -89,6 +91,8 @@ function AdminApp() {
       'webhook-log-detail': <WebhookLogDetailPage key={id} logId={id} />,
       alerts: <AlertsPage />,
       'alert-detail': <AlertDetailPage key={id} alertId={id} />,
+      tickets: <TicketsPage />,
+      'ticket-detail': <TicketDetailPage key={id} ticketId={id} />,
     }[route.page]
   }
 
