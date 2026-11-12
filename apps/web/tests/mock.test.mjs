@@ -296,6 +296,38 @@ test('kiosk: buying flows from order to QR to paid to completed, on the server c
   assert.equal(detail.payments[0].status, 'SUCCESS')
 })
 
+test('FE 5.3 mock: a paid kiosk order goes PAID → DISPENSING → COMPLETED, or DISPENSE_FAILED / stays DISPENSING by scenario', async () => {
+  for (const [scenario, last] of [['none', 'COMPLETED'], ['dispense-failed', 'DISPENSE_FAILED'], ['dispense-slow', 'DISPENSING']]) {
+    const { state, fetcher } = setup({ autoPayMs: 10 ** 9, dispenseMs: 4_000 })
+    state.search = `?scenario=${scenario}`
+    const kiosk = createKioskApi(KEY)
+    const { data: order } = await kiosk.createOrder(PRODUCT_ID)
+    assert.equal(fetcher.control.payKioskOrder(), null, 'nothing to pay before a QR exists')
+    await kiosk.createPayment(order.id)
+    assert.equal(fetcher.control.payKioskOrder(), order.orderCode)
+    assert.equal((await kiosk.getOrder(order.id)).data.status, 'PAID')
+    state.clock += 1_000
+    assert.equal((await kiosk.getOrder(order.id)).data.status, 'DISPENSING')
+    state.clock += 3_000
+    assert.equal((await kiosk.getOrder(order.id)).data.status, last, scenario)
+    state.clock += 60_000
+    assert.equal((await kiosk.getOrder(order.id)).data.status, last, `${scenario} is final`)
+  }
+})
+
+test('FE 5.1 mock: scenario maintenance shows the kiosk machine in MAINTENANCE and refuses orders', async () => {
+  const { state } = setup()
+  state.search = '?scenario=maintenance'
+  const kiosk = createKioskApi(KEY)
+  assert.equal((await kiosk.me()).data.machineStatus, 'MAINTENANCE')
+  const catalog = (await kiosk.catalog()).data
+  assert.equal(catalog.acceptingOrders, false)
+  assert.deepEqual(catalog.products, [])
+  await assert.rejects(kiosk.createOrder(PRODUCT_ID), failsWith(409))
+  state.search = '?scenario=none'
+  assert.equal((await kiosk.catalog()).data.acceptingOrders, true)
+})
+
 test('kiosk: cancelling releases the reserved head and is idempotent', async () => {
   setup()
   const kiosk = createKioskApi(KEY)

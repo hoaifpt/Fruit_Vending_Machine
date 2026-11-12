@@ -16,7 +16,17 @@ export interface HandlerContext {
   user: MockUser | undefined
   /** Machine of the kiosk key, for kiosk routes. */
   machineId: string
-  options: { autoPayMs: number; dispenseMs: number; autoPay: boolean }
+  options: KioskSimulation
+}
+/** How the mock plays the backend's background work for kiosk orders (payment webhook, dispensing, machine state). */
+export interface KioskSimulation {
+  autoPayMs: number
+  dispenseMs: number
+  autoPay: boolean
+  /** `fail`: the machine reports DISPENSE_FAILED; `slow`: the order stays DISPENSING (no report from the machine). */
+  dispense: 'ok' | 'fail' | 'slow'
+  /** The kiosk's machine is shown in MAINTENANCE (scenario `maintenance`), without changing the stored machine. */
+  maintenance: boolean
 }
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
@@ -146,7 +156,30 @@ function releaseOrder(ctx: HandlerContext, order: MockOrder, reason: string) {
   }
 }
 
-/** Simulates what the backend does in the background (payment webhook, dispensing, reservation sweep) for kiosk orders. */
+function markPaid(store: MockStore, order: MockOrder, payment: MockPayment, now: number) {
+  Object.assign(payment, { status: 'SUCCESS', paidAt: iso(now), transactionId: `MOCK-TXN-${randomCode(8)}`, qrCode: undefined })
+  order.status = 'PAID'
+  order.paidAt = iso(now)
+  createDispenseCommands(store, order, now)
+}
+
+/**
+ * Plays a verified payment webhook for the newest live kiosk order still waiting on a PENDING QR (mock-only control used
+ * by the UX tests to time PAID ≤ 3 s after the webhook). Returns the order code, or null when nothing was payable.
+ */
+export function payLatestKioskOrder(ctx: HandlerContext): string | null {
+  advanceOrders(ctx)
+  const order = [...ctx.store.orders].reverse().find(candidate => candidate.live && candidate.status === 'PENDING_PAYMENT' && latestPayment(ctx.store, candidate.id)?.status === 'PENDING')
+  if (!order) return null
+  markPaid(ctx.store, order, latestPayment(ctx.store, order.id)!, ctx.now)
+  return order.orderCode
+}
+
+/**
+ * Simulates what the backend does in the background (payment webhook, dispensing, reservation sweep) for kiosk orders:
+ * PENDING_PAYMENT → PAID (webhook) → DISPENSING (command acknowledged, after a quarter of dispenseMs) → COMPLETED or
+ * DISPENSE_FAILED (machine report, after dispenseMs). The real dispense-command read endpoint is BE 3.3 (due 30/11).
+ */
 export function advanceOrders(ctx: HandlerContext) {
   const { store, now, options } = ctx
   for (const order of store.orders) {
@@ -154,31 +187,36 @@ export function advanceOrders(ctx: HandlerContext) {
     const payment = latestPayment(store, order.id)
     if (order.status === 'PENDING_PAYMENT') {
       if (payment?.status === 'PENDING' && payment.expiredAt && Date.parse(payment.expiredAt) <= now) payment.status = 'EXPIRED'
-      if (options.autoPay && payment?.status === 'PENDING' && Date.parse(payment.createdAt) + options.autoPayMs <= now) {
-        Object.assign(payment, { status: 'SUCCESS', paidAt: iso(now), transactionId: `MOCK-TXN-${randomCode(8)}`, qrCode: undefined })
-        order.status = 'PAID'
-        order.paidAt = iso(now)
-        createDispenseCommands(store, order, now)
-      } else if (order.expiresAt && Date.parse(order.expiresAt) <= now) releaseOrder(ctx, order, 'RESERVATION_EXPIRED')
-    } else if (order.status === 'PAID' && order.paidAt && Date.parse(order.paidAt) + options.dispenseMs <= now) {
-      order.status = 'COMPLETED'
-      order.completedAt = iso(now)
-      for (const command of store.dispenseCommands) {
-        if (command.orderId === order.id) Object.assign(command, { status: 'SUCCESS', sentAt: command.sentAt ?? iso(now), acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
-      }
-      for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
-      for (const item of allocationItems(store, order)) {
-        setItemStatus(item, 'SOLD', now)
-        history(store, item, 'SALE', now, { referenceId: order.id, statusBefore: 'RESERVED', statusAfter: 'SOLD' })
-      }
+      if (options.autoPay && payment?.status === 'PENDING' && Date.parse(payment.createdAt) + options.autoPayMs <= now) markPaid(store, order, payment, now)
+      else if (order.expiresAt && Date.parse(order.expiresAt) <= now) releaseOrder(ctx, order, 'RESERVATION_EXPIRED')
+    }
+    const paidAt = order.paidAt ? Date.parse(order.paidAt) : NaN
+    const commands = store.dispenseCommands.filter(command => command.orderId === order.id)
+    if (order.status === 'PAID' && paidAt + options.dispenseMs / 4 <= now) {
+      order.status = 'DISPENSING'
+      for (const command of commands) if (command.status === 'PENDING') Object.assign(command, { status: 'SENT', sentAt: iso(now), updatedAt: iso(now) })
+    }
+    if (order.status !== 'DISPENSING' || paidAt + options.dispenseMs > now || options.dispense === 'slow') continue
+    if (options.dispense === 'fail') {
+      order.status = 'DISPENSE_FAILED'
+      for (const command of commands) Object.assign(command, { status: 'FAILED', acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
+      for (const item of allocationItems(store, order)) setItemStatus(item, 'DISPENSE_FAILED', now)
+      continue
+    }
+    order.status = 'COMPLETED'
+    order.completedAt = iso(now)
+    for (const command of commands) Object.assign(command, { status: 'SUCCESS', sentAt: command.sentAt ?? iso(now), acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
+    for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
+    for (const item of allocationItems(store, order)) {
+      setItemStatus(item, 'SOLD', now)
+      history(store, item, 'SALE', now, { referenceId: order.id, reason: 'ORDER_COMPLETED', statusBefore: 'RESERVED', statusAfter: 'SOLD' })
     }
   }
 }
 
 /**
  * Like the payment webhook + DispenseService for a kiosk order: one PENDING command per bowl, created with the move to
- * PAID. The mock keeps the order PAID until it completes (the kiosk shows PAID and DISPENSING alike), so the command stays
- * PENDING (a SENT command would mean DISPENSING) and ends SUCCESS with the order in advanceOrders.
+ * PAID. advanceOrders then sends them (SENT, order DISPENSING) and ends them SUCCESS, or FAILED with scenario `dispense-failed`.
  */
 function createDispenseCommands(store: MockStore, order: MockOrder, now: number) {
   for (const allocation of order.items.flatMap(line => line.allocations)) {
@@ -657,12 +695,12 @@ export const routes: Route[] = [
   // ---- kiosk (X-Kiosk-Key)
   route('GET', '/kiosk/me', 'kiosk', ctx => {
     const machine = findMachine(ctx, ctx.machineId)
-    return ok({ machineId: machine.id, machineCode: machine.code, machineName: machine.name, machineStatus: machine.status })
+    return ok({ machineId: machine.id, machineCode: machine.code, machineName: machine.name, machineStatus: ctx.options.maintenance ? 'MAINTENANCE' : machine.status })
   }),
   route('GET', '/kiosk/catalog', 'kiosk', ctx => {
     const { store, now } = ctx
     const machine = findMachine(ctx, ctx.machineId)
-    if (machine.status !== 'ACTIVE') return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: false, products: [] })
+    if (machine.status !== 'ACTIVE' || ctx.options.maintenance) return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: false, products: [] })
     const heads = sellableHeads(ctx, machine.id)
     const holdUntil = now + RESERVATION_MS
     const products = [...new Set(heads.map(({ head }) => head.productId))].map(productId => {
@@ -681,6 +719,7 @@ export const routes: Route[] = [
     const product = store.products.find(candidate => candidate.id === productId)
     if (!product) throw notFound('Không tìm thấy sản phẩm.')
     const machine = findMachine(ctx, ctx.machineId)
+    if (ctx.options.maintenance) throw conflict('Requested product is not available on this machine')
     // First-expiring head between sellable slots; never a bowl behind a head.
     const choice = sellableHeads(ctx, machine.id).filter(({ head }) => head.productId === productId)
       .sort((a, b) => a.head.expiresAt.localeCompare(b.head.expiresAt) || a.head.loadedAt.localeCompare(b.head.loadedAt) || a.slot.slotCode.localeCompare(b.slot.slotCode))[0]
