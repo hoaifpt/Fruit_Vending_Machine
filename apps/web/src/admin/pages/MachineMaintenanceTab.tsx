@@ -37,6 +37,7 @@ import { useApi, errorMessage } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
 import { useConnection } from '../useConnection.ts'
 import { useSession } from '../useSession.ts'
+import { useReturnFocus } from '../return-focus.ts'
 
 const PANEL = 'min-w-0 rounded-xl border bg-card p-5 shadow-xs max-[680px]:p-4'
 const ERROR_BOX = 'rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-[13px] text-destructive'
@@ -64,11 +65,16 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
   // The newest command decides the lock (the server runs one at a time, so only the newest can be unfinished).
   const [fast, setFast] = useState(false)
   const poll = { pollMs: fast ? MAINTENANCE_POLL_MS : MAINTENANCE_IDLE_POLL_MS, stopOn: isMaintenanceMissing }
-  const head = useApi(signal => maintenanceCommandsApi.list(machineId, { page: 0, size: 1 }, signal), `${machineId}|maintenance-head`, poll)
+  // On later pages of the history a one-row query of page 0 follows the newest command.
+  const head = useApi(signal => (page === 0 ? Promise.resolve(undefined) : maintenanceCommandsApi.list(machineId, { page: 0, size: 1 }, signal)), `${machineId}|maintenance-head|${page === 0}`, poll)
   const history = useApi(signal => maintenanceCommandsApi.list(machineId, { page, size: MAINTENANCE_PAGE_SIZE }, signal), `${machineId}|maintenance|${page}`, poll)
-  const running = runningCommand(head.data?.content)
+  const newest = page === 0 ? history.data : head.data
+  // The command just sent counts as running until the reloaded history shows it (no second click in between).
+  const [justSent, setJustSent] = useState<MaintenanceCommand | null>(null)
+  const listed = !!justSent && !!newest?.content.some(command => command.id === justSent.id || command.createdAt > justSent.createdAt)
+  const running = runningCommand(newest?.content.slice(0, 1)) ?? (justSent && !listed ? justSent : undefined)
   // Poll fast exactly while the newest command is unfinished (state adjusted during render, React's derived-state pattern).
-  if (head.data && fast !== !!running) setFast(!!running)
+  if (newest && fast !== !!running) setFast(!!running)
 
   const slots = useApi(signal => slotsApi.list(machineId, { page: 0, size: 100 }, signal), `${machineId}|maintenance-slots`)
   const slot = slots.data?.content.find(candidate => candidate.id === slotId)
@@ -83,7 +89,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
     lastRunning.current = running?.id
   }, [running, reloadSummary, reloadHistory, reloadMachine])
 
-  const missing = isMaintenanceMissing(head.error) && !head.data
+  const missing = isMaintenanceMissing(history.error) && !history.data
   const lock = machineLock({
     canMaintain, canChangeStatus: !!openStatusChange, machineStatus: machine.status, connection: shown.shown,
     neverConnected: shown.never, running, missing,
@@ -98,6 +104,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
     if (needsRefresh(error)) { reloadMachine(); head.reload(); reloadHistory(); reloadSummary() }
   }
   const sent = (command: MaintenanceCommand) => {
+    setJustSent(command)
     toast.success(`Đã gửi lệnh “${commandLabel(command.type)}”`, { description: `Máy ${machine.code}${command.slotCode ? ` · ngăn ${command.slotCode}` : ''}. Theo dõi kết quả ở Lịch sử lệnh.` })
     head.reload(); reloadHistory()
     if (page) update({ commandPage: undefined })
@@ -119,7 +126,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
     EMPTY_COLUMN: slot ? slotPlan('EMPTY_COLUMN', summary.data) : { count: 0, blocked: 'Chọn ngăn trước.' },
   }
   const summaryPending = !!slot && !summary.data
-  const refill = refillState(history.data && page === 0 ? history.data.content : head.data?.content)
+  const refill = refillState(newest?.content)
 
   return <section aria-labelledby="maintenance-title" className="grid gap-5">
     <div>
@@ -152,7 +159,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
         : slots.data.content.length === 0 ? <p className="text-[13px] text-muted-foreground">Máy chưa có ngăn nào nên chưa có lệnh theo ngăn. Thêm ngăn ở thẻ Ngăn.</p>
         : <>
           <div className="mb-3 grid max-w-sm gap-3">
-            <FormField label="Ngăn">
+            <FormField label="Ngăn cần thao tác">
               <NativeSelect value={slot ? slot.id : ''} data-focus-key="maintenance-slot" onChange={event => update({ maintenanceSlot: event.target.value || undefined })}>
                 <option value="">Chọn ngăn…</option>
                 {slots.data.content.map(candidate => <option key={candidate.id} value={candidate.id}>Ngăn {candidate.slotCode} ({statusMeta('slot', candidate.status).label})</option>)}
@@ -240,6 +247,8 @@ function CommandDialog({ machine, type, slotCode, plan, close, send }: {
   const [failure, setFailure] = useState('')
   const [reasonError, setReasonError] = useState('')
   const reasonRef = useRef<HTMLTextAreaElement>(null)
+  // Focus goes back to the command button that opened the dialog (Hủy, Esc, or after sending).
+  const { onCloseAutoFocus } = useReturnFocus()
   const count = plan?.count ?? 0
   const title = type === 'EMPTY_COLUMN' ? `Rút hết ${count} hộp ở ngăn ${slotCode}?` : type === 'REMOVE_ITEM' ? `Rút hộp đáy ngăn ${slotCode}?` : `Khởi động lại bộ nhả hàng của máy ${machine.code}?`
   const confirmLabel = type === 'EMPTY_COLUMN' ? `Rút ${count} hộp` : type === 'REMOVE_ITEM' ? 'Rút 1 hộp' : 'Khởi động lại'
@@ -254,7 +263,7 @@ function CommandDialog({ machine, type, slotCode, plan, close, send }: {
     }
   }
   return <AlertDialog open onOpenChange={open => { if (!open && !pending) close() }}>
-    <AlertDialogContent aria-busy={pending} onEscapeKeyDown={event => { if (pending) event.preventDefault() }}>
+    <AlertDialogContent aria-busy={pending} onEscapeKeyDown={event => { if (pending) event.preventDefault() }} onCloseAutoFocus={onCloseAutoFocus}>
       <AlertDialogTitle>{title}</AlertDialogTitle>
       <AlertDialogDescription asChild><div className="grid gap-2">
         <p>{info.does}</p>

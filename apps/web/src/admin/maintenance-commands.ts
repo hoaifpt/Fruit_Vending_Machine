@@ -211,6 +211,8 @@ export function maintenanceAvailability(error: unknown): MaintenanceAvailability
 export const isMaintenanceMissing = (error: unknown) => maintenanceAvailability(error) === 'missing'
 export const MAINTENANCE_MISSING = 'Chưa có chức năng lệnh bảo trì: máy chủ chưa hỗ trợ phần này. Trong thời gian này, thao tác trực tiếp tại máy; trạng thái máy và tồn kho ở các thẻ khác vẫn đúng.'
 
+export const MAINTENANCE_TARGET_GONE = 'Không tìm thấy máy hoặc ngăn này nữa (có thể vừa bị thay đổi). Trang đã tải lại; chọn lại ngăn rồi gửi lại.'
+
 const CONFLICTS: readonly [RegExp, string][] = [
   [/not in maintenance/i, 'Máy không còn ở trạng thái Bảo trì (có thể vừa được đổi ở nơi khác). Trang đã tải lại trạng thái máy.'],
   [/offline/i, 'Máy đang mất kết nối nên máy chủ không gửi lệnh. Kiểm tra nguồn điện và Wi-Fi của máy rồi thử lại.'],
@@ -225,11 +227,10 @@ const CONFLICTS: readonly [RegExp, string][] = [
 export function describeMaintenanceError(error: unknown): unknown {
   if (!(error instanceof ApiError)) return error
   if (error.status === 409) return new ApiError(409, CONFLICTS.find(([pattern]) => pattern.test(error.message))?.[1] ?? 'Máy chủ từ chối lệnh vì trạng thái máy hoặc ngăn vừa thay đổi. Trang đã tải lại; kiểm tra rồi gửi lại.')
-  if (error.status === 404) {
-    if (/slot/i.test(error.message)) return new ApiError(404, 'Ngăn này không còn thuộc máy. Tải lại trang rồi chọn ngăn khác.')
-    if (/machine/i.test(error.message)) return new ApiError(404, 'Không tìm thấy máy này nữa. Về danh sách máy rồi mở lại.')
-    return new ApiError(404, MAINTENANCE_MISSING)
-  }
+  // The API client replaces every 404 message with a generic one (only 400/409 carry business text), so a 404 on POST
+  // cannot tell "machine/slot gone" from "endpoint missing". The tab only enables sending once the history loaded (the
+  // endpoint exists), so a 404 here means the machine or the slot is gone.
+  if (error.status === 404) return new ApiError(404, MAINTENANCE_TARGET_GONE)
   if (error.status === 403) return new ApiError(403, 'Tài khoản của bạn không có quyền gửi lệnh bảo trì. Nhờ Quản trị viên cấp quyền rồi đăng nhập lại.')
   if (error.status === 501 || error.status === 405) return new ApiError(error.status, MAINTENANCE_MISSING)
   if (error.status === 400) return new ApiError(400, 'Lệnh gửi lên chưa hợp lệ. Kiểm tra ngăn và ghi chú rồi gửi lại.', error.fieldErrors)

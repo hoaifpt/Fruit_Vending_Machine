@@ -47,7 +47,10 @@ function OrdersPage() {
         { head: 'Máy', nowrap: true, cell: order => order.machineCode },
         { head: 'Trạng thái', cell: order => <Badge domain="order" value={order.status} /> },
         { head: 'Số dòng / số hộp', secondary: true, cell: order => `${order.itemCount ?? 0} / ${order.totalQuantity ?? 0}` },
-        { head: 'Tổng tiền', sortKey: 'totalAmount', firstDirection: 'desc', nowrap: true, cell: order => formatMoney(order.totalAmount) },
+        // Near-expiry discount (FE 7.5, draft pricing-discount.yaml): the amount taken off, under the total, when there is one.
+        { head: 'Tổng tiền', sortKey: 'totalAmount', firstDirection: 'desc', nowrap: true, cell: order => (order.discountAmount ?? 0) > 0
+          ? <>{formatMoney(order.totalAmount)}<span className="block text-xs text-muted-foreground">Đã giảm {formatMoney(order.discountAmount)}</span></>
+          : formatMoney(order.totalAmount) },
         { head: 'Tạo lúc', sortKey: 'createdAt', firstDirection: 'desc', cell: order => formatDateTime(order.createdAt) },
         { head: 'Hết hạn thanh toán', secondary: true, cell: order => formatDateTime(order.expiresAt) },
       ]} />

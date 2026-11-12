@@ -8,6 +8,7 @@ import type { components as TelemetryDraft, operations as TelemetryOperations } 
 import type { components as TicketsDraft, operations as TicketOperations } from './drafts/work-tickets'
 import type { components as SchedulesDraft, operations as ScheduleOperations } from './drafts/maintenance-schedules'
 import type { components as MaintenanceDraft, operations as MaintenanceOperations } from './drafts/machine-maintenance'
+import type { components as PricingDraft } from './drafts/pricing-discount'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -15,13 +16,17 @@ export type Machine = S['MachineResponse']
 export type Slot = S['MachineSlotResponse']
 export type User = S['UserResponse']
 export type Batch = S['ProductBatchResponse']
-export type InventoryItem = S['InventoryItemResponse']
+// Near-expiry discount fields (FE 7.5): DRAFT api-contract/drafts/pricing-discount.yaml, backend 4.1. Optional, so the
+// real API without them still type-checks and shows plain prices; drop the intersections once they reach api.yaml.
+type P = PricingDraft['schemas']
+export type InventoryItem = S['InventoryItemResponse'] & P['InventoryItemPricing']
 export type InventorySummary = S['InventorySummaryResponse']
 export type InventoryTransaction = S['InventoryTransactionResponse']
 export type KioskCredential = S['KioskCredentialResponse']
 export type IssuedKioskCredential = S['IssuedKioskCredentialResponse']
-export type OrderSummary = S['OrderSummaryResponse']
-export type OrderDetail = S['OrderDetailResponse']
+export type OrderSummary = S['OrderSummaryResponse'] & P['OrderPricing']
+export type OrderLine = S['OrderItemDetailResponse'] & P['OrderItemPricing']
+export type OrderDetail = Omit<S['OrderDetailResponse'], 'items'> & P['OrderPricing'] & { items?: OrderLine[] }
 export type Payment = S['PaymentResponse']
 export type PaymentDetail = S['PaymentDetailResponse']
 export type WebhookLogSummary = S['PaymentWebhookLogSummaryResponse']
@@ -173,6 +178,11 @@ export type CreateWorkTicketBody = T['CreateWorkTicketRequest']
 export type AssignWorkTicketBody = T['AssignWorkTicketRequest']
 export type CompleteWorkTicketBody = T['CompleteWorkTicketRequest']
 export type CancelWorkTicketBody = T['CancelWorkTicketRequest']
+// Restock lines of a RESTOCK ticket (FE 7.2, screen O4): same draft, waiting for backend issue 4.4.
+export type RestockLine = T['RestockLineResponse']
+export type RestockReconciliation = T['RestockReconciliation']
+export type LoadRestockLineBody = T['LoadRestockLineRequest']
+export type RemoveRestockItemBody = T['RemoveRestockItemRequest']
 
 export const ticketsApi = {
   list: (query: WorkTicketListQuery, signal?: AbortSignal) => list<WorkTicket>('/work-tickets', query, signal),
@@ -187,6 +197,10 @@ export const ticketsApi = {
   complete: (ticketId: string, body: CompleteWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/complete`, body),
   /** Any state before COMPLETED → CANCELLED, with a mandatory reason. */
   cancel: (ticketId: string, body: CancelWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/cancel`, body),
+  /** RESTOCK, IN_PROGRESS, assignee: bowls placed in the line's slot (rules of POST /inventory/load). Answers the ticket. */
+  loadLine: (ticketId: string, lineId: string, body: LoadRestockLineBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/restock-lines/${id(lineId)}/load`, body),
+  /** RESTOCK, IN_PROGRESS, assignee: a bowl of the line's slot taken out by hand (rules of POST /inventory/{id}/remove). */
+  removeItem: (ticketId: string, lineId: string, body: RemoveRestockItemBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/restock-lines/${id(lineId)}/remove`, body),
 }
 
 // Maintenance schedules (screen O5, FE 7.3): draft contract api-contract/drafts/maintenance-schedules.yaml, waiting for

@@ -4,6 +4,7 @@
 // (waiting for BE 4.3). A staff account asking for someone else's ticket gets 404 from the server, shown as "not found".
 import { ApiError } from '../../api/client.ts'
 import { ticketsApi } from '../../api/resources.ts'
+import type { WorkTicket } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
 import { formatDateTime } from '../../lib/format.ts'
 import { alertPath, machinePath } from '../alerts.ts'
@@ -11,7 +12,8 @@ import { Badge, ErrorState, Link, Loading, PageHead, useDialog } from '../kit.ts
 import { HEADING, HINT, LINK, PANEL } from '../payment-parts.tsx'
 import { DueText, TicketActionButtons, TicketActionDialog, TicketHistory } from '../ticket-parts.tsx'
 import type { TicketActionState } from '../ticket-parts.tsx'
-import { TICKETS_MISSING, TICKETS_PATH, TICKET_NOT_FOUND, assigneeText, isOverdue, nextActions, nextStepText, ticketTypeLabel, ticketsAvailability } from '../tickets.ts'
+import { hasRestockLines, restockPath } from '../restock.ts'
+import { TICKETS_MISSING, TICKETS_PATH, TICKET_NOT_FOUND, assigneeText, isClosed, isMine, isOverdue, nextActions, nextStepText, ticketTypeLabel, ticketsAvailability } from '../tickets.ts'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 import { useTicketViewer } from '../useTicketViewer.ts'
@@ -82,11 +84,24 @@ function TicketDetailPage({ ticketId }: { ticketId: string }) {
       <section className={PANEL} aria-labelledby="ticket-progress">
         <h2 id="ticket-progress" className={HEADING}>Tiến trình</h2>
         <p className={HINT}><strong className="font-medium text-foreground">Bước tiếp theo: </strong>{nextStepText(ticket, viewer)}</p>
+        {hasRestockLines(ticket) && <RestockEntry ticket={ticket} mine={isMine(ticket, viewer)} />}
         <TicketHistory ticket={ticket} />
       </section>
     </div>
     <TicketActionDialog state={action.value} close={action.close} changed={state.reload} screen="detail" />
   </>
+}
+
+/** FE 7.2: a RESTOCK ticket with lines is carried out step by step on its own screen (made for a phone). */
+function RestockEntry({ ticket, mine }: { ticket: WorkTicket; mine: boolean }) {
+  const lines = ticket.restockLines ?? []
+  const planned = lines.reduce((total, line) => total + line.plannedQuantity, 0)
+  const closed = isClosed(ticket)
+  const label = closed ? 'Xem đối chiếu nạp hàng' : mine ? 'Thực hiện nạp hàng từng bước' : 'Xem tiến độ nạp hàng'
+  return <div className="mb-4 grid gap-2 rounded-lg border bg-muted/40 px-3.5 py-3 text-[13px]">
+    <p>Phiếu nạp {lines.length} ngăn ({lines.map(line => line.slotCode).join(', ')}), tổng {planned} hộp theo kế hoạch.{mine && !closed ? ' Màn nạp hàng dẫn bạn qua từng bước: mở cửa nạp, rút hộp hỏng, nạp theo dòng, đóng cửa nạp, đối chiếu.' : ''}</p>
+    <p><Button asChild variant={mine && !closed ? 'default' : 'outline'} className="h-11 max-sm:w-full"><Link to={restockPath(ticket.id)}>{label}</Link></Button></p>
+  </div>
 }
 
 export default TicketDetailPage

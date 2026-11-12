@@ -14,6 +14,7 @@ import {
 import type { MachineState, OrderView } from '../kiosk/flow'
 import { incidentReportConfig, incidentReportUrl } from '../kiosk/incident'
 import { formatDateTime, formatMoney as money } from '../lib/format'
+import { discountReasonText, lineView, orderDiscount, priceView } from '../lib/price'
 import orange from '../assets/orange-mark.webp'
 import mix from '../assets/fruit-still-life.webp'
 import './PurchasePage.css'
@@ -321,10 +322,12 @@ export default function PurchasePage() {
           onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false } }}>
           {products.slice(currentPage * 2, currentPage * 2 + 2).map(product => {
             const low = (product.availableQuantity ?? 0) <= 2
+            // Server price of the box that would be sold now; a near-expiry box shows its original price struck and the % off (FE 7.5).
+            const price = priceView({ price: product.price, originalPrice: product.originalUnitPrice, discountPercent: product.discountPercent })
             return <button className="buy-product" key={product.productId} onClick={() => void selectProduct(product)}>
-              <div className="buy-product-top"><span>1 hộp</span><small data-low={low || undefined}>{low ? 'Còn ít' : 'Còn hàng'}</small></div>
+              <div className="buy-product-top"><span>1 hộp</span>{price.discounted && <span className="buy-discount-tag">{price.tag}<span className="sr-only"> {discountReasonText(product.discountReason).toLowerCase()}</span></span>}<small data-low={low || undefined}>{low ? 'Còn ít' : 'Còn hàng'}</small></div>
               <img src={imageOf(product)} alt="" draggable={false} />
-              <div className="buy-product-info"><span className="buy-product-name">{product.name}</span><p>{product.description || 'Trái cây tươi'}</p><div><strong>{money(product.price)}</strong><span className="buy-product-cta">Chạm để mua <Icon name="arrow" /></span></div></div>
+              <div className="buy-product-info"><span className="buy-product-name">{product.name}</span><p>{product.description || 'Trái cây tươi'}</p><div><span className="buy-price"><strong>{price.current}</strong>{price.discounted && <s><span className="sr-only">Giá gốc </span>{price.original}</s>}</span><span className="buy-product-cta">Chạm để mua <Icon name="arrow" /></span></div></div>
             </button>
           })}
         </div>
@@ -345,6 +348,7 @@ export default function PurchasePage() {
             {/* Amount is always the server's order total; the kiosk never computes prices. */}
             <dt>Số tiền thanh toán</dt><dd>{screen.kind === 'order' ? money(screen.order.totalAmount) : '…'}</dd>
           </dl>
+          {screen.kind === 'order' && <OrderDiscount order={screen.order} />}
           <Countdown screen={screen} serverNow={clock + offset.current} />
           <button className="buy-cancel" disabled={screen.kind === 'creating' || cancelling} onClick={() => setDialog('cancel')}>Hủy đơn và chọn lại</button>
           {screen.kind === 'order' && screen.order.orderCode && <p className="buy-pay-code">Mã đơn <strong>{screen.order.orderCode}</strong></p>}
@@ -434,6 +438,17 @@ function EndedScreen({ reason, order, returnLeft, onHome, heading }: {
     <OrderCode code={order.orderCode} large={charged} />
     <div className="buy-result-actions"><button className="buy-primary" onClick={onHome}>Về danh sách sản phẩm <Icon name="arrow" /></button><small>Tự về màn hình chính sau {returnLeft} giây</small></div>
   </section>
+}
+
+/** Discount of the order as the server snapshotted it (FE 7.5): nothing when the order has none or the API does not send it. */
+function OrderDiscount({ order }: { order: KioskOrder }) {
+  const discount = orderDiscount(order)
+  if (discount <= 0) return null
+  const line = order.items?.length === 1 ? lineView(order.items[0]) : undefined
+  return <p className="buy-pay-discount">
+    <span className="buy-discount-tag">{line?.unit.tag ?? 'Giảm giá'}</span>
+    <span>{discountReasonText(order.items?.[0]?.discountReason)}: đã giảm <b>{money(discount)}</b>{line?.unit.original && <>, giá gốc <s>{line.unit.original}</s></>}</span>
+  </p>
 }
 
 function OrderCode({ code, large = false, machineCode }: { code: string | undefined; large?: boolean; machineCode?: string }) {

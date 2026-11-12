@@ -1,0 +1,209 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - near-expiry discount fields
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 7.5 "Hiển thị giảm giá cận hạn", screens K1, T1, I2) for backend issue 4.1.
+    It adds NO endpoint and changes NO existing field: it only ADDS optional fields to responses that already exist in
+    api.yaml (kiosk catalog, kiosk order, order list, order detail, inventory list). The schemas below list only the
+    added fields; every other field of these responses stays exactly as in api.yaml. A backend that does not send them
+    is valid: the web then shows the plain price as today.
+
+
+    Field names agreed in the FE plan: originalUnitPrice and discountAmount. Prices keep their current meaning: `price`
+    (catalog) and `unitPrice` / `totalPrice` / `subtotal` / `totalAmount` (orders) are what the customer pays, AFTER the
+    discount. So a client that ignores the new fields still charges and shows the right amount.
+
+
+    Proposed rule for the backend (the web never computes a discount, it only displays these fields):
+
+    1. A bowl is NEAR_EXPIRY when its batch expiresAt is within the near-expiry window from now (proposal: 24 hours,
+       configurable, e.g. app.pricing.near-expiry.window=PT24H) and still sellable (expiresAt after now + reservation TTL,
+       as today).
+
+    2. A NEAR_EXPIRY bowl is sold at discountPercent off the product price (proposal: 50, configurable,
+       app.pricing.near-expiry.percent=50, 1..99).
+
+    3. unitPrice = originalUnitPrice x (100 - discountPercent) / 100, rounded HALF_UP to a whole VND (payOS only accepts
+       whole VND). Example: 35000 at 50% -> 17500; 25000 at 50% -> 12500; 33333 at 50% -> 16667.
+
+    4. Catalog: `price` is the price of the bowl POST /kiosk/orders would pick right now (the first-expiring sellable head
+       of the product, FEFO between heads). It is a display snapshot like availableQuantity.
+
+    5. Order creation computes the price under the same locks that pick the head and snapshots it in order_items
+       (original_unit_price, unit_price, discount_amount, discount_percent, discount_reason); it is never recomputed later.
+       The order response is the truth for the amount to pay, even if the catalog showed another price a moment before.
+
+    6. discountAmount of a line = (originalUnitPrice - unitPrice) x quantity; discountAmount of an order = sum of its
+       lines. Both are 0 (not null) when there is no discount; originalUnitPrice equals unitPrice then.
+paths:
+  /api/v1/kiosk/catalog:
+    get:
+      tags: [Kiosk]
+      operationId: getKioskCatalogPricing
+      summary: Kiosk catalog - added discount fields per product (draft)
+      description: Same endpoint and response as api.yaml getKioskCatalog; each product gains the fields of KioskCatalogProductPricing.
+      responses:
+        "200":
+          description: Only the fields added to KioskCatalogProductResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KioskCatalogProductPricing"
+  /api/v1/kiosk/orders/{orderId}:
+    get:
+      tags: [Kiosk Orders]
+      operationId: getKioskOrderPricing
+      summary: Kiosk order - added discount fields (draft)
+      description: >-
+        Same endpoint and response as api.yaml (also POST /api/v1/kiosk/orders and POST .../cancel): the order gains
+        OrderPricing, each item of KioskOrderItemResponse gains OrderItemPricing.
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Only the fields added to KioskOrderResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPricing"
+  /api/v1/orders:
+    get:
+      tags: [Orders]
+      operationId: listOrdersPricing
+      summary: Order list - added discount total per row (draft)
+      description: Same endpoint and response as api.yaml listOrders; each OrderSummaryResponse gains OrderPricing.
+      responses:
+        "200":
+          description: Only the fields added to OrderSummaryResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPricing"
+  /api/v1/orders/{id}:
+    get:
+      tags: [Orders]
+      operationId: getOrderPricing
+      summary: Order detail - added discount fields (draft)
+      description: Same endpoint and response as api.yaml; the order gains OrderPricing, each OrderItemDetailResponse gains OrderItemPricing.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Only the fields added to OrderDetailResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderPricing"
+  /api/v1/inventory:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryPricing
+      summary: Inventory list - added selling price of each box (draft)
+      description: >-
+        Same endpoint and response as api.yaml listInventory; each InventoryItemResponse gains InventoryItemPricing, the
+        price the box would sell at now (screen I2 shows the near-expiry label on the box).
+      responses:
+        "200":
+          description: Only the fields added to InventoryItemResponse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItemPricing"
+components:
+  schemas:
+    DiscountReason:
+      type: string
+      enum: [NEAR_EXPIRY]
+      description: Why the price is lowered. Only NEAR_EXPIRY for now.
+    KioskCatalogProductPricing:
+      type: object
+      description: Added to KioskCatalogProductResponse. `price` stays the price to pay (after discount).
+      properties:
+        originalUnitPrice:
+          type: number
+          description: Product price before discount; equals price when there is no discount.
+          examples: [35000]
+        discountPercent:
+          type:
+            - integer
+            - "null"
+          format: int32
+          minimum: 1
+          maximum: 99
+          description: Percent off of the bowl that would be sold now; null without discount.
+          examples: [50]
+        discountReason:
+          oneOf:
+            - $ref: "#/components/schemas/DiscountReason"
+            - type: "null"
+    OrderItemPricing:
+      type: object
+      description: >-
+        Added to KioskOrderItemResponse and OrderItemDetailResponse. `unitPrice` and `totalPrice` stay what is charged
+        (after discount); snapshot taken when the order is created.
+      properties:
+        originalUnitPrice:
+          type: number
+          description: Product price at order time, before discount; equals unitPrice without discount.
+          examples: [35000]
+        discountAmount:
+          type: number
+          description: (originalUnitPrice - unitPrice) x quantity; 0 without discount.
+          examples: [17500]
+        discountPercent:
+          type:
+            - integer
+            - "null"
+          format: int32
+          minimum: 1
+          maximum: 99
+          examples: [50]
+        discountReason:
+          oneOf:
+            - $ref: "#/components/schemas/DiscountReason"
+            - type: "null"
+    OrderPricing:
+      type: object
+      description: >-
+        Added to KioskOrderResponse, OrderSummaryResponse and OrderDetailResponse. subtotal / totalAmount stay the amount
+        charged (after discount); the price before discount is totalAmount + discountAmount.
+      properties:
+        discountAmount:
+          type: number
+          description: Sum of the lines' discountAmount; 0 without discount.
+          examples: [17500]
+    InventoryItemPricing:
+      type: object
+      description: Added to InventoryItemResponse. Price the box would sell at now (changes as the box nears expiry).
+      properties:
+        unitPrice:
+          type: number
+          description: Selling price of this box now, after discount.
+          examples: [17500]
+        originalUnitPrice:
+          type: number
+          description: Product price before discount.
+          examples: [35000]
+        discountPercent:
+          type:
+            - integer
+            - "null"
+          format: int32
+          minimum: 1
+          maximum: 99
+          examples: [50]
+        discountReason:
+          oneOf:
+            - $ref: "#/components/schemas/DiscountReason"
+            - type: "null"

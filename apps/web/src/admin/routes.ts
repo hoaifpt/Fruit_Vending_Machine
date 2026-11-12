@@ -7,7 +7,7 @@ import type { Permission, Subject } from './permissions.ts'
 export type PageKey =
   | 'overview' | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
   | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
-  | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail' | 'maintenance-schedules'
+  | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail' | 'ticket-restock' | 'maintenance-schedules'
 
 /** `roles` lists the roles that hold `permission` today (derived, for display and older callers). */
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
@@ -28,6 +28,8 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   // O3 (FE 7.1): draft permission of api-contract/drafts/work-tickets.yaml; staff only receive their own tickets.
   { pattern: /^\/admin\/tickets$/, page: 'tickets', permission: 'TICKET_READ' },
   { pattern: /^\/admin\/tickets\/([^/]+)$/, page: 'ticket-detail', permission: 'TICKET_READ' },
+  // O4 (FE 7.2): carrying out a RESTOCK ticket on a phone; the server only discloses the ticket to its assignee/admins.
+  { pattern: /^\/admin\/tickets\/([^/]+)\/restock$/, page: 'ticket-restock', permission: 'TICKET_READ' },
   // O5 (FE 7.3): draft permission of api-contract/drafts/maintenance-schedules.yaml; changes need MAINTENANCE_SCHEDULE_WRITE.
   { pattern: /^\/admin\/maintenance-schedules$/, page: 'maintenance-schedules', permission: 'MAINTENANCE_SCHEDULE_READ' },
   { pattern: /^\/admin\/orders$/, page: 'orders', permission: 'ORDER_READ' },
@@ -60,7 +62,7 @@ export const NAV: NavItem[] = [
   // Draft permission (api-contract/drafts/alerts.yaml, BE 3.6): see DRAFT_PERMISSIONS in permissions.ts.
   { to: '/admin/alerts', label: 'Cảnh báo', group: 'Vận hành', permission: 'ALERT_READ', match: ['alerts', 'alert-detail'] },
   // Draft permission (api-contract/drafts/work-tickets.yaml, BE 4.3).
-  { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'TICKET_READ', match: ['tickets', 'ticket-detail'] },
+  { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'TICKET_READ', match: ['tickets', 'ticket-detail', 'ticket-restock'] },
   // Draft permission (api-contract/drafts/maintenance-schedules.yaml, BE 4.5).
   { to: '/admin/maintenance-schedules', label: 'Lịch bảo trì', group: 'Vận hành', permission: 'MAINTENANCE_SCHEDULE_READ', match: ['maintenance-schedules'] },
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
@@ -75,7 +77,7 @@ export function breadcrumbFor(route: RouteMatch | undefined): { label: string; t
   if (!route) return []
   const item = NAV.find(entry => entry.match.includes(route.page))
   if (!item) return []
-  const detail = route.page === 'inventory-history' ? 'Lịch sử' : route.id ? 'Chi tiết' : undefined
+  const detail = route.page === 'inventory-history' ? 'Lịch sử' : route.page === 'ticket-restock' ? 'Thực hiện nạp hàng' : route.id ? 'Chi tiết' : undefined
   return [{ label: item.group }, { label: item.label, to: detail ? item.to : undefined }, ...(detail ? [{ label: detail }] : [])]
 }
 

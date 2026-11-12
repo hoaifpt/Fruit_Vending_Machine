@@ -10,10 +10,12 @@ import { useId, useState } from 'react'
 import { Circle, CircleCheck, CircleDot, CircleSlash, CircleX, TriangleAlert } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
 import { dispenseCommandsApi, ordersApi, slotsApi } from '../../api/resources.ts'
-import type { DispenseCommand, OrderDetail } from '../../api/resources.ts'
+import type { DispenseCommand, OrderDetail, OrderLine } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime, formatMoney } from '../../lib/format.ts'
+import { lineView, orderDiscount } from '../../lib/price.ts'
+import { DISCOUNT_TAG, PriceTag } from '../../components/ui/price-tag.tsx'
 import { Badge, DataTable, ErrorState, Forbidden, Link, Loading, PageHead } from '../kit.tsx'
 import {
   DISPENSE_MISSING, LIVE_POLL_MS, STEP_STATE_TEXT, allocationRows, commandEndedAt, commandNote, dispenseAvailability, noCommandText, inventoryMapPath, isLiveOrder, orderAttention, orderTimeline,
@@ -72,6 +74,9 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
   const attention = orderAttention(current, commandList)
   const steps = orderTimeline(current, commandList)
   const updatedAt = order.updatedAt
+  // Near-expiry discount (FE 7.5, draft pricing-discount.yaml): only shown when the server reports one.
+  const discount = orderDiscount(current)
+  const discountTag = current.items?.length === 1 ? lineView(current.items[0]).unit.tag : undefined
   return <>
     <PageHead title={`Đơn ${current.orderCode ?? ''}`} back={BACK}
       subtitle="Chỉ xem. Trạng thái đơn do kiosk, cổng thanh toán và máy cập nhật; web không sửa hoặc hủy đơn." />
@@ -97,6 +102,8 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
         <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-[14px] [&_dt]:text-muted-foreground">
           <dt>Trạng thái</dt><dd><Badge domain="order" explain value={current.status} /></dd>
           <dt>Máy</dt><dd className="break-words">{current.machineCode ?? '—'}{canInventory && current.machineId ? <> · <Link to={inventoryMapPath(current.machineId)} className={LINK}>Sơ đồ ngăn của máy</Link></> : null}</dd>
+          {discount > 0 && <><dt>Giá gốc</dt><dd><s>{formatMoney((current.totalAmount ?? 0) + discount)}</s></dd>
+            <dt>Giảm giá cận hạn</dt><dd className="flex flex-wrap items-center gap-1.5"><span>{formatMoney(discount)}</span>{discountTag && <span className={DISCOUNT_TAG}>{discountTag}</span>}</dd></>}
           <dt>Tạm tính</dt><dd>{formatMoney(current.subtotal)}</dd>
           <dt>Tổng tiền</dt><dd className="font-semibold">{formatMoney(current.totalAmount)}</dd>
           <dt>Tạo lúc</dt><dd>{formatDateTime(current.createdAt)}</dd>
@@ -116,9 +123,11 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
         { head: 'SKU', nowrap: true, cell: item => item.sku },
         { head: 'Sản phẩm', cell: item => item.productName },
         { head: 'Số hộp', cell: item => item.quantity },
-        { head: 'Đơn giá', nowrap: true, cell: item => formatMoney(item.unitPrice) },
+        { head: 'Đơn giá', nowrap: true, cell: item => <PriceTag view={lineView(item).unit} reason={item.discountReason} /> },
+        ...(discount > 0 ? [{ head: 'Tiền giảm', nowrap: true, cell: (item: OrderLine) => { const off = lineView(item).discount; return off > 0 ? formatMoney(off) : '—' } }] : []),
         { head: 'Thành tiền', nowrap: true, cell: item => formatMoney(item.totalPrice) },
       ]} />
+      {discount > 0 && <p className="mt-3! text-[14px]">Tổng giảm của đơn: <strong>{formatMoney(discount)}</strong>. Đơn giá gạch ngang là giá gốc; hộp cận hạn được bán giảm giá theo giá máy chủ ghi lúc tạo đơn.</p>}
     </section>
   </>
 }

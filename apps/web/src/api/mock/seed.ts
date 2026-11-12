@@ -8,6 +8,8 @@ import type { components as TelemetryDraft } from '../drafts/machine-telemetry'
 import type { components as TicketsDraft } from '../drafts/work-tickets'
 import type { components as SchedulesDraft } from '../drafts/maintenance-schedules'
 import type { components as MaintenanceDraft } from '../drafts/machine-maintenance'
+import type { components as PricingDraft } from '../drafts/pricing-discount'
+import { boxPrice, linePricing } from './pricing.ts'
 import { addDays, dueInstant, nextDueDate, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 
 type S = components['schemas']
@@ -20,10 +22,12 @@ export type MockCredential = S['KioskCredentialResponse'] & { credentialId: stri
 export type MockBatch = S['ProductBatchResponse'] & { id: string; productId: string; batchCode: string; expiresAt: string; quantity: number; createdAt: string }
 export type MockItem = Omit<S['InventoryItemResponse'], 'expired'> & { id: string; batchId: string; slotId: string; machineId: string; productId: string; status: NonNullable<S['InventoryItemResponse']['status']>; expiresAt: string; loadedAt: string }
 export type MockTransaction = S['InventoryTransactionResponse'] & { id: string; createdAt: string }
-export type MockOrderItem = S['OrderItemDetailResponse'] & { productId: string; quantity: number; totalPrice: number; allocations: S['OrderAllocationResponse'][] }
+export type MockOrderItem = S['OrderItemDetailResponse'] & PricingDraft['schemas']['OrderItemPricing'] & { productId: string; quantity: number; totalPrice: number; allocations: S['OrderAllocationResponse'][] }
 export type MockOrder = Omit<S['OrderDetailResponse'], 'payments' | 'items'> & {
   id: string; orderCode: string; machineId: string; machineCode: string; status: NonNullable<S['OrderDetailResponse']['status']>
   totalAmount: number; createdAt: string; items: MockOrderItem[]
+  /** Draft pricing-discount.yaml (FE 7.5). */
+  discountAmount?: number
   /** Created by the kiosk during this session; only these advance over time (seed rows stay put). */
   live: boolean
 }
@@ -48,6 +52,14 @@ export type MockReading = TelemetryDraft['schemas']['SensorReadingResponse']
 export type MockMachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
 /** Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml): a job at one machine, people named by fullName. */
 export type MockTicket = TicketsDraft['schemas']['WorkTicketResponse']
+type RestockLine = TicketsDraft['schemas']['RestockLineResponse']
+/** Totals of the restock lines (draft RestockReconciliation, FE 7.2): difference = loaded - planned. */
+export function restockReconciliation(lines: readonly RestockLine[]): TicketsDraft['schemas']['RestockReconciliation'] | null {
+  if (!lines.length) return null
+  const sum = (pick: (line: RestockLine) => number) => lines.reduce((total, line) => total + pick(line), 0)
+  const plannedQuantity = sum(line => line.plannedQuantity), loadedQuantity = sum(line => line.loadedQuantity)
+  return { plannedQuantity, loadedQuantity, removedQuantity: sum(line => line.removedQuantity), difference: loadedQuantity - plannedQuantity, noteRequired: lines.some(line => line.loadedQuantity !== line.plannedQuantity) }
+}
 /** Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml); `overdue` is computed when read. */
 export type MockSchedule = Omit<SchedulesDraft['schemas']['MaintenanceScheduleResponse'], 'overdue'>
 /** Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): a command sent to a machine by staff. */
@@ -166,7 +178,8 @@ export function createStore(nowMs: number): MockStore {
   })
   const batches = [
     batch(1, 'SEED-MIXED-01', 0, -DAY, 30 * DAY, 20),
-    batch(2, 'SEED-WATERMELON-01', 1, -DAY, 30 * DAY, 20),
+    // Expires in 18 hours (FE 7.5): its boxes are near expiry, so the kiosk sells watermelon at 50% off (25.000 -> 12.500 ₫).
+    batch(2, 'SEED-WATERMELON-01', 1, -DAY, 18 * HOUR, 20),
     batch(3, 'SEED-PINEAPPLE-01', 2, -2 * DAY, 20 * HOUR, 10),
     batch(4, 'SEED-MANGO-EXPIRED', 3, -5 * DAY, -DAY, 5),
   ]
@@ -289,6 +302,16 @@ export function createStore(nowMs: number): MockStore {
     Object.assign(mixed, { subtotal: amount, totalAmount: amount })
     for (const payment of payments) if (payment.orderId === mixed.id) payment.amount = amount
   }
+  // A completed order of a near-expiry mixed fruit box (FE 7.5, draft pricing-discount.yaml): 35.000 ₫ sold at 17.500 ₫.
+  // Its batch is shown as it was then (it expired within 24 hours of the sale). Done before the webhook logs below.
+  const discounted = orders.find(order => order.id === uuid('90000000', 13))
+  if (discounted) {
+    const line = discounted.items[0]
+    line.allocations[0].batchExpiresAt = new Date(Date.parse(discounted.createdAt) + 10 * HOUR).toISOString()
+    Object.assign(line, linePricing(boxPrice(line.unitPrice!, line.allocations[0].batchExpiresAt, Date.parse(discounted.createdAt)), line.quantity))
+    Object.assign(discounted, { subtotal: line.totalPrice, totalAmount: line.totalPrice, discountAmount: line.discountAmount })
+    for (const payment of payments) if (payment.orderId === discounted.id) payment.amount = line.totalPrice
+  }
   // Webhook logs (FE 6.2): the calls providers made, built once the amounts above are final so every body matches its
   // payment (the third COMPLETED order is 2 bowls, its body says the doubled total). b0000000-n is the first call about
   // payment n: a verified PAYMENT_SUCCESS / PAYMENT_FAILED, or for n % 7 a call with a bad signature and for n % 10 a body
@@ -329,7 +352,7 @@ export function createStore(nowMs: number): MockStore {
   const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
   const alerts = seedAlerts(nowMs, { machines, slots, orders, admin: users[0], staff: users[1] })
   const { heartbeats, readings, machineEvents } = seedTelemetry(nowMs, machines)
-  const tickets = seedTickets(nowMs, { machines, alerts, users })
+  const tickets = seedTickets(nowMs, { machines, alerts, users, slots, batches })
   const schedules = seedSchedules(nowMs, { machines, users, tickets })
 
   return {
@@ -419,13 +442,22 @@ function seedAlerts(nowMs: number, { machines, slots, orders, admin, staff }: { 
  * Three others belong to other staff (ASSIGNED, IN_PROGRESS, CANCELLED with a reason) and one is OPEN (from the
  * MACHINE_OFFLINE alert), so a staff account visibly sees only its own.
  */
-function seedTickets(nowMs: number, { machines, alerts, users }: { machines: S['MachineResponse'][]; alerts: MockAlert[]; users: MockUser[] }): MockTicket[] {
+function seedTickets(nowMs: number, { machines, alerts, users, slots, batches }: { machines: S['MachineResponse'][]; alerts: MockAlert[]; users: MockUser[]; slots: S['MachineSlotResponse'][]; batches: MockBatch[] }): MockTicket[] {
   const iso = (offset: number) => new Date(nowMs + offset).toISOString()
   const [m1, m2, m3] = machines
   const [admin, staff] = users
   const restocker = users.find(user => user.id === uuid('11000000', 7))!
   const night = users.find(user => user.id === uuid('11000000', 8))!
   const alertOf = (n: number) => alerts.find(alert => alert.id === uuid('60000000', n))?.id ?? null
+  // FE 7.2: ticket 2 (staff, from the LOW_STOCK alert of A2) is a full restock of DEV-MACHINE-01: A2 gets 4 watermelon
+  // bowls (its free places), B1 first loses its 2 expired mango bowls then gets 6 mixed fruit bowls.
+  const line = (n: number, slotCode: string, batchCode: string, plannedQuantity: number): RestockLine => {
+    const slot = slots.find(candidate => candidate.machineId === m1.id && candidate.slotCode === slotCode)!
+    const batch = batches.find(candidate => candidate.batchCode === batchCode)!
+    return { id: uuid('63000000', n), slotId: slot.id, slotCode, productId: batch.productId, productName: batch.productName ?? '', batchId: batch.id, batchCode: batch.batchCode, batchExpiresAt: batch.expiresAt, plannedQuantity, loadedQuantity: 0, removedQuantity: 0 }
+  }
+  const restockLines = [line(1, 'A2', 'SEED-WATERMELON-01', 4), line(2, 'B1', 'SEED-MIXED-01', 6)]
+  const restock = (lines: RestockLine[]) => ({ restockLines: lines, reconciliation: restockReconciliation(lines) })
   const blank = {
     description: null, machineName: null, alertId: null, dueAt: null, assigneeId: null, assigneeName: null,
     assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
@@ -440,7 +472,7 @@ function seedTickets(nowMs: number, { machines, alerts, users }: { machines: S['
   const started = (user: MockUser, at: number) => ({ startedAt: iso(at), startedById: user.id, startedByName: user.fullName, updatedAt: iso(at) })
   return [
     ticket(1, m2, { type: 'MAINTENANCE', status: 'OPEN', title: 'Máy mất kết nối · máy DEV-MACHINE-02', description: 'Kiểm tra nguồn điện và Wi-Fi của máy, khởi động lại bộ điều khiển nếu cần.', alertId: alertOf(2), dueAt: iso(3 * HOUR) }, -30 * 60_000),
-    ticket(2, m1, { type: 'RESTOCK', status: 'ASSIGNED', title: 'Nạp thêm hộp ngăn A2 · máy DEV-MACHINE-01', description: 'Ngăn A2 còn 1 hộp. Mang hộp từ lô mới nhất tới máy.', alertId: alertOf(5), dueAt: iso(5 * HOUR), ...assigned(staff, -40 * 60_000) }, -45 * 60_000),
+    ticket(2, m1, { type: 'RESTOCK', status: 'ASSIGNED', title: 'Nạp thêm hộp ngăn A2 · máy DEV-MACHINE-01', description: 'Ngăn A2 còn 1 hộp. Mang hộp từ lô mới nhất tới máy.', alertId: alertOf(5), dueAt: iso(5 * HOUR), ...assigned(staff, -40 * 60_000), ...restock(restockLines) }, -45 * 60_000),
     ticket(3, m1, { type: 'RESTOCK', status: 'IN_PROGRESS', title: 'Rút hộp hết hạn ngăn B1 · máy DEV-MACHINE-01', description: 'Hộp ở đáy ngăn B1 đã hết hạn và chặn cả ngăn. Rút hộp rồi nạp hộp còn hạn.', alertId: alertOf(3), dueAt: iso(-HOUR), ...assigned(staff, -4 * HOUR), ...started(staff, -3 * HOUR) }, -4 * HOUR - 10 * 60_000),
     ticket(4, m1, { type: 'MAINTENANCE', status: 'COMPLETED', title: 'Vệ sinh khay nhả hàng · máy DEV-MACHINE-01', ...assigned(staff, -2 * DAY), ...started(staff, -2 * DAY + 2 * HOUR), completedAt: iso(-2 * DAY + 3 * HOUR), completedById: staff.id, completedByName: staff.fullName, completionNote: 'Đã vệ sinh khay và thử nhả 2 hộp, máy chạy bình thường.', updatedAt: iso(-2 * DAY + 3 * HOUR) }, -2 * DAY - HOUR),
     ticket(5, m2, { type: 'MAINTENANCE', status: 'ASSIGNED', title: 'Kiểm tra gioăng cửa · máy DEV-MACHINE-02', description: 'Độ ẩm từng chạm ngưỡng tối đa; kiểm tra gioăng cửa và khay nước ngưng.', ...assigned(restocker, -20 * HOUR) }, -DAY),

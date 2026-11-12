@@ -99,9 +99,49 @@ export interface paths {
         put?: never;
         /**
          * Complete a ticket (draft)
-         * @description TICKET_READ and the caller must be the assignee (403 otherwise). IN_PROGRESS -> COMPLETED; records completedAt (now), completedBy (the caller) and the optional note. The body may be omitted. Not reversible.
+         * @description TICKET_READ and the caller must be the assignee (403 otherwise). IN_PROGRESS -> COMPLETED; records completedAt (now), completedBy (the caller) and the optional note. The body may be omitted. Not reversible. For a RESTOCK ticket with restock lines the note becomes mandatory when any line's loadedQuantity differs from its plannedQuantity (400 with fieldErrors.note "must not be blank when loaded differs from planned"), and the response carries the reconciliation. In the same transaction the server resolves, as the system, every LOW_STOCK alert of the ticket's machine that is not RESOLVED and whose slot has a line loaded in full (loadedQuantity >= plannedQuantity); a LOW_STOCK alert without a slot is resolved only when every line is loaded in full. Each one gets resolvedAt = completedAt, resolvedById = null, resolvedByName = "Hệ thống" and resolutionNote "Tự đóng khi hoàn tất phiếu nạp hàng “<ticket title>”: đã nạp <n> hộp vào ngăn <slot>." Their ids are returned in resolvedAlertIds. The ticket's own alertId is treated the same way (it is closed only if it is such a LOW_STOCK alert).
          */
         post: operations["completeWorkTicket"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-tickets/{id}/restock-lines/{lineId}/load": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record bowls loaded into the slot of a restock line (draft, FE 7.2)
+         * @description TICKET_READ and INVENTORY_WRITE, and the caller must be the assignee (403 otherwise). The ticket must be a RESTOCK ticket IN_PROGRESS (409 otherwise). Runs exactly the rules of POST /inventory/load on the line's slot (product ACTIVE, batch not expired, machine ACTIVE or MAINTENANCE, slot ACTIVE, free places of the slot, bowls left in the batch; same 409 messages: "Slot capacity exceeded", "Batch declared quantity exceeded", ...), creates the bowls AVAILABLE with LOAD rows in the inventory history whose referenceId is the ticket id, and adds the quantity to the line's loadedQuantity. The batch must be of the line's product (409 "Batch product does not match the restock line"). May be called several times per line (several batches, or a second round); loading more than planned is allowed within the slot's capacity and shows up as a difference at reconciliation. The ticket row and the slot are locked while loading. Answers the whole ticket with its lines.
+         */
+        post: operations["loadWorkTicketRestockLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-tickets/{id}/restock-lines/{lineId}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a damaged or expired bowl taken out of the slot of a restock line (draft, FE 7.2)
+         * @description TICKET_READ and INVENTORY_WRITE, and the caller must be the assignee (403 otherwise). The ticket must be a RESTOCK ticket IN_PROGRESS (409 otherwise). With the refill door open the staff takes the bowl out by hand; this records it with the rules of POST /inventory/{id}/remove: the bowl must be in the line's slot (400 with fieldErrors.inventoryItemId otherwise) and AVAILABLE or EXPIRED (409 otherwise); it becomes REMOVED with a REMOVE row in the inventory history (reason, referenceId = the ticket id), and the line's removedQuantity grows by one. Never a delete. Answers the whole ticket with its lines.
+         */
+        post: operations["removeWorkTicketRestockItem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -190,6 +230,75 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             updatedAt: string;
+            /** @description RESTOCK tickets only (absent or empty for MAINTENANCE): the slots to fill, in slot code order. Empty when the server had nothing to plan. */
+            restockLines?: components["schemas"]["RestockLineResponse"][];
+            /** @description RESTOCK tickets with lines only, null otherwise. Plan against result, computed by the server. */
+            reconciliation?: components["schemas"]["RestockReconciliation"] | null;
+            /** @description LOW_STOCK alerts the server resolved automatically when this RESTOCK ticket was completed (empty before, and for other tickets). */
+            resolvedAlertIds?: string[];
+        };
+        /** @description One slot to fill during a restock. */
+        RestockLineResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            slotId: string;
+            slotCode: string;
+            /** Format: uuid */
+            productId: string;
+            productName: string;
+            /**
+             * Format: uuid
+             * @description Suggested batch (the loadable one of this product expiring first when planned); another batch of the same product may be used.
+             */
+            batchId?: string | null;
+            batchCode?: string | null;
+            /** Format: date-time */
+            batchExpiresAt?: string | null;
+            /** Format: int32 */
+            plannedQuantity: number;
+            /**
+             * Format: int32
+             * @description Bowls loaded through this ticket so far (all batches).
+             */
+            loadedQuantity: number;
+            /**
+             * Format: int32
+             * @description Damaged or expired bowls taken out of the slot through this ticket so far.
+             */
+            removedQuantity: number;
+        };
+        /** @description Totals over the lines. difference = loaded - planned (negative: fewer bowls than planned). noteRequired is true when any line's loadedQuantity differs from its plannedQuantity: POST /complete then needs a note. */
+        RestockReconciliation: {
+            /** Format: int32 */
+            plannedQuantity: number;
+            /** Format: int32 */
+            loadedQuantity: number;
+            /** Format: int32 */
+            removedQuantity: number;
+            /** Format: int32 */
+            difference: number;
+            noteRequired: boolean;
+        };
+        LoadRestockLineRequest: {
+            /**
+             * Format: uuid
+             * @description A batch of the line's product, not expired.
+             */
+            batchId: string;
+            /**
+             * Format: int32
+             * @description Bowls placed in the slot now (same bounds as LoadInventoryRequest).
+             */
+            quantity: number;
+        };
+        RemoveRestockItemRequest: {
+            /**
+             * Format: uuid
+             * @description A bowl of the line's slot, AVAILABLE or EXPIRED.
+             */
+            inventoryItemId: string;
+            reason: string;
         };
         CreateWorkTicketRequest: {
             /** @enum {string} */
@@ -308,6 +417,7 @@ export interface components {
     };
     parameters: {
         TicketId: string;
+        LineId: string;
     };
     requestBodies: never;
     headers: never;
@@ -571,6 +681,129 @@ export interface operations {
                      *       "timestamp": "2026-12-04T04:00:00Z"
                      *     }
                      */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            500: components["responses"]["ServerError"];
+        };
+    };
+    loadWorkTicketRestockLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["TicketId"];
+                lineId: components["parameters"]["LineId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoadRestockLineRequest"];
+            };
+        };
+        responses: {
+            /** @description The ticket with the updated line */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkTicketResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not the assignee, or lacks INVENTORY_WRITE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Ticket, line or batch not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Ticket not IN_PROGRESS, or one of the loading rules of POST /inventory/load */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "error": "Conflict",
+                     *       "message": "Slot capacity exceeded",
+                     *       "path": "/api/v1/work-tickets/61000000-0000-0000-0000-000000000002/restock-lines/63000000-0000-0000-0000-000000000001/load",
+                     *       "timestamp": "2026-12-04T04:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            500: components["responses"]["ServerError"];
+        };
+    };
+    removeWorkTicketRestockItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["TicketId"];
+                lineId: components["parameters"]["LineId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveRestockItemRequest"];
+            };
+        };
+        responses: {
+            /** @description The ticket with the updated line */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkTicketResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description The caller is not the assignee, or lacks INVENTORY_WRITE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Ticket, line or bowl not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Ticket not IN_PROGRESS, or the bowl is not AVAILABLE or EXPIRED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };

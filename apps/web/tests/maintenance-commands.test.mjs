@@ -13,7 +13,7 @@ import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { STATUS_CATALOG } from '../src/lib/status.ts'
 import { DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
 import {
-  COMMAND_INFO, MAINTENANCE_COMMAND_TYPES, MAINTENANCE_MISSING, NOT_MAINTENANCE_NEXT_ADMIN, NOT_MAINTENANCE_NEXT_STAFF, SLOT_COMMANDS,
+  COMMAND_INFO, MAINTENANCE_COMMAND_TYPES, MAINTENANCE_MISSING, MAINTENANCE_TARGET_GONE, NOT_MAINTENANCE_NEXT_ADMIN, NOT_MAINTENANCE_NEXT_STAFF, SLOT_COMMANDS,
   commandDetail, describeMaintenanceError, failureText, isMaintenanceMissing, machineLock, maintenanceAvailability, maintenanceCommandBody,
   needsRefresh, refillState, runningCommand, sendMaintenanceCommand, slotPlan, validateCommand,
 } from '../src/admin/maintenance-commands.ts'
@@ -142,9 +142,8 @@ test('errors in Vietnamese with the next step; 404/501 means the backend has no 
   assert.match(text(409, 'Slot is empty'), /Ngăn đã trống/)
   assert.match(text(409, 'Slot holds reserved or dispense-failed bowls'), /đang giữ cho đơn hoặc nhả hàng thất bại/)
   assert.match(text(409, 'Request conflicts with existing data'), /vừa thay đổi/)
-  assert.match(text(404, 'Slot not found in specified machine'), /Ngăn này không còn thuộc máy/)
-  assert.match(text(404, 'Machine not found'), /Không tìm thấy máy/)
-  assert.equal(text(404, 'No static resource found.'), MAINTENANCE_MISSING)
+  // The client makes every 404 message generic: on POST it means the machine or slot is gone (sending needs a loaded history).
+  assert.equal(text(404, 'Không tìm thấy dữ liệu yêu cầu.'), MAINTENANCE_TARGET_GONE)
   assert.equal(text(501, 'Mock chưa có handler'), MAINTENANCE_MISSING)
   assert.match(text(403, 'Access denied'), /không có quyền gửi lệnh bảo trì/)
   const invalid = describeMaintenanceError(new ApiError(400, 'Validation Failed', { reason: 'size must be between 0 and 500' }))
@@ -279,7 +278,8 @@ test('mock: 400 on unknown or misplaced fields, 404 for a slot of another machin
   await rejects(maintenanceCommandsApi.create(MACHINE_1, { type: 'RESET', inventoryItemId: id('70000000', 1) }), 400, error => !!error.fieldErrors.inventoryItemId)
   await rejects(maintenanceCommandsApi.create(MACHINE_1, { type: 'DISPENSE' }), 400, error => !!error.fieldErrors.type)
   await rejects(maintenanceCommandsApi.create(MACHINE_1, { type: 'RESET', reason: 'x'.repeat(501) }), 400, error => !!error.fieldErrors.reason)
-  await rejects(maintenanceCommandsApi.create(MACHINE_1, { type: 'EMPTY_COLUMN', slotId: M2_A1 }), 404, error => error.message === 'Slot not found in specified machine')
+  await rejects(maintenanceCommandsApi.create(MACHINE_1, { type: 'EMPTY_COLUMN', slotId: M2_A1 }), 404)
+  await rejects(sendMaintenanceCommand(MACHINE_1, 'EMPTY_COLUMN', { slotId: M2_A1 }), 404, error => error.message === MAINTENANCE_TARGET_GONE)
   await rejects(maintenanceCommandsApi.create(id('20000000', 99), { type: 'RESET' }), 404)
   // Seed history: DEV-MACHINE-02 has a timed-out RESET, DEV-MACHINE-03 none.
   assert.equal((await latest(MACHINE_2)).status, 'TIMEOUT')
@@ -288,5 +288,4 @@ test('mock: 400 on unknown or misplaced fields, 404 for a slot of another machin
   await rejects(maintenanceCommandsApi.create(MACHINE_1, { type: 'RESET' }), 403)
   state.search = '?scenario=missing:maintenance-commands'
   await assert.rejects(maintenanceCommandsApi.list(MACHINE_1, { page: 0, size: 1 }), error => isMaintenanceMissing(error))
-  await rejects(sendMaintenanceCommand(MACHINE_1, 'RESET'), 404, error => error.message === MAINTENANCE_MISSING)
 })

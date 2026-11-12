@@ -131,6 +131,8 @@ export interface MockControl {
   requests: (prefix?: string) => { method: string; path: string; at: number }[]
   /** Plays a verified payment webhook for the newest kiosk order showing a QR; returns its order code or null. */
   payKioskOrder: () => string | null
+  /** An administrator elsewhere changes a machine's status (id or code), e.g. to MAINTENANCE before a restock (FE 7.2). */
+  setMachineStatus: (machine: string, status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE') => void
 }
 export type MockFetcher = typeof fetch & { control: MockControl }
 /** Kept for the FM5 kiosk tests: `window.__freshvendMock`. */
@@ -220,6 +222,11 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     raiseAlert: input => raiseAlert(store, options.now(), input),
     stopHeartbeat: machine => setHeartbeat(store, options.now(), machine, false),
     resumeHeartbeat: machine => setHeartbeat(store, options.now(), machine, true),
+    setMachineStatus: (machine, status) => {
+      const target = store.machines.find(candidate => candidate.id === machine || candidate.code === machine)
+      if (!target) throw new Error(`Không có máy ${machine}`)
+      Object.assign(target, { status, updatedAt: new Date(options.now()).toISOString() })
+    },
   }
   const fetcher: typeof fetch = async (input, init) => {
     const url = requestUrl(input)

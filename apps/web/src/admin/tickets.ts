@@ -240,6 +240,7 @@ const CONFLICT_TEXT: Record<TicketAction, string> = {
   cancel: 'Phiếu này đã hoàn tất hoặc đã hủy trước đó nên không hủy được nữa.',
 }
 const NOT_ASSIGNEE = 'Phiếu này không còn giao cho bạn nên bạn không thực hiện bước này được. Hãy hỏi quản trị viên.'
+const RESTOCK_NOTE_REQUIRED = 'Số hộp đã nạp khác kế hoạch của phiếu: ghi lý do để quản trị viên đối chiếu (hoặc làm theo màn “Thực hiện nạp hàng”).'
 
 /**
  * The error a dialog shows for a failed action: a 409 (state changed meanwhile) and, for start/complete, a 403 (the
@@ -249,6 +250,10 @@ export function ticketActionError(error: unknown, action: TicketAction, screen: 
   if (!(error instanceof ApiError)) return error
   if (error.status === 409) return new ApiError(409, `${CONFLICT_TEXT[action]} ${RELOADED[screen]}; xem trạng thái mới nhất.`, error.fieldErrors)
   if (error.status === 403 && (action === 'start' || action === 'complete')) return new ApiError(403, NOT_ASSIGNEE, error.fieldErrors)
+  // FE 7.2: a RESTOCK ticket whose loaded bowls differ from its plan needs a note (rule of POST /complete).
+  if (error.status === 400 && action === 'complete' && /differs from planned/i.test(error.fieldErrors.note ?? '')) {
+    return new ApiError(400, error.message, { ...error.fieldErrors, note: RESTOCK_NOTE_REQUIRED })
+  }
   return error
 }
 /** Errors after which retrying the same dialog cannot help: close it and reload the screen. */

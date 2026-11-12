@@ -6,9 +6,11 @@ import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, Moc
 import type { components as AuthMe } from '../drafts/auth-me'
 import type { MockSchedule } from './seed.ts'
 import type { MockMaintenanceCommand } from './seed.ts'
+import { restockReconciliation } from './seed.ts'
 import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
+import { boxPrice, linePricing } from './pricing.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -124,6 +126,13 @@ const userView = ({ password: _password, ...user }: MockUser) => user
 const credentialView = ({ apiKey: _apiKey, machineId: _machineId, ...credential }: MockCredential) => credential
 const isExpired = (item: MockItem, now: number) => Date.parse(item.expiresAt) <= now
 const itemView = (item: MockItem, now: number) => ({ ...item, expired: isExpired(item, now) })
+/** Draft pricing-discount.yaml (FE 7.5): what a box sells at now; only boxes still on sale can be discounted. */
+function itemPricing(store: MockStore, item: MockItem, now: number) {
+  const listPrice = store.products.find(product => product.id === item.productId)?.price
+  if (typeof listPrice !== 'number') return {}
+  const { unitPrice, originalUnitPrice, discountPercent, discountReason } = item.status === 'AVAILABLE' || item.status === 'RESERVED' ? boxPrice(listPrice, item.expiresAt, now) : boxPrice(listPrice, undefined, now)
+  return { unitPrice, originalUnitPrice, discountPercent, discountReason }
+}
 const paymentRow = (ctx: HandlerContext, { qrCode: _qrCode, ...payment }: MockPayment) => {
   const order = ctx.store.orders.find(candidate => candidate.id === payment.orderId)
   return { ...payment, orderCode: order?.orderCode, machineCode: order?.machineCode }
@@ -246,8 +255,8 @@ function kioskOrderView(store: MockStore, order: MockOrder) {
   const payment = latestPayment(store, order.id)
   return {
     id: order.id, orderCode: order.orderCode, machineId: order.machineId, status: order.status,
-    items: order.items.map(({ productId, sku, productName, quantity, unitPrice, totalPrice }) => ({ productId, sku, productName, quantity, unitPrice, totalPrice })),
-    subtotal: order.subtotal, totalAmount: order.totalAmount, createdAt: order.createdAt, expiresAt: order.expiresAt, cancelledAt: order.cancelledAt ?? null,
+    items: order.items.map(({ productId, sku, productName, quantity, unitPrice, totalPrice, originalUnitPrice, discountAmount, discountPercent, discountReason }) => ({ productId, sku, productName, quantity, unitPrice, totalPrice, originalUnitPrice: originalUnitPrice ?? unitPrice, discountAmount: discountAmount ?? 0, discountPercent: discountPercent ?? null, discountReason: discountReason ?? null })),
+    subtotal: order.subtotal, totalAmount: order.totalAmount, discountAmount: order.discountAmount ?? 0, createdAt: order.createdAt, expiresAt: order.expiresAt, cancelledAt: order.cancelledAt ?? null,
     currentPayment: payment ? kioskPaymentView(payment) : null,
   }
 }
@@ -330,6 +339,47 @@ function assignTo(ticket: MockTicket, assignee: MockUser, by: MockUser, at: stri
 }
 function onlyAssignee(ctx: HandlerContext, ticket: MockTicket) {
   if (ticket.assigneeId !== ctx.user!.id) throw new MockHttpError(403, 'Only the assignee can do this')
+}
+/** FE 7.2: the line of a RESTOCK ticket the assignee (with INVENTORY_WRITE) works on, while IN_PROGRESS. */
+function findRestockLine(ctx: HandlerContext) {
+  const ticket = findTicket(ctx)
+  onlyAssignee(ctx, ticket)
+  if (!permissionsOfUser(ctx.store, ctx.user!).includes('INVENTORY_WRITE')) throw new MockHttpError(403, 'Access denied')
+  const line = ticket.restockLines?.find(candidate => candidate.id === decode(ctx.params.lineId))
+  if (!line) throw notFound('Restock line not found')
+  if (ticket.type !== 'RESTOCK' || ticket.status !== 'IN_PROGRESS') throw conflict('Ticket is not IN_PROGRESS')
+  return { ticket, line }
+}
+function touchRestock(ticket: MockTicket, now: number) {
+  ticket.reconciliation = restockReconciliation(ticket.restockLines ?? [])
+  ticket.updatedAt = iso(now)
+}
+/** Runs another mock endpoint with this request's caller (the restock lines reuse the inventory rules as they are). */
+function callRoute(ctx: HandlerContext, method: string, path: string, body: unknown): Reply {
+  for (const candidate of routes) {
+    const match = candidate.method === method ? candidate.pattern.exec(path) : null
+    if (match) return candidate.handle({ ...ctx, params: match.groups ?? {}, body })
+  }
+  throw new MockHttpError(501, `Mock chưa có handler cho ${method} ${path}`)
+}
+/**
+ * Rule of POST /complete for a RESTOCK ticket (draft): the LOW_STOCK alerts of its machine still open whose slot has a
+ * line loaded in full (or, without a slot, when every line is) are resolved by the system. Returns their ids.
+ */
+function resolveLowStock(store: MockStore, ticket: MockTicket, now: number): string[] {
+  const lines = ticket.restockLines ?? []
+  const full = lines.filter(line => line.loadedQuantity >= line.plannedQuantity)
+  const resolved: string[] = []
+  for (const alert of store.alerts) {
+    if (alert.type !== 'LOW_STOCK' || alert.machineId !== ticket.machineId || alert.status === 'RESOLVED') continue
+    const line = alert.slotId ? full.find(candidate => candidate.slotId === alert.slotId) : undefined
+    if (alert.slotId ? !line : full.length !== lines.length) continue
+    const at = iso(Math.max(now, Date.parse(alert.triggeredAt)))
+    const what = line ? `đã nạp ${line.loadedQuantity} hộp vào ngăn ${line.slotCode}.` : `đã nạp đủ ${lines.length} ngăn theo kế hoạch.`
+    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedById: null, resolvedByName: 'Hệ thống', resolutionNote: `Tự đóng khi hoàn tất phiếu nạp hàng “${ticket.title}”: ${what}`, updatedAt: at })
+    resolved.push(alert.id)
+  }
+  return resolved
 }
 
 // ---- maintenance schedules (draft of backend 4.5, api-contract/drafts/maintenance-schedules.yaml). English messages.
@@ -656,7 +706,7 @@ export const routes: Route[] = [
   route('GET', '/inventory', 'any', ctx => {
     const { query, now } = ctx
     const rows = ctx.store.items.filter(item => eq(query, 'machineId', item.machineId) && eq(query, 'slotId', item.slotId) && eq(query, 'batchId', item.batchId) && eq(query, 'status', item.status) && flag(query, 'expired', isExpired(item, now)))
-    return ok(paginate(rows.map(item => itemView(item, now)), query, { sorts: { id: row => row.id, status: row => row.status, loadedAt: row => row.loadedAt, createdAt: row => row.createdAt, updatedAt: row => row.updatedAt }, defaultSort: 'createdAt,desc' }))
+    return ok(paginate(rows.map(item => ({ ...itemView(item, now), ...itemPricing(ctx.store, item, now) })), query, { sorts: { id: row => row.id, status: row => row.status, loadedAt: row => row.loadedAt, createdAt: row => row.createdAt, updatedAt: row => row.updatedAt }, defaultSort: 'createdAt,desc' }))
   }),
   route('GET', '/inventory/transactions', 'any', ctx => {
     const { query } = ctx
@@ -709,13 +759,15 @@ export const routes: Route[] = [
     const { query } = ctx
     const rows = ctx.store.orders.filter(order => eq(query, 'status', order.status) && eq(query, 'machineId', order.machineId) && within(query, 'createdFrom', 'createdTo', order.createdAt) && contains(query.get('search'), order.orderCode)).map(order => ({
       id: order.id, orderCode: order.orderCode, machineId: order.machineId, machineCode: order.machineCode, status: order.status,
-      itemCount: order.items.length, totalQuantity: order.items.reduce((sum, line) => sum + line.quantity, 0), totalAmount: order.totalAmount,
+      itemCount: order.items.length, totalQuantity: order.items.reduce((sum, line) => sum + line.quantity, 0), totalAmount: order.totalAmount, discountAmount: order.discountAmount ?? 0,
       createdAt: order.createdAt, expiresAt: order.expiresAt, cancelledAt: order.cancelledAt,
     }))
     return ok(paginate(rows, query, { sorts: { createdAt: row => row.createdAt, totalAmount: row => row.totalAmount, orderCode: row => row.orderCode }, defaultSort: 'createdAt,desc' }))
   }),
   route('GET', '/orders/:id', 'any', ctx => {
-    const { live: _live, ...order } = byId(ctx.store.orders, ctx.params.id, 'Không tìm thấy đơn hàng.')
+    const { live: _live, ...stored } = byId(ctx.store.orders, ctx.params.id, 'Không tìm thấy đơn hàng.')
+    // Draft pricing-discount.yaml (FE 7.5): 0 / equal prices when the line had no discount.
+    const order = { ...stored, discountAmount: stored.discountAmount ?? 0, items: stored.items.map(line => ({ ...line, originalUnitPrice: line.originalUnitPrice ?? line.unitPrice, discountAmount: line.discountAmount ?? 0, discountPercent: line.discountPercent ?? null, discountReason: line.discountReason ?? null })) }
     const payments = ctx.store.payments.filter(payment => payment.orderId === order.id).map(({ id, provider, status, amount, createdAt, paidAt, expiredAt }) => ({ id, provider, status, amount, createdAt, paidAt, expiredAt }))
     return ok({ ...order, payments })
   }),
@@ -837,8 +889,46 @@ export const routes: Route[] = [
     const ticket = findTicket(ctx)
     onlyAssignee(ctx, ticket)
     if (ticket.status !== 'IN_PROGRESS') throw conflict('Ticket is not IN_PROGRESS')
+    // FE 7.2 (restock lines): a note is mandatory when the result differs from the plan.
+    const lines = ticket.type === 'RESTOCK' ? ticket.restockLines ?? [] : []
+    if (lines.some(line => line.loadedQuantity !== line.plannedQuantity) && !note) {
+      throw new MockHttpError(400, 'Dữ liệu gửi lên chưa hợp lệ.', { note: 'must not be blank when loaded differs from planned' })
+    }
     const at = iso(ctx.now)
     Object.assign(ticket, { status: 'COMPLETED', completedAt: at, completedById: ctx.user!.id, completedByName: ctx.user!.fullName, completionNote: note, updatedAt: at })
+    if (lines.length) ticket.resolvedAlertIds = resolveLowStock(ctx.store, ticket, ctx.now)
+    return ok({ ...ticket })
+  }),
+  // FE 7.2: loading and removing through the lines of a RESTOCK ticket, with the rules of /inventory/load and /remove.
+  route('POST', '/work-tickets/:id/restock-lines/:lineId/load', { draftPermission: 'TICKET_READ' }, ctx => {
+    const form = new Form(ctx.body, ['batchId', 'quantity'])
+    const batchId = form.text('batchId'), quantity = form.integer('quantity', 1, 1000)
+    form.done()
+    const { ticket, line } = findRestockLine(ctx)
+    const batch = ctx.store.batches.find(candidate => candidate.id === batchId)
+    if (!batch) throw notFound('Không tìm thấy lô hàng.')
+    if (batch.productId !== line.productId) throw conflict('Batch product does not match the restock line')
+    const reply = callRoute(ctx, 'POST', '/inventory/load', { batchId, slotId: line.slotId, quantity })
+    const operationId = (reply.data as { operationId: string }).operationId
+    for (const row of ctx.store.transactions) if (row.referenceId === operationId) row.referenceId = ticket.id
+    line.loadedQuantity += quantity
+    touchRestock(ticket, ctx.now)
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/restock-lines/:lineId/remove', { draftPermission: 'TICKET_READ' }, ctx => {
+    const form = new Form(ctx.body, ['inventoryItemId', 'reason'])
+    const itemId = form.text('inventoryItemId')
+    form.text('reason', 500)
+    form.done()
+    const { ticket, line } = findRestockLine(ctx)
+    const item = ctx.store.items.find(candidate => candidate.id === itemId)
+    if (!item) throw notFound('Không tìm thấy hộp hàng.')
+    if (item.slotId !== line.slotId) throw new MockHttpError(400, 'Dữ liệu gửi lên chưa hợp lệ.', { inventoryItemId: 'Item is not in the slot of this restock line' })
+    callRoute(ctx, 'POST', `/inventory/${item.id}/remove`, { reason: (ctx.body as { reason: unknown }).reason })
+    const row = ctx.store.transactions.findLast(candidate => candidate.inventoryItemId === item.id && candidate.type === 'REMOVE')
+    if (row) row.referenceId = ticket.id
+    line.removedQuantity += 1
+    touchRestock(ticket, ctx.now)
     return ok({ ...ticket })
   }),
   route('POST', '/work-tickets/:id/cancel', { draftPermission: 'TICKET_WRITE' }, ctx => {
@@ -978,7 +1068,10 @@ export const routes: Route[] = [
       const product = store.products.find(candidate => candidate.id === productId)!
       const slotIds = new Set(heads.filter(({ head }) => head.productId === productId).map(({ slot }) => slot.id))
       const availableQuantity = store.items.filter(item => item.productId === productId && slotIds.has(item.slotId) && item.status === 'AVAILABLE' && Date.parse(item.expiresAt) > holdUntil).length
-      return { productId, sku: product.sku, name: product.name, description: product.description ?? undefined, price: product.price, imageUrl: product.imageUrl ?? undefined, availableQuantity }
+      // Draft pricing-discount.yaml (FE 7.5): price of the head POST /kiosk/orders would pick now (FEFO between heads).
+      const next = heads.filter(({ head }) => head.productId === productId).map(({ head }) => head).sort((a, b) => a.expiresAt.localeCompare(b.expiresAt) || a.loadedAt.localeCompare(b.loadedAt))[0]
+      const pricing = boxPrice(product.price, next?.expiresAt, now)
+      return { productId, sku: product.sku, name: product.name, description: product.description ?? undefined, price: pricing.unitPrice, originalUnitPrice: pricing.originalUnitPrice, discountPercent: pricing.discountPercent, discountReason: pricing.discountReason, imageUrl: product.imageUrl ?? undefined, availableQuantity }
     })
     return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: true, products })
   }),
@@ -998,11 +1091,13 @@ export const routes: Route[] = [
     const { head, slot } = choice
     const batch = store.batches.find(candidate => candidate.id === head.batchId)
     const createdAt = iso(now)
+    // Price snapshot of the chosen box (draft pricing-discount.yaml, FE 7.5): near-expiry boxes sell at 50% off.
+    const line = linePricing(boxPrice(product.price, head.expiresAt, now), 1)
     setItemStatus(head, 'RESERVED', now)
     const order: MockOrder = {
       id: newId(), orderCode: `ORD-${createdAt.slice(0, 10).replaceAll('-', '')}-${randomCode(8)}`, machineId: machine.id, machineCode: machine.code, status: 'PENDING_PAYMENT',
-      subtotal: product.price, totalAmount: product.price, createdAt, expiresAt: iso(now + RESERVATION_MS), live: true,
-      items: [{ id: newId(), productId, sku: product.sku, productName: product.name, quantity: 1, unitPrice: product.price, totalPrice: product.price, allocations: [{ id: newId(), inventoryItemId: head.id, slotCode: slot.slotCode, batchCode: head.batchCode, batchExpiresAt: batch?.expiresAt, status: 'RESERVED' }] }],
+      subtotal: line.totalPrice, totalAmount: line.totalPrice, discountAmount: line.discountAmount, createdAt, expiresAt: iso(now + RESERVATION_MS), live: true,
+      items: [{ id: newId(), productId, sku: product.sku, productName: product.name, quantity: 1, ...line, allocations: [{ id: newId(), inventoryItemId: head.id, slotCode: slot.slotCode, batchCode: head.batchCode, batchExpiresAt: batch?.expiresAt, status: 'RESERVED' }] }],
     }
     store.orders.push(order)
     history(store, head, 'RESERVE', now, { referenceId: order.id, statusBefore: 'AVAILABLE', statusAfter: 'RESERVED' })
