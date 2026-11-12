@@ -92,6 +92,12 @@ export interface TicketViewer {
   canWrite: boolean
 }
 export type TicketAction = 'assign' | 'start' | 'complete' | 'cancel'
+/**
+ * A next step offered for a ticket: one of the actions run through a dialog, or `restock`, the link to the step-by-step
+ * restock screen (FE 7.2) that replaces Bắt đầu / Hoàn tất for a RESTOCK ticket with lines (it starts the ticket, opens
+ * and closes the refill door and reconciles before completing; the plain dialogs would skip all of that).
+ */
+export type TicketNextAction = TicketAction | 'restock'
 
 export function isMine(ticket: Pick<WorkTicket, 'assigneeId'>, viewer: TicketViewer): boolean {
   return !!viewer.userId && ticket.assigneeId === viewer.userId
@@ -99,25 +105,32 @@ export function isMine(ticket: Pick<WorkTicket, 'assigneeId'>, viewer: TicketVie
 export function isClosed(ticket: Pick<WorkTicket, 'status'>): boolean {
   return ticket.status === 'COMPLETED' || ticket.status === 'CANCELLED'
 }
+/** RESTOCK ticket that has lines: the restock screen applies (others use the plain "Hoàn tất" of the detail page). */
+export function hasRestockLines(ticket: Partial<Pick<WorkTicket, 'type' | 'restockLines'>>): boolean {
+  return ticket.type === 'RESTOCK' && (ticket.restockLines?.length ?? 0) > 0
+}
 
 /**
  * The buttons a viewer gets for a ticket: only the valid next step(s) of the lifecycle for this role, progress first,
  * cancel last. OPEN/ASSIGNED → assign (admin); ASSIGNED → start and IN_PROGRESS → complete (assignee only, admins too
- * only when the ticket is theirs); anything not closed → cancel (admin). Never a delete.
+ * only when the ticket is theirs); anything not closed → cancel (admin). For a RESTOCK ticket with lines the assignee's
+ * start / complete become one `restock` link to the restock screen. Never a delete.
  */
-export function nextActions(ticket: Pick<WorkTicket, 'status' | 'assigneeId'>, viewer: TicketViewer): TicketAction[] {
-  const actions: TicketAction[] = []
+export function nextActions(ticket: Pick<WorkTicket, 'status' | 'assigneeId'> & Partial<Pick<WorkTicket, 'type' | 'restockLines'>>, viewer: TicketViewer): TicketNextAction[] {
+  const actions: TicketNextAction[] = []
   const mine = isMine(ticket, viewer)
+  const restock = hasRestockLines(ticket)
   if (viewer.canWrite && (ticket.status === 'OPEN' || ticket.status === 'ASSIGNED')) actions.push('assign')
-  if (mine && ticket.status === 'ASSIGNED') actions.push('start')
-  if (mine && ticket.status === 'IN_PROGRESS') actions.push('complete')
+  if (mine && (ticket.status === 'ASSIGNED' || ticket.status === 'IN_PROGRESS')) {
+    actions.push(restock ? 'restock' : ticket.status === 'ASSIGNED' ? 'start' : 'complete')
+  }
   if (viewer.canWrite && !isClosed(ticket)) actions.push('cancel')
   return actions
 }
 
-export function actionLabel(action: TicketAction, ticket: Pick<WorkTicket, 'status'>): string {
+export function actionLabel(action: TicketNextAction, ticket: Pick<WorkTicket, 'status'>): string {
   if (action === 'assign') return ticket.status === 'OPEN' ? 'Phân công' : 'Đổi người phụ trách'
-  return { start: 'Bắt đầu', complete: 'Hoàn tất', cancel: 'Hủy phiếu' }[action]
+  return { start: 'Bắt đầu', complete: 'Hoàn tất', cancel: 'Hủy phiếu', restock: 'Thực hiện nạp hàng' }[action]
 }
 
 const person = (name: string | null | undefined, id: string | null | undefined) =>
@@ -132,6 +145,10 @@ export function assigneeText(ticket: Pick<WorkTicket, 'assigneeId' | 'assigneeNa
 export function nextStepText(ticket: WorkTicket, viewer: TicketViewer): string {
   const mine = isMine(ticket, viewer)
   const who = person(ticket.assigneeName, ticket.assigneeId)
+  if (mine && hasRestockLines(ticket)) {
+    if (ticket.status === 'ASSIGNED') return 'Khi tới máy, mở “Thực hiện nạp hàng” và làm theo từng bước: bắt đầu phiếu, mở cửa nạp, rút hộp hỏng, nạp theo dòng, đóng cửa nạp, đối chiếu.'
+    if (ticket.status === 'IN_PROGRESS') return 'Tiếp tục ở “Thực hiện nạp hàng”: phiếu chỉ hoàn tất được sau khi đóng cửa nạp và đối chiếu số hộp.'
+  }
   switch (ticket.status) {
     case 'OPEN': return viewer.canWrite ? 'Chọn nhân viên phụ trách để giao phiếu.' : 'Phiếu chưa có người phụ trách; quản trị viên sẽ phân công.'
     case 'ASSIGNED': return mine ? 'Khi tới máy, bấm “Bắt đầu” để báo bạn đang làm phiếu này.' : `Chờ ${who} bắt đầu tại máy.`

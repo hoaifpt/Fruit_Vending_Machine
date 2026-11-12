@@ -127,6 +127,8 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
   }
   const summaryPending = !!slot && !summary.data
   const refill = refillState(newest?.content)
+  // Without the history the door state is unknown: never claim that no command succeeded.
+  const newestError = page === 0 ? history.error : head.error
 
   return <section aria-labelledby="maintenance-title" className="grid gap-5">
     <div>
@@ -144,7 +146,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
       <h3 id="maintenance-machine-title" className="text-sm font-semibold">Lệnh cho cả máy</h3>
       <p className="mt-1! mb-3! text-[13px] text-muted-foreground">
         Cửa nạp: {refill.state === 'open' ? <strong className="font-medium text-foreground">đang mở</strong> : refill.state === 'closed' ? 'đã đóng' : 'chưa rõ'}
-        {refill.at ? ` (theo lệnh thành công lúc ${formatDateTime(refill.at)})` : ' (chưa có lệnh mở/đóng nào thành công)'}.
+        {refill.at ? ` (theo lệnh thành công lúc ${formatDateTime(refill.at)})` : newest ? ' (chưa có lệnh mở/đóng nào thành công)' : newestError ? ' (không tải được lịch sử lệnh)' : ' (đang đọc lịch sử lệnh…)'}.
       </p>
       <ul className="grid gap-3" aria-label="Lệnh cho cả máy">
         {MACHINE_COMMANDS.map(type => <CommandRow key={type} type={type} lock={lock} lockId={lockId} sending={sending === type} busy={!!sending} onRun={() => run(type)} />)}

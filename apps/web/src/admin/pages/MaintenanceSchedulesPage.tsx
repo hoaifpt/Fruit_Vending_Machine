@@ -170,7 +170,9 @@ function ScheduleSheet({ schedule, close, saved }: { schedule?: MaintenanceSched
   const [now] = useState(() => Date.now())
   const today = vietnamDate(now)
   const machines = useMachineOptions()
-  const staff = useStaffOptions(true)
+  const { can } = useSession()
+  const canUsers = can('USER_READ')
+  const staff = useStaffOptions(canUsers)
   const form = useForm<ScheduleValues>(schedule ? scheduleValues(schedule) : newScheduleValues(now))
   const { values, errors } = form
   const paused = editing && !schedule.active
@@ -221,7 +223,7 @@ function ScheduleSheet({ schedule, close, saved }: { schedule?: MaintenanceSched
           : <p className="text-muted-foreground">Nhập chu kỳ và ngày tính chu kỳ để xem ngày đến hạn kế tiếp.</p>}
     </div>
     <FormField label="Người phụ trách (không bắt buộc)" error={errors.assigneeId} className="mb-4"
-      hint={staff.error ? 'Không tải được danh sách nhân viên; có thể chọn sau.' : staff.loading ? 'Đang tải danh sách nhân viên…' : 'Phiếu bảo trì mở từ lịch sẽ giao cho người này. Để trống thì quản trị viên phân công sau.'}>
+      hint={!canUsers ? 'Tài khoản này không có quyền xem danh sách nhân viên nên không chọn được người phụ trách; quản trị viên phân công sau.' : staff.error ? 'Không tải được danh sách nhân viên; có thể chọn sau.' : staff.loading ? 'Đang tải danh sách nhân viên…' : 'Phiếu bảo trì mở từ lịch sẽ giao cho người này. Để trống thì quản trị viên phân công sau.'}>
       <NativeSelect value={values.assigneeId} className="max-sm:h-11 max-sm:text-base" onChange={event => form.set('assigneeId')(event.target.value)}>
         <option value="">Chưa chọn</option>
         {schedule?.assigneeId && !staff.options.some(option => option.value === schedule.assigneeId) && <option value={schedule.assigneeId}>{schedule.assigneeName || 'Người phụ trách hiện tại'}</option>}

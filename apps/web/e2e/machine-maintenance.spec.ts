@@ -177,6 +177,9 @@ test.describe('Tiêu chí xong (Quản trị viên)', () => {
     await expect(page.getByText(/^Chưa có chức năng lệnh bảo trì: máy chủ chưa hỗ trợ phần này/)).toBeVisible()
     await page.goto(`${DEV_01}?tab=maintenance&scenario=403:maintenance-commands`)
     await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toBeVisible()
+    // Without the history the door state is unknown, not "no command succeeded".
+    await expect(page.getByText('Cửa nạp: chưa rõ (không tải được lịch sử lệnh).')).toBeVisible()
+    await expect(page.getByText(/chưa có lệnh mở\/đóng nào thành công/)).toHaveCount(0)
     await page.goto(`${DEV_01}?tab=maintenance&scenario=none`)
   })
 })

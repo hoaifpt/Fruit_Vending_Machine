@@ -52,7 +52,8 @@ export type MockReading = TelemetryDraft['schemas']['SensorReadingResponse']
 export type MockMachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
 /** Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml): a job at one machine, people named by fullName. */
 export type MockTicket = TicketsDraft['schemas']['WorkTicketResponse']
-type RestockLine = TicketsDraft['schemas']['RestockLineResponse']
+export type MockRestockLine = TicketsDraft['schemas']['RestockLineResponse']
+type RestockLine = MockRestockLine
 /** Totals of the restock lines (draft RestockReconciliation, FE 7.2): difference = loaded - planned. */
 export function restockReconciliation(lines: readonly RestockLine[]): TicketsDraft['schemas']['RestockReconciliation'] | null {
   if (!lines.length) return null
@@ -357,7 +358,7 @@ export function createStore(nowMs: number): MockStore {
 
   return {
     users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, tickets, schedules, webhookLogs,
-    heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, slots, users }),
+    heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, users }),
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
 }
@@ -577,7 +578,7 @@ export function seedMaintenanceCode(n: number): string {
  *   a RESET sent just before the machine went quiet that timed out (the FAULT is still there).
  * - DEV-MACHINE-03: none.
  */
-function seedMaintenanceCommands(nowMs: number, { machines, users }: { machines: S['MachineResponse'][]; slots: S['MachineSlotResponse'][]; users: MockUser[] }): MockMaintenanceCommand[] {
+function seedMaintenanceCommands(nowMs: number, { machines, users }: { machines: S['MachineResponse'][]; users: MockUser[] }): MockMaintenanceCommand[] {
   const iso = (offset: number) => new Date(nowMs + offset).toISOString()
   const MINUTE = 60_000
   const [m1, m2] = machines

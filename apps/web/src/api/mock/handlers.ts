@@ -2,10 +2,11 @@
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
 import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
-import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockTicket, MockUser } from './seed.ts'
+import type {
+  MockAlert, MockCredential, MockHeartbeat, MockItem, MockMaintenanceCommand, MockOrder, MockPayment, MockRestockLine, MockRole, MockSchedule, MockStore,
+  MockTicket, MockUser,
+} from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
-import type { MockSchedule } from './seed.ts'
-import type { MockMaintenanceCommand } from './seed.ts'
 import { restockReconciliation } from './seed.ts'
 import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
@@ -36,8 +37,9 @@ export interface KioskSimulation {
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
  * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_WRITE of
- * drafts/alerts.yaml, TICKET_READ/TICKET_WRITE of drafts/work-tickets.yaml); checked against the web's proposed seed
- * DRAFT_ROLE_PERMISSIONS.
+ * drafts/alerts.yaml, TICKET_READ/TICKET_WRITE of drafts/work-tickets.yaml, MAINTENANCE_SCHEDULE_READ/_WRITE of
+ * drafts/maintenance-schedules.yaml, MACHINE_MAINTENANCE of drafts/machine-maintenance.yaml); checked against the web's
+ * proposed seed DRAFT_ROLE_PERMISSIONS.
  */
 export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
 export interface Route { method: string; pattern: RegExp; policy: Policy; handle: (ctx: HandlerContext) => Reply }
@@ -361,6 +363,38 @@ function callRoute(ctx: HandlerContext, method: string, path: string, body: unkn
     if (match) return candidate.handle({ ...ctx, params: match.groups ?? {}, body })
   }
   throw new MockHttpError(501, `Mock chưa có handler cho ${method} ${path}`)
+}
+/** Same as LOW_STOCK_THRESHOLD of src/admin/overview.ts: an ACTIVE slot with at most this many sellable bowls is low. */
+export const MOCK_LOW_STOCK_THRESHOLD = 1
+/**
+ * Lines the server writes when a RESTOCK ticket is created (proposal of drafts/work-tickets.yaml): one per ACTIVE slot of
+ * the machine below the low-stock threshold (sellable = AVAILABLE and not expired, at most MOCK_LOW_STOCK_THRESHOLD),
+ * planned = the slot's free places, product = the one of the newest bowl ever loaded in the slot, batch = the loadable
+ * batch of that product (not expired, bowls left) expiring first, or null when there is none. Slot code order. A slot
+ * without a free place, or that never held a bowl (no product to plan), gets no line.
+ */
+export function planRestockLines(store: MockStore, machineId: string, now: number): MockRestockLine[] {
+  const lines: MockRestockLine[] = []
+  const slots = store.slots.filter(slot => slot.machineId === machineId && slot.status === 'ACTIVE').sort((a, b) => a.slotCode.localeCompare(b.slotCode))
+  for (const slot of slots) {
+    const present = presentItems(store, slot.id)
+    const sellable = present.filter(item => item.status === 'AVAILABLE' && !isExpired(item, now)).length
+    const free = slot.capacity - present.length
+    if (sellable > MOCK_LOW_STOCK_THRESHOLD || free <= 0) continue
+    const newest = store.items.filter(item => item.slotId === slot.id).sort((a, b) => b.loadedAt.localeCompare(a.loadedAt))[0]
+    const product = newest && store.products.find(candidate => candidate.id === newest.productId)
+    if (!product?.id) continue
+    const batch = store.batches
+      .filter(candidate => candidate.productId === product.id && Date.parse(candidate.expiresAt) > now
+        && store.items.filter(item => item.batchId === candidate.id).length < candidate.quantity)
+      .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt))[0]
+    lines.push({
+      id: newId(), slotId: slot.id, slotCode: slot.slotCode, productId: product.id, productName: product.name ?? '',
+      batchId: batch?.id ?? null, batchCode: batch?.batchCode ?? null, batchExpiresAt: batch?.expiresAt ?? null,
+      plannedQuantity: free, loadedQuantity: 0, removedQuantity: 0,
+    })
+  }
+  return lines
 }
 /**
  * Rule of POST /complete for a RESTOCK ticket (draft): the LOW_STOCK alerts of its machine still open whose slot has a
@@ -857,6 +891,10 @@ export const routes: Route[] = [
       assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
       completedAt: null, completedById: null, completedByName: null, completionNote: null,
       cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: at, updatedAt: at,
+    }
+    if (type === 'RESTOCK') {
+      const restockLines = planRestockLines(ctx.store, ticket.machineId, ctx.now)
+      Object.assign(ticket, { restockLines, reconciliation: restockReconciliation(restockLines) })
     }
     if (assignee) assignTo(ticket, assignee, ctx.user!, at)
     ctx.store.tickets.push(ticket)

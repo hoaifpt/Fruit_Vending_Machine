@@ -4,7 +4,7 @@
 // 403, missing endpoint, error, screenshots + axe at 1440/768/390 light and dark.
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { auditScreen, loginAs, THEMES, useThemeChoice } from './support.ts'
+import { ACCOUNTS, auditScreen, loginAs, THEMES, typeLogin, useThemeChoice } from './support.ts'
 
 const id = (prefix: string, n: number) => `${prefix}-0000-0000-0000-${String(n).padStart(12, '0')}`
 const T = (n: number) => id('61000000', n)
@@ -30,8 +30,22 @@ async function switchTo(page: Page, role: 'ADMIN' | 'STAFF') {
   await page.evaluate(() => sessionStorage.clear())
   await loginAs(page, role)
 }
+/**
+ * Signs out through the account menu and in again as `role` without loading the page, so the in-memory mock keeps what
+ * this test changed (a ticket just created by the admin is still there for the staff account).
+ */
+async function switchInPlace(page: Page, role: 'ADMIN' | 'STAFF') {
+  await page.getByRole('button', { name: /^Tài khoản: / }).click()
+  await page.getByRole('menuitem', { name: 'Đăng xuất' }).click()
+  await expect(page).toHaveURL(/\/login/)
+  await typeLogin(page, ACCOUNTS[role].email, ACCOUNTS[role].password)
+  await page.waitForURL(url => url.pathname.startsWith('/admin/'))
+  await expect(page.locator('#admin-main')).toBeVisible()
+}
+const openTicketsFromNav = (page: Page) => page.getByRole('navigation', { name: 'Quản trị' }).getByRole('link', { name: 'Phiếu công việc', exact: true }).click()
 /** Every action button a row or screen can show (the names start with the visible label). */
 const ACTIONS = /^(Phân công|Đổi người phụ trách|Bắt đầu|Hoàn tất|Hủy phiếu)/
+const BACK_TO_LIST = '← Danh sách phiếu công việc'
 
 test('Tiêu chí xong: STAFF chỉ thấy phiếu của mình; mỗi phiếu chỉ có đúng bước tiếp theo; bắt đầu rồi hoàn tất ghi tên và giờ', async ({ page }) => {
   await loginAs(page, 'STAFF')
@@ -46,9 +60,10 @@ test('Tiêu chí xong: STAFF chỉ thấy phiếu của mình; mỗi phiếu ch�
   await expect(table(page).getByRole('columnheader', { name: 'Người phụ trách' })).toHaveCount(0)
   await expect(page.getByLabel('Người phụ trách')).toHaveCount(0)
 
-  // ASSIGNED → only "Bắt đầu"; IN_PROGRESS → only "Hoàn tất"; COMPLETED → nothing.
-  await expect(row(page, T(2)).getByRole('button')).toHaveCount(1)
-  await expect(row(page, T(2)).getByRole('button', { name: `Bắt đầu: ${TITLES[2]}` })).toBeVisible()
+  // RESTOCK with lines → only the link to the restock screen (no plain Bắt đầu, which would skip the door and the
+  // reconciliation); IN_PROGRESS without lines → only "Hoàn tất"; COMPLETED → nothing.
+  await expect(row(page, T(2)).getByRole('button')).toHaveCount(0)
+  await expect(row(page, T(2)).getByRole('link', { name: `Thực hiện nạp hàng: ${TITLES[2]}` })).toHaveAttribute('href', `/admin/tickets/${T(2)}/restock`)
   await expect(row(page, T(3)).getByRole('button')).toHaveCount(1)
   await expect(row(page, T(3)).getByRole('button', { name: `Hoàn tất: ${TITLES[3]}` })).toBeVisible()
   await expect(row(page, T(3))).toContainText('Quá hạn')
@@ -61,32 +76,71 @@ test('Tiêu chí xong: STAFF chỉ thấy phiếu của mình; mỗi phiếu ch�
   await expect(page.getByText(/phiếu không giao cho bạn/)).toBeVisible()
   await page.getByRole('link', { name: 'Về danh sách phiếu' }).click()
 
-  await row(page, T(2)).getByRole('button', { name: /^Bắt đầu/ }).click()
-  const confirm = page.getByRole('alertdialog', { name: 'Bắt đầu làm phiếu này?' })
-  await expect(confirm).toContainText('ghi tên bạn và thời điểm bắt đầu')
-  await confirm.getByRole('button', { name: 'Bắt đầu' }).click()
-  await expect(confirm).toBeHidden()
-  await expect(row(page, T(2))).toContainText('Đang thực hiện')
-  await expect(row(page, T(2)).getByRole('button')).toHaveCount(1)
-  await expect(row(page, T(2)).getByRole('button', { name: /^Hoàn tất/ })).toBeFocused()
-
-  await row(page, T(2)).getByRole('link', { name: TITLES[2] }).click()
+  // The restock ticket's detail: the header leads to the restock screen, not to a plain Bắt đầu.
+  await row(page, T(2)).getByRole('link', { name: TITLES[2], exact: true }).click()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(TITLES[2])
+  await expect(progress(page)).toContainText('Bước tiếp theo: Khi tới máy, mở “Thực hiện nạp hàng”')
+  await expect(page.getByRole('button', { name: ACTIONS })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Thực hiện nạp hàng', exact: true })).toHaveAttribute('href', `/admin/tickets/${T(2)}/restock`)
+  await page.getByRole('link', { name: BACK_TO_LIST }).click()
+
+  // Plain completion of a ticket without restock lines.
+  await row(page, T(3)).getByRole('link', { name: TITLES[3], exact: true }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(TITLES[3])
   await expect(progress(page)).toContainText(new RegExp(`Bắt đầu · ${TIME}`))
   await expect(progress(page)).toContainText('Bước tiếp theo: Làm xong việc tại máy thì bấm “Hoàn tất”')
   await expect(info(page)).toContainText('Nhân viên vận hành (bạn)')
   await expect(page.getByRole('button', { name: ACTIONS })).toHaveCount(1)
   await page.getByRole('button', { name: 'Hoàn tất' }).click()
   const sheet = page.getByRole('dialog', { name: 'Hoàn tất phiếu' })
-  await sheet.getByLabel('Ghi chú (không bắt buộc)').fill('Đã nạp 6 hộp vào ngăn A2.')
+  await sheet.getByLabel('Ghi chú (không bắt buộc)').fill('Đã rút 2 hộp hết hạn ở ngăn B1.')
   await sheet.getByRole('button', { name: 'Hoàn tất' }).click()
   await expect(sheet).toBeHidden()
   await expect(info(page)).toContainText('Hoàn tất')
   await expect(progress(page)).toContainText(new RegExp(`Hoàn tất · ${TIME}`))
-  await expect(progress(page)).toContainText('Đã nạp 6 hộp vào ngăn A2.')
+  await expect(progress(page)).toContainText('Đã rút 2 hộp hết hạn ở ngăn B1.')
   await expect(progress(page)).toContainText('Phiếu đã hoàn tất, không còn bước nào.')
   await expect(page.getByRole('button', { name: ACTIONS })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
+})
+
+test('Phiếu không có dòng nạp: STAFF bấm Bắt đầu (focus sang Hoàn tất) rồi Hoàn tất ghi tên và giờ', async ({ page }) => {
+  // The seed's ASSIGNED ticket of the staff account is a restock with lines (restock screen), so the admin first gives
+  // it a maintenance ticket; switching accounts in place keeps that ticket in the in-memory mock.
+  await loginAs(page, 'ADMIN')
+  await openTicketsFromNav(page)
+  await page.getByRole('button', { name: 'Tạo phiếu' }).click()
+  const create = page.getByRole('dialog', { name: 'Tạo phiếu công việc' })
+  await create.getByLabel('Loại phiếu').selectOption('MAINTENANCE')
+  await create.getByRole('combobox', { name: 'Máy', exact: true }).selectOption(MACHINE_1)
+  await create.getByLabel('Tiêu đề').fill('Lau kính cửa máy')
+  await create.getByLabel('Người phụ trách (không bắt buộc)').selectOption({ label: 'Nhân viên vận hành (staff@freshvend.test)' })
+  await create.getByRole('button', { name: 'Tạo phiếu' }).click()
+  await expect(create).toBeHidden()
+
+  await switchInPlace(page, 'STAFF')
+  await openTicketsFromNav(page)
+  const mine = rows(page).filter({ hasText: 'Lau kính cửa máy' })
+  await expect(mine.getByRole('button')).toHaveCount(1)
+  await mine.getByRole('button', { name: 'Bắt đầu: Lau kính cửa máy' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Bắt đầu làm phiếu này?' })
+  await expect(confirm).toContainText('ghi tên bạn và thời điểm bắt đầu')
+  await confirm.getByRole('button', { name: 'Bắt đầu' }).click()
+  await expect(confirm).toBeHidden()
+  await expect(mine).toContainText('Đang thực hiện')
+  await expect(mine.getByRole('button')).toHaveCount(1)
+  await expect(mine.getByRole('button', { name: /^Hoàn tất/ })).toBeFocused()
+
+  await mine.getByRole('link', { name: 'Lau kính cửa máy', exact: true }).click()
+  await expect(progress(page)).toContainText(new RegExp(`Bắt đầu · ${TIME}`))
+  await page.getByRole('button', { name: 'Hoàn tất' }).click()
+  const sheet = page.getByRole('dialog', { name: 'Hoàn tất phiếu' })
+  await sheet.getByLabel('Ghi chú (không bắt buộc)').fill('Đã lau kính.')
+  await sheet.getByRole('button', { name: 'Hoàn tất' }).click()
+  await expect(sheet).toBeHidden()
+  await expect(progress(page)).toContainText(new RegExp(`Hoàn tất · ${TIME}`))
+  await expect(progress(page)).toContainText('Phiếu đã hoàn tất, không còn bước nào.')
+  await expect(page.getByRole('button', { name: ACTIONS })).toHaveCount(0)
 })
 
 test('ADMIN thấy mọi phiếu; chỉ có Phân công/Hủy theo trạng thái (không Bắt đầu thay nhân viên); phân công rồi hủy kèm lý do', async ({ page }) => {
@@ -178,6 +232,23 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
   await expect(page).toHaveURL(/\/admin\/tickets\/[0-9a-f-]{36}$/)
   await expect(info(page)).toContainText('Đã phân công')
   await expect(info(page).getByRole('link', { name: 'Mở cảnh báo gốc' })).toHaveAttribute('href', `/admin/alerts/${LOW_STOCK_ALERT}`)
+  // The server planned the restock lines (mock of the draft rule: B1 is the slot of DEV-MACHINE-01 below the threshold).
+  await expect(progress(page)).toContainText('Phiếu nạp 1 ngăn (B1), tổng 8 hộp theo kế hoạch.')
+  await expect(progress(page).getByRole('link', { name: 'Xem tiến độ nạp hàng' })).toBeVisible()
+  const ticketUrl = new URL(page.url()).pathname
+
+  // The staff it was given to opens the restock screen and sees the line.
+  await switchInPlace(page, 'STAFF')
+  await openTicketsFromNav(page)
+  const fromAlertRow = rows(page).filter({ has: page.locator(`a[href="${ticketUrl}"]`) })
+  await expect(fromAlertRow.getByRole('button')).toHaveCount(0)
+  await fromAlertRow.getByRole('link', { name: /^Thực hiện nạp hàng: / }).click()
+  await expect(page).toHaveURL(`${ticketUrl}/restock`)
+  await expect(page.locator('#restock-step-title')).toHaveText('Bước 1/5: Mở cửa nạp')
+  await expect(page.getByText(/chưa có dòng nạp hàng/)).toHaveCount(0)
+  await page.getByRole('link', { name: 'Xem chi tiết phiếu' }).click()
+  await expect(progress(page)).toContainText('Phiếu nạp 1 ngăn (B1), tổng 8 hộp theo kế hoạch.')
+  await expect(progress(page).getByRole('link', { name: 'Thực hiện nạp hàng từng bước' })).toHaveAttribute('href', `${ticketUrl}/restock`)
 
   await switchTo(page, 'STAFF')
   await page.goto(`/admin/alerts/${LOW_STOCK_ALERT}`)
@@ -188,13 +259,13 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
 test('409 đóng hộp thoại và giải thích; 400 đánh dấu ô; 403, chưa có API (404) và lỗi máy chủ đều có lời giải thích', async ({ page }) => {
   await loginAs(page, 'STAFF')
   await page.goto('/admin/tickets?scenario=409')
-  await row(page, T(2)).getByRole('button', { name: /^Bắt đầu/ }).click()
-  const confirm = page.getByRole('alertdialog', { name: 'Bắt đầu làm phiếu này?' })
-  await confirm.getByRole('button', { name: 'Bắt đầu' }).click()
-  await expect(confirm).toBeHidden()
-  await expect(page.getByText(/không còn ở trạng thái chờ bắt đầu.*Danh sách đã được tải lại/)).toBeVisible()
-  await expect(page.getByText('Đã bắt đầu phiếu')).toHaveCount(0)
-  await expect(row(page, T(2)).getByRole('button', { name: /^Bắt đầu/ })).toBeFocused()
+  await row(page, T(3)).getByRole('button', { name: /^Hoàn tất/ }).click()
+  const conflictSheet = page.getByRole('dialog', { name: 'Hoàn tất phiếu' })
+  await conflictSheet.getByRole('button', { name: 'Hoàn tất' }).click()
+  await expect(conflictSheet).toBeHidden()
+  await expect(page.getByText(/không còn ở trạng thái đang thực hiện.*Danh sách đã được tải lại/)).toBeVisible()
+  await expect(page.getByText('Đã hoàn tất phiếu')).toHaveCount(0)
+  await expect(row(page, T(3)).getByRole('button', { name: /^Hoàn tất/ })).toBeFocused()
 
   await page.goto(`/admin/tickets/${T(3)}?scenario=400`)
   await page.getByRole('button', { name: 'Hoàn tất' }).click()

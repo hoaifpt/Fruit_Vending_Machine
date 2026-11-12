@@ -13,7 +13,7 @@ import type { LoadRoom } from './inventory-load.ts'
 import { LOAD_MAX_PER_REQUEST, QUANTITY_INVALID, describeLoadError, describeRemoveFailure, loadMax, parseBoxCount, quantityProblem, reasonProblem } from './inventory-load.ts'
 import { compareDispenseOrder, isExpiredBox, isPresent } from './inventory-map.ts'
 import { runningCommand } from './maintenance-commands.ts'
-import { TICKETS_PATH } from './tickets.ts'
+import { TICKETS_PATH, hasRestockLines } from './tickets.ts'
 
 const count = new Intl.NumberFormat('vi-VN')
 const n = (value: number) => count.format(value)
@@ -35,10 +35,8 @@ export function restockPath(ticketId: string): string {
   return `${TICKETS_PATH}/${encodeURIComponent(ticketId)}/restock`
 }
 
-/** RESTOCK ticket that has lines: the restock screen applies (others use the plain "Hoàn tất" of the detail page). */
-export function hasRestockLines(ticket: Pick<WorkTicket, 'type' | 'restockLines'>): boolean {
-  return ticket.type === 'RESTOCK' && (ticket.restockLines?.length ?? 0) > 0
-}
+/** RESTOCK ticket that has lines (rule kept in tickets.ts, which decides the next-step buttons too). */
+export { hasRestockLines }
 
 export type RefillSince = { state: 'none' } | { state: 'open'; at: string } | { state: 'closed'; at: string }
 
@@ -90,6 +88,17 @@ export function restockStep(input: StepInput): RestockStep {
   if (!loaded && (input.expiredLeft === undefined || input.expiredLeft > 0)) return 'remove'
   if (input.lines.length && input.lines.every(line => line.loadedQuantity >= line.plannedQuantity)) return 'close'
   return 'load'
+}
+
+/**
+ * Whether the step can be decided from the machine's maintenance command history. Only an IN_PROGRESS ticket needs it
+ * (before, the step is always "open"; after, "done"). `failed`: the history could not be read (401, 403, 500, network;
+ * a 404 means the backend has no maintenance commands, handled by hand as `missing`), so the screen shows the error
+ * with a retry instead of guessing a step (it would claim the door was never opened).
+ */
+export function commandHistoryState(input: { status: WorkTicket['status']; loaded: boolean; error: unknown; missing: boolean }): 'ready' | 'loading' | 'failed' {
+  if (input.status !== 'IN_PROGRESS' || input.loaded || input.missing) return 'ready'
+  return input.error ? 'failed' : 'loading'
 }
 
 /**

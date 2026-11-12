@@ -17,6 +17,7 @@ const COMMAND_WAIT = 20_000
 test.use({ viewport: { width: 390, height: 844 } })
 
 const stepHeading = (page: Page) => page.locator('#restock-step-title')
+const activeTag = (page: Page) => page.evaluate(() => document.activeElement?.tagName ?? 'BODY')
 const slotCard = (page: Page, name: RegExp | string) => page.getByRole('region', { name })
 async function setMachineStatus(page: Page, status: 'ACTIVE' | 'MAINTENANCE') {
   await page.evaluate(value => (window as unknown as { __fvMock: { setMachineStatus: (machine: string, status: string) => void } }).__fvMock.setMachineStatus('DEV-MACHINE-01', value), status)
@@ -28,13 +29,17 @@ test('Tiêu chí xong: STAFF làm hết phiếu RESTOCK trên điện thoại; c
   await page.goto(`/admin/tickets/${T2}`)
   await page.getByRole('link', { name: 'Thực hiện nạp hàng từng bước' }).click()
   await expect(page).toHaveURL(RESTOCK)
-  await expect(page.getByRole('navigation', { name: 'Tiến độ nạp hàng' }).locator('[aria-current="step"]')).toContainText('Mở cửa nạp')
+  await expect(page.getByRole('group', { name: 'Tiến độ nạp hàng' }).locator('[aria-current="step"]')).toContainText('Mở cửa nạp')
   await expect(stepHeading(page)).toHaveText('Bước 1/5: Mở cửa nạp')
 
   // (1) Start, then the door: locked while the machine is ACTIVE, with the reason and who can fix it.
-  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
+  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).focus()
+  await page.keyboard.press('Enter')
   await expect(page.getByText(/^Đã bắt đầu lúc \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}\.$/)).toBeVisible()
   const lock = page.locator('[data-lock="status"]')
+  // The start button is gone: focus moves to what comes next (here the reason the door cannot be opened yet).
+  await expect(lock).toBeFocused()
+  expect(await activeTag(page)).not.toBe('BODY')
   await expect(lock).toContainText('Lệnh bảo trì chỉ gửi được khi máy ở trạng thái Bảo trì')
   await expect(lock).toContainText('Nhờ Quản trị viên chuyển máy sang Bảo trì')
   // The locked button stays focusable (aria-disabled); using it moves focus to the reason.
@@ -46,8 +51,13 @@ test('Tiêu chí xong: STAFF làm hết phiếu RESTOCK trên điện thoại; c
   await setMachineStatus(page, 'MAINTENANCE')
   await page.getByRole('button', { name: 'Kiểm tra lại trạng thái máy' }).click()
   await expect(lock).toHaveCount(0)
-  await page.getByRole('button', { name: 'Mở cửa nạp hàng' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'Đang chờ máy: “Mở cửa nạp hàng”' })).toBeVisible()
+  await page.getByRole('button', { name: 'Mở cửa nạp hàng' }).focus()
+  await page.keyboard.press('Enter')
+  const waiting = page.getByRole('status').filter({ hasText: 'Đang chờ máy: “Mở cửa nạp hàng”' })
+  await expect(waiting).toBeVisible()
+  // The button became "Đang chờ máy…": focus follows it instead of falling back to the page.
+  await expect(waiting).toBeFocused()
+  expect(await activeTag(page)).not.toBe('BODY')
 
   // (2) The door is open: B1 has two expired bowls to take out.
   await expect(stepHeading(page)).toHaveText('Bước 2/5: Rút hộp hỏng', { timeout: COMMAND_WAIT })
@@ -104,6 +114,9 @@ test('Tiêu chí xong: STAFF làm hết phiếu RESTOCK trên điện thoại; c
   const result = page.getByRole('status').filter({ hasText: 'Đã tự đóng 1 cảnh báo Ngăn sắp hết hàng của máy này.' })
   await expect(result).toBeVisible()
   await expect(page.getByText('Ghi chú: Lô trộn chỉ còn 5 hộp mang theo.')).toBeVisible()
+  // The machine is still in MAINTENANCE: a reminder to switch it back (a STAFF account asks an administrator).
+  await expect(page.locator('p').filter({ hasText: 'Máy DEV-MACHINE-01 vẫn ở trạng thái Bảo trì' })).toContainText('nhờ Quản trị viên đổi trạng thái máy')
+  await expect(page.getByRole('link', { name: /Mở thẻ Tổng quan của máy/ })).toHaveCount(0)
   await auditScreen(page, testInfo, 'restock-done', 'light', () => expect(result).toBeVisible(), PHONE)
   await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
   await result.getByRole('link', { name: 'Ngăn sắp hết hàng · ngăn A2 (đã đóng)' }).click()
@@ -136,6 +149,20 @@ test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, không tìm thấy, c
   await page.goto(`${RESTOCK}?scenario=missing:maintenance-commands`)
   await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
   await expect(stepHeading(page)).toHaveText('Bước 2/5: Rút hộp hỏng')
+
+  // The machine's command history cannot be read (500, 403): no guessed step, an explanation and a retry.
+  await page.goto(`${RESTOCK}?scenario=error500:maintenance-commands`)
+  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
+  const unknown = page.getByRole('heading', { name: 'Chưa biết phiếu đang ở bước nào' })
+  await expect(unknown).toBeVisible()
+  await expect(unknown).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible()
+  await expect(page.getByText('Đang đọc lịch sử lệnh của máy để biết đang ở bước nào…')).toHaveCount(0)
+  await expect(page.getByText(/chưa có lệnh mở\/đóng nào thành công|Cửa nạp chưa được mở cho phiếu này/)).toHaveCount(0)
+  await page.goto(`${RESTOCK}?scenario=403:maintenance-commands`)
+  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
+  await expect(page.getByRole('heading', { name: 'Chưa biết phiếu đang ở bước nào' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toBeVisible()
 
   await page.goto(`${RESTOCK}?scenario=401:tickets`)
   await expect(page).toHaveURL(/\/login\?next=/)

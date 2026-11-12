@@ -16,13 +16,13 @@ import { Check, Lock as LockIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '../../api/client.ts'
 import { alertsApi, batchesApi, inventoryApi, machinesApi, maintenanceCommandsApi, slotsApi, ticketsApi } from '../../api/resources.ts'
-import type { Batch, InventoryItem, InventorySummary, MaintenanceCommand, MaintenanceCommandType, RestockLine, WorkTicket } from '../../api/resources.ts'
+import type { Batch, InventoryItem, InventorySummary, Machine, MaintenanceCommand, MaintenanceCommandType, RestockLine, WorkTicket } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
 import { FormField } from '../../components/ui/form-field.tsx'
 import { Input, NativeSelect, Textarea } from '../../components/ui/input.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime } from '../../lib/format.ts'
-import { alertPath, alertTypeLabel } from '../alerts.ts'
+import { alertPath, alertTypeLabel, machinePath } from '../alerts.ts'
 import { countLoaded } from '../batches.ts'
 import type { LoadedCount } from '../batches.ts'
 import { CONNECTION_POLL_MS } from '../connection.ts'
@@ -36,7 +36,7 @@ import {
 } from '../maintenance-commands.ts'
 import type { Lock } from '../maintenance-commands.ts'
 import {
-  NOTE_MAX, REMOVE_REASONS, RESTOCK_STEPS, STEP_LABELS, bowls, defaultQuantity, describeCompleteError, describeLineLoadError,
+  NOTE_MAX, REMOVE_REASONS, RESTOCK_STEPS, STEP_LABELS, bowls, commandHistoryState, defaultQuantity, describeCompleteError, differenceText, describeLineLoadError,
   describeLineRemoveError, hasRestockLines, leftToLoad, lineLoadBody, lineQuantityProblem, lineRemoveBody, reconcile, refillSince, refillText,
   removalPlan, resolvedText, restockCompleteBody, restockStep, shownStep, stepProgress, stepState,
 } from '../restock.ts'
@@ -58,6 +58,8 @@ const LINK = 'font-medium text-primary underline underline-offset-4 focus-visibl
 const MACHINE_POLL_MS = 10_000
 /** Read in event handlers only (render stays pure). */
 const clock = () => Date.now()
+/** Focus fell back to the page (the focused control was removed from the screen). */
+const lostFocus = () => !document.activeElement || document.activeElement === document.body
 
 class TicketUnavailable extends Error {
   readonly kind: 'missing' | 'not-found'
@@ -155,11 +157,16 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
   const [batchNow] = useState(() => Date.now())
   const batches = useApi(signal => loadBatches(lines, batchNow, signal), `restock-batches|${ticket.id}|${lineKey}`)
 
-  // A command that just ended may have changed the door or the bowls: read everything again.
+  // A command that just ended may have changed the door or the bowls: read everything again. Its "Đang chờ máy…" block
+  // (which had focus after sending) is gone: when focus fell back to the page, put it on the step heading.
   const lastRunning = useRef<string | undefined>(undefined)
+  const headingRef = useRef<HTMLHeadingElement>(null)
   const { reload: reloadCommands } = commands, { reload: reloadStock } = stock, { reload: reloadMachine } = machine
   useEffect(() => {
-    if (lastRunning.current && !running) { reloadCommands(); reloadStock(); reloadMachine() }
+    if (lastRunning.current && !running) {
+      reloadCommands(); reloadStock(); reloadMachine()
+      if (lostFocus()) headingRef.current?.focus()
+    }
     lastRunning.current = running?.id
   }, [running, reloadCommands, reloadStock, reloadMachine])
 
@@ -168,7 +175,7 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
   const derived = restockStep({ status: ticket.status, startedAt: ticket.startedAt, lines, commands: commands.data?.content, expiredLeft, doorByHand: missing })
   const [chosen, setChosen] = useState<RestockStepKey | null>(null)
   const step = shownStep(derived, chosen, missing)
-  const waiting = ticket.status === 'IN_PROGRESS' && !commands.data && !missing
+  const history = commandHistoryState({ status: ticket.status, loaded: !!commands.data, error: commands.error, missing })
   const refill = refillSince(commands.data?.content, ticket.startedAt)
 
   const lock = machineLock({
@@ -180,12 +187,25 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
   const [failureOf, setFailureOf] = useState<{ step: RestockStep; text: string } | null>(null)
 
   // Focus the step heading when the step changes (not on first render), so keyboard and screen reader users follow.
-  const headingRef = useRef<HTMLHeadingElement>(null)
   const previous = useRef<RestockStep | null>(null)
   useEffect(() => {
     if (previous.current && previous.current !== step) headingRef.current?.focus()
     previous.current = step
   }, [step])
+  // The button just used is replaced (Bắt đầu → "Đã bắt đầu…", Mở cửa → "Đang chờ máy…"): move focus to what replaced
+  // it, so keyboard and screen reader users do not land back at the top of the page.
+  const waitRef = useRef<HTMLParagraphElement>(null)
+  const openRef = useRef<HTMLButtonElement>(null)
+  const focusNext = useRef<'started' | 'sent' | null>(null)
+  useEffect(() => {
+    if (focusNext.current === 'started' && ticket.status !== 'ASSIGNED') {
+      focusNext.current = null
+      ;(lockRef.current ?? openRef.current ?? headingRef.current)?.focus()
+    } else if (focusNext.current === 'sent' && waitRef.current) {
+      focusNext.current = null
+      waitRef.current.focus()
+    }
+  })
   // A failure belongs to the step it happened on: moving to another step hides it.
   const failure = failureOf?.step === step ? failureOf.text : ''
   const setFailure = (text: string) => setFailureOf(text ? { step, text } : null)
@@ -193,7 +213,11 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
   async function start() {
     if (busy) return
     setBusy('start'); setFailure('')
-    try { await ticketsApi.start(ticket.id); toast.success('Đã bắt đầu phiếu', { description: `Máy ${ticket.machineCode}` }); reloadTicket() } catch (error) {
+    try {
+      await ticketsApi.start(ticket.id)
+      toast.success('Đã bắt đầu phiếu', { description: `Máy ${ticket.machineCode}` })
+      focusNext.current = 'started'; reloadTicket()
+    } catch (error) {
       setFailure(errorMessage(ticketActionError(error, 'start', 'detail')))
       if (error instanceof ApiError && (error.status === 409 || error.status === 403)) reloadTicket()
     } finally { setBusy(null) }
@@ -204,7 +228,7 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
     setBusy(type); setFailure('')
     try {
       const command = await sendMaintenanceCommand(machineId, type, { reason: `Phiếu nạp hàng: ${ticket.title}` })
-      setSent(command); reloadCommands()
+      focusNext.current = 'sent'; setSent(command); reloadCommands()
       toast.success(`Đã gửi lệnh “${COMMAND_INFO[type].label}”`, { description: `Máy ${ticket.machineCode}. Chờ máy báo xong.` })
     } catch (error) {
       setFailure(errorMessage(error))
@@ -222,26 +246,30 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
       {readOnly && <p role="status" className={NOTE_BOX}>
         Phiếu này giao cho <strong className="font-medium">{assigneeText(ticket)}</strong>; chỉ người được giao mới thực hiện các bước. Bạn đang xem tiến độ.
       </p>}
-      {waiting
-        ? <Loading label="Đang đọc lịch sử lệnh của máy để biết đang ở bước nào…" rows={3} />
+      {history === 'loading' ? <Loading label="Đang đọc lịch sử lệnh của máy để biết đang ở bước nào…" rows={3} />
+        : history === 'failed' ? <section className={PANEL} aria-labelledby="restock-history-error">
+          <h2 id="restock-history-error" ref={headingRef} tabIndex={-1} className="mb-1 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Chưa biết phiếu đang ở bước nào</h2>
+          <p className="text-[13px] text-muted-foreground">Không đọc được lịch sử lệnh của máy (mở, đóng cửa nạp) nên chưa xác định được cửa nạp đang mở hay đã đóng. Số hộp đã nạp, đã rút trong phiếu vẫn được giữ trên máy chủ.</p>
+          <ErrorState error={commands.error} retry={reloadCommands} />
+        </section>
         : <section className={PANEL} aria-labelledby="restock-step-title">
           <h2 id="restock-step-title" ref={headingRef} tabIndex={-1} className="mb-1 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
             {step === 'done' ? (ticket.status === 'CANCELLED' ? 'Phiếu đã hủy' : 'Phiếu đã hoàn tất') : `Bước ${progress.index}/${progress.total}: ${progress.label}`}
           </h2>
           {failure && <p role="alert" className={cn(ERROR_BOX, 'my-3')}>{failure}</p>}
           {step === 'open' && <OpenStep ticket={ticket} viewer={viewer} readOnly={readOnly} lock={lock} lockRef={lockRef} reloadMachine={reloadMachine}
-            running={running} commands={commands.data?.content} busy={busy} start={start} open={() => send('OPEN_REFILL')} />}
+            running={running} commands={commands.data?.content} busy={busy} start={start} open={() => send('OPEN_REFILL')} openRef={openRef} waitRef={waitRef} />}
           {step === 'remove' && <RemoveStep ticket={ticket} lines={lines} stock={stock} plans={plans} readOnly={readOnly}
             changed={() => { setChosen('remove'); reloadTicket(); reloadStock() }} next={() => go('load')} />}
           {step === 'load' && <LoadStep ticket={ticket} lines={lines} stock={stock} batches={batches} readOnly={readOnly}
             changed={() => { setChosen('load'); reloadTicket() }} refreshFigures={() => { reloadStock(); batches.reload() }}
             back={() => go('remove')} next={() => go('close')} />}
           {step === 'close' && <CloseStep ticket={ticket} lines={lines} readOnly={readOnly} lock={lock} lockRef={lockRef} reloadMachine={reloadMachine}
-            running={running} commands={commands.data?.content} busy={busy} missing={missing} refill={refillText(refill)}
+            running={running} commands={commands.data?.content} busy={busy} missing={missing} refill={refillText(refill)} waitRef={waitRef}
             close={() => send('CLOSE_REFILL')} back={() => go('load')} byHand={() => go('reconcile')} />}
           {step === 'reconcile' && <ReconcileStep ticket={ticket} lines={lines} readOnly={readOnly} missing={missing} busy={busy}
             reopen={() => { setChosen(null); void send('OPEN_REFILL') }} back={missing ? () => go('load') : undefined} completed={reloadTicket} />}
-          {step === 'done' && <DoneStep ticket={ticket} lines={lines} />}
+          {step === 'done' && <DoneStep ticket={ticket} lines={lines} machine={machine.data} />}
         </section>}
       <p className="text-[13px] text-muted-foreground">
         Mỗi bước được lưu trên máy chủ: tải lại trang hoặc mở lại phiếu trên máy khác sẽ tiếp tục đúng bước. <Link to={back.to} className={LINK}>Xem chi tiết phiếu</Link>
@@ -253,7 +281,7 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
 /** Five numbered steps with the current one marked (aria-current) and named in words, plus a bar. */
 function StepBar({ step, progress }: { step: RestockStep; progress: { index: number; total: number; label: string } }) {
   const percent = step === 'done' ? 100 : Math.round(((progress.index - 1) / progress.total) * 100)
-  return <nav aria-label="Tiến độ nạp hàng" className="grid gap-2">
+  return <div role="group" aria-label="Tiến độ nạp hàng" className="grid gap-2">
     <div role="progressbar" aria-label="Tiến độ nạp hàng" aria-valuemin={0} aria-valuemax={progress.total} aria-valuenow={step === 'done' ? progress.total : progress.index - 1}
       aria-valuetext={step === 'done' ? 'Đã xong cả 5 bước' : `Bước ${progress.index}/${progress.total}: ${progress.label}`}
       className="h-2 overflow-hidden rounded-full bg-muted">
@@ -271,7 +299,7 @@ function StepBar({ step, progress }: { step: RestockStep; progress: { index: num
         </li>
       })}
     </ol>
-  </nav>
+  </div>
 }
 
 function LockNotice({ lock, lockRef, reloadMachine }: { lock: Lock; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void }) {
@@ -296,8 +324,8 @@ function failedAttempt(commands: readonly MaintenanceCommand[] | undefined, type
   return last && (last.status === 'FAILED' || last.status === 'TIMEOUT') ? last : undefined
 }
 
-function CommandWait({ command }: { command: MaintenanceCommand }) {
-  return <p role="status" className={cn(NOTE_BOX, 'my-3')}>
+function CommandWait({ command, waitRef }: { command: MaintenanceCommand; waitRef?: Ref<HTMLParagraphElement> }) {
+  return <p ref={waitRef} tabIndex={-1} role="status" className={cn(NOTE_BOX, 'my-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring')}>
     <strong className="font-medium">Đang chờ máy: “{COMMAND_INFO[command.type].label}”</strong> ({commandStatusLabel(command.status).toLowerCase()}). {commandStatusText(command.status)} Trang tự cập nhật mỗi 2 giây.
   </p>
 }
@@ -307,9 +335,10 @@ function CommandFailure({ command }: { command: MaintenanceCommand }) {
   </p>
 }
 
-function OpenStep({ ticket, viewer, readOnly, lock, lockRef, reloadMachine, running, commands, busy, start, open }: {
+function OpenStep({ ticket, viewer, readOnly, lock, lockRef, reloadMachine, running, commands, busy, start, open, openRef, waitRef }: {
   ticket: WorkTicket; viewer: TicketViewer; readOnly: boolean; lock: Lock | null; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void
   running?: MaintenanceCommand; commands?: readonly MaintenanceCommand[]; busy: string | null; start: () => void; open: () => void
+  openRef: Ref<HTMLButtonElement>; waitRef: Ref<HTMLParagraphElement>
 }) {
   const started = ticket.status === 'IN_PROGRESS'
   const failed = started && !running ? failedAttempt(commands, 'OPEN_REFILL', ticket.startedAt) : undefined
@@ -329,10 +358,10 @@ function OpenStep({ ticket, viewer, readOnly, lock, lockRef, reloadMachine, runn
       <li className={cn('grid gap-2 rounded-lg border px-3.5 py-3', !started && 'text-muted-foreground')}>
         <span className="font-medium">2. Mở cửa nạp</span>
         <span className="text-[13px] text-muted-foreground">{COMMAND_INFO.OPEN_REFILL.does.replace(' Tồn kho không đổi; nhập số hộp đã nạp ở màn Tồn kho.', '')}</span>
-        {started && running && <CommandWait command={running} />}
+        {started && running && <CommandWait command={running} waitRef={waitRef} />}
         {started && failed && <CommandFailure command={failed} />}
         {started && !running && !readOnly && lock && <LockNotice lock={lock} lockRef={lockRef} reloadMachine={reloadMachine} />}
-        {started && !running && !readOnly && <Button type="button" className={cn(BIG, lock && 'border-dashed')} variant={lock ? 'outline' : 'default'}
+        {started && !running && !readOnly && <Button ref={openRef} type="button" className={cn(BIG, lock && 'border-dashed')} variant={lock ? 'outline' : 'default'}
           aria-disabled={lock || busy ? true : undefined} onClick={open}>
           {lock && <LockIcon aria-hidden="true" />}{busy === 'OPEN_REFILL' ? 'Đang gửi…' : failed ? 'Gửi lại lệnh mở cửa nạp' : 'Mở cửa nạp hàng'}
         </Button>}
@@ -516,9 +545,9 @@ function LineLoadCard({ ticket, line, stock, batches, readOnly, changed, refresh
   </section>
 }
 
-function CloseStep({ ticket, lines, readOnly, lock, lockRef, reloadMachine, running, commands, busy, missing, refill, close, back, byHand }: {
+function CloseStep({ ticket, lines, readOnly, lock, lockRef, reloadMachine, running, commands, busy, missing, refill, waitRef, close, back, byHand }: {
   ticket: WorkTicket; lines: readonly RestockLine[]; readOnly: boolean; lock: Lock | null; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void
-  running?: MaintenanceCommand; commands?: readonly MaintenanceCommand[]; busy: string | null; missing: boolean; refill: string
+  running?: MaintenanceCommand; commands?: readonly MaintenanceCommand[]; busy: string | null; missing: boolean; refill: string; waitRef: Ref<HTMLParagraphElement>
   close: () => void; back: () => void; byHand: () => void
 }) {
   const loaded = lines.reduce((total, line) => total + line.loadedQuantity, 0)
@@ -532,7 +561,7 @@ function CloseStep({ ticket, lines, readOnly, lock, lockRef, reloadMachine, runn
       </>
       : <>
         <p className="text-[13px]">{refill}</p>
-        {running && <CommandWait command={running} />}
+        {running && <CommandWait command={running} waitRef={waitRef} />}
         {failed && <CommandFailure command={failed} />}
         {!running && !readOnly && lock && <LockNotice lock={lock} lockRef={lockRef} reloadMachine={reloadMachine} />}
         {!running && !readOnly && <Button type="button" className={cn(BIG, lock && 'border-dashed')} variant={lock ? 'outline' : 'default'} aria-disabled={lock || busy ? true : undefined} onClick={close}>
@@ -572,7 +601,7 @@ function ReconcileTable({ lines }: { lines: readonly RestockLine[] }) {
     <p className="text-[13px] text-muted-foreground">Đã rút {bowls(result.removed)} hết hạn hoặc hỏng trong phiếu này.</p>
   </div>
 }
-const reconcileTotal = (difference: number) => difference === 0 ? 'Khớp' : difference < 0 ? `Thiếu ${-difference}` : `Thừa ${difference}`
+const reconcileTotal = (difference: number) => difference === 0 ? 'Khớp' : differenceText(difference)
 
 function ReconcileStep({ ticket, lines, readOnly, missing, busy, reopen, back, completed }: {
   ticket: WorkTicket; lines: readonly RestockLine[]; readOnly: boolean; missing: boolean; busy: string | null
@@ -621,8 +650,10 @@ function ReconcileStep({ ticket, lines, readOnly, missing, busy, reopen, back, c
   </div>
 }
 
-function DoneStep({ ticket, lines }: { ticket: WorkTicket; lines: readonly RestockLine[] }) {
+function DoneStep({ ticket, lines, machine }: { ticket: WorkTicket; lines: readonly RestockLine[]; machine?: Machine }) {
   const { can } = useSession()
+  const inMaintenance = machine?.status === 'MAINTENANCE'
+  const overview = can('MACHINE_WRITE') ? machinePath(ticket.machineId) : ''
   const ids = ticket.resolvedAlertIds ?? []
   const canAlerts = can('ALERT_READ')
   const alerts = useApi(signal => (canAlerts && ids.length ? Promise.all(ids.map(alertId => alertsApi.get(alertId, signal))) : Promise.resolve([])), `restock-alerts|${ids.join(',')}|${canAlerts}`)
@@ -640,13 +671,23 @@ function DoneStep({ ticket, lines }: { ticket: WorkTicket; lines: readonly Resto
       {ids.length > 0 && <ul className="grid gap-1">
         {ids.map((alertId, index) => {
           const alert = alerts.data?.find(candidate => candidate.id === alertId)
-          const label = alert ? `${alertTypeLabel(alert.type)}${alert.slotCode ? ` · ngăn ${alert.slotCode}` : ''} (đã đóng)` : `Cảnh báo đã đóng ${index + 1}`
+          const label = alert ? `${alertTypeLabel(alert.type)}${alert.slotCode ? ` · ngăn ${alert.slotCode}` : ''} (đã đóng)` : alertFallback(!!alerts.error, index, ids.length)
           return <li key={alertId}>{canAlerts ? <Link to={alertPath(alertId)} className={cn(LINK, 'inline-flex min-h-11 items-center')}>{label}</Link> : label}</li>
         })}
       </ul>}
     </div>
+    {inMaintenance && <div className={cn(NOTE_BOX, 'grid gap-2')}>
+      <p><strong className="font-medium">Máy {ticket.machineCode} vẫn ở trạng thái Bảo trì</strong> nên kiosk chưa bán hàng. Xong việc tại máy thì chuyển máy về Hoạt động{overview ? ' ở thẻ Tổng quan của máy.' : ': nhờ Quản trị viên đổi trạng thái máy.'}</p>
+      {overview && <p><Button asChild variant="outline" className={BIG}><Link to={overview}>Mở thẻ Tổng quan của máy {ticket.machineCode}</Link></Button></p>}
+    </div>}
     <p><Button asChild variant="outline" className={BIG}><Link to="/admin/tickets">Về danh sách phiếu</Link></Button></p>
   </div>
+}
+
+/** Name of a closed alert link while its details load (or when they cannot be read): stable and meaningful. */
+function alertFallback(failed: boolean, index: number, total: number): string {
+  const which = total > 1 ? ` ${index + 1}/${total}` : ''
+  return failed ? `Cảnh báo đã đóng${which}: mở để xem chi tiết` : `Cảnh báo đã đóng${which} (đang tải tên…)`
 }
 
 export default TicketRestockPage

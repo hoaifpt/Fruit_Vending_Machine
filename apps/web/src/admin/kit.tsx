@@ -57,7 +57,7 @@ export function Link({ to, children, className, label }: { to: string; children:
 export function PageHead({ title, subtitle, actions, back }: { title: string; subtitle?: string; actions?: ReactNode; back?: { to: string; label: string } }) {
   return <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
     <div>
-      {back && <p className="mb-1.5! text-[13px]"><Link to={back.to} className="text-muted-foreground no-underline transition-colors hover:text-foreground">← {back.label}</Link></p>}
+      {back && <p className="mb-1.5! text-[13px]"><Link to={back.to} className="text-muted-foreground no-underline transition-colors hover:text-foreground max-sm:inline-flex max-sm:min-h-11 max-sm:items-center">← {back.label}</Link></p>}
       <h1>{title}</h1>
       {subtitle && <p className="mt-1! max-w-[70ch] text-muted-foreground">{subtitle}</p>}
     </div>

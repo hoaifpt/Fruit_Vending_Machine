@@ -6,14 +6,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ApiError, configureClient } from '../src/api/client.ts'
-import { alertsApi, authApi, inventoryApi, maintenanceCommandsApi, ticketsApi } from '../src/api/resources.ts'
+import { alertsApi, authApi, batchesApi, inventoryApi, maintenanceCommandsApi, ticketsApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
+import { MOCK_LOW_STOCK_THRESHOLD } from '../src/api/mock/handlers.ts'
+import { LOW_STOCK_THRESHOLD } from '../src/admin/overview.ts'
 import { ValidationError } from '../src/admin/form-error.ts'
 import { breadcrumbFor, matchRoute } from '../src/admin/routes.ts'
 import { ticketActionError } from '../src/admin/tickets.ts'
 import {
-  NOTE_REQUIRED, RESTOCK_STALE, defaultQuantity, describeCompleteError, describeLineLoadError, describeLineRemoveError, differenceText,
+  NOTE_REQUIRED, RESTOCK_STALE, commandHistoryState, defaultQuantity, describeCompleteError, describeLineLoadError, describeLineRemoveError, differenceText,
   hasRestockLines, lineLoadBody, lineQuantityProblem, lineRemoveBody, reconcile, refillSince, removalPlan, resolvedText, restockCompleteBody,
   restockPath, restockStep, shownStep, stepProgress, stepState,
 } from '../src/admin/restock.ts'
@@ -281,4 +283,72 @@ test('mock: the plain completion of a restock ticket without loading needs a not
   await rejects(ticketsApi.complete(T2, {}), 400)
   assert.deepEqual((await ticketsApi.complete(T2, { note: 'Đã nạp 6 hộp vào ngăn A2' })).resolvedAlertIds, [])
   assert.equal((await alertsApi.get(LOW_STOCK_A2)).status, 'OPEN')
+})
+
+// ---- FM7 acceptance fixes
+
+test('command history: only an IN_PROGRESS ticket waits for it; a failed read (401/403/500) is an error, never a guessed step', () => {
+  const error = new ApiError(500, 'boom')
+  assert.equal(commandHistoryState({ status: 'ASSIGNED', loaded: false, error: undefined, missing: false }), 'ready')
+  assert.equal(commandHistoryState({ status: 'COMPLETED', loaded: false, error, missing: false }), 'ready')
+  assert.equal(commandHistoryState({ status: 'IN_PROGRESS', loaded: false, error: undefined, missing: false }), 'loading')
+  for (const status of [401, 403, 500]) assert.equal(commandHistoryState({ status: 'IN_PROGRESS', loaded: false, error: new ApiError(status, 'x'), missing: false }), 'failed')
+  assert.equal(commandHistoryState({ status: 'IN_PROGRESS', loaded: false, error: new TypeError('network'), missing: false }), 'failed')
+  // 404 = no maintenance commands on the backend: the door is handled by hand.
+  assert.equal(commandHistoryState({ status: 'IN_PROGRESS', loaded: false, error: new ApiError(404, 'x'), missing: true }), 'ready')
+  // Data already read stays usable when a later poll fails.
+  assert.equal(commandHistoryState({ status: 'IN_PROGRESS', loaded: true, error, missing: false }), 'ready')
+})
+
+test('mock: POST /work-tickets RESTOCK writes the lines of the draft (ACTIVE slots below the threshold, planned = free places, earliest loadable batch)', async () => {
+  assert.equal(MOCK_LOW_STOCK_THRESHOLD, LOW_STOCK_THRESHOLD)
+  const { state } = setup()
+  await signIn(state, 'admin')
+  // DEV-MACHINE-01: A1 (8 sellable) and A2 (6) are fine; B1 only holds 2 expired mango bowls (0 sellable, 8 free) and
+  // no mango batch is loadable any more, so the line has no suggested batch.
+  const fromAlert = await ticketsApi.create({ type: 'RESTOCK', machineId: MACHINE_1, title: 'Ngăn sắp hết hàng', alertId: LOW_STOCK_A2, assigneeId: id('11000000', 2) })
+  assert.equal(fromAlert.status, 'ASSIGNED')
+  assert.deepEqual(fromAlert.restockLines.map(entry => [entry.slotCode, entry.productName, entry.plannedQuantity, entry.batchId, entry.loadedQuantity, entry.removedQuantity]),
+    [['B1', 'Mango bowl', 8, null, 0, 0]])
+  assert.equal(fromAlert.restockLines[0].slotId, SLOT_B1)
+  assert.deepEqual(fromAlert.reconciliation, { plannedQuantity: 8, loadedQuantity: 0, removedQuantity: 0, difference: -8, noteRequired: true })
+  assert.equal(hasRestockLines(fromAlert), true)
+  // DEV-MACHINE-02: A1 has 3 sellable (no line); A2's only bowl is held for an order (0 sellable, 7 free): watermelon,
+  // batch SEED-WATERMELON-01 (the loadable one expiring first, 7 of 20 bowls used).
+  const machine2 = await ticketsApi.create({ type: 'RESTOCK', machineId: id('20000000', 2), title: 'Nạp máy 2' })
+  assert.deepEqual(machine2.restockLines.map(entry => [entry.slotCode, entry.productName, entry.plannedQuantity, entry.batchId, entry.batchCode]),
+    [['A2', 'Watermelon bowl', 7, BATCH_WATERMELON, 'SEED-WATERMELON-01']])
+  // Stored as answered; lines have distinct ids, one per slot.
+  assert.deepEqual((await ticketsApi.get(machine2.id)).restockLines, machine2.restockLines)
+  // Earliest loadable batch: a batch expiring sooner wins, unless all its bowls were already loaded; expired ones never.
+  const hours = n => new Date(state.clock + n * 3_600_000).toISOString()
+  const watermelon = machine2.restockLines[0].productId
+  const later = await batchesApi.create({ batchCode: 'W-LATER', productId: watermelon, manufacturedAt: hours(-1), expiresAt: hours(240), quantity: 10 })
+  const sooner = await batchesApi.create({ batchCode: 'W-SOONER', productId: watermelon, manufacturedAt: hours(-1), expiresAt: hours(6), quantity: 1 })
+  const plan = async () => (await ticketsApi.create({ type: 'RESTOCK', machineId: id('20000000', 2), title: 'Nạp máy 2' })).restockLines[0].batchCode
+  assert.equal(await plan(), 'W-SOONER')
+  await inventoryApi.load({ batchId: sooner.id, slotId: id('30000000', 5), quantity: 1 })
+  assert.equal(await plan(), 'SEED-WATERMELON-01')
+  state.clock += 19 * 3_600_000
+  await signIn(state, 'admin')
+  assert.equal(await plan(), later.batchCode)
+  // A machine without slots: a RESTOCK ticket with no lines (plain completion); MAINTENANCE never gets lines.
+  const empty = await ticketsApi.create({ type: 'RESTOCK', machineId: id('20000000', 3), title: 'Nạp máy 3' })
+  assert.deepEqual(empty.restockLines, [])
+  assert.equal(empty.reconciliation, null)
+  const maintenance = await ticketsApi.create({ type: 'MAINTENANCE', machineId: MACHINE_1, title: 'Lau kính' })
+  assert.equal(maintenance.restockLines, undefined)
+})
+
+test('mock: a ticket opened from the LOW_STOCK alert is carried out on the restock screen: the assignee loads its line', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const ticket = await ticketsApi.create({ type: 'RESTOCK', machineId: id('20000000', 2), title: 'Nạp máy 2', assigneeId: id('11000000', 2) })
+  await signIn(state, 'staff')
+  const [lineA2] = ticket.restockLines
+  await ticketsApi.start(ticket.id)
+  const loaded = await ticketsApi.loadLine(ticket.id, lineA2.id, { batchId: lineA2.batchId, quantity: 7 })
+  assert.equal(loaded.restockLines[0].loadedQuantity, 7)
+  assert.equal(loaded.reconciliation.noteRequired, false)
+  assert.equal((await ticketsApi.complete(ticket.id, {})).status, 'COMPLETED')
 })

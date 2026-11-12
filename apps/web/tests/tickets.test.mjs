@@ -12,6 +12,7 @@ import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { STATUS_CATALOG } from '../src/lib/status.ts'
 import { DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
 import { NAV, matchRoute, navFor } from '../src/admin/routes.ts'
+import { NAV_ICONS } from '../src/admin/shell/nav-icons.ts'
 import {
   NEW_TICKET, TICKETS_PATH, TICKET_STATUSES, TICKET_TYPES, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, isOverdue, isStale,
   nextActions, nextStepText, readTicketFilters, ticketActionError, ticketFilterKeys, ticketFromAlert, ticketListQuery, ticketPath, ticketSteps,
@@ -264,4 +265,32 @@ test('mock: admin creates (OPEN, or ASSIGNED with an assignee), assigns, cancels
   // The new assigned ticket shows up in that staff member's own list.
   await signIn(state, 'staff')
   assert.equal((await ticketsApi.list({ page: 0, size: 100 })).totalElements, 4)
+})
+
+// ---- FM7 acceptance fixes
+
+test('RESTOCK ticket with lines: the assignee gets one "Thực hiện nạp hàng" link instead of the plain Bắt đầu / Hoàn tất', () => {
+  const admin = { userId: ADMIN, canWrite: true }
+  const staff = { userId: STAFF, canWrite: false }
+  const lines = [{ id: 'l1', slotId: 's', slotCode: 'A2', productId: 'p', productName: 'Watermelon bowl', plannedQuantity: 4, loadedQuantity: 0, removedQuantity: 0 }]
+  const restock = (status, assigneeId = STAFF) => ({ type: 'RESTOCK', restockLines: lines, status, assigneeId: status === 'OPEN' ? null : assigneeId })
+  const matrix = viewer => Object.fromEntries(TICKET_STATUSES.map(status => [status, nextActions(restock(status), viewer)]))
+  assert.deepEqual(matrix(staff), { OPEN: [], ASSIGNED: ['restock'], IN_PROGRESS: ['restock'], COMPLETED: [], CANCELLED: [] })
+  assert.deepEqual(matrix(admin), { OPEN: ['assign', 'cancel'], ASSIGNED: ['assign', 'cancel'], IN_PROGRESS: ['cancel'], COMPLETED: [], CANCELLED: [] })
+  assert.deepEqual(nextActions(restock('ASSIGNED', ADMIN), admin), ['assign', 'restock', 'cancel'])
+  assert.deepEqual(nextActions(restock('IN_PROGRESS', OTHER), staff), [])
+  for (const status of TICKET_STATUSES) assert.ok(!nextActions(restock(status), staff).some(action => action === 'start' || action === 'complete'), status)
+  // Without lines (or a MAINTENANCE ticket) the plain buttons stay.
+  assert.deepEqual(nextActions({ type: 'RESTOCK', restockLines: [], status: 'ASSIGNED', assigneeId: STAFF }, staff), ['start'])
+  assert.deepEqual(nextActions({ type: 'MAINTENANCE', restockLines: lines, status: 'IN_PROGRESS', assigneeId: STAFF }, staff), ['complete'])
+  assert.equal(actionLabel('restock', { status: 'ASSIGNED' }), 'Thực hiện nạp hàng')
+  const named = { ...restock('ASSIGNED'), assigneeName: 'Nhân viên vận hành' }
+  assert.match(nextStepText(named, staff), /mở “Thực hiện nạp hàng”/)
+  assert.doesNotMatch(nextStepText(named, staff), /bấm “Bắt đầu”/)
+  assert.match(nextStepText({ ...named, status: 'IN_PROGRESS' }, staff), /đóng cửa nạp và đối chiếu/)
+  assert.equal(nextStepText(named, admin), 'Chờ Nhân viên vận hành bắt đầu tại máy.')
+})
+
+test('every sidebar item has an icon (the schedules item too)', () => {
+  for (const item of NAV) assert.ok(NAV_ICONS[item.to], item.to)
 })

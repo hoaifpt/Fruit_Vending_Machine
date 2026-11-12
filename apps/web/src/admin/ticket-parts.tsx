@@ -11,8 +11,10 @@ import { FormField } from '../components/ui/form-field.tsx'
 import { Input, NativeSelect, Textarea } from '../components/ui/input.tsx'
 import { cn } from '../lib/cn.ts'
 import { formatDateTime } from '../lib/format.ts'
-import { ConfirmDialog, FormSheet, useForm } from './kit.tsx'
+import { ConfirmDialog, FormSheet, Link, useForm } from './kit.tsx'
 import { useMachineOptions, useStaffOptions } from './options.ts'
+import { restockPath } from './restock.ts'
+import { useSession } from './useSession.ts'
 import {
   NEW_TICKET, TICKETS_MISSING, TICKET_LIMITS, TICKET_TYPE_OPTIONS, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, isStale,
   nextActions, ticketActionError, ticketSteps, ticketTypeLabel, ticketsAvailability, validateTicket,
@@ -38,6 +40,10 @@ export function TicketActionButtons({ ticket, viewer, open, where }: {
     {actions.map((action, index) => {
       const label = actionLabel(action, ticket)
       const primary = index === 0 && action !== 'cancel' && where === 'detail'
+      // FE 7.2: a RESTOCK ticket with lines is started and completed on the restock screen (door, reconciliation).
+      if (action === 'restock') return <Button key={index === 0 ? 'next' : action} asChild size={where === 'list' ? 'sm' : 'default'} className={TOUCH} variant={primary ? 'default' : 'outline'}>
+        <Link to={restockPath(ticket.id)} label={where === 'list' ? `${label}: ${ticket.title}` : undefined}>{label}</Link>
+      </Button>
       // The first button keeps its React key across steps, so the same element (and its focus) becomes the new next step.
       return <Button key={index === 0 ? 'next' : action} type="button" size={where === 'list' ? 'sm' : 'default'} className={TOUCH}
         variant={action === 'cancel' ? (where === 'list' ? 'ghost' : 'outline') : primary ? 'default' : 'outline'}
@@ -78,7 +84,8 @@ function TicketFacts({ ticket }: { ticket: WorkTicket }) {
 /** OPEN/ASSIGNED → ASSIGNED: pick an active staff account. */
 export function AssignSheet(props: ActionProps) {
   const { ticket, close } = props
-  const staff = useStaffOptions(true)
+  const canUsers = useSession().can('USER_READ')
+  const staff = useStaffOptions(canUsers)
   const form = useForm({ assigneeId: ticket.assigneeId ?? '' })
   const reassign = ticket.status === 'ASSIGNED'
   return <FormSheet title={reassign ? 'Đổi người phụ trách' : 'Phân công phiếu'} submitLabel={reassign ? 'Đổi người' : 'Phân công'} close={close} onFieldErrors={form.setErrors}
@@ -90,7 +97,7 @@ export function AssignSheet(props: ActionProps) {
     }}>
     <TicketFacts ticket={ticket} />
     <FormField label="Nhân viên phụ trách" required error={form.errors.assigneeId} className="mb-2"
-      hint={staff.error ? 'Không tải được danh sách nhân viên. Đóng rồi mở lại để thử lại.' : staff.loading ? 'Đang tải danh sách nhân viên…' : staff.options.length ? 'Chỉ tài khoản nhân viên đang hoạt động.' : 'Chưa có tài khoản nhân viên đang hoạt động. Tạo ở màn Tài khoản.'}>
+      hint={!canUsers ? 'Tài khoản này không có quyền xem danh sách nhân viên (Xem tài khoản) nên không phân công được. Nhờ quản trị viên cấp quyền.' : staff.error ? 'Không tải được danh sách nhân viên. Đóng rồi mở lại để thử lại.' : staff.loading ? 'Đang tải danh sách nhân viên…' : staff.options.length ? 'Chỉ tài khoản nhân viên đang hoạt động.' : 'Chưa có tài khoản nhân viên đang hoạt động. Tạo ở màn Tài khoản.'}>
       <NativeSelect value={form.values.assigneeId} className="max-sm:h-11 max-sm:text-base" onChange={event => form.set('assigneeId')(event.target.value)}>
         <option value="">Chọn nhân viên…</option>
         {staff.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -179,7 +186,8 @@ export function CreateTicketSheet({ initial = NEW_TICKET, alertLabel, close, cre
   initial?: TicketValues; alertLabel?: string; close: () => void; created: (ticket: WorkTicket) => void
 }) {
   const machines = useMachineOptions()
-  const staff = useStaffOptions(true)
+  const canUsers = useSession().can('USER_READ')
+  const staff = useStaffOptions(canUsers)
   const form = useForm<TicketValues>({ ...initial })
   const { values, errors } = form
   const [now] = useState(() => Date.now())
@@ -223,7 +231,7 @@ export function CreateTicketSheet({ initial = NEW_TICKET, alertLabel, close, cre
         <Input type="datetime-local" value={values.dueAt} min={localMinute(now)} className="max-sm:h-11 max-sm:text-base" onChange={event => form.set('dueAt')(event.target.value)} />
       </FormField>
       <FormField label="Người phụ trách (không bắt buộc)" error={errors.assigneeId} className="mb-4"
-        hint={staff.error ? 'Không tải được danh sách nhân viên; có thể phân công sau.' : staff.loading ? 'Đang tải danh sách nhân viên…' : 'Để trống thì phiếu ở trạng thái Chưa phân công.'}>
+        hint={!canUsers ? 'Tài khoản này không có quyền xem danh sách nhân viên; phiếu ở trạng thái Chưa phân công, phân công sau.' : staff.error ? 'Không tải được danh sách nhân viên; có thể phân công sau.' : staff.loading ? 'Đang tải danh sách nhân viên…' : 'Để trống thì phiếu ở trạng thái Chưa phân công.'}>
         <NativeSelect value={values.assigneeId} className="max-sm:h-11 max-sm:text-base" onChange={event => form.set('assigneeId')(event.target.value)}>
           <option value="">Chưa phân công</option>
           {staff.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
