@@ -393,7 +393,7 @@ class MachineManagementIntegrationTest {
         jdbc.update("INSERT INTO product_batches(id,batch_code,product_id,manufactured_at,expires_at,quantity) VALUES (?,'FIXTURE',?,now(),now()+interval '2 days',1)", batch, product);
         jdbc.update("INSERT INTO inventory_items(id,batch_id,slot_id,loaded_at) VALUES (?,?,?,now())", item, batch, slot);
         jdbc.update("INSERT INTO sensor_readings(machine_id,temperature,humidity,recorded_at) VALUES (?,5,60,now())", campus.getId());
-        jdbc.update("INSERT INTO machine_events(machine_id,event_type,payload) VALUES (?,'FIXTURE','{}')", campus.getId());
+        jdbc.update("INSERT INTO machine_events(machine_id,event_type,payload,source) VALUES (?,'FIXTURE','{}','BACKEND')", campus.getId());
         jdbc.update("INSERT INTO orders(id,order_code,machine_id,subtotal,total_amount) VALUES (?,'FIXTURE',?,1,1)", order, campus.getId());
         jdbc.update("INSERT INTO payments(order_id,provider,amount) VALUES (?,'TEST',1)", order);
         jdbc.update("INSERT INTO alerts(machine_id,type,severity,title,message,triggered_at) VALUES (?,'HIGH_TEMPERATURE','WARNING','Fixture','Fixture',now())", campus.getId());

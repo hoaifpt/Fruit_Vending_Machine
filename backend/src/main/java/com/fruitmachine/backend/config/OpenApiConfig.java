@@ -366,6 +366,101 @@ public class OpenApiConfig {
         });
     }
 
+    /** Free-form JSON fields (machine event payload, audit old/new values) are documented as JSON objects, not as a Jackson type. */
+    @Bean
+    public OpenApiCustomizer historyJsonFields() {
+        return api -> {
+            var schemas = api.getComponents() == null ? null : api.getComponents().getSchemas();
+            if (schemas == null) return;
+            schemas.remove("JsonNode");
+            var event = schemas.get("MachineEventResponse");
+            if (event != null && event.getProperties() != null && event.getProperties().get("payload") != null) {
+                var payload = (io.swagger.v3.oas.models.media.Schema<?>) event.getProperties().get("payload");
+                event.getProperties().put("payload", jsonObject(java.util.Set.of("object"), payload.getDescription()));
+            }
+            var audit = schemas.get("AuditLogResponse");
+            if (audit != null && audit.getProperties() != null) {
+                for (String field : List.of("oldValue", "newValue")) {
+                    var value = (io.swagger.v3.oas.models.media.Schema<?>) audit.getProperties().get(field);
+                    if (value == null) continue;
+                    audit.getProperties().put(field, jsonObject(new java.util.LinkedHashSet<>(List.of("object", "null")), value.getDescription()));
+                }
+            }
+        };
+    }
+
+    private static io.swagger.v3.oas.models.media.Schema<Object> jsonObject(java.util.Set<String> types, String description) {
+        var schema = new io.swagger.v3.oas.models.media.Schema<Object>();
+        schema.setTypes(types);
+        schema.setAdditionalProperties(Boolean.TRUE);
+        schema.setDescription(description);
+        return schema;
+    }
+
+    @Bean
+    public OpenApiCustomizer historyDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!List.of("/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}").contains(name)) return;
+            path.readOperations().forEach(operation -> operation.getResponses().forEach((code, response) -> {
+                Object example;
+                if (code.startsWith("2")) {
+                    response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    var audit = new java.util.LinkedHashMap<String, Object>();
+                    audit.put("id", "7b0f3c2e-55a1-4f0e-9c1d-2a6b8e4f0c11");
+                    audit.put("action", "MACHINE_MAINTENANCE_AUTO");
+                    audit.put("entityType", "Machine");
+                    audit.put("entityId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03");
+                    audit.put("userId", null);
+                    audit.put("userEmail", null);
+                    audit.put("actor", "system");
+                    audit.put("oldValue", Map.of("status", "ACTIVE"));
+                    audit.put("newValue", Map.of("status", "MAINTENANCE", "reason", "NO_BOWL_DETECTED"));
+                    audit.put("ipAddress", null);
+                    audit.put("createdAt", "2026-11-11T03:20:01Z");
+                    Object data;
+                    String message;
+                    if (name.endsWith("/events")) {
+                        var machineEvent = new java.util.LinkedHashMap<String, Object>();
+                        machineEvent.put("id", "0d1e2f30-4a5b-4c6d-8e9f-a0b1c2d3e4f5");
+                        machineEvent.put("eventType", "DISPENSE_ABORTED");
+                        machineEvent.put("source", "MACHINE");
+                        machineEvent.put("messageId", "a1b2c3d4-0042");
+                        machineEvent.put("payload", Map.of("eventType", "DISPENSE_ABORTED",
+                                "details", Map.of("commandId", "D-7F3A91C2E4B05D18", "reason", "NO_BOWL_DETECTED")));
+                        machineEvent.put("createdAt", "2026-11-11T03:20:01Z");
+                        data = Map.of("content", List.of(machineEvent), "page", 0, "size", 50, "totalElements", 1, "totalPages", 1);
+                        message = "Machine events retrieved";
+                    } else if (name.endsWith("{id}")) {
+                        data = audit;
+                        message = "Audit log entry retrieved";
+                    } else {
+                        data = Map.of("content", List.of(audit), "page", 0, "size", 50, "totalElements", 1, "totalPages", 1);
+                        message = "Audit log retrieved";
+                    }
+                    example = Map.of("timestamp", "2026-11-11T03:21:00Z", "message", message, "data", data);
+                } else {
+                    if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    String error = switch (code) {
+                        case "400" -> "Bad Request";
+                        case "401" -> "Unauthorized";
+                        case "403" -> "Forbidden";
+                        case "404" -> "Not Found";
+                        default -> "Internal Server Error";
+                    };
+                    String message = switch (code) {
+                        case "400" -> "to must be after from";
+                        case "401" -> "Authentication required or access token invalid";
+                        case "403" -> "Access denied";
+                        case "404" -> name.endsWith("/events") ? "Machine not found" : "Audit log entry not found";
+                        default -> "An unexpected error occurred";
+                    };
+                    example = Map.of("timestamp", "2026-11-11T03:21:00Z", "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                }
+                response.getContent().get("application/json").setExample(example);
+            }));
+        });
+    }
+
     @Bean
     public OpenApiCustomizer machineSlotDocumentation() {
         return api -> api.getPaths().forEach((name, path) -> {

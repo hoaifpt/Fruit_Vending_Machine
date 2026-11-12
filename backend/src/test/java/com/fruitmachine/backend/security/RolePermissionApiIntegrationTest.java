@@ -47,7 +47,7 @@ class RolePermissionApiIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void adminListsPermissionsAndRoles() throws Exception {
         var permissions = fixtures.api("GET", "/api/v1/permissions", null, admin.token(), 200);
-        assertThat(permissions).hasSize(15);
+        assertThat(permissions).hasSize(16);
         List<String> listed = new ArrayList<>();
         permissions.forEach(p -> { listed.add(p.path("code").asText()); assertThat(p.path("description").asText()).isNotBlank(); });
         assertThat(listed).isSorted().containsExactlyInAnyOrderElementsOf(Permissions.ALL);

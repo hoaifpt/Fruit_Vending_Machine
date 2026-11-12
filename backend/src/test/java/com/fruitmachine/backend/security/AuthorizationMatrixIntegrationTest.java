@@ -27,10 +27,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  */
 class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
     static final Path BASELINE = Path.of("src/test/resources/security/authorization-matrix-baseline.tsv");
+    /** ADMIN-only operations added later: role/permission APIs (#48, PERMISSION_MANAGE) and the audit log (#56, AUDIT_LOG_READ). */
     static final Set<String> NEW_OPERATIONS = Set.of("GET /api/v1/permissions", "GET /api/v1/roles", "GET /api/v1/roles/{id}",
-            "PUT /api/v1/roles/{id}/permissions");
-    /** Added by #53: MACHINE_READ, so ADMIN and STAFF are allowed; anonymous and kiosk keys are unauthenticated here. */
-    static final Set<String> NEW_READ_OPERATIONS = Set.of("GET /api/v1/machines/{machineId}/telemetry", "GET /api/v1/machines/{machineId}/telemetry/latest");
+            "PUT /api/v1/roles/{id}/permissions", "GET /api/v1/audit-logs", "GET /api/v1/audit-logs/{id}");
+    /** Added by #53 and #56: MACHINE_READ, so ADMIN and STAFF are allowed; anonymous and kiosk keys are unauthenticated here. */
+    static final Set<String> NEW_READ_OPERATIONS = Set.of("GET /api/v1/machines/{machineId}/telemetry", "GET /api/v1/machines/{machineId}/telemetry/latest",
+            "GET /api/v1/machines/{machineId}/events");
     static final List<String> IDENTITIES = List.of("ANONYMOUS", "STAFF", "ADMIN", "KIOSK");
 
     record Operation(String method, String path) {

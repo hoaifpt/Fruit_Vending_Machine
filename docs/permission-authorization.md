@@ -28,6 +28,7 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `ORDER_READ` | `GET /api/v1/orders`, `GET /api/v1/orders/{id}` |
 | `PAYMENT_READ` | `GET /api/v1/payments`, `GET /api/v1/payments/{id}` |
 | `PAYMENT_WEBHOOK_LOG_READ` | `GET /api/v1/payment-webhook-logs`, `/{id}` |
+| `AUDIT_LOG_READ` (V16, #56) | `GET /api/v1/audit-logs`, `/{id}` (chỉ ADMIN) |
 
 Code có dạng `^[A-Z][A-Z0-9_]{2,63}$` (CHECK trong DB) và không bao giờ bắt đầu bằng `ROLE_`, nên không trùng authority của role.
 UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọi môi trường có cùng dữ liệu tham chiếu.
@@ -42,7 +43,7 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `MACHINE_READ` | ✓ | ✓ |
 | `MACHINE_WRITE`, `KIOSK_CREDENTIAL_MANAGE` | ✓ | |
 | `BATCH_READ`, `BATCH_CREATE`, `INVENTORY_READ`, `INVENTORY_WRITE`, `ORDER_READ` | ✓ | ✓ |
-| `PAYMENT_READ`, `PAYMENT_WEBHOOK_LOG_READ` | ✓ | |
+| `PAYMENT_READ`, `PAYMENT_WEBHOOK_LOG_READ`, `AUDIT_LOG_READ` | ✓ | |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.
