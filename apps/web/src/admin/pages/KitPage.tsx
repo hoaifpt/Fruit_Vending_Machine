@@ -101,8 +101,8 @@ function FormFieldSection() {
       <FormField label="Mã ngăn (chỉ đọc)" hint="Đang khóa."><Input defaultValue="A1" readOnly /></FormField>
       <FormField label="Trạng thái"><NativeSelect defaultValue="ACTIVE"><option value="ACTIVE">Hoạt động</option><option value="INACTIVE">Ngừng hoạt động</option></NativeSelect></FormField>
       <FormField label="Ghi chú" hint="Tối đa 500 ký tự."><Textarea defaultValue="Hộp 2 miếng, giao buổi sáng." /></FormField>
-      <Field label="Field của kit, ô nhập thường" hint="Kiểu ô nhập cũ còn được các trang khác dùng."><input defaultValue="35000" /></Field>
-      <Field label="Field của kit, có lỗi" error="Vui lòng chọn ngăn."><select defaultValue=""><option value="">Chọn ngăn</option></select></Field>
+      <Field label="Field của kit" hint="FormField có sẵn lề dưới, dùng trong biểu mẫu."><Input defaultValue="35000" /></Field>
+      <Field label="Field của kit, có lỗi" error="Vui lòng chọn ngăn."><NativeSelect defaultValue=""><option value="">Chọn ngăn</option></NativeSelect></Field>
     </div>
   </Section>
 }
@@ -127,8 +127,8 @@ function DialogSection() {
     {dialog.value === 'pending' && <ConfirmDialog title="Xác nhận gỡ hộp" message="Hộp đang chọn sẽ chuyển sang trạng thái Đã gỡ." confirmLabel="Gỡ hộp" close={close} onConfirm={() => wait(3000)} />}
     {dialog.value === 'failing' && <ConfirmDialog danger title="Thu hồi khóa" message="Thử xem lỗi hiển thị trong hộp thoại." confirmLabel="Thu hồi" close={close} onConfirm={async () => { await wait(300); throw new ApiError(409, 'Khóa đã được thu hồi trước đó. Hãy tải lại danh sách.') }} />}
     {dialog.value === 'form' && <FormDialog title="Thêm ngăn" close={close} onFieldErrors={form.setErrors} onSubmit={async () => { await wait(300); if (!form.values.code.trim()) form.fail({ code: 'Vui lòng nhập mã ngăn.' }) }}>
-      <Field label="Mã ngăn" error={form.errors.code}><input value={form.values.code} onChange={event => form.set('code')(event.target.value)} /></Field>
-      <Field label="Ghi chú"><textarea /></Field>
+      <Field label="Mã ngăn" error={form.errors.code}><Input value={form.values.code} onChange={event => form.set('code')(event.target.value)} /></Field>
+      <Field label="Ghi chú"><Textarea /></Field>
     </FormDialog>}
     {dialog.value === 'status' && <StatusDialog title="Trạng thái: Kiwi vàng" domain="product" current="ACTIVE" options={['ACTIVE', 'INACTIVE']} close={close} onSubmit={() => wait(300)} note="Sản phẩm ngừng hoạt động không hiện trên kiosk." />}
   </Section>
@@ -173,7 +173,6 @@ function OthersSection() {
       <Sample label="Badge"><div className="flex flex-wrap gap-2"><Badge domain="machine" value="ACTIVE" /><Badge domain="machine" value="MAINTENANCE" /><Badge domain="user" value="LOCKED" /><Badge value="soon" /></div></Sample>
       <Sample label="Notice"><Notice>Danh sách này chỉ để tham khảo.</Notice><Notice tone="error">Không lưu được thay đổi. Hãy thử lại.</Notice></Sample>
       <Sample label="Pagination"><Pagination page={1} totalPages={4} totalElements={72} onPage={() => {}} /></Sample>
-      <Sample label="Nút thường trên nền bảng (kiểu cũ)"><div className="a-actions"><button type="button">Sửa</button><button type="button" className="a-primary">Thêm</button><button type="button" className="a-danger">Thu hồi</button></div></Sample>
     </div>
   </Section>
 }

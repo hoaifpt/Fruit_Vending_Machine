@@ -17,7 +17,6 @@ import { formatDateTime, formatMoney as money } from '../lib/format'
 import { discountReasonText, lineView, orderDiscount, priceView } from '../lib/price'
 import orange from '../assets/orange-mark.webp'
 import mix from '../assets/fruit-still-life.webp'
-import './PurchasePage.css'
 
 const env = import.meta.env
 const IDLE_SECONDS = configuredSeconds(env.VITE_KIOSK_PAYMENT_IDLE_SECONDS, 120)

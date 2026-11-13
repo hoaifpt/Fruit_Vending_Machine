@@ -33,7 +33,8 @@ export const LABELS: Record<string, string> = {
 }
 const PLAIN_TONES: Record<string, string> = { expired: 'bg-status-danger text-status-danger-foreground', soon: 'bg-status-warning text-status-warning-foreground' }
 
-// Unlayered global rules (index.css, admin.css) beat Tailwind utilities, so margins on <p> and sizes on plain controls need `!`.
+// Unlayered global rules in index.css (`h1, h2, p { margin: 0 }`, the .admin-app heading scale) beat Tailwind utilities, so
+// margins on <p> and headings need `!`; SMALL_PLAIN_BUTTONS shrinks the buttons of a PageHead action row.
 const ERROR_BOX = 'my-3.5! rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-destructive'
 const HINT = 'mt-3! mb-4.5! text-[13px] leading-[1.7] text-muted-foreground'
 const SMALL_PLAIN_BUTTONS = '[&_button]:min-h-8! [&_button]:px-2.5! [&_button]:text-[13px]!'
@@ -85,7 +86,7 @@ export function Loading({ label = 'Đang tải dữ liệu…', rows = 4 }: { la
 
 /** Table-shaped placeholder used while a list loads for the first time. */
 export function TableSkeleton({ columns = 5, rows = 6 }: { columns?: number; rows?: number }) {
-  return <div role="status" className="w-full overflow-hidden rounded-xl border bg-card in-[.a-panel]:rounded-none in-[.a-panel]:border-0 in-[.a-panel]:bg-transparent">
+  return <div role="status" className="w-full overflow-hidden rounded-xl border bg-card">
     <span className="sr-only">Đang tải dữ liệu…</span>
     <div className="flex gap-6 border-b bg-muted px-3.5 py-3">{Array.from({ length: columns }, (_, index) => <Skeleton key={index} className="h-3 flex-1 opacity-70" />)}</div>
     {Array.from({ length: rows }, (_, row) => <div key={row} className="flex items-center gap-6 border-b px-3.5 py-4 last:border-b-0">

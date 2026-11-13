@@ -28,7 +28,7 @@ Làm lại giao diện `apps/web` gồm 4 bề mặt: **admin** (13 trang), **đ
 - Bảng: TanStack Table cho sắp xếp, ẩn/hiện cột và phân trang theo API.
 - Dữ liệu: TanStack Query để cache, giữ dữ liệu cũ khi tải lại và biết khi nào đang tải, nhờ vậy loading và chuyển trang mượt.
 - Chuyển động: View Transitions API cho chuyển trang, `tw-animate-css` (đi kèm shadcn) cho Sheet, dialog, toast. Không thêm thư viện animation nặng.
-- Xoá dần `admin.css`, `App.css` và CSS của từng trang sau khi màn hình tương ứng đã chuyển xong.
+- Xoá dần `admin.css`, `App.css` và CSS của từng trang sau khi màn hình tương ứng đã chuyển xong (đã xong ở FE 9.4, xem `DESIGN.md`).
 
 ## 6. Bố cục
 **Admin shell**

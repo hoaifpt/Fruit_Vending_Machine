@@ -97,7 +97,7 @@ export function AdminShell({ nav, route, email, roles, onLogout, children, bell 
             <ThemeMenu />
           </div>
         </header>
-        <main id="admin-main" tabIndex={-1} className="vt-content admin-app mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8">{children}</main>
+        <main id="admin-main" tabIndex={-1} className="vt-content admin-app mx-auto text-[14px] leading-normal text-foreground w-full max-w-[1400px] flex-1 px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8">{children}</main>
       </div>
 
       <CommandPalette open={palette} onOpenChange={setPalette} nav={nav} onLogout={onLogout} />

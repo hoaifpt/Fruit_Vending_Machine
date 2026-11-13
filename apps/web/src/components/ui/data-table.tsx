@@ -59,7 +59,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
         {sortable.flatMap(column => (['asc', 'desc'] as const).map(direction => <option key={`${column.sortKey},${direction}`} value={`${column.sortKey},${direction}`}>{column.head}: {directionLabel[direction]}</option>))}
       </NativeSelect>
     </FormField>}
-    <div aria-busy={loading} className="relative w-full overflow-x-auto rounded-xl border bg-card in-[.a-panel]:rounded-none in-[.a-panel]:border-0 in-[.a-panel]:bg-transparent @max-[680px]:overflow-visible @max-[680px]:rounded-none @max-[680px]:border-0 @max-[680px]:bg-transparent">
+    <div aria-busy={loading} className="relative w-full overflow-x-auto rounded-xl border bg-card @max-[680px]:overflow-visible @max-[680px]:rounded-none @max-[680px]:border-0 @max-[680px]:bg-transparent">
       {/* Reloading over rows already shown: a thin bar on top; the rows keep full contrast (no dimming). */}
       {loading && rows.length > 0 && <div data-slot="data-table-progress" aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-1 h-0.5 overflow-hidden">
         <div className="h-full w-2/5 animate-progress rounded-full bg-primary motion-reduce:w-full motion-reduce:animate-none" />
@@ -74,7 +74,7 @@ export function DataTable<T>({ columns, rows, rowKey, loading = false, error, em
             const active = column.sortKey !== undefined && sort?.field === column.sortKey
             const canSort = !!onSort && !!column.sortKey
             return <th key={column.head} role="columnheader" scope="col" aria-sort={!canSort ? undefined : active && sort ? ariaSort[sort.direction] : 'none'}
-              className={cn('border-b bg-muted px-3 py-2.5 align-bottom text-xs font-medium text-muted-foreground in-[.a-panel]:bg-transparent', TIGHT, column.secondary && SECONDARY)}>
+              className={cn('border-b bg-muted px-3 py-2.5 align-bottom text-xs font-medium text-muted-foreground', TIGHT, column.secondary && SECONDARY)}>
               {canSort && column.sortKey
                 ? <SortButton head={column.head} direction={active ? sort?.direction : undefined} next={nextSort(sort, column.sortKey, column.firstDirection)} onSort={onSort} />
                 : column.head}

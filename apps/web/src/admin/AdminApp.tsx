@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import '@fontsource-variable/inter/wght.css'
 import { endSession, expireSession, loginPathFor, setLoginRedirect } from '../api/session.ts'
 import type { Role } from '../api/session.ts'
+import { ROUTE_MESSAGE } from '../lib/route-message.ts'
 import { confirmLeave, navigate, useLocation } from '../lib/router.ts'
 import { Forbidden, Link, PageSkeleton } from './kit.tsx'
 import { can } from './permissions.ts'
@@ -10,7 +11,6 @@ import { canOpen, homeFor, matchRoute, navFor } from './routes.ts'
 import { AdminShell } from './shell/AdminShell.tsx'
 import { AlertBell } from './shell/AlertBell.tsx'
 import { useSession } from './useSession.ts'
-import './admin.css'
 
 const OverviewPage = lazy(() => import('./pages/OverviewPage.tsx'))
 const UsersPage = lazy(() => import('./pages/UsersPage.tsx'))
@@ -68,7 +68,7 @@ function AdminApp() {
   // Move focus to the new screen after client-side navigation, like a full page load would.
   useEffect(() => { document.getElementById('admin-main')?.focus({ preventScroll: true }); window.scrollTo({ top: 0 }) }, [pathname])
 
-  if (!session) return <main className="route-message" role="status"><p>Đang chuyển đến trang đăng nhập…</p></main>
+  if (!session) return <main className={ROUTE_MESSAGE} role="status"><p>Đang chuyển đến trang đăng nhập…</p></main>
 
   let content: ReactNode
   if (KitPage && pathname.replace(/\/+$/, '') === '/admin/_kit') content = <KitPage />
@@ -118,7 +118,7 @@ function AdminApp() {
 }
 
 function NotFound() {
-  return <section className="a-empty"><h1>Không tìm thấy màn hình</h1><p><Link to="/admin">Về trang quản trị</Link></p></section>
+  return <section className="px-4 py-10 text-center text-muted-foreground"><h1 className="mb-2! text-foreground">Không tìm thấy màn hình</h1><p><Link to="/admin">Về trang quản trị</Link></p></section>
 }
 
 export default AdminApp

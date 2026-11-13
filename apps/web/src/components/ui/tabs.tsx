@@ -10,7 +10,6 @@ export function TabsList({ className, ...props }: ComponentProps<typeof TabsPrim
 }
 
 export function TabsTrigger({ className, ...props }: ComponentProps<typeof TabsPrimitive.Trigger>) {
-  // data-slot keeps the legacy `.admin-app button:not([data-slot])` look (border, fill) off the tab.
   return <TabsPrimitive.Trigger
     data-slot="tabs-trigger"
     className={cn(

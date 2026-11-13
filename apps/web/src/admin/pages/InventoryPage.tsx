@@ -48,10 +48,13 @@ import { useSession } from '../useSession.ts'
 const SORTS = [{ value: 'loadedAt,desc', label: 'Nạp gần nhất' }, { value: 'updatedAt,desc', label: 'Cập nhật gần nhất' }, { value: 'status,asc', label: 'Trạng thái' }]
 const VIEW_LABELS: Record<InventoryView, string> = { map: 'Sơ đồ ngăn', list: 'Danh sách hộp' }
 
+const TAB = 'inline-flex min-h-8 items-center rounded-[7px] px-3 text-[13px] font-medium text-muted-foreground no-underline transition-colors duration-150 ease-out hover:text-foreground'
+const TAB_CURRENT = 'bg-card text-foreground shadow-[0_1px_3px_oklch(0_0_0/0.1)]'
+
 export function InventoryTabs({ current }: { current: 'items' | 'history' }) {
-  return <nav className="a-tabs" aria-label="Tồn kho">
-    <Link to="/admin/inventory" className={current === 'items' ? 'is-current' : ''}>Hộp hàng</Link>
-    <Link to="/admin/inventory/history" className={current === 'history' ? 'is-current' : ''}>Lịch sử</Link>
+  return <nav className="mb-5 inline-flex flex-wrap gap-0.5 rounded-[10px] bg-muted p-[3px]" aria-label="Tồn kho">
+    <Link to="/admin/inventory" className={cn(TAB, current === 'items' && TAB_CURRENT)}>Hộp hàng</Link>
+    <Link to="/admin/inventory/history" className={cn(TAB, current === 'history' && TAB_CURRENT)}>Lịch sử</Link>
   </nav>
 }
 
@@ -485,7 +488,7 @@ function SlotSummaryPanel({ machineId, slotId, refresh }: { machineId: string; s
   const data = summary.data
   if (!data) return null
   const cells: [string, number | undefined][] = [['Sức chứa', data.capacity], ['Đang có', data.occupiedCount], ['Sẵn sàng', data.availableCount], ['Quá hạn', data.expiredCount], ['Giữ chỗ', data.reservedCount], ['Còn trống', data.remainingCapacity]]
-  return <section className="a-stats" aria-label="Tóm tắt ngăn">{cells.map(([label, value]) => <div key={label}><strong>{value}</strong><small>{label}</small></div>)}</section>
+  return <section className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-3" aria-label="Tóm tắt ngăn">{cells.map(([label, value]) => <div key={label} className="rounded-[10px] border border-border bg-card px-3.5 py-3"><strong className="block text-[22px] font-semibold tabular-nums">{value}</strong><small className="text-[12px] text-muted-foreground">{label}</small></div>)}</section>
 }
 
 // ---- load

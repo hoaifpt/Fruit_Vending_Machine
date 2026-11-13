@@ -15,7 +15,6 @@ import { getContactLinks } from '../features/landing/contact'
 import heroImage from '../assets/landing-hero.webp'
 import spaceImage from '../assets/partnership-space.webp'
 import orangeImage from '../assets/orange-mark.webp'
-import './LandingPage.css'
 
 const sections = [['#giai-phap', 'Giải pháp'], ['#cach-hoat-dong', 'Cách hoạt động'], ['#hop-tac', 'Hợp tác']] as const
 const steps: readonly { icon: LucideIcon; title: string; text: string }[] = [
