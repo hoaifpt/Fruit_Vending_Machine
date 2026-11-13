@@ -68,7 +68,8 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
             assertThat(product(result, excluded)).as("excluded product %s", excluded).isNull();
         String body = result.toString();
         assertThat(body).doesNotContain(slot.toString(), inactiveSlot.toString(), sellableBatch.toString(), "slotCode", "batchCode", "inventoryItemId", "\"A\"");
-        assertThat(only.fieldNames()).toIterable().containsExactlyInAnyOrder("productId", "sku", "name", "description", "price", "imageUrl", "availableQuantity");
+        assertThat(only.fieldNames()).toIterable().containsExactlyInAnyOrder("productId", "sku", "name", "description", "price", "originalPrice",
+                "discountPercent", "discountReason", "imageUrl", "availableQuantity");
     }
 
     @Test

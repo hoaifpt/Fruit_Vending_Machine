@@ -76,8 +76,8 @@ public abstract class AbstractOrderIntegrationTest extends AbstractCoreIntegrati
         for (Object[] line : lines) {
             UUID lineId = UUID.randomUUID();
             jdbc.update("""
-                    INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, total_price)
-                    SELECT ?, ?, p.id, ?, p.price, p.price * ? FROM products p WHERE p.id = ?
+                    INSERT INTO order_items (id, order_id, product_id, quantity, original_unit_price, unit_price, total_price)
+                    SELECT ?, ?, p.id, ?, p.price, p.price, p.price * ? FROM products p WHERE p.id = ?
                     """, lineId, orderId, line[1], line[1], line[0]);
             jdbc.update("""
                     INSERT INTO order_item_allocations (order_item_id, inventory_item_id, status, released_at)

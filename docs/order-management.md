@@ -86,6 +86,13 @@ vì "một reservation mỗi slot" và "chỉ head" là luật của slot: hai �
 Lỗi: 400 sai request, 404 product không tồn tại, 409 product không ACTIVE / máy không ACTIVE / không slot nào có head bán được
 ("Requested product is not available on this machine"; không giữ gì).
 
+## Giá và giảm giá sắp hết hạn (issue #61)
+
+Giá của đơn được chốt lúc tạo đơn từ đúng bát được giữ: bát thuộc lô hết hạn trong ngày kinh doanh hôm nay (Asia/Ho_Chi_Minh) được
+giảm theo setting của Admin (mặc định 50 %, làm tròn xuống đồng). Đơn lưu giá gốc (`subtotal`, `originalUnitPrice`), phần giảm
+(`discountAmount`, `discountPercent`, `discountReason`) và số tiền thu (`totalAmount` = số tiền thanh toán). Chi tiết:
+[near-expiry-pricing.md](near-expiry-pricing.md).
+
 ## Hủy và hết hạn
 
 Hủy (kiosk) hoặc sweep: khóa order, `PENDING_PAYMENT -> CANCELLED`, allocation `RELEASED`, item `RESERVED -> AVAILABLE`

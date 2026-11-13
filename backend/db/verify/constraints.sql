@@ -45,10 +45,10 @@ BEGIN
     INSERT INTO inventory_items(batch_id, slot_id, loaded_at) VALUES (batch, slot_a, CURRENT_TIMESTAMP) RETURNING id INTO other_bowl;
     INSERT INTO orders(order_code, machine_id, subtotal, total_amount)
     VALUES ('TEST-' || test_suffix, machine_a, 20, 20) RETURNING id INTO purchase;
-    INSERT INTO order_items(order_id, product_id, quantity, unit_price, total_price)
-    VALUES (purchase, product, 2, 10, 20) RETURNING id INTO line;
-    INSERT INTO order_items(order_id, product_id, quantity, unit_price, total_price)
-    VALUES (purchase, product, 1, 10, 10) RETURNING id INTO other_line;
+    INSERT INTO order_items(order_id, product_id, quantity, original_unit_price, unit_price, total_price)
+    VALUES (purchase, product, 2, 10, 10, 20) RETURNING id INTO line;
+    INSERT INTO order_items(order_id, product_id, quantity, original_unit_price, unit_price, total_price)
+    VALUES (purchase, product, 1, 10, 10, 10) RETURNING id INTO other_line;
 
     PERFORM pg_temp.expect_error(format('UPDATE products SET price = -1 WHERE id = %L', product), '23514');
     PERFORM pg_temp.expect_error(format('UPDATE products SET price = ''NaN'' WHERE id = %L', product), '23514');

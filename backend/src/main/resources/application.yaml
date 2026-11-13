@@ -47,6 +47,8 @@ management:
       show-components: never
 
 app:
+  # Issue #61: business day of order codes, the near-expiry discount and reports. Database and JDBC stay UTC.
+  business-zone: ${BUSINESS_ZONE:Asia/Ho_Chi_Minh}
   bootstrap:
     admin:
       email: ${INITIAL_ADMIN_EMAIL:}

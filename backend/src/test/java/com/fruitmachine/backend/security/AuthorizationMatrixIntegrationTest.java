@@ -27,17 +27,20 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  */
 class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
     static final Path BASELINE = Path.of("src/test/resources/security/authorization-matrix-baseline.tsv");
-    /** ADMIN-only operations added later: role/permission APIs (#48, PERMISSION_MANAGE) and the audit log (#56, AUDIT_LOG_READ). */
-    static final Set<String> NEW_OPERATIONS = Set.of("GET /api/v1/permissions", "GET /api/v1/roles", "GET /api/v1/roles/{id}",
-            "PUT /api/v1/roles/{id}/permissions", "GET /api/v1/audit-logs", "GET /api/v1/audit-logs/{id}");
     /**
-     * Added by #53, #56 and #58: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, or any signed-in user for the own
-     * notifications); anonymous and kiosk keys are unauthenticated here.
+     * ADMIN-only operations added later: role/permission APIs (#48, PERMISSION_MANAGE), the audit log (#56, AUDIT_LOG_READ) and the
+     * near-expiry discount change (#61, PRICING_MANAGE).
+     */
+    static final Set<String> NEW_OPERATIONS = Set.of("GET /api/v1/permissions", "GET /api/v1/roles", "GET /api/v1/roles/{id}",
+            "PUT /api/v1/roles/{id}/permissions", "GET /api/v1/audit-logs", "GET /api/v1/audit-logs/{id}", "PUT /api/v1/pricing/near-expiry-discount");
+    /**
+     * Added by #53, #56, #58 and #61: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, PRICING_READ, or any
+     * signed-in user for the own notifications); anonymous and kiosk keys are unauthenticated here.
      */
     static final Set<String> NEW_READ_OPERATIONS = Set.of("GET /api/v1/machines/{machineId}/telemetry", "GET /api/v1/machines/{machineId}/telemetry/latest",
             "GET /api/v1/machines/{machineId}/events", "GET /api/v1/alerts", "GET /api/v1/alerts/{id}", "POST /api/v1/alerts/{id}/acknowledge",
             "POST /api/v1/alerts/{id}/resolve", "GET /api/v1/notifications/me", "GET /api/v1/notifications/me/unread-count",
-            "POST /api/v1/notifications/{id}/read", "POST /api/v1/notifications/me/read-all");
+            "POST /api/v1/notifications/{id}/read", "POST /api/v1/notifications/me/read-all", "GET /api/v1/pricing/near-expiry-discount");
     static final List<String> IDENTITIES = List.of("ANONYMOUS", "STAFF", "ADMIN", "KIOSK");
 
     record Operation(String method, String path) {

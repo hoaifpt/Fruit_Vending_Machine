@@ -77,6 +77,8 @@ public class SecurityConfig {
                     authorize.requestMatchers("/api/v1/audit-logs", "/api/v1/audit-logs/**").hasAuthority(Permissions.AUDIT_LOG_READ);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/alerts", "/api/v1/alerts/**").hasAuthority(Permissions.ALERT_READ);
                     authorize.requestMatchers("/api/v1/alerts", "/api/v1/alerts/**").hasAuthority(Permissions.ALERT_MANAGE);
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/pricing/**").hasAuthority(Permissions.PRICING_READ);
+                    authorize.requestMatchers("/api/v1/pricing/**").hasAuthority(Permissions.PRICING_MANAGE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/orders", "/api/v1/orders/**").hasAuthority(Permissions.ORDER_READ);
                     authorize.requestMatchers("/api/v1/orders", "/api/v1/orders/**").denyAll();
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/products", "/api/v1/products/**").hasAuthority(Permissions.PRODUCT_READ);

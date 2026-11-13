@@ -26,7 +26,7 @@ class OrderManagementReadIntegrationTest extends AbstractOrderIntegrationTest {
     private UUID historical(Shop shop) {
         UUID id = insertHistoricalOrder(shop.machineId(), shop.slotId(), new Object[]{shop.productId(), 2});
         UUID line = UUID.randomUUID();
-        jdbc.update("INSERT INTO order_items (id, order_id, product_id, quantity, unit_price, total_price) SELECT ?, ?, id, 1, price, price FROM products WHERE id=?",
+        jdbc.update("INSERT INTO order_items (id, order_id, product_id, quantity, original_unit_price, unit_price, total_price) SELECT ?, ?, id, 1, price, price, price FROM products WHERE id=?",
                 line, id, shop.secondProductId());
         jdbc.update("""
                 INSERT INTO order_item_allocations (order_item_id, inventory_item_id, status, released_at)

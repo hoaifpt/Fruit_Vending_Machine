@@ -22,6 +22,8 @@ public final class Permissions {
     public static final String INVENTORY_READ = "INVENTORY_READ";
     public static final String INVENTORY_WRITE = "INVENTORY_WRITE";
     public static final String ORDER_READ = "ORDER_READ";
+    public static final String PRICING_READ = "PRICING_READ";
+    public static final String PRICING_MANAGE = "PRICING_MANAGE";
     public static final String PAYMENT_READ = "PAYMENT_READ";
     public static final String PAYMENT_WEBHOOK_LOG_READ = "PAYMENT_WEBHOOK_LOG_READ";
     public static final String AUDIT_LOG_READ = "AUDIT_LOG_READ";
@@ -43,6 +45,8 @@ public final class Permissions {
     public static final String HAS_INVENTORY_READ = "hasAuthority('" + INVENTORY_READ + "')";
     public static final String HAS_INVENTORY_WRITE = "hasAuthority('" + INVENTORY_WRITE + "')";
     public static final String HAS_ORDER_READ = "hasAuthority('" + ORDER_READ + "')";
+    public static final String HAS_PRICING_READ = "hasAuthority('" + PRICING_READ + "')";
+    public static final String HAS_PRICING_MANAGE = "hasAuthority('" + PRICING_MANAGE + "')";
     public static final String HAS_PAYMENT_READ = "hasAuthority('" + PAYMENT_READ + "')";
     public static final String HAS_PAYMENT_WEBHOOK_LOG_READ = "hasAuthority('" + PAYMENT_WEBHOOK_LOG_READ + "')";
     public static final String HAS_AUDIT_LOG_READ = "hasAuthority('" + AUDIT_LOG_READ + "')";
@@ -54,7 +58,7 @@ public final class Permissions {
     /** The full catalog of this release, in migration order (V13, V16, V17). */
     public static final List<String> ALL = List.of(USER_READ, USER_WRITE, PERMISSION_MANAGE, PRODUCT_READ, PRODUCT_WRITE, MACHINE_READ,
             MACHINE_WRITE, KIOSK_CREDENTIAL_MANAGE, BATCH_READ, BATCH_CREATE, INVENTORY_READ, INVENTORY_WRITE, ORDER_READ, PAYMENT_READ,
-            PAYMENT_WEBHOOK_LOG_READ, AUDIT_LOG_READ, ALERT_READ, ALERT_MANAGE, ALERT_NOTIFY);
+            PAYMENT_WEBHOOK_LOG_READ, AUDIT_LOG_READ, ALERT_READ, ALERT_MANAGE, ALERT_NOTIFY, PRICING_READ, PRICING_MANAGE);
 
     /** The ADMIN role must always keep these, otherwise nobody could manage users or permissions any more. */
     public static final List<String> ADMIN_REQUIRED = List.of(PERMISSION_MANAGE, USER_WRITE);

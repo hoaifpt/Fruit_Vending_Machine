@@ -22,36 +22,56 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
     UUID findSlotIdById(@Param("id") UUID id);
     interface CatalogRow {
         UUID getProductId(); String getSku(); String getName(); String getDescription();
-        java.math.BigDecimal getPrice(); String getImageUrl(); Long getAvailableQuantity();
+        java.math.BigDecimal getOriginalPrice(); java.math.BigDecimal getPrice(); Integer getDiscountPercent(); String getDiscountReason();
+        String getImageUrl(); Long getAvailableQuantity();
     }
     /**
      * Products that can be dispensed now, as one aggregate statement (nothing is counted in Java). A slot's head is its
      * physically present bowl (AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED) with the earliest loaded_at, tie-break id;
      * a slot sells a product only when that head is an AVAILABLE bowl of the product outliving the hold deadline in an
      * ACTIVE slot. availableQuantity counts AVAILABLE, unexpired bowls of the product in exactly those slots.
+     *
+     * <p>Issue #61: price is the price of the bowl that would be reserved now, the FEFO head among the sellable heads in the
+     * same order as {@code findSellableHeadId} (head expiry, head loaded_at, slot code, slot id). The discount applies when that
+     * head's batch expires in [dayStart, dayEnd) and the setting is enabled: floor(price x (100 - percent) / 100), the rule of
+     * NearExpiryPricingService (a test asserts both agree).
      */
     @Query(value = """
         with heads as (
-            select distinct on (i.slot_id) i.slot_id, i.status, i.batch_id
+            select distinct on (i.slot_id) i.slot_id, i.status, i.batch_id, i.loaded_at
             from inventory_items i join machine_slots s on s.id = i.slot_id
             where s.machine_id = :machineId and i.status in ('AVAILABLE', 'RESERVED', 'EXPIRED', 'DISPENSE_FAILED')
             order by i.slot_id, i.loaded_at, i.id
         ), sellable as (
-            select h.slot_id, hb.product_id
+            select h.slot_id, hb.product_id, hb.expires_at as head_expires_at, h.loaded_at, s.slot_code
             from heads h join product_batches hb on hb.id = h.batch_id join machine_slots s on s.id = h.slot_id
             where h.status = 'AVAILABLE' and hb.expires_at > :holdDeadline and s.status = 'ACTIVE'
+        ), next_bowl as (
+            select distinct on (x.product_id) x.product_id,
+                   (cast(:enabled as boolean) and x.head_expires_at >= :dayStart and x.head_expires_at < :dayEnd) as eligible
+            from sellable x
+            order by x.product_id, x.head_expires_at, x.loaded_at, x.slot_code, x.slot_id
+        ), stock as (
+            select x.product_id, count(i.id) as available
+            from sellable x
+            join inventory_items i on i.slot_id = x.slot_id and i.status = 'AVAILABLE'
+            join product_batches b on b.id = i.batch_id and b.product_id = x.product_id and b.expires_at > :holdDeadline
+            group by x.product_id
         )
-        select p.id as "productId", p.sku as "sku", p.name as "name", p.description as "description", p.price as "price",
-               p.image_url as "imageUrl", count(i.id) as "availableQuantity"
-        from sellable x
-        join products p on p.id = x.product_id
-        join inventory_items i on i.slot_id = x.slot_id and i.status = 'AVAILABLE'
-        join product_batches b on b.id = i.batch_id and b.product_id = x.product_id and b.expires_at > :holdDeadline
+        select p.id as "productId", p.sku as "sku", p.name as "name", p.description as "description",
+               p.price as "originalPrice",
+               case when n.eligible then cast(floor(p.price * (100 - cast(:percent as integer)) / 100) as numeric(12,2)) else p.price end as "price",
+               case when n.eligible then cast(:percent as integer) else 0 end as "discountPercent",
+               case when n.eligible then 'NEAR_EXPIRY' else 'NONE' end as "discountReason",
+               p.image_url as "imageUrl", c.available as "availableQuantity"
+        from next_bowl n
+        join products p on p.id = n.product_id
+        join stock c on c.product_id = n.product_id
         where p.status = 'ACTIVE'
-        group by p.id, p.sku, p.name, p.description, p.price, p.image_url
         order by p.name, p.id
         """, nativeQuery = true)
-    List<CatalogRow> findCatalog(@Param("machineId") UUID machineId, @Param("holdDeadline") Instant holdDeadline);
+    List<CatalogRow> findCatalog(@Param("machineId") UUID machineId, @Param("holdDeadline") Instant holdDeadline,
+            @Param("enabled") boolean enabled, @Param("percent") int percent, @Param("dayStart") Instant dayStart, @Param("dayEnd") Instant dayEnd);
 
     /**
      * Slots of the machine that physically hold at least one bowl of the product (any present status). Unlocked
