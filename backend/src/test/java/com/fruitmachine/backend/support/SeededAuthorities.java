@@ -10,7 +10,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 public final class SeededAuthorities {
     public static final List<String> STAFF_PERMISSIONS = List.of(Permissions.ALERT_MANAGE, Permissions.ALERT_READ, Permissions.BATCH_CREATE,
             Permissions.BATCH_READ, Permissions.INVENTORY_READ, Permissions.INVENTORY_WRITE, Permissions.MACHINE_READ, Permissions.ORDER_READ,
-            Permissions.MAINTENANCE_COMMAND_EXECUTE, Permissions.MAINTENANCE_COMMAND_READ, Permissions.PRICING_READ, Permissions.PRODUCT_READ);
+            Permissions.MAINTENANCE_COMMAND_EXECUTE, Permissions.MAINTENANCE_COMMAND_READ, Permissions.PRICING_READ, Permissions.PRODUCT_READ,
+            Permissions.WORK_ORDER_EXECUTE, Permissions.WORK_ORDER_READ_ASSIGNED);
 
     private SeededAuthorities() {
     }

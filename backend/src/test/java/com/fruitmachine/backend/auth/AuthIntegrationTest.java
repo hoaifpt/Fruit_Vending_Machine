@@ -242,7 +242,11 @@ class AuthIntegrationTest {
                 "/api/v1/notifications/me", "/api/v1/notifications/me/unread-count", "/api/v1/notifications/{id}/read",
                 "/api/v1/notifications/me/read-all", "/api/v1/pricing/near-expiry-discount",
                 "/api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands", "/api/v1/machines/{machineId}/reset",
-                "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/{id}", "/api/v1/maintenance-commands/{id}/reconcile");
+                "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/{id}", "/api/v1/maintenance-commands/{id}/reconcile",
+                "/api/v1/work-orders", "/api/v1/work-orders/me", "/api/v1/work-orders/{id}", "/api/v1/work-orders/{id}/events",
+                "/api/v1/work-orders/{id}/assign", "/api/v1/work-orders/{id}/unassign", "/api/v1/work-orders/{id}/start",
+                "/api/v1/work-orders/{id}/notes", "/api/v1/work-orders/{id}/complete", "/api/v1/work-orders/{id}/cancel",
+                "/api/v1/work-orders/{id}/alerts", "/api/v1/work-orders/{id}/alerts/{alertId}", "/api/v1/alerts/{alertId}/work-orders");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

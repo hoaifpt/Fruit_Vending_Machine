@@ -189,3 +189,8 @@ Xem [docs/near-expiry-pricing.md](docs/near-expiry-pricing.md).
 
 Khi máy ở MAINTENANCE, Staff/Admin bỏ hộp đầu cột, xả cột, mở/đóng cổng nạp qua portal; Admin gửi RESET. Tồn kho chỉ đổi khi máy
 báo COMPLETED (hoặc Staff đối soát DONE). Xem [docs/maintenance-commands.md](docs/maintenance-commands.md).
+
+## Work order — Issue #66
+
+Việc nạp hàng, bảo trì, sự cố tại máy: Admin tạo/giao (hoặc tạo từ cảnh báo), Staff bắt đầu (máy dừng bán) và hoàn thành với kết quả,
+cảnh báo liên kết được đóng, lịch sử đầy đủ và thông báo trên portal. Xem [docs/work-orders.md](docs/work-orders.md).

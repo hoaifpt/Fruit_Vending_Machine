@@ -96,6 +96,11 @@ app:
     # Only for a private CA: PKCS12 truststore; empty = JVM trust store (Let's Encrypt). Never log the password.
     truststore-path: ${MQTT_TRUSTSTORE_PATH:}
     truststore-password: ${MQTT_TRUSTSTORE_PASSWORD:}
+  # Issue #66: overdue work orders are announced once, checked every 5 minutes.
+  work-order:
+    overdue:
+      enabled: ${WORK_ORDER_OVERDUE_ENABLED:true}
+      interval: ${WORK_ORDER_OVERDUE_INTERVAL:PT5M}
   # Issue #64: maintenance commands (re-send, accept and completion timeouts, dispatcher tick).
   maintenance-command:
     resend-interval: ${MAINT_CMD_RESEND:PT5S}

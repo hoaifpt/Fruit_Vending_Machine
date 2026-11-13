@@ -365,7 +365,7 @@ class AlertIntegrationTest extends AbstractWebhookIntegrationTest {
         var unread = fixtures.api("GET", "/api/v1/notifications/me?unreadOnly=true", null, admin.token(), 200);
         assertThat(unread.path("totalElements").asLong()).isEqualTo(1);
         var item = unread.path("content").get(0);
-        assertThat(item.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "alertId", "title", "message", "severity", "read", "readAt", "createdAt");
+        assertThat(item.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "alertId", "workOrderId", "title", "message", "severity", "read", "readAt", "createdAt");
         assertThat(item.path("alertId").asText()).isEqualTo(second.toString());
         assertThat(item.path("read").asBoolean()).isFalse();
         String id = item.path("id").asText();

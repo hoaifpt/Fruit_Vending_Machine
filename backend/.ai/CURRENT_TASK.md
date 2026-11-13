@@ -1,89 +1,90 @@
-# Issue #64 — [BE] Implement Machine Maintenance Commands
+# Issue #66 — [BE] Implement Work Order Management
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/64
-Branch: feature/64-maintenance-commands (from origin/dev e93882c, includes #61 via PR #63)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/66
+Branch: feature/66-work-orders (from origin/dev e977894, includes #64 via PR #65)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
 
 ## Scope
-V19 (maintenance_commands with one-unfinished-per-machine index, machine_slots.refill_gate_open, MAINTENANCE_COMMAND_READ /
-MAINTENANCE_COMMAND_EXECUTE (ADMIN, STAFF), MACHINE_RESET (ADMIN)), maintenance package (create under locks, dispatcher with re-send
-and accept/complete timeouts, MQTT report handling, effects on COMPLETED, reconciliation with audit), RESET, gateway sendMaintenance /
-sendReset, dispense waits for unfinished maintenance, refill-gate slots never sell and cannot be activated, slot responses refillGateOpen,
-APIs, docs/Swagger/api.yaml/mqtt-contract 1.6.0.
+V20 (work_orders, work_order_alerts, work_order_events append-only, notifications.work_order_id, 4 permissions), workorder package
+(lifecycle with versions and one event per action, assignment rules, machine stop on start, completion checks extension point, alert
+create/link/unlink/resolve, notifications after commit, overdue job, createBySystem for 4.5/5.2), APIs, alert responses workOrderId/Code,
+notification responses workOrderId, machine reactivation guard, docs/Swagger/api.yaml.
 
 ## Non-goals
-Restock/loading (4.4), work orders (4.3), scheduling (4.5), firmware RESET handler and NVS, servo test commands, reactivating machines.
+Restock lines (4.4), maintenance plans (4.5), customer report form (5.2), attachments/checklists/time tracking/SLA, email/SMS,
+Staff-created work orders, automatic work orders for every alert.
 
 ## Status and verification
-Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 792 tests, 0 failures,
-BUILD SUCCESS (the first full run had one postgres container startup timeout in PaymentManagementIntegrationTest, infra; it passed
-alone and in the rerun). New: MaintenanceCommandIntegrationTest (12), MaintenanceCommandDocumentationTest (1). Updated: counts,
-permission lists, matrix, slot response field lists, NearExpiryPricingMigrationTest (2 migrations after V17).
+Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 799 tests, 0 failures,
+BUILD SUCCESS (first full run: one postgres container startup timeout in MachineManagementDocumentationTest, infra; passed alone and in
+the rerun). New: WorkOrderIntegrationTest (6), WorkOrderDocumentationTest (1). Updated: counts, permission lists, matrix, notification fields.
 
 Decisions / notes:
-- 409 codes are the first word of the message (ApiErrorResponse has no code field; adding one would change every error schema).
-- "No unfinished dispense command" = SENT/ACKNOWLEDGED: a PENDING dispense never publishes while the machine is MAINTENANCE.
-- 201 returns the command as PENDING; it is published right after commit (AFTER_COMMIT), then the 1 s dispatcher re-sends / times out.
-- A maintenance command is only published while the machine is MAINTENANCE; otherwise it stays PENDING until ACCEPT_TIMEOUT.
-- Stricter CHECKs than the issue sketch: OTHER needs a non-null note, REMOVE_ITEM/EMPTY_COLUMN need a reason, REMOVE_ITEM needs a target.
-- RESET command codes are MC-… (the contract said RS-…; corrected in 1.6.0).
-- Open firmware question: EMPTY_COLUMN keeps the upper gate closed; documented (run OPEN_REFILL first) until confirmed.
+- One permission per endpoint (OpenAPI x-required-permission and the URL/method consistency test): /me, detail and events need
+  WORK_ORDER_READ_ASSIGNED, which ADMIN also holds; without READ_ALL other people's work orders are 404. start/notes/complete need
+  WORK_ORDER_EXECUTE (ADMIN has it too); "Admin may act for the assignee" = holder of WORK_ORDER_MANAGE.
+- Machine-stop preconditions (active orders, unfinished dispense) apply only when the start actually stops an ACTIVE machine.
+- Stricter CHECKs than the sketch: OPEN can never have an assignee; NULL result_note / cancel_reason fail (COALESCE); time order.
+- Cancel keeps alert links as history; only unfinished work orders count as handling an alert.
+- 409 codes are the first word of the message (as in #64).
 
 # Testing
 
 ## 8. Migration
 
 - [x] Applies; Flyway + Hibernate validation pass
-- [x] Second unfinished command for the same machine rejected by index
-- [x] RESET with slot / REMOVE_ITEM without slot rejected; OTHER without note rejected
+- [x] CHECKs reject DONE without result, CANCELLED without reason, ASSIGNED without assignee
+- [x] `work_order_events` UPDATE/DELETE rejected
 
-## 9. Creation Rules
+## 9. Lifecycle
 
-- [x] Machine ACTIVE → 409; INACTIVE → 409; MAINTENANCE → 201
-- [x] Offline machine → 409; slot of another machine → 404
-- [x] Unfinished dispense or maintenance command → 409
-- [x] REMOVE_ITEM: head AVAILABLE / EXPIRED / DISPENSE_FAILED accepted; RESERVED slot → 409; non-head item id → 409; empty slot → 409
-- [x] Refill gate open → REMOVE_ITEM / EMPTY_COLUMN / OPEN_REFILL rejected; CLOSE_REFILL allowed
-- [x] Idempotency: same key + body → same command; different body → 409
-- [x] STAFF cannot RESET (403); anonymous 401; kiosk key 401
+- [x] Create without assignee → OPEN; with assignee → ASSIGNED + notification
+- [x] Assign / unassign / reassign (IN_PROGRESS stays IN_PROGRESS)
+- [x] Start by assignee → IN_PROGRESS; by other Staff → 404; by Admin → allowed
+- [x] Complete requires result note; DONE / CANCELLED final; invalid transitions 409
+- [x] Stale version → 409; repeated start → 200 unchanged
+- [x] Every action writes one event with actor and status before/after
 
-## 10. Lifecycle (fake gateway + fixed Clock)
+## 10. Machine Stop
 
-- [x] Publish → SENT; BUSY reject → resend same code; ACCEPTED → ACCEPTED
-- [x] No ACCEPTED within 30 s → FAILED ACCEPT_TIMEOUT
-- [x] ACCEPTED but no COMPLETED within 90 s → NEEDS_RECONCILIATION
-- [x] ABORTED → NEEDS_RECONCILIATION; CONTROLLER_FAULT reject → FAILED
-- [x] Late COMPLETED after FAILED / NEEDS_RECONCILIATION → effect applied once
-- [x] Wrong event prefix, unknown code, machine mismatch → ignored
+- [x] Start RESTOCK / MAINTENANCE → machine MAINTENANCE; kiosk catalog empty / order creation 409
+- [x] Start INCIDENT without stopMachine → machine unchanged; with → MAINTENANCE
+- [x] Active orders or unfinished dispense → 409; INACTIVE machine → 409
+- [x] Reactivation refused while IN_PROGRESS; allowed after DONE / CANCELLED
+- [x] Complete with unfinished maintenance command → 409
 
-## 11. Effects (real PostgreSQL)
+## 11. Alerts
 
-- [x] REMOVE_ITEM completed → only the head REMOVED, one REMOVE transaction (reason, actor, reference)
-- [x] REMOVE_ITEM on DISPENSE_FAILED head → REMOVED; order/refund untouched
-- [x] Head changed before completion → NEEDS_RECONCILIATION, nothing removed
-- [x] EMPTY_COLUMN → all physical bowls REMOVED, removed_count correct; SOLD/REMOVED untouched
-- [x] OPEN_REFILL / CLOSE_REFILL toggle flag; slot with open gate not in catalog, cannot be activated
-- [x] Duplicate COMPLETED → no duplicate transactions
-- [x] Dispense creation refused while a maintenance command is unfinished
+- [x] Create from alert → linked, alert ACKNOWLEDGED, priority/type defaults
+- [x] Second unfinished WO for same alert → 409; RESOLVED alert → 409
+- [x] Complete with resolveLinkedAlerts → alerts RESOLVED; false → unchanged
+- [x] Link alert of another machine → 400
 
-## 12. Reconciliation
+## 12. Notifications / Overdue
 
-- [x] DONE applies effect; NOT_DONE changes nothing; both audited; second reconcile → 409
+- [x] Assignment, system creation, completion, cancellation notify the right users once
+- [x] Overdue job notifies once; changing due_at re-arms; DONE not notified
 
-## 13. Regression
+## 13. Authorization
 
-- [x] Dispense, inventory, catalog, alert, event-logging tests pass
+- [x] STAFF list only `/me`; `/work-orders` → 403; other's detail → 404
+- [x] STAFF cannot create / assign / cancel / edit (403)
+- [x] Anonymous 401; kiosk key 401
 - [x] Authorization matrix extended
-- [x] All tests pass (`mvn clean verify`); Swagger / `api.yaml` / `mqtt-contract.md` consistent
+
+## 14. Regression
+
+- [x] Alert, notification, maintenance command, machine, order tests pass
+- [x] All tests pass (`mvn clean verify`); Swagger / `api.yaml` consistent
 
 # Acceptance Criteria
 
-- [x] Staff/Admin can remove the head bowl, empty a column, open/close the refill gate while the machine is in MAINTENANCE
-- [x] Admin can send RESET; FAULT_CLEARED resolves the controller fault alert
-- [x] At most one command in flight per machine; dispense and maintenance never overlap
-- [x] Inventory changes only on COMPLETED (or reconciliation DONE), exactly once, with REMOVE history
-- [x] Aborted / uncertain commands go to NEEDS_RECONCILIATION and are resolved by Staff
-- [x] Slots with an open refill gate are never sold
-- [x] Idempotent creation; permissions enforced
-- [x] Docs, Swagger, `api.yaml`, `mqtt-contract.md`, ERD updated
+- [x] Admin creates, edits, assigns, cancels work orders of type RESTOCK / MAINTENANCE / INCIDENT
+- [x] Staff sees only their work orders, starts and completes them with a result
+- [x] Starting RESTOCK / MAINTENANCE (and INCIDENT on request) puts the machine in MAINTENANCE; Admin reactivates only when no work order is in progress
+- [x] Work orders can be created from and linked to alerts; completion resolves linked alerts
+- [x] Assignment, completion and overdue notifications delivered in the portal
+- [x] Full append-only history per work order
+- [x] Extension points ready for 4.4, 4.5, 5.2
+- [x] Docs, Swagger, `api.yaml`, ERD updated
 - [x] Tests pass (`mvn clean verify`); applied migrations unchanged

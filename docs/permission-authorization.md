@@ -37,6 +37,10 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `MAINTENANCE_COMMAND_READ` (V19, #64) | `GET /api/v1/maintenance-commands`, `/{id}` |
 | `MAINTENANCE_COMMAND_EXECUTE` (V19, #64) | `POST /api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands`, `POST /api/v1/maintenance-commands/{id}/reconcile` |
 | `MACHINE_RESET` (V19, #64) | `POST /api/v1/machines/{machineId}/reset` (chỉ ADMIN) |
+| `WORK_ORDER_READ_ALL` (V20, #66) | `GET /api/v1/work-orders` |
+| `WORK_ORDER_READ_ASSIGNED` (V20, #66) | `GET /api/v1/work-orders/me`, `/{id}`, `/{id}/events` (không có READ_ALL: chỉ việc của mình, còn lại 404) |
+| `WORK_ORDER_MANAGE` (V20, #66) | tạo, sửa, giao, bỏ giao, hủy, liên kết cảnh báo, `POST /api/v1/alerts/{alertId}/work-orders` |
+| `WORK_ORDER_EXECUTE` (V20, #66) | `POST /api/v1/work-orders/{id}/start`, `/notes`, `/complete` (STAFF chỉ việc của mình) |
 
 Code có dạng `^[A-Z][A-Z0-9_]{2,63}$` (CHECK trong DB) và không bao giờ bắt đầu bằng `ROLE_`, nên không trùng authority của role.
 UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọi môi trường có cùng dữ liệu tham chiếu.
@@ -58,6 +62,8 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `PRICING_MANAGE` | ✓ | |
 | `MAINTENANCE_COMMAND_READ`, `MAINTENANCE_COMMAND_EXECUTE` | ✓ | ✓ |
 | `MACHINE_RESET` | ✓ | |
+| `WORK_ORDER_READ_ALL`, `WORK_ORDER_MANAGE` | ✓ | |
+| `WORK_ORDER_READ_ASSIGNED`, `WORK_ORDER_EXECUTE` | ✓ | ✓ |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.

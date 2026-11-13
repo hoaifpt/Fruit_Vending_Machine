@@ -43,4 +43,9 @@ public interface NotificationRepository extends Repository<Notification, UUID> {
             WHERE a.id = :alertId AND p.code = 'ALERT_NOTIFY' AND u.status = 'ACTIVE'
               AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.alert_id = a.id AND n.user_id = u.id)""", nativeQuery = true)
     int insertForAlert(@Param("alertId") UUID alertId, @Param("at") Instant at);
+
+    /** Issue #66: work order notifications are written one per recipient. */
+    Notification save(Notification notification);
+
+    void flush();
 }
