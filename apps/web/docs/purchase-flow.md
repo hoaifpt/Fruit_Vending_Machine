@@ -43,7 +43,7 @@ Field nháp `api-contract/drafts/pricing-discount.yaml` (chờ BE 4.1). Thẻ s�
 
 ## Nút Báo sự cố (K8)
 
-Ẩn mặc định. Bật bằng `VITE_KIOSK_INCIDENT_REPORT=true`; QR mở `VITE_INCIDENT_REPORT_URL` (mặc định `<origin>/bao-su-co`) kèm `?machine=<mã máy>`. Form công khai là FE 8.2 và BE 5.2 (giữa tháng 12) nên trang đích chưa có; FE 8.3 mới bật cờ. Với mock, `?incident=on|off` đổi cờ để test.
+Bật mặc định từ FE 8.3 (form công khai FE 8.2 đã có, mock tới khi có BE 5.2). Tắt trên một máy bằng `VITE_KIOSK_INCIDENT_REPORT=false` (`0`/`off`/`no` cũng tắt; để trống hoặc giá trị khác là bật). Nút "Báo sự cố" nằm góc trái chân màn hình trên mọi màn (K-01 danh mục…); QR mở `VITE_INCIDENT_REPORT_URL` (mặc định `<origin>/bao-su-co`) kèm `?machine=<mã máy>`. Màn "Máy chưa nhả được hàng" / "chưa báo kết quả" (K-07) có thêm nút "Quét mã QR báo sự cố" cạnh nút chính; QR lúc này kèm `&order=<mã đơn>` và form điền sẵn loại "Đã trả tiền nhưng không nhận hàng" cùng mã đơn (mã sai dạng thì bỏ qua). Báo cáo tạo phiếu INCIDENT (O3) và, với đơn PAID/DISPENSE_FAILED, hiện ngay ở "Cần hoàn tiền" (W-12). Với mock, `?incident=on|off` đổi cờ để test.
 
 Logic thuần nằm ở `src/kiosk/flow.ts` (có test); gọi API ở `src/kiosk/api.ts`.
 

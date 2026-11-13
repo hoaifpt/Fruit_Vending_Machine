@@ -88,6 +88,19 @@ export interface IncidentDraft {
 }
 export const emptyDraft = (machineCode = ''): IncidentDraft => ({ machineCode, type: '', orderCode: '', description: '', contactPhone: '', photo: null })
 
+/** Query parameter the kiosk adds after a failed dispense (FE 8.3, screen K-07): the order the customer paid for. */
+export const ORDER_PARAM = 'order'
+/**
+ * First draft of the form from the page URL: the machine of the QR and, when the QR came from the "máy chưa nhả được
+ * hàng" screen, its well-formed order code with "Đã trả tiền nhưng không nhận hàng" pre-selected. A malformed order
+ * code is ignored (the customer can still type it).
+ */
+export function draftFromSearch(search: string): IncidentDraft {
+  const draft = emptyDraft(machineFromSearch(search) ?? '')
+  const order = normalizeOrderCode(new URLSearchParams(search).get(ORDER_PARAM) ?? '')
+  return order && ORDER_CODE.test(order) ? { ...draft, type: 'PAID_NOT_RECEIVED', orderCode: order } : draft
+}
+
 /** Fields in screen order: the first one with an error receives focus. */
 export const FIELD_ORDER: readonly IncidentField[] = ['machineCode', 'type', 'orderCode', 'description', 'contactPhone', 'photo']
 export const firstErrorField = (errors: IncidentFieldErrors): IncidentField | undefined => FIELD_ORDER.find(field => errors[field])

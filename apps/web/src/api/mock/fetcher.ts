@@ -31,6 +31,8 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   refunds: 'refunds',
   // Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
   'work-tickets': 'tickets',
+  // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): admin read of reports for W-12 (FE 8.3).
+  'incident-reports': 'incident-reports',
   // Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml).
   'maintenance-schedules': 'maintenance-schedules',
 }

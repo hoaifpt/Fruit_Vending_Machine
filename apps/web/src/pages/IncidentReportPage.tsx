@@ -9,7 +9,7 @@ import { Button } from '../components/ui/button'
 import { FormField } from '../components/ui/form-field'
 import { Input, Textarea } from '../components/ui/input'
 import {
-  buildIncidentForm, describeIncidentError, DESCRIPTION_MAX, emptyDraft, firstErrorField, INCIDENT_TYPES, MACHINE_PARAM, machineFromSearch,
+  buildIncidentForm, describeIncidentError, DESCRIPTION_MAX, draftFromSearch, emptyDraft, firstErrorField, INCIDENT_TYPES, MACHINE_PARAM, machineFromSearch,
   photoError, PHOTO_TYPES, thankYouMessage, typeOption, validateIncident,
 } from '../features/incident/incident'
 import type { IncidentDraft, IncidentFailure, IncidentField, IncidentFieldErrors, IncidentReceipt, IncidentType } from '../features/incident/incident'
@@ -37,7 +37,8 @@ type Photo = NonNullable<IncidentDraft['photo']>
 function IncidentReportPage() {
   const [fromQr] = useState(() => machineFromSearch(window.location.search))
   const [badParam] = useState(() => new URLSearchParams(window.location.search).has(MACHINE_PARAM) && !machineFromSearch(window.location.search))
-  const [draft, setDraft] = useState<IncidentDraft>(() => emptyDraft(fromQr ?? ''))
+  // FE 8.3: from the kiosk's failed-dispense screen the QR also carries the order code (type and code pre-filled).
+  const [draft, setDraft] = useState<IncidentDraft>(() => draftFromSearch(window.location.search))
   /** The machine code is shown as a fixed line when it came from the QR, until the customer chooses to change it. */
   const [editMachine, setEditMachine] = useState(!fromQr)
   const [errors, setErrors] = useState<IncidentFieldErrors>({})

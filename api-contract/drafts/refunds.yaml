@@ -14,6 +14,11 @@ info:
     PAYMENT_LATE (the order is CANCELLED, same rule as GET /payments?requiresAttention=true) or PAYMENT_DUPLICATE (the
     order has another SUCCESS payment; both are refundable while two SUCCESS remain, the web offers the one paid last,
     as the requiresAttention description says).
+    Customer reports (FE 8.3, backend 5.2): "Cần hoàn tiền" also lists the "đã trả nhưng không nhận hàng" reports read
+    from GET /incident-reports?flagged=true (drafts/incident-reports.yaml), so a report shows up as soon as it arrives.
+    A report never makes an order refundable by itself (BR-15): the rules above stay the only ones. An order the report
+    names that is still PAID or DISPENSING is shown for checking only (no refund action, "kiểm tra máy trước"); once the
+    machine side confirms the failure and the order is DISPENSE_FAILED, the usual DISPENSE_FAILED refund applies.
     Which payment: the path names the order (the refund is about the order, it may change the order status and the
     audit reads per order) and the body names the payment with paymentId. paymentId is optional only to keep the
     simple case simple: without it the server refunds the order's only SUCCESS payment, and answers 400

@@ -6,7 +6,7 @@ import type { components as DispenseDraft } from './drafts/dispense-commands'
 import type { components as AlertsDraft, operations as AlertOperations } from './drafts/alerts'
 import type { components as TelemetryDraft, operations as TelemetryOperations } from './drafts/machine-telemetry'
 import type { components as RefundsDraft, operations as RefundOperations } from './drafts/refunds'
-import type { components as IncidentDraft } from './drafts/incident-reports'
+import type { components as IncidentDraft, operations as IncidentOperations } from './drafts/incident-reports'
 import type { components as TicketsDraft, operations as TicketOperations } from './drafts/work-tickets'
 import type { components as SchedulesDraft, operations as ScheduleOperations } from './drafts/maintenance-schedules'
 import type { components as MaintenanceDraft, operations as MaintenanceOperations } from './drafts/machine-maintenance'
@@ -265,6 +265,10 @@ export type { Q as QueryParams }
 // multipart/form-data built by features/incident/incident.ts (buildIncidentForm). When 5.2 lands: move the path into
 // api.yaml, run gen:api, switch the type to schema.d.ts and delete the draft.
 export type IncidentReportReceipt = IncidentDraft['schemas']['IncidentReportReceipt']
+export type IncidentReport = IncidentDraft['schemas']['IncidentReportResponse']
+export type IncidentReportListQuery = NonNullable<IncidentOperations['listIncidentReports']['parameters']['query']>
 export const incidentReportsApi = {
   create: (form: FormData, signal?: AbortSignal) => request<IncidentReportReceipt>('POST', '/public/incident-reports', { body: form, auth: false, signal }),
+  /** FE 8.3, ADMIN (REFUND_RECORD): reports for W-12; `flagged: true` = orders still to check for a refund. */
+  list: (query: IncidentReportListQuery, signal?: AbortSignal) => list<IncidentReport>('/incident-reports', query, signal),
 }

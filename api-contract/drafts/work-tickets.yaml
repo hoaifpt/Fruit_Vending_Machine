@@ -31,8 +31,15 @@ info:
     alerts automatically (see POST /complete). Proposed permissions (not in backend #48 yet):
     TICKET_READ (ADMIN, STAFF) and TICKET_WRITE (ADMIN). A caller without TICKET_WRITE only ever sees tickets assigned
     to itself (the server filters; the web never relies on its own filtering). Starting and completing a ticket is done
-    by its assignee only. Used by the mock layer until the backend ships it, then this file is deleted and the paths
-    move to api.yaml.
+    by its assignee only. INCIDENT tickets (FE 8.3, backend 5.2, SRS 3.6.4): the server opens one OPEN INCIDENT ticket
+    for the machine every time a customer sends a public incident report (drafts/incident-reports.yaml); the ticket
+    stores the report (proposed column work_tickets.incident_report_id FK incident_reports NULL, UNIQUE, CHECK
+    (type = 'INCIDENT') = (incident_report_id IS NOT NULL)), createdById is null and createdByName "Hệ thống". Its
+    title is "Sự cố: <type label> · máy <code>" and its description the customer's text. An INCIDENT ticket can never
+    be created through POST /work-tickets (400 on type); after that it follows the same lifecycle as the other types
+    (assign, start, complete with a note, cancel with a reason). Completing it changes nothing on the order or its
+    payments (BR-15): a refund stays a manual admin action on W-12. Used by the mock layer until the backend ships it,
+    then this file is deleted and the paths move to api.yaml.
 paths:
   /api/v1/work-tickets:
     get:
@@ -80,7 +87,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [RESTOCK, MAINTENANCE]
+            enum: [RESTOCK, MAINTENANCE, INCIDENT]
         - name: machineId
           in: query
           description: Machine UUID filter.
@@ -122,7 +129,8 @@ paths:
       operationId: createWorkTicket
       summary: Open a work ticket (draft)
       description: >-
-        TICKET_WRITE. Creates an OPEN ticket, or an ASSIGNED one when assigneeId is given (assignedAt/assignedBy are then
+        TICKET_WRITE. Creates a RESTOCK or MAINTENANCE ticket (INCIDENT tickets are opened by the server from a customer
+        report only: type INCIDENT is answered 400 with fieldErrors.type). Creates an OPEN ticket, or an ASSIGNED one when assigneeId is given (assignedAt/assignedBy are then
         the creation time and the caller). machineId must be an existing machine; alertId, when given, must be an alert
         of that same machine that is not RESOLVED; assigneeId must be an ACTIVE account holding the STAFF role. Unknown
         or invalid references are reported as fieldErrors (400). dueAt must be in the future. Unknown fields are rejected
@@ -573,7 +581,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [RESTOCK, MAINTENANCE]
+          enum: [RESTOCK, MAINTENANCE, INCIDENT]
         status:
           type: string
           enum: [OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED]
@@ -616,8 +624,11 @@ components:
             - "null"
           description: fullName of the assignee.
         createdById:
-          type: string
+          type:
+            - string
+            - "null"
           format: uuid
+          description: Null when the server opened the ticket itself (INCIDENT from a customer report); createdByName is then "Hệ thống".
         createdByName:
           type:
             - string
@@ -713,6 +724,65 @@ components:
           items:
             type: string
             format: uuid
+        incidentReport:
+          description: "INCIDENT tickets only (null otherwise): the customer report the server opened this ticket from."
+          oneOf:
+            - $ref: "#/components/schemas/TicketIncidentReport"
+            - type: "null"
+    TicketIncidentReport:
+      type: object
+      description: >-
+        The customer report behind an INCIDENT ticket (table incident_reports of drafts/incident-reports.yaml), as anyone
+        who may read the ticket sees it. Privacy: contactPhone is only sent to callers holding TICKET_WRITE (ADMIN); for
+        everyone else (the assigned STAFF) it is null, so the staff at the machine never get the customer's number.
+        Description is plain text written by a customer: clients show it as text, never as HTML.
+      required: [id, reportCode, type, hasPhoto, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        reportCode:
+          type: string
+          description: Code given to the customer (MSG47), "INC-yyyyMMdd-XXXX".
+          examples: ["INC-20261109-7KQ2"]
+        type:
+          type: string
+          description: Same values as IncidentType of drafts/incident-reports.yaml.
+          enum: [PAID_NOT_RECEIVED, SPOILED_FRUIT, MACHINE_FAULT, OTHER]
+        orderId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        orderCode:
+          type:
+            - string
+            - "null"
+        orderFlagged:
+          type: boolean
+          description: The named order was PAID or DISPENSE_FAILED when the report arrived, so it is listed on W-12 (flag only).
+        description:
+          type:
+            - string
+            - "null"
+        contactPhone:
+          type:
+            - string
+            - "null"
+          description: ADMIN (TICKET_WRITE) only, null for other callers.
+        hasPhoto:
+          type: boolean
+        photoUrl:
+          type:
+            - string
+            - "null"
+          format: uri
+          description: >-
+            Short-lived signed https URL of the photo (proposal: 10 minutes), null when there is no photo or the storage
+            cannot sign one. Never a public URL.
+        createdAt:
+          type: string
+          format: date-time
     RestockLineResponse:
       type: object
       description: One slot to fill during a restock.
@@ -818,6 +888,7 @@ components:
       properties:
         type:
           type: string
+          description: INCIDENT tickets are opened by the server from customer reports only.
           enum: [RESTOCK, MAINTENANCE]
         machineId:
           type: string

@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/incident-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Customer reports for the admin (draft, FE 8.3)
+         * @description REFUND_RECORD (ADMIN only, draft permission of drafts/refunds.yaml; a later admin screen of reports may bring its own INCIDENT_READ). Newest first, database pagination page0/size20/max100. With flagged=true only the reports whose order was flagged (orderFlagged: the order was PAID or DISPENSE_FAILED when the report arrived) and whose order still holds a SUCCESS payment with no refund recorded, i.e. the reports an admin still has to check for a refund; once the payment is refunded the report leaves this list. Each row carries the order's current status and amount so the screen can tell "refund now" (DISPENSE_FAILED) from "check the machine first" (PAID, DISPENSING). Reading never changes the order, its payments or the report (BR-15).
+         */
+        get: operations["listIncidentReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/incident-reports": {
         parameters: {
             query?: never;
@@ -19,7 +39,7 @@ export interface paths {
          *
          *     Rules: `type` decides the required fields. PAID_NOT_RECEIVED requires `orderCode`; OTHER requires `description`; every other field is optional. When `orderCode` is sent (any type) it must be an order of the machine named by `machineCode`, otherwise 422 with fieldErrors.orderCode (MSG46 "Không tìm thấy mã đơn của máy này."). Text fields are stripped; blank optional fields count as absent. `machineCode` and `orderCode` are compared upper-cased (Locale.ROOT), like machine codes elsewhere.
          *
-         *     Effects (BR-15): the report is stored and the backend opens an INCIDENT ticket for the admin. It never changes the order, its payments, the inventory or the machine status. When the report names an order in PAID or DISPENSE_FAILED, that order is flagged for the admin's attention on screen W-12 (flag only; refunds stay a manual admin action). The answer never reveals anything about the order (status, amount) to the reporter.
+         *     Effects (BR-15): the report is stored and, in the same transaction, the backend opens an OPEN INCIDENT work ticket for the machine (drafts/work-tickets.yaml, no assignee, created by "Hệ thống", linked to the report). It never changes the order, its payments, the inventory or the machine status. When the report names an order in PAID or DISPENSE_FAILED, that order is flagged for the admin's attention on screen W-12 (flag only; refunds stay a manual admin action). The answer never reveals anything about the order (status, amount) to the reporter.
          *
          *     Rate limit (BR-32): at most 5 requests per minute per client (client IP after the trusted proxy), counted on every POST to this path whatever its outcome; the 6th within the window gets 429 with a Retry-After header in seconds (MSG48 "Bạn gửi quá nhiều báo cáo. Vui lòng thử lại sau một phút.").
          */
@@ -73,6 +93,56 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
+        /** @description One report as the admin sees it. The order fields describe the order now (current status), not at report time. description is plain text written by a customer: show it as text, never as HTML. */
+        IncidentReportResponse: {
+            /** Format: uuid */
+            id: string;
+            /** @example INC-20261109-7KQ2 */
+            reportCode: string;
+            type: components["schemas"]["IncidentType"];
+            /** Format: uuid */
+            machineId: string;
+            machineCode: string;
+            /** Format: uuid */
+            orderId?: string | null;
+            orderCode?: string | null;
+            /**
+             * @description Current status of the order (OrderDetailResponse.status of api.yaml), null without an order.
+             * @enum {string|null}
+             */
+            orderStatus?: "PENDING_PAYMENT" | "PAID" | "DISPENSING" | "COMPLETED" | "CANCELLED" | "PAYMENT_FAILED" | "DISPENSE_FAILED" | "REFUNDED" | null;
+            /** @description Order total in VND, null without an order. */
+            orderTotalAmount?: number | null;
+            orderFlagged: boolean;
+            description?: string | null;
+            /** @description Optional number left by the customer (ADMIN only). */
+            contactPhone?: string | null;
+            hasPhoto: boolean;
+            /**
+             * Format: uuid
+             * @description The INCIDENT work ticket opened for this report.
+             */
+            ticketId?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        PageIncidentReportResponse: {
+            content: components["schemas"]["IncidentReportResponse"][];
+            /** Format: int32 */
+            page: number;
+            /** Format: int32 */
+            size: number;
+            /** Format: int64 */
+            totalElements: number;
+            /** Format: int32 */
+            totalPages: number;
+        };
+        ApiResponsePageIncidentReportResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["PageIncidentReportResponse"];
+        };
         ApiResponseIncidentReportReceipt: {
             /** Format: date-time */
             timestamp?: string;
@@ -100,6 +170,71 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listIncidentReports: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                /** @description Only reports with an order still to check for a refund (see above). */
+                flagged?: boolean;
+                type?: components["schemas"]["IncidentType"];
+                machineId?: string;
+                /** @description createdAt only, with optional asc/desc. */
+                sort?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of reports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponsePageIncidentReportResponse"];
+                };
+            };
+            /** @description Invalid parameter (unknown type, non-UUID id, unknown sort) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing or invalid access token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description The caller lacks REFUND_RECORD */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     createPublicIncidentReport: {
         parameters: {
             query?: never;

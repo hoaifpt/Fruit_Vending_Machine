@@ -297,6 +297,8 @@ export default function PurchasePage() {
   const imageOf = (product: KioskProduct) => product.imageUrl || fallbackImage(productIndex(product))
   const orderCode = 'order' in screen ? screen.order.orderCode : undefined
   const slowDispense = screen.kind === 'dispensing' && clock - enteredAt.current >= DISPENSE_SLOW_MS
+  // K-07 (FE 8.3): after a paid order the machine did not serve, the incident QR also carries the order code.
+  const failedOrderCode = screen.kind === 'ended' && (screen.reason === 'dispense-failed' || screen.reason === 'dispense-stuck') ? screen.order.orderCode : undefined
 
   return <div className="buy-app buy-screen">
     <header className="buy-header">
@@ -390,7 +392,13 @@ export default function PurchasePage() {
           ? 'Bạn đã thanh toán nhưng máy chưa xác nhận đã nhả hộp. Nếu chưa nhận được hộp trong khay, vui lòng chụp lại hoặc ghi mã đơn và báo nhân viên để được hỗ trợ hoặc hoàn tiền. Không thanh toán lại.'
           : 'Bạn đã thanh toán nhưng máy chưa nhả được hộp trái cây. Vui lòng chụp lại hoặc ghi mã đơn và báo nhân viên để được hỗ trợ hoặc hoàn tiền. Không thanh toán lại.'}</p></div>
         <OrderCode code={screen.order.orderCode} large machineCode={machine?.machineCode} />
-        <div className="buy-result-actions"><button className="buy-primary" onClick={goHome}>Tôi đã ghi lại mã đơn</button><small>Tự về màn hình chính sau {returnLeft} giây</small></div>
+        <div className="buy-result-actions">
+          <div className="buy-result-actions-row">
+            {incident.enabled && <button className="buy-incident buy-incident-inline" onClick={() => setDialog('incident')}><span aria-hidden="true">!</span> Quét mã QR báo sự cố</button>}
+            <button className="buy-primary" onClick={goHome}>Tôi đã ghi lại mã đơn</button>
+          </div>
+          <small>Tự về màn hình chính sau {returnLeft} giây</small>
+        </div>
       </section>}
 
       {screen.kind === 'ended' && (screen.reason === 'cancelled' || screen.reason === 'expired') && <EndedScreen heading={heading} reason={screen.reason} order={screen.order} returnLeft={returnLeft} onHome={goHome} />}
@@ -406,7 +414,7 @@ export default function PurchasePage() {
         <h3>Đã thanh toán nhưng màn hình chưa xác nhận?</h3><p>Không thanh toán lại. Chờ thêm ít giây; nếu vẫn chưa xác nhận, hãy báo nhân viên mã đơn và mã máy.</p>
         {orderCode && <p><strong>Mã đơn {orderCode}</strong></p>}
         {machine && <p><strong>Máy {machine.machineCode}</strong> · {machine.machineName}</p>}</>}
-      {dialog === 'incident' && <IncidentPanel url={incidentReportUrl(incident.baseUrl, machine?.machineCode)} machine={machine} />}
+      {dialog === 'incident' && <IncidentPanel url={incidentReportUrl(incident.baseUrl, machine?.machineCode, failedOrderCode)} machine={machine} orderCode={failedOrderCode} />}
     </dialog>
   </div>
 }
@@ -510,9 +518,11 @@ function Countdown({ screen, serverNow }: { screen: Screen; serverNow: number })
   </div>
 }
 
-function IncidentPanel({ url, machine }: { url: string; machine: KioskIdentity | null }) {
+function IncidentPanel({ url, machine, orderCode }: { url: string; machine: KioskIdentity | null; orderCode?: string }) {
   return <div className="buy-incident-panel">
-    <p>Quét mã bằng điện thoại để báo sự cố{machine ? <> với máy <strong>{machine.machineCode}</strong></> : null}: máy không nhả hàng, đã trừ tiền nhưng không nhận hàng, hàng hư hỏng…</p>
+    {orderCode
+      ? <p>Quét mã bằng điện thoại để báo <strong>đã trả tiền nhưng không nhận hàng</strong>. Trang báo sự cố điền sẵn mã máy{machine ? <> <strong>{machine.machineCode}</strong></> : null} và mã đơn <strong>{orderCode}</strong>; bạn không cần nhập lại.</p>
+      : <p>Quét mã bằng điện thoại để báo sự cố{machine ? <> với máy <strong>{machine.machineCode}</strong></> : null}: máy không nhả hàng, đã trừ tiền nhưng không nhận hàng, hàng hư hỏng…</p>}
     <QrImage text={url} alt="Mã QR mở trang báo sự cố của máy này" label="Mã QR báo sự cố" />
     <p className="buy-incident-url">{url}</p>
   </div>

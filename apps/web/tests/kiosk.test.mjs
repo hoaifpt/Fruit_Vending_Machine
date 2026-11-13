@@ -1,4 +1,5 @@
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { configureClient } from '../src/api/client.ts'
 import { createKioskApi } from '../src/kiosk/api.ts'
@@ -116,22 +117,34 @@ test('FE 5.2: an order that ended without a box says whether money was taken', (
   assert.equal(chargeOutcome({ currentPayment: { status: 'SUCCESS' } }), 'paid-late')
 })
 
-test('FE 5.4: the incident button is off unless configured; the QR opens the report form of this machine', () => {
+test('FE 5.4 / 8.3: the incident button is on by default, off only when configured so; the QR opens the report form of this machine', () => {
   const origin = 'https://kiosk.example'
-  assert.equal(incidentReportConfig({}, origin).enabled, false)
-  assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: 'false' }, origin).enabled, false)
+  // FE 8.3 switched the default on (the public form exists); false/0/off/no still hide it.
+  assert.equal(incidentReportConfig({}, origin).enabled, true)
+  assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: '' }, origin).enabled, true)
+  for (const off of ['false', '0', 'off', 'NO', ' False ']) assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: off }, origin).enabled, false, off)
   for (const on of ['true', '1', 'on', 'ON']) assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: on }, origin).enabled, true)
   assert.equal(incidentReportConfig({}, `${origin}/`).baseUrl, 'https://kiosk.example/bao-su-co')
   assert.equal(incidentReportConfig({ VITE_INCIDENT_REPORT_URL: 'https://fv.example/report' }, origin).baseUrl, 'https://fv.example/report')
   // ?incident= only overrides the flag with the mock API (UX tests), never in a real build.
-  assert.equal(incidentReportConfig({}, origin, 'on').enabled, false)
-  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'all' }, origin, 'on').enabled, true)
+  assert.equal(incidentReportConfig({ VITE_KIOSK_INCIDENT_REPORT: 'false' }, origin, 'on').enabled, false)
+  assert.equal(incidentReportConfig({}, origin, 'off').enabled, true, 'no override without the mock API')
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'all', VITE_KIOSK_INCIDENT_REPORT: 'false' }, origin, 'on').enabled, true)
   assert.equal(incidentReportConfig({ VITE_API_MOCK: 'all', VITE_KIOSK_INCIDENT_REPORT: 'true' }, origin, 'off').enabled, false)
-  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'orders,payments' }, origin, 'on').enabled, false, 'the kiosk API itself must be mocked')
-  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'kiosk' }, origin, 'on').enabled, true)
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'all' }, origin, 'off').enabled, false, 'the off state stays testable with ?incident=off')
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'orders,payments', VITE_KIOSK_INCIDENT_REPORT: 'false' }, origin, 'on').enabled, false, 'the kiosk API itself must be mocked')
+  assert.equal(incidentReportConfig({ VITE_API_MOCK: 'kiosk', VITE_KIOSK_INCIDENT_REPORT: 'off' }, origin, 'on').enabled, true)
   // A relative or broken URL never crashes the kiosk: relative resolves on the origin, junk falls back to the default.
   assert.equal(incidentReportConfig({ VITE_INCIDENT_REPORT_URL: '/report' }, origin).baseUrl, 'https://kiosk.example/report')
   for (const bad of ['javascript:alert(1)', 'http://[bad', 'ftp://x.example/r']) assert.equal(incidentReportConfig({ VITE_INCIDENT_REPORT_URL: bad }, origin).baseUrl, 'https://kiosk.example/bao-su-co', bad)
   assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', 'M 01&x'), 'https://kiosk.example/bao-su-co?machine=M+01%26x')
   assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', undefined), 'https://kiosk.example/bao-su-co')
+})
+
+test('FE 8.3: after a failed dispense (K-07) the QR also carries the order code; .env.example ships the button on', () => {
+  assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', 'DEV-MACHINE-01', 'ORD-20261109-AB12CD34'), 'https://kiosk.example/bao-su-co?machine=DEV-MACHINE-01&order=ORD-20261109-AB12CD34')
+  assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', 'DEV-MACHINE-01', undefined), 'https://kiosk.example/bao-su-co?machine=DEV-MACHINE-01')
+  assert.equal(incidentReportUrl('https://kiosk.example/bao-su-co', 'DEV-MACHINE-01', ''), 'https://kiosk.example/bao-su-co?machine=DEV-MACHINE-01')
+  const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
+  assert.match(example, /^VITE_KIOSK_INCIDENT_REPORT=true$/m)
 })

@@ -136,3 +136,9 @@
 .buy-price s{font-size:17px;color:oklch(.9 .02 153);font-variant-numeric:tabular-nums}
 .buy-pay-discount{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:10px 0 0;font-size:15px}
 .buy-pay-discount s{color:var(--muted)}
+/* FE 8.3: K-07 "máy chưa nhả được hàng" offers the incident QR (with the order code) next to the main action. */
+.buy-screen .buy-result-failed .buy-result-actions{max-width:680px}
+.buy-result-actions-row{display:flex;gap:12px;width:100%}
+.buy-result-actions-row>button{flex:1 1 0;min-width:0}
+.buy-app .buy-incident-inline{justify-content:center;min-height:64px}
+@media(max-width:600px){.buy-result-actions-row{flex-direction:column}}

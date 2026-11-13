@@ -4,11 +4,13 @@
 // (GET /orders?status=DISPENSE_FAILED) and late or duplicate payments (GET /payments?requiresAttention=true).
 // "Đã hoàn tiền" (`?view=refunded`) lists the recorded refunds (GET /refunds, draft). `?orderId=` narrows the screen to
 // one order (entry from the order and payment detail screens). Filters and pages live in the URL. No delete.
+// FE 8.3: "Cần hoàn tiền" starts with the customer reports naming a paid order (GET /incident-reports?flagged=true,
+// draft), shown as soon as they arrive; a DISPENSE_FAILED row of the same order is marked "Khách báo sự cố INC-…".
 import { useState } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
-import { ordersApi, paymentsApi, refundsApi } from '../../api/resources.ts'
-import type { OrderSummary, Payment, Refund } from '../../api/resources.ts'
+import { incidentReportsApi, ordersApi, paymentsApi, refundsApi } from '../../api/resources.ts'
+import type { IncidentReport, OrderSummary, Payment, Refund } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
 import { FilterBar } from '../../components/ui/filter-bar.tsx'
 import { formatDateTime, formatMoney } from '../../lib/format.ts'
@@ -23,9 +25,11 @@ import { listAnomalies } from '../payments.ts'
 import { RefundDialog } from '../refund-parts.tsx'
 import type { RefundTarget } from '../refund-parts.tsx'
 import {
-  REFUNDS_MISSING, REFUND_FILTER_KEYS, REFUND_REASONS, REFUND_REASON_LABELS, REFUND_SORT_RULE, attentionPaymentsQuery, blockedText,
-  failedOrdersQuery, pageValue, paymentRowAction, readRefundFilters, refundCase, refundListQuery, refundOf, refundReasonLabel, refundsMissing,
+  REFUNDS_MISSING, REFUND_FILTER_KEYS, REFUND_REASONS, REFUND_REASON_LABELS, REFUND_SORT_RULE, REPORTS_MISSING, REPORT_CHECK_MACHINE, REPORT_NOTHING,
+  attentionPaymentsQuery, blockedText, failedOrdersQuery, flaggedReportsQuery, pageValue, paymentRowAction, readRefundFilters, refundCase, refundListQuery,
+  refundOf, refundReasonLabel, refundsMissing, reportMark, reportRowAction, reportsByOrder,
 } from '../refunds.ts'
+import { incidentTypeLabel, ticketPath } from '../tickets.ts'
 import type { RefundFilters } from '../refunds.ts'
 import { useApi } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
@@ -51,12 +55,14 @@ function RefundsPage() {
   const listKey = `${filters.machineId}|${filters.view}|${filters.orderId}`
   const failed = useApi(signal => (pendingView ? ordersApi.list(failedOrdersQuery(filters, PAGE_SIZE), signal) : Promise.resolve(undefined)), `${listKey}|${filters.failedPage}`)
   const attention = useApi(signal => (pendingView ? paymentsApi.list(attentionPaymentsQuery(filters, PAGE_SIZE), signal) : Promise.resolve(undefined)), `${listKey}|${filters.paymentPage}`)
+  const reports = useApi(signal => (pendingView ? incidentReportsApi.list(flaggedReportsQuery(filters, PAGE_SIZE), signal) : Promise.resolve(undefined)), `${listKey}|${filters.reportPage}`,
+    { stopOn: refundsMissing })
   const refunded = useApi(signal => (refundedView ? refundsApi.list(refundListQuery(filters, PAGE_SIZE), signal) : Promise.resolve(undefined)),
     `${listKey}|${filters.reason}|${filters.from}|${filters.to}|${filters.sort.field},${filters.sort.direction}|${filters.page}`)
   const [focusTick, setFocusTick] = useState(0)
-  const changed = () => { failed.reload(); attention.reload(); refunded.reload(); setFocusTick(tick => tick + 1) }
+  const changed = () => { failed.reload(); attention.reload(); reports.reload(); refunded.reload(); setFocusTick(tick => tick + 1) }
   const open = (target: RefundTarget) => dialog.open(target)
-  const setView = (view: RefundFilters['view']) => update({ view, orderId: undefined, page: undefined, failedPage: undefined, paymentPage: undefined })
+  const setView = (view: RefundFilters['view']) => update({ view, orderId: undefined, page: undefined, failedPage: undefined, paymentPage: undefined, reportPage: undefined })
 
   const forbidden = pendingView ? is403(failed) || is403(attention) : refundedView ? is403(refunded) : false
   const filterKeys = refundedView ? REFUND_FILTER_KEYS : (['machineId'] as const)
@@ -77,8 +83,8 @@ function RefundsPage() {
       ? <OrderFocus key={`${filters.orderId}|${focusTick}`} orderId={filters.orderId} open={open} clear={() => update({ orderId: undefined })} />
       : forbidden ? <Forbidden />
       : <>
-        <FilterBar activeCount={activeFilterCount(filterKeys.map(key => filters[key]))} onClear={() => update({ ...clearFiltersPatch(filterKeys), failedPage: undefined, paymentPage: undefined })}>
-          <SelectFilter label="Máy" value={filters.machineId} onChange={value => update({ machineId: value, failedPage: undefined, paymentPage: undefined })} options={machines} />
+        <FilterBar activeCount={activeFilterCount(filterKeys.map(key => filters[key]))} onClear={() => update({ ...clearFiltersPatch(filterKeys), failedPage: undefined, paymentPage: undefined, reportPage: undefined })}>
+          <SelectFilter label="Máy" value={filters.machineId} onChange={value => update({ machineId: value, failedPage: undefined, paymentPage: undefined, reportPage: undefined })} options={machines} />
           {refundedView && <>
             <SelectFilter label="Trường hợp" value={filters.reason} onChange={value => update({ reason: value })} options={REASON_OPTIONS} />
             <DateFilter label="Hoàn từ ngày" value={filters.from} onChange={value => update({ from: value })} />
@@ -86,7 +92,8 @@ function RefundsPage() {
           </>}
         </FilterBar>
         {pendingView && <>
-          <FailedOrders state={failed} open={open} onPage={next => update({ failedPage: pageValue(next) })} />
+          <FlaggedReports state={reports} open={open} onPage={next => update({ reportPage: pageValue(next) })} />
+          <FailedOrders state={failed} open={open} reports={reportsByOrder(reports.data?.content)} onPage={next => update({ failedPage: pageValue(next) })} />
           <AttentionPayments state={attention} open={open} onPage={next => update({ paymentPage: pageValue(next) })} />
         </>}
         {refundedView && <RefundedList state={refunded} filters={filters} update={update} />}
@@ -97,9 +104,57 @@ function RefundsPage() {
 
 // ---- "Cần hoàn tiền"
 
-function FailedOrders({ state, open, onPage }: { state: ApiState<{ content: OrderSummary[]; page: number; totalPages: number; totalElements: number } | undefined>; open: (target: RefundTarget) => void; onPage: (page: number) => void }) {
+type PageOf<T> = { content: T[]; page: number; totalPages: number; totalElements: number }
+
+/** FE 8.3: customer reports naming a paid order, newest first, listed as soon as they arrive. */
+function FlaggedReports({ state, open, onPage }: { state: ApiState<PageOf<IncidentReport> | undefined>; open: (target: RefundTarget) => void; onPage: (page: number) => void }) {
+  const columns: Column<IncidentReport>[] = [
+    { head: 'Báo cáo', cell: report => <span className="grid gap-0.5">
+      {report.ticketId
+        ? <Link to={ticketPath(report.ticketId)} className={`${LINK} font-mono`} label={`${report.reportCode}, mở phiếu sự cố`}>{report.reportCode}</Link>
+        : <span className="font-mono">{report.reportCode}</span>}
+      <span className="text-xs text-muted-foreground">{incidentTypeLabel(report.type)}</span>
+    </span> },
+    { head: 'Đơn hàng', nowrap: true, cell: report => report.orderId
+      ? <span className="grid justify-items-start gap-1"><Link to={`/admin/orders/${report.orderId}`} className={LINK} label={`Mở đơn ${report.orderCode ?? ''}`}>{report.orderCode ?? shortId(report.orderId)}</Link>
+        {report.orderStatus && <Badge domain="order" value={report.orderStatus} />}</span>
+      : '—' },
+    { head: 'Máy', nowrap: true, secondary: true, cell: report => report.machineCode },
+    { head: 'Số tiền', nowrap: true, cell: report => report.orderTotalAmount === null || report.orderTotalAmount === undefined ? '—' : formatMoney(report.orderTotalAmount) },
+    { head: 'Gửi lúc', cell: report => formatDateTime(report.createdAt) },
+    { head: 'Thao tác', cell: report => {
+      const action = reportRowAction(report)
+      if (action === 'record') return <RecordButton label={`Ghi nhận hoàn tiền đơn ${report.orderCode ?? ''} (báo cáo ${report.reportCode})`}
+        onClick={() => open({ orderId: report.orderId ?? '', orderCode: report.orderCode ?? undefined })} />
+      return <span data-report-action={action} className="block max-w-[34ch] text-[13px] text-muted-foreground">{action === 'check-machine' ? REPORT_CHECK_MACHINE : REPORT_NOTHING}</span>
+    } },
+  ]
+  const head = <>
+    <h2 id="refund-reports" className={HEADING}>Khách báo sự cố về đơn đã trả tiền</h2>
+    <p className={HINT}>Báo cáo gửi qua mã QR trên máy, hiện ngay khi khách gửi. Báo cáo không tự đổi trạng thái đơn: đơn còn “Đã thanh toán” thì kiểm tra máy trước (mở phiếu sự cố); đơn nhả hàng thất bại thì hoàn tiền như bình thường.</p>
+  </>
+  if (state.error && !state.data && refundsMissing(state.error)) return <section className={SECTION} aria-labelledby="refund-reports">
+    {head}
+    <p role="status" className="rounded-lg border bg-muted/40 px-4 py-4 text-center text-[13px] text-muted-foreground">{REPORTS_MISSING}</p>
+  </section>
+  return <section className={SECTION} aria-labelledby="refund-reports">
+    {head}
+    <DataTable state={state} rows={state.data?.content} rowKey={report => report.id} caption="Báo cáo sự cố của khách cần kiểm tra hoàn tiền" columns={columns}
+      empty="Không có báo cáo nào của khách đang chờ kiểm tra hoàn tiền." />
+    {state.data && <Pagination page={state.data.page} totalPages={state.data.totalPages} totalElements={state.data.totalElements} onPage={onPage} />}
+  </section>
+}
+
+function FailedOrders({ state, open, reports, onPage }: { state: ApiState<PageOf<OrderSummary> | undefined>; open: (target: RefundTarget) => void; reports: Map<string, IncidentReport>; onPage: (page: number) => void }) {
   const columns: Column<OrderSummary>[] = [
-    { head: 'Đơn hàng', nowrap: true, cell: order => <Link to={`/admin/orders/${order.id}`} className={LINK} label={`Mở đơn ${order.orderCode ?? ''}`}>{order.orderCode ?? shortId(order.id)}</Link> },
+    { head: 'Đơn hàng', nowrap: true, cell: order => {
+      const report = reports.get(order.id ?? '')
+      const link = <Link to={`/admin/orders/${order.id}`} className={LINK} label={`Mở đơn ${order.orderCode ?? ''}`}>{order.orderCode ?? shortId(order.id)}</Link>
+      if (!report) return link
+      return <span className="grid justify-items-start gap-0.5">{link}{report.ticketId
+        ? <Link to={ticketPath(report.ticketId)} className={`${BASE_LINK} text-xs`}>{reportMark(report)}</Link>
+        : <span className="text-xs font-medium">{reportMark(report)}</span>}</span>
+    } },
     { head: 'Máy', nowrap: true, cell: order => order.machineCode ?? '—' },
     { head: 'Số tiền', nowrap: true, cell: order => formatMoney(order.totalAmount) },
     { head: 'Tạo lúc', cell: order => formatDateTime(order.createdAt) },

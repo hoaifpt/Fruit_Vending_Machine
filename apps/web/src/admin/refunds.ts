@@ -5,8 +5,11 @@
 // POST /orders/{orderId}/refund { transferRef, note?, paymentId } and GET /refunds. The cases to refund come from APIs
 // that already exist: GET /orders?status=DISPENSE_FAILED and GET /payments?requiresAttention=true (late payment on a
 // cancelled order, duplicate payment). ADMIN only (REFUND_RECORD, draft permission; never STAFF, BR-19/20).
+// FE 8.3: customer reports naming a paid order (GET /incident-reports?flagged=true, draft incident-reports.yaml) are
+// listed first, as soon as they arrive. A report never makes an order refundable by itself (BR-15): an order still PAID
+// is shown for checking only; a DISPENSE_FAILED one is refunded as usual.
 import { ApiError } from '../api/client.ts'
-import type { OrderDetail, Refund, RefundBody, RefundListQuery } from '../api/resources.ts'
+import type { IncidentReport, IncidentReportListQuery, OrderDetail, Refund, RefundBody, RefundListQuery } from '../api/resources.ts'
 import { dateRangeToInstants, formatDateTime } from '../lib/format.ts'
 import { formatSort, oneOf, parseSort, uuidParam } from '../lib/table-query.ts'
 import type { SortRule, SortState } from '../lib/table-query.ts'
@@ -52,6 +55,8 @@ export interface RefundFilters {
   reason: RefundReason | ''; from: string; to: string; sort: SortState; page: number
   /** "Cần hoàn tiền": one page per list. */
   failedPage: number; paymentPage: number
+  /** "Cần hoàn tiền": page of the customer reports (FE 8.3). */
+  reportPage: number
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -72,6 +77,7 @@ export function readRefundFilters(params: URLSearchParams): RefundFilters {
     from: dateParam(params.get('from')), to: dateParam(params.get('to')),
     sort: parseSort(params.get('sort'), REFUND_SORT_RULE),
     page: pageOf(params, 'page'), failedPage: pageOf(params, 'failedPage'), paymentPage: pageOf(params, 'paymentPage'),
+    reportPage: pageOf(params, 'reportPage'),
   }
 }
 
@@ -83,6 +89,37 @@ export function failedOrdersQuery(filters: RefundFilters, size: number) {
 export function attentionPaymentsQuery(filters: RefundFilters, size: number) {
   return { page: filters.paymentPage, size, sort: 'paidAt,desc', requiresAttention: true, machineId: filters.machineId || undefined }
 }
+/** GET /incident-reports (draft, FE 8.3): customer reports whose paid order still has a payment to check, newest first. */
+export function flaggedReportsQuery(filters: RefundFilters, size: number): IncidentReportListQuery {
+  return { page: filters.reportPage, size, sort: 'createdAt,desc', flagged: true, machineId: filters.machineId || undefined }
+}
+
+// ---- customer reports (FE 8.3)
+
+/**
+ * What a flagged report row offers: `record` when the order is a refund case the dialog can check (DISPENSE_FAILED, or
+ * CANCELLED with money received), `check-machine` while the order is still PAID or DISPENSING (the report alone does
+ * not prove the bowl was not served), `none` otherwise (no order, or already settled).
+ */
+export type ReportRowAction = 'record' | 'check-machine' | 'none'
+export function reportRowAction(report: Pick<IncidentReport, 'orderId' | 'orderStatus'>): ReportRowAction {
+  if (!report.orderId) return 'none'
+  if (report.orderStatus === 'DISPENSE_FAILED' || report.orderStatus === 'CANCELLED') return 'record'
+  if (report.orderStatus === 'PAID' || report.orderStatus === 'DISPENSING') return 'check-machine'
+  return 'none'
+}
+export const REPORT_CHECK_MACHINE = 'Đơn chưa ở trạng thái nhả thất bại; kiểm tra máy trước.'
+export const REPORT_NOTHING = 'Đơn không còn thuộc trường hợp cần hoàn tiền; mở đơn để xem.'
+/** Reports of the loaded page by order id (newest kept), to mark the matching rows of the other lists. */
+export function reportsByOrder(reports: readonly IncidentReport[] | undefined): Map<string, IncidentReport> {
+  const map = new Map<string, IncidentReport>()
+  for (const report of reports ?? []) if (report.orderId && !map.has(report.orderId)) map.set(report.orderId, report)
+  return map
+}
+/** "Khách báo sự cố INC-20261109-7KQ2" */
+export const reportMark = (report: Pick<IncidentReport, 'reportCode'>) => `Khách báo sự cố ${report.reportCode}`
+export const REPORTS_MISSING = 'Chưa có dữ liệu báo cáo của khách: máy chủ chưa cung cấp chức năng này. Các trường hợp bên dưới vẫn dùng dữ liệu thật.'
+
 /** GET /refunds (draft): only parameters of the draft contract, absent when not in effect. */
 export function refundListQuery(filters: RefundFilters, size: number): RefundListQuery {
   const range = dateRangeToInstants(filters.from, filters.to)

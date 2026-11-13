@@ -2,6 +2,8 @@
 // next, and who did each step with the note or cancel reason. The header only offers the valid next step for this
 // account and status. API: GET /work-tickets/{id} of the draft contract api-contract/drafts/work-tickets.yaml
 // (waiting for BE 4.3). A staff account asking for someone else's ticket gets 404 from the server, shown as "not found".
+// FE 8.3: an INCIDENT ticket also shows the customer's report (code, type, order, description, photo; the phone number
+// only reaches admins, the server leaves it null for staff). Customer text is rendered as text, never as HTML.
 import { ApiError } from '../../api/client.ts'
 import { ticketsApi } from '../../api/resources.ts'
 import type { WorkTicket } from '../../api/resources.ts'
@@ -13,7 +15,12 @@ import { HEADING, HINT, LINK, PANEL } from '../payment-parts.tsx'
 import { DueText, TicketActionButtons, TicketActionDialog, TicketHistory } from '../ticket-parts.tsx'
 import type { TicketActionState } from '../ticket-parts.tsx'
 import { hasRestockLines, restockPath } from '../restock.ts'
-import { TICKETS_MISSING, TICKETS_PATH, TICKET_NOT_FOUND, assigneeText, isClosed, isMine, isOverdue, nextActions, nextStepText, ticketTypeLabel, ticketsAvailability } from '../tickets.ts'
+import { refundPathFor } from '../refunds.ts'
+import {
+  TICKETS_MISSING, TICKETS_PATH, TICKET_NOT_FOUND, assigneeText, incidentTypeLabel, isClosed, isMine, isOverdue, nextActions, nextStepText, safePhotoUrl,
+  ticketTypeLabel, ticketsAvailability,
+} from '../tickets.ts'
+import type { TicketIncident } from '../tickets.ts'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 import { useTicketViewer } from '../useTicketViewer.ts'
@@ -87,9 +94,45 @@ function TicketDetailPage({ ticketId }: { ticketId: string }) {
         {hasRestockLines(ticket) && <RestockEntry ticket={ticket} mine={isMine(ticket, viewer)} />}
         <TicketHistory ticket={ticket} />
       </section>
+      {ticket.type === 'INCIDENT' && <IncidentReportPanel report={ticket.incidentReport ?? null} canOrders={can('ORDER_READ')} canRefund={can('REFUND_RECORD')} />}
     </div>
     <TicketActionDialog state={action.value} close={action.close} changed={state.reload} screen="detail" />
   </>
+}
+
+/** FE 8.3: the customer report behind an INCIDENT ticket. */
+function IncidentReportPanel({ report, canOrders, canRefund }: { report: TicketIncident | null; canOrders: boolean; canRefund: boolean }) {
+  if (!report) return <section className={`${PANEL} lg:col-span-2`} aria-labelledby="ticket-incident">
+    <h2 id="ticket-incident" className={HEADING}>Báo cáo của khách</h2>
+    <p className={HINT}>Không đọc được báo cáo gốc của phiếu này. Tải lại trang; nếu vẫn vậy, báo bộ phận kỹ thuật kèm đường dẫn phiếu.</p>
+  </section>
+  const photo = safePhotoUrl(report.photoUrl)
+  const paidNotReceived = report.type === 'PAID_NOT_RECEIVED'
+  return <section className={`${PANEL} lg:col-span-2`} aria-labelledby="ticket-incident">
+    <h2 id="ticket-incident" className={HEADING}>Báo cáo của khách</h2>
+    <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-[14px] [&_dt]:text-muted-foreground">
+      <dt>Mã báo cáo</dt><dd className="font-mono">{report.reportCode}</dd>
+      <dt>Loại sự cố</dt><dd>{incidentTypeLabel(report.type)}</dd>
+      <dt>Gửi lúc</dt><dd>{formatDateTime(report.createdAt)}</dd>
+      <dt>Mã đơn</dt><dd>{report.orderCode
+        ? <span className="grid gap-1">
+          {canOrders && report.orderId
+            ? <Link to={`/admin/orders/${report.orderId}`} className={LINK} label={`Mở đơn ${report.orderCode}`}><span className="font-mono">{report.orderCode}</span></Link>
+            : <span className="font-mono">{report.orderCode}</span>}
+          {canRefund && report.orderFlagged && report.orderId && <span className="text-[13px] text-muted-foreground">Đơn đã được đưa vào “Cần hoàn tiền” để kiểm tra. <Link to={refundPathFor(report.orderId)} className={LINK}>Mở hoàn tiền của đơn</Link></span>}
+        </span>
+        : paidNotReceived ? 'Khách chưa ghi mã đơn' : 'Không có'}</dd>
+      <dt>Mô tả</dt><dd className="whitespace-pre-wrap break-words">{report.description?.trim() || 'Khách không ghi mô tả.'}</dd>
+      {report.contactPhone && <><dt>Số điện thoại</dt><dd><a href={`tel:${report.contactPhone}`} className={LINK}>{report.contactPhone}</a>
+        <span className="block text-xs text-muted-foreground">Chỉ quản trị viên thấy số này; chỉ dùng để gọi lại về sự cố.</span></dd></>}
+      <dt>Ảnh</dt><dd>{photo
+        ? <a href={photo} target="_blank" rel="noopener noreferrer" className="inline-block rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <img src={photo} alt={`Ảnh khách gửi kèm báo cáo ${report.reportCode} (mở ảnh lớn trong thẻ mới)`} className="max-h-60 max-w-full rounded-md border object-contain" />
+        </a>
+        : report.hasPhoto ? 'Khách có gửi ảnh nhưng chưa xem được ở đây: máy chủ chưa cấp đường dẫn xem ảnh. Tải lại trang sau ít phút.' : 'Không có ảnh'}</dd>
+    </dl>
+    {paidNotReceived && <p className={`${HINT} mt-3!`}>Hoàn tất phiếu không tự hoàn tiền và không đổi trạng thái đơn. Kiểm tra máy trước; quản trị viên ghi nhận hoàn tiền ở màn Hoàn tiền khi đơn đã ở trạng thái nhả hàng thất bại.</p>}
+  </section>
 }
 
 /** FE 7.2: a RESTOCK ticket with lines is carried out step by step on its own screen (made for a phone). */

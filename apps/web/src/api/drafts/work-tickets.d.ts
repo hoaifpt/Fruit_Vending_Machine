@@ -19,7 +19,7 @@ export interface paths {
         put?: never;
         /**
          * Open a work ticket (draft)
-         * @description TICKET_WRITE. Creates an OPEN ticket, or an ASSIGNED one when assigneeId is given (assignedAt/assignedBy are then the creation time and the caller). machineId must be an existing machine; alertId, when given, must be an alert of that same machine that is not RESOLVED; assigneeId must be an ACTIVE account holding the STAFF role. Unknown or invalid references are reported as fieldErrors (400). dueAt must be in the future. Unknown fields are rejected (400).
+         * @description TICKET_WRITE. Creates a RESTOCK or MAINTENANCE ticket (INCIDENT tickets are opened by the server from a customer report only: type INCIDENT is answered 400 with fieldErrors.type). Creates an OPEN ticket, or an ASSIGNED one when assigneeId is given (assignedAt/assignedBy are then the creation time and the caller). machineId must be an existing machine; alertId, when given, must be an alert of that same machine that is not RESOLVED; assigneeId must be an ACTIVE account holding the STAFF role. Unknown or invalid references are reported as fieldErrors (400). dueAt must be in the future. Unknown fields are rejected (400).
          */
         post: operations["createWorkTicket"];
         delete?: never;
@@ -177,7 +177,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            type: "RESTOCK" | "MAINTENANCE";
+            type: "RESTOCK" | "MAINTENANCE" | "INCIDENT";
             /** @enum {string} */
             status: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
             title: string;
@@ -198,8 +198,11 @@ export interface components {
             assigneeId?: string | null;
             /** @description fullName of the assignee. */
             assigneeName?: string | null;
-            /** Format: uuid */
-            createdById: string;
+            /**
+             * Format: uuid
+             * @description Null when the server opened the ticket itself (INCIDENT from a customer report); createdByName is then "Hệ thống".
+             */
+            createdById: string | null;
             createdByName?: string | null;
             /**
              * Format: date-time
@@ -236,6 +239,39 @@ export interface components {
             reconciliation?: components["schemas"]["RestockReconciliation"] | null;
             /** @description LOW_STOCK alerts the server resolved automatically when this RESTOCK ticket was completed (empty before, and for other tickets). */
             resolvedAlertIds?: string[];
+            /** @description INCIDENT tickets only (null otherwise): the customer report the server opened this ticket from. */
+            incidentReport?: components["schemas"]["TicketIncidentReport"] | null;
+        };
+        /** @description The customer report behind an INCIDENT ticket (table incident_reports of drafts/incident-reports.yaml), as anyone who may read the ticket sees it. Privacy: contactPhone is only sent to callers holding TICKET_WRITE (ADMIN); for everyone else (the assigned STAFF) it is null, so the staff at the machine never get the customer's number. Description is plain text written by a customer: clients show it as text, never as HTML. */
+        TicketIncidentReport: {
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description Code given to the customer (MSG47), "INC-yyyyMMdd-XXXX".
+             * @example INC-20261109-7KQ2
+             */
+            reportCode: string;
+            /**
+             * @description Same values as IncidentType of drafts/incident-reports.yaml.
+             * @enum {string}
+             */
+            type: "PAID_NOT_RECEIVED" | "SPOILED_FRUIT" | "MACHINE_FAULT" | "OTHER";
+            /** Format: uuid */
+            orderId?: string | null;
+            orderCode?: string | null;
+            /** @description The named order was PAID or DISPENSE_FAILED when the report arrived, so it is listed on W-12 (flag only). */
+            orderFlagged?: boolean;
+            description?: string | null;
+            /** @description ADMIN (TICKET_WRITE) only, null for other callers. */
+            contactPhone?: string | null;
+            hasPhoto: boolean;
+            /**
+             * Format: uri
+             * @description Short-lived signed https URL of the photo (proposal: 10 minutes), null when there is no photo or the storage cannot sign one. Never a public URL.
+             */
+            photoUrl?: string | null;
+            /** Format: date-time */
+            createdAt: string;
         };
         /** @description One slot to fill during a restock. */
         RestockLineResponse: {
@@ -301,7 +337,10 @@ export interface components {
             reason: string;
         };
         CreateWorkTicketRequest: {
-            /** @enum {string} */
+            /**
+             * @description INCIDENT tickets are opened by the server from customer reports only.
+             * @enum {string}
+             */
             type: "RESTOCK" | "MAINTENANCE";
             /** Format: uuid */
             machineId: string;
@@ -435,7 +474,7 @@ export interface operations {
                 /** @description Exact ticket status. */
                 status?: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
                 /** @description Exact ticket type. */
-                type?: "RESTOCK" | "MAINTENANCE";
+                type?: "RESTOCK" | "MAINTENANCE" | "INCIDENT";
                 /** @description Machine UUID filter. */
                 machineId?: string;
                 /** @description Assignee account UUID filter (ignored and replaced by the caller for callers without TICKET_WRITE). */

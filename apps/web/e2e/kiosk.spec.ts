@@ -151,11 +151,12 @@ test('K6: hết giờ giữ hàng nói rõ chưa bị trừ tiền', async ({ pa
   await expect(page.getByText('Bạn chưa bị trừ tiền.')).toBeVisible()
 })
 
-test('K8: nút Báo sự cố ẩn mặc định; bật cờ thì hiện và QR mở đúng link máy', async ({ page }, testInfo) => {
-  await openKiosk(page)
+test('K8: nút Báo sự cố hiện mặc định (FE 8.3), tắt được bằng cờ; QR mở đúng link máy', async ({ page }, testInfo) => {
+  // The off state stays reachable (VITE_KIOSK_INCIDENT_REPORT=false, or ?incident=off with the mock).
+  await openKiosk(page, '?incident=off')
   await expect(page.getByRole('button', { name: 'Báo sự cố' })).toHaveCount(0)
 
-  await openKiosk(page, '?incident=on')
+  await openKiosk(page)
   await page.getByRole('button', { name: 'Báo sự cố' }).click()
   const dialog = page.getByRole('dialog', { name: 'Báo sự cố với máy' })
   await auditScreen(page, testInfo, 'kiosk-incident', 'light', () => expect(dialog.getByRole('img', { name: /báo sự cố/ })).toBeVisible(), KIOSK)
@@ -163,4 +164,28 @@ test('K8: nút Báo sự cố ẩn mặc định; bật cờ thì hiện và QR 
   await expect(dialog.locator('.buy-incident-url')).toHaveText(`${origin}/bao-su-co?machine=DEV-MACHINE-01`)
   await dialog.getByRole('button', { name: 'Đóng' }).click()
   await expect(dialog).toBeHidden()
+})
+
+test('K-07 (FE 8.3): máy chưa nhả được hàng thì có QR báo sự cố mang sẵn mã đơn', async ({ page }) => {
+  await openKiosk(page, '?scenario=dispense-failed')
+  await buyFirst(page)
+  const orderCode = (await page.locator('.buy-pay-code strong').innerText()).trim()
+  await pay(page)
+  await expect(page.getByRole('heading', { level: 1, name: 'Máy chưa nhả được hàng' })).toBeVisible({ timeout: 10_000 })
+  const inline = page.getByRole('button', { name: 'Quét mã QR báo sự cố' })
+  await expect(inline).toBeVisible()
+  await expectTouchTargets(page, 'màn nhả lỗi có nút sự cố')
+  // The whole result (order code and both actions) fits the 1280x800 screen without scrolling.
+  for (const locator of [page.locator('.buy-order-code-large'), inline, page.getByRole('button', { name: 'Tôi đã ghi lại mã đơn' })]) {
+    const box = await locator.boundingBox()
+    expect(box && box.y + box.height).toBeLessThanOrEqual(800)
+  }
+  await inline.click()
+  const dialog = page.getByRole('dialog', { name: 'Báo sự cố với máy' })
+  await expect(dialog.getByRole('img', { name: /báo sự cố/ })).toBeVisible()
+  await expect(dialog).toContainText(`mã đơn ${orderCode}`)
+  const origin = new URL(page.url()).origin
+  await expect(dialog.locator('.buy-incident-url')).toHaveText(`${origin}/bao-su-co?machine=DEV-MACHINE-01&order=${orderCode}`)
+  await dialog.getByRole('button', { name: 'Đóng' }).click()
+  await expect(inline).toBeFocused()
 })
