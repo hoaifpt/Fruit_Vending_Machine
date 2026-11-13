@@ -96,6 +96,19 @@ public class WorkOrder extends UpdatedEntity {
     @Column(name = "cancel_reason", length = 500)
     private String cancelReason;
 
+    /** Issue #70: the maintenance plan of a SCHEDULE work order (CHECK: exactly for source SCHEDULE, type MAINTENANCE). */
+    @Column(name = "maintenance_plan_id")
+    private UUID maintenancePlanId;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @Setter(AccessLevel.NONE)
+    @JoinColumn(name = "maintenance_plan_id", insertable = false, updatable = false)
+    private com.fruitmachine.backend.maintenanceplan.entity.MaintenancePlan maintenancePlan;
+
+    /** Issue #70: the plan occurrence (business-zone date) this work order is for; unique per plan. */
+    @Column(name = "scheduled_for")
+    private java.time.LocalDate scheduledFor;
+
     @Column(name = "overdue_notified_at", columnDefinition = "timestamptz")
     private Instant overdueNotifiedAt;
 

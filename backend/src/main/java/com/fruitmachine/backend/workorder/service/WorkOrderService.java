@@ -157,6 +157,7 @@ public class WorkOrderService {
     public WorkOrder createBySystem(WorkOrderType type, WorkOrderSource source, UUID machineId, String title, String description,
             WorkOrderPriority priority, Instant dueAt, List<UUID> alertIds) {
         if (source == WorkOrderSource.MANUAL) throw new IllegalArgumentException("System work orders are not MANUAL");
+        if (source == WorkOrderSource.SCHEDULE) throw new IllegalArgumentException("SCHEDULE work orders come from a maintenance plan (createScheduled)");
         machines.findById(machineId).orElseThrow(() -> new ResourceNotFoundException("Machine not found"));
         WorkOrder order = newWorkOrder(type, source, machineId, title, description, priority, dueAt, null, null);
         for (UUID alertId : alertIds == null ? List.<UUID>of() : alertIds) {
@@ -168,8 +169,28 @@ public class WorkOrderService {
         return order;
     }
 
+    /**
+     * Issue #70: the work order of one maintenance plan occurrence, created by the system (created_by NULL) in the caller's transaction.
+     * The unique indexes (plan, scheduledFor) and (plan, unfinished) make a duplicate fail with DataIntegrityViolationException.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public WorkOrder createScheduled(UUID planId, java.time.LocalDate scheduledFor, UUID machineId, String title, String description,
+            WorkOrderPriority priority, Instant dueAt, UUID assigneeId) {
+        User assignee = assigneeId != null && workOrders.canExecute(assigneeId) ? users.getReferenceById(assigneeId) : null;
+        return newWorkOrder(WorkOrderType.MAINTENANCE, WorkOrderSource.SCHEDULE, machineId, title, description, priority, dueAt, null, assignee,
+                order -> {
+                    order.setMaintenancePlanId(planId);
+                    order.setScheduledFor(scheduledFor);
+                });
+    }
+
     private WorkOrder newWorkOrder(WorkOrderType type, WorkOrderSource source, UUID machineId, String title, String description,
             WorkOrderPriority priority, Instant dueAt, User creator, User assignee) {
+        return newWorkOrder(type, source, machineId, title, description, priority, dueAt, creator, assignee, order -> { });
+    }
+
+    private WorkOrder newWorkOrder(WorkOrderType type, WorkOrderSource source, UUID machineId, String title, String description,
+            WorkOrderPriority priority, Instant dueAt, User creator, User assignee, java.util.function.Consumer<WorkOrder> customize) {
         if (title == null || title.isBlank()) throw new BadRequestException("title is required");
         var order = new WorkOrder();
         order.setCode(newCode());
@@ -183,6 +204,7 @@ public class WorkOrderService {
         order.setCreatedBy(creator);
         order.setAssignee(assignee);
         order.setStatus(assignee == null ? WorkOrderStatus.OPEN : WorkOrderStatus.ASSIGNED);
+        customize.accept(order);
         workOrders.saveAndFlush(order);
         entityManager.refresh(order);
         ObjectNode details = JsonNodeFactory.instance.objectNode().put("type", type.name()).put("source", source.name()).put("priority", order.getPriority().name());
@@ -286,6 +308,7 @@ public class WorkOrderService {
         workOrders.flush();
         record(order, WorkOrderEventType.CANCELLED, before, WorkOrderStatus.CANCELLED, actor, request.reason(), null);
         notice(order, WorkOrderNotice.Kind.CANCELLED, actor);
+        events.publishEvent(new com.fruitmachine.backend.workorder.event.WorkOrderCancelledEvent(order.getId(), order.getMachineId(), order.getType()));
         return response(id);
     }
 
@@ -482,14 +505,14 @@ public class WorkOrderService {
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_WORK_ORDER_READ_ALL)
     public WorkOrderPageResponse list(List<WorkOrderStatus> statuses, WorkOrderType type, WorkOrderSource source, UUID machineId, UUID assigneeId,
-            WorkOrderPriority priority, boolean overdue, Instant from, Instant to, int page, int size) {
-        return search(statuses, type, source, machineId, assigneeId, priority, overdue, from, to, page, size);
+            WorkOrderPriority priority, boolean overdue, Instant from, Instant to, UUID maintenancePlanId, int page, int size) {
+        return search(statuses, type, source, machineId, assigneeId, priority, overdue, from, to, maintenancePlanId, page, size);
     }
 
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_WORK_ORDER_READ_ASSIGNED)
     public WorkOrderPageResponse mine(List<WorkOrderStatus> statuses, boolean overdue, int page, int size) {
-        return search(statuses, null, null, null, actorId(), null, overdue, null, null, page, size);
+        return search(statuses, null, null, null, actorId(), null, overdue, null, null, null, page, size);
     }
 
     @Transactional(readOnly = true)
@@ -510,12 +533,12 @@ public class WorkOrderService {
     }
 
     private WorkOrderPageResponse search(List<WorkOrderStatus> statuses, WorkOrderType type, WorkOrderSource source, UUID machineId, UUID assigneeId,
-            WorkOrderPriority priority, boolean overdue, Instant from, Instant to, int page, int size) {
+            WorkOrderPriority priority, boolean overdue, Instant from, Instant to, UUID maintenancePlanId, int page, int size) {
         TimeRange.checkPage(page, size, MAX_PAGE_SIZE);
         TimeRange range = TimeRange.of(from, to);
         Collection<WorkOrderStatus> wanted = statuses == null || statuses.isEmpty() ? EnumSet.allOf(WorkOrderStatus.class) : EnumSet.copyOf(statuses);
         var result = workOrders.search(wanted, type, source, machineId, assigneeId, priority, overdue, now(), WorkOrderStatus.UNFINISHED,
-                range.from(), range.to(), PageRequest.of(page, size));
+                range.from(), range.to(), maintenancePlanId, PageRequest.of(page, size));
         return new WorkOrderPageResponse(toResponses(result.getContent()), page, size, result.getTotalElements(), result.getTotalPages());
     }
 
@@ -541,6 +564,8 @@ public class WorkOrderService {
                 user(w.getCompletedBy()), w.getResultNote(), w.getCancelledAt(), user(w.getCancelledBy()), w.getCancelReason(),
                 linked.getOrDefault(w.getId(), List.of()),
                 w.getType() == WorkOrderType.RESTOCK ? restock.getOrDefault(w.getId(), new WorkOrderRestockSummary(0, 0, 0, 0)) : null,
+                w.getMaintenancePlan() == null ? null : new WorkOrderResponse.WorkOrderPlan(w.getMaintenancePlan().getId(), w.getMaintenancePlan().getTitle()),
+                w.getScheduledFor(),
                 w.getVersion(), w.getCreatedAt(), w.getUpdatedAt())).toList();
     }
 

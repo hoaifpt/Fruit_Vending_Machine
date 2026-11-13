@@ -14,7 +14,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     static final UUID ADMIN = UUID.fromString("10000000-0000-0000-0000-000000000001");
     static final UUID STAFF = UUID.fromString("10000000-0000-0000-0000-000000000002");
     static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "INVENTORY_READ", "INVENTORY_WRITE",
-            "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ",
+            "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_PLAN_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ",
             "RESTOCK_EXECUTE", "WORK_ORDER_EXECUTE", "WORK_ORDER_READ_ASSIGNED");
 
     List<String> codesOf(UUID role) {
@@ -25,7 +25,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void v13AppliesAndSeedsExactlyTheCatalogWithFixedIds() {
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("22");
         var rows = jdbc.queryForList("SELECT id, code, description FROM permissions ORDER BY id");
         assertThat(rows).extracting(r -> r.get("code")).containsExactlyElementsOf(Permissions.ALL);
         for (int n = 0; n < rows.size(); n++) {
@@ -40,7 +40,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     void seededMappingReproducesTheFormerAdminAndStaffAccess() {
         assertThat(codesOf(ADMIN)).containsExactlyElementsOf(Permissions.ALL.stream().sorted().toList());
         assertThat(codesOf(STAFF)).containsExactlyElementsOf(STAFF_CODES);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM role_permissions", Long.class)).isEqualTo(31 + 15);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM role_permissions", Long.class)).isEqualTo(33 + 16);
     }
 
     @Test

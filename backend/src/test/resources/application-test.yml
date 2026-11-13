@@ -22,6 +22,9 @@ app:
     expiry-sweep:
       # The sweep is invoked directly by tests with a controlled clock.
       enabled: false
+  maintenance-schedule:
+    # Tests call MaintenancePlanScheduler.runOnce directly.
+    enabled: false
   work-order:
     overdue:
       # Tests call WorkOrderOverdueJob.runOnce directly with a controlled time.

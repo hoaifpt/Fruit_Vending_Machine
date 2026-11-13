@@ -316,7 +316,7 @@ class WorkOrderIntegrationTest extends AbstractWebhookIntegrationTest {
         assertThat(notifications(admin.id(), cancelled)).isZero();
 
         // System-created and unassigned: every manager.
-        var system = transactions.execute(s -> service.createBySystem(WorkOrderType.MAINTENANCE, WorkOrderSource.SCHEDULE, machine, "Bảo trì định kỳ",
+        var system = transactions.execute(s -> service.createBySystem(WorkOrderType.MAINTENANCE, WorkOrderSource.CUSTOMER_REPORT, machine, "Bảo trì định kỳ",
                 null, WorkOrderPriority.LOW, null, List.of()));
         assertThat(system.getCreatedBy()).isNull();
         var systemJson = fixtures.api("GET", BASE + "/" + system.getId(), null, admin.token(), 200);

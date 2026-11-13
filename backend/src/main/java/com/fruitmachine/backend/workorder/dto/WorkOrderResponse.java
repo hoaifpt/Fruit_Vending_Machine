@@ -34,9 +34,13 @@ public record WorkOrderResponse(
         @Schema(nullable = true) String cancelReason,
         List<WorkOrderLinkedAlert> linkedAlerts,
         @Schema(nullable = true, description = "Issue #68: RESTOCK work orders only.") WorkOrderRestockSummary restockSummary,
+        @Schema(nullable = true, description = "Issue #70: the maintenance plan of a SCHEDULE work order.") WorkOrderPlan maintenancePlan,
+        @Schema(nullable = true, description = "Issue #70: the plan occurrence (business-zone date) of a SCHEDULE work order.") java.time.LocalDate scheduledFor,
         long version, Instant createdAt, Instant updatedAt) {
 
     public record WorkOrderUser(UUID id, String fullName) { }
+
+    public record WorkOrderPlan(UUID id, String title) { }
 
     public record WorkOrderLinkedAlert(UUID id, AlertType type, AlertSeverity severity, AlertStatus status, String title) { }
 }

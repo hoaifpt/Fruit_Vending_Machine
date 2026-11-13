@@ -93,9 +93,10 @@ public class WorkOrderController {
             @RequestParam(defaultValue = "false") @Parameter(description = "true: only unfinished work orders past their due time.") boolean overdue,
             @RequestParam(required = false) @Parameter(description = "Optional start of createdAt, inclusive, ISO-8601.") Instant from,
             @RequestParam(required = false) @Parameter(description = "Optional end of createdAt, exclusive, ISO-8601; after from.") Instant to,
+            @RequestParam(required = false) @Parameter(description = "Issue #70: optional maintenance plan UUID (SCHEDULE work orders of that plan).") UUID maintenancePlanId,
             @RequestParam(defaultValue = "0") @Parameter(description = "Zero-based page index.") int page,
             @RequestParam(defaultValue = "20") @Parameter(description = "Page size, 1 to 100.") int size) {
-        return ok("Work orders retrieved", service.list(status, type, source, machineId, assigneeId, priority, overdue, from, to, page, size));
+        return ok("Work orders retrieved", service.list(status, type, source, machineId, assigneeId, priority, overdue, from, to, maintenancePlanId, page, size));
     }
 
     @GetMapping("/api/v1/work-orders/me")

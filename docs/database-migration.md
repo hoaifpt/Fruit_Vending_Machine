@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V21 hiện có (29 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V22 hiện có (30 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -242,6 +242,24 @@ erDiagram
         varchar discount_reason "NONE, NEAR_EXPIRY (V18)"
         timestamptz created_at
     }
+    maintenance_plans {
+        uuid id PK "V22"
+        uuid machine_id FK
+        varchar title
+        varchar instructions "nullable"
+        int interval_days "1..365"
+        int lead_days "0..30, < interval_days"
+        time due_time "local time, default 17:00"
+        varchar priority "LOW, NORMAL, HIGH, URGENT"
+        uuid default_assignee_id FK "nullable"
+        date next_due_date "business-zone date"
+        boolean active
+        timestamptz last_completed_at "nullable"
+        uuid created_by FK
+        bigint version
+        timestamptz created_at
+        timestamptz updated_at
+    }
     restock_lines {
         uuid id PK "V21"
         uuid work_order_id FK
@@ -275,6 +293,8 @@ erDiagram
         uuid cancelled_by FK "nullable"
         varchar cancel_reason "nullable; required for CANCELLED"
         timestamptz overdue_notified_at "nullable"
+        uuid maintenance_plan_id FK "nullable (V22)"
+        date scheduled_for "nullable (V22)"
         bigint version
         timestamptz created_at
         timestamptz updated_at
@@ -423,6 +443,9 @@ erDiagram
     users ||--o{ maintenance_commands : "requested_by"
     machines ||--o{ work_orders : "work on"
     work_orders ||--o{ restock_lines : "plans"
+    machines ||--o{ maintenance_plans : "maintained by"
+    users |o--o{ maintenance_plans : "default_assignee, created_by"
+    maintenance_plans |o--o{ work_orders : "maintenance_plan_id (V22)"
     machine_slots ||--o{ restock_lines : "slot"
     products ||--o{ restock_lines : "product"
     work_orders |o--o{ maintenance_commands : "work_order_id (V21)"
@@ -504,6 +527,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
 | orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
 | order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price; unit_price ≤ original_unit_price, discount_percent 0–90, discount_reason NONE/NEAR_EXPIRY nhất quán (V18) | order_id, product_id |
+| maintenance_plans — kế hoạch bảo trì (V22) | id; machine_id → machines; default_assignee_id, created_by → users | title không rỗng; interval 1–365; lead 0–30 < interval; priority CHECK | next_due_date partial khi active, machine, assignee partial, created_by |
 | restock_lines — dòng nạp hàng (V21) | id; work_order_id → work_orders; (slot_id, machine_id) → machine_slots; product_id → products | UNIQUE (work_order, slot, product); planned/loaded 0–1000; variance_reason không rỗng | work_order, slot, product |
 | work_orders — việc tại máy (V20) | id; machine_id → machines; assignee/created_by/completed_by/cancelled_by → users | type/source/priority/status CHECK; OPEN không người nhận, các trạng thái khác (trừ CANCELLED) có; DONE cần completed_at/by + result_note; CANCELLED cần cancelled_at + cancel_reason; mã WO-… | assignee/status/due, machine/time, partial status/due khi chưa xong, created_by, completed_by, cancelled_by |
 | work_order_alerts — cảnh báo do WO xử lý (V20) | PK (work_order_id, alert_id) | một WO chưa xong mỗi cảnh báo (service, khóa dòng cảnh báo) | alert_id |
@@ -547,6 +571,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
 | V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V22 | maintenance_plans; work_orders.maintenance_plan_id + scheduled_for (CHECK SCHEDULE ⇔ có kế hoạch và ngày; chỉ MAINTENANCE; unique theo lần và một việc chưa xong mỗi kế hoạch); quyền MAINTENANCE_PLAN_READ → ADMIN, STAFF, MAINTENANCE_PLAN_MANAGE → ADMIN (issue #70, [maintenance-plans.md](maintenance-plans.md)) |
 | V21 | restock_lines, maintenance_commands.work_order_id, index inventory_transactions.reference_id; quyền RESTOCK_PLAN, INVENTORY_LOAD_DIRECT → ADMIN, RESTOCK_EXECUTE → ADMIN, STAFF (issue #68, [restock.md](restock.md)) |
 | V20 | work_orders, work_order_alerts, work_order_events (append-only trigger), notifications.work_order_id; quyền WORK_ORDER_READ_ALL, WORK_ORDER_MANAGE → ADMIN, WORK_ORDER_READ_ASSIGNED, WORK_ORDER_EXECUTE → ADMIN, STAFF (issue #66, [work-orders.md](work-orders.md)) |
 | V19 | maintenance_commands (+ một lệnh chưa xong mỗi máy), machine_slots.refill_gate_open; quyền MAINTENANCE_COMMAND_READ, MAINTENANCE_COMMAND_EXECUTE → ADMIN, STAFF, MACHINE_RESET → ADMIN (issue #64, [maintenance-commands.md](maintenance-commands.md)) |

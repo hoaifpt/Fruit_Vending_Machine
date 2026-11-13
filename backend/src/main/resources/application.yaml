@@ -96,6 +96,10 @@ app:
     # Only for a private CA: PKCS12 truststore; empty = JVM trust store (Let's Encrypt). Never log the password.
     truststore-path: ${MQTT_TRUSTSTORE_PATH:}
     truststore-password: ${MQTT_TRUSTSTORE_PASSWORD:}
+  # Issue #70: due maintenance plans become work orders (checked every hour and shortly after startup).
+  maintenance-schedule:
+    enabled: ${MAINTENANCE_SCHEDULE_ENABLED:true}
+    interval: ${MAINTENANCE_SCHEDULE_INTERVAL:PT1H}
   # Issue #66: overdue work orders are announced once, checked every 5 minutes.
   work-order:
     overdue:

@@ -25,7 +25,7 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
 
     @Query("""
             select w from WorkOrder w join fetch w.machine left join fetch w.assignee left join fetch w.createdBy
-            left join fetch w.completedBy left join fetch w.cancelledBy where w.id = :id""")
+            left join fetch w.completedBy left join fetch w.cancelledBy left join fetch w.maintenancePlan where w.id = :id""")
     Optional<WorkOrder> findDetailsById(@Param("id") UUID id);
 
     @Query("select w.machineId from WorkOrder w where w.id = :id")
@@ -38,8 +38,9 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
     /** Priority first (URGENT, HIGH, NORMAL, LOW), then due time (none last), then oldest first; every filter optional. */
     @Query(value = """
             select w from WorkOrder w join fetch w.machine left join fetch w.assignee left join fetch w.createdBy
-            left join fetch w.completedBy left join fetch w.cancelledBy
+            left join fetch w.completedBy left join fetch w.cancelledBy left join fetch w.maintenancePlan
             where w.status in :statuses
+              and (:planId is null or w.maintenancePlanId = :planId)
               and (:type is null or w.type = :type)
               and (:source is null or w.source = :source)
               and (:machineId is null or w.machineId = :machineId)
@@ -54,6 +55,7 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
             countQuery = """
             select count(w) from WorkOrder w
             where w.status in :statuses
+              and (:planId is null or w.maintenancePlanId = :planId)
               and (:type is null or w.type = :type)
               and (:source is null or w.source = :source)
               and (:machineId is null or w.machineId = :machineId)
@@ -64,7 +66,25 @@ public interface WorkOrderRepository extends JpaRepository<WorkOrder, UUID> {
     Page<WorkOrder> search(@Param("statuses") Collection<WorkOrderStatus> statuses, @Param("type") WorkOrderType type,
             @Param("source") WorkOrderSource source, @Param("machineId") UUID machineId, @Param("assigneeId") UUID assigneeId,
             @Param("priority") WorkOrderPriority priority, @Param("overdue") boolean overdue, @Param("now") Instant now,
-            @Param("unfinished") Collection<WorkOrderStatus> unfinished, @Param("from") Instant from, @Param("to") Instant to, Pageable pageable);
+            @Param("unfinished") Collection<WorkOrderStatus> unfinished, @Param("from") Instant from, @Param("to") Instant to,
+            @Param("planId") UUID planId, Pageable pageable);
+
+    /** Issue #70: the unfinished work order of each plan (at most one, unique index). */
+    interface PlanWorkOrder {
+        UUID getPlanId(); UUID getId(); String getCode(); String getStatus();
+    }
+
+    @Query(value = """
+            SELECT maintenance_plan_id AS "planId", id AS "id", code AS "code", status AS "status" FROM work_orders
+            WHERE maintenance_plan_id IN (:planIds) AND status IN ('OPEN', 'ASSIGNED', 'IN_PROGRESS')""", nativeQuery = true)
+    List<PlanWorkOrder> findUnfinishedByPlanIds(@Param("planIds") Collection<UUID> planIds);
+
+    boolean existsByMaintenancePlanIdAndStatusIn(UUID maintenancePlanId, Collection<WorkOrderStatus> statuses);
+
+    boolean existsByMaintenancePlanIdAndScheduledFor(UUID maintenancePlanId, java.time.LocalDate scheduledFor);
+
+    @Query("select w from WorkOrder w left join fetch w.assignee where w.maintenancePlanId = :planId order by w.scheduledFor desc, w.createdAt desc")
+    List<WorkOrder> findByPlan(@Param("planId") UUID planId);
 
     @Query("select w.id from WorkOrder w where w.dueAt < :now and w.status in :unfinished and w.overdueNotifiedAt is null order by w.dueAt, w.id")
     List<UUID> findOverdueIds(@Param("now") Instant now, @Param("unfinished") Collection<WorkOrderStatus> unfinished, Pageable limit);
