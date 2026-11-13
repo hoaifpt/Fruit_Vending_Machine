@@ -467,6 +467,10 @@ Repository
 
 Do not implement business workflows directly inside MQTT callbacks.
 
+Transport (issue #59): local development uses plain `tcp://` on 1883; staging uses `ssl://mqtt.<staging-domain>:8883`
+(`MqttTlsSocketFactory`, TLS 1.2+, hostname verification, optional PKCS12 truststore for a private CA) and `require-tls`
+refuses to start otherwise. Broker setup: `infra/mosquitto/README.md`; connection rules: `api-contract/mqtt-contract.md` §8.1.
+
 Outbound commands (dispense today, maintenance/reset later):
 
 ```text

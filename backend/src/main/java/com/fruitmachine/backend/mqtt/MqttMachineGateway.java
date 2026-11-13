@@ -30,6 +30,8 @@ import org.springframework.stereotype.Component;
  * MQTT transport (api-contract/mqtt-contract.md): publishes dispense commands to {@code <root>/<machineCode>/commands} and subscribes
  * to every machine's {@code events} and {@code status}. Connects in the background and keeps retrying, so the backend starts
  * even when the broker is down; commands created meanwhile stay PENDING and the dispense sweep re-sends them.
+ * {@code ssl://} URLs (issue #59) use {@link MqttTlsSocketFactory} (TLS 1.2+) with hostname verification; TLS failures are logged
+ * with their reason and the retry loop continues.
  */
 @Slf4j
 @Component
@@ -44,6 +46,8 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
     private final ObjectProvider<MachineMessageHandler> handler;
     private final ObjectMapper json;
     private final MqttClient client;
+    // Null for tcp:// (local development only).
+    private final MqttTlsSocketFactory tls;
     private final ScheduledExecutorService retry = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "mqtt-connect");
         thread.setDaemon(true);
@@ -54,6 +58,7 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
         this.properties = properties;
         this.handler = handler;
         this.json = json;
+        this.tls = properties.tls() ? MqttTlsSocketFactory.create(properties.truststorePath(), properties.truststorePassword()) : null;
         // A per-process suffix: two backend processes with the same client id would keep disconnecting each other.
         this.client = new MqttClient(properties.brokerUrl(), properties.clientId() + "-" + UUID.randomUUID().toString().substring(0, 8), new MemoryPersistence());
         this.client.setCallback(this);
@@ -73,13 +78,33 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
         options.setKeepAliveInterval(30);
         if (!properties.username().isBlank()) options.setUserName(properties.username());
         if (!properties.password().isBlank()) options.setPassword(properties.password().toCharArray());
+        if (tls != null) {
+            options.setSocketFactory(tls);
+            // The broker certificate must name the host in the URL (mqtt.<staging-domain>), not just chain to a trusted CA.
+            options.setHttpsHostnameVerificationEnabled(true);
+        }
         try {
             client.connect(options);
         } catch (MqttException ex) {
             // Never log the credentials; the reason code is enough (4/5 = bad credentials or not authorised).
-            log.warn("MQTT broker {} unreachable (reason {}); retrying in {}s", properties.brokerUrl(), ex.getReasonCode(), RETRY_SECONDS);
+            String tlsFailure = tlsFailure(ex);
+            if (tlsFailure != null) log.warn("MQTT TLS connection to {} failed: {}; retrying in {}s", properties.brokerUrl(), tlsFailure, RETRY_SECONDS);
+            else log.warn("MQTT broker {} unreachable (reason {}); retrying in {}s", properties.brokerUrl(), ex.getReasonCode(), RETRY_SECONDS);
             retry.schedule(this::connect, RETRY_SECONDS, TimeUnit.SECONDS);
         }
+    }
+
+    /** The certificate or handshake problem (untrusted CA, hostname mismatch, protocol), or null when TLS was not the cause. */
+    static String tlsFailure(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
+            if (cause instanceof javax.net.ssl.SSLException || cause instanceof java.security.cert.CertificateException)
+                return cause.getClass().getSimpleName() + ": " + cause.getMessage();
+        }
+        return null;
+    }
+
+    public boolean isConnected() {
+        return client.isConnected();
     }
 
     @Override

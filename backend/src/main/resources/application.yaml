@@ -89,6 +89,11 @@ app:
     username: ${MQTT_USERNAME:}
     password: ${MQTT_PASSWORD:}
     topic-root: ${MQTT_TOPIC_ROOT:vending}
+    # Issue #59: staging sets ssl://mqtt.<staging-domain>:8883 and MQTT_REQUIRE_TLS=true (startup fails on tcp://).
+    require-tls: ${MQTT_REQUIRE_TLS:false}
+    # Only for a private CA: PKCS12 truststore; empty = JVM trust store (Let's Encrypt). Never log the password.
+    truststore-path: ${MQTT_TRUSTSTORE_PATH:}
+    truststore-password: ${MQTT_TRUSTSTORE_PASSWORD:}
   dispense:
     resend-after: ${DISPENSE_RESEND_AFTER:PT5S}
     # Published command without a result, counted from its first delivery: outcome unknown, bowl blocked, machine MAINTENANCE.
