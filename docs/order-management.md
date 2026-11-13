@@ -137,3 +137,7 @@ Test dùng `OffsetClock` (chỉ chạy tiến) và gọi `OrderExpiryService.swe
   (head có status `EXPIRED` hoặc batch đã hết hạn) để nhân viên thấy bát đáy hết hạn đang chặn cột. Các trường cũ không đổi.
 - Ảnh hưởng Milestone 3 (chỉ ghi nhận, chưa làm): một đơn -> một allocation -> một lệnh dispense -> một slot; "hoàn tất đơn sau khi mọi lệnh
   thành công" thu gọn còn một lệnh.
+
+## Hoàn tiền (issue #72)
+
+Order `DISPENSE_FAILED` / `COMPLETED` thành `REFUNDED` (+ `refunded_at`) khi payment trả đơn được hoàn; chi tiết order có `refundedAt` và `refunds[]` (chỉ cho `REFUND_READ`). Xem [refunds.md](refunds.md).

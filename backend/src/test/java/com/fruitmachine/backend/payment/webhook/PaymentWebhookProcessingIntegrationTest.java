@@ -315,7 +315,10 @@ class PaymentWebhookProcessingIntegrationTest extends AbstractWebhookIntegration
         var order = payable();
         String reference = reference(order);
         // GREATEST: created_at comes from the JVM clock, now() from the database server clock, which may lag slightly.
-        jdbc.update("UPDATE payments SET status='REFUNDED', transaction_id='TXN-OLD', paid_at=GREATEST(now(), created_at) WHERE payment_reference=?", reference);
+        // Refund fields are required with REFUNDED since V23 (issue #72).
+        jdbc.update("UPDATE payments SET status='REFUNDED', transaction_id='TXN-OLD', paid_at=GREATEST(now(), created_at), refunded_at=GREATEST(now(), created_at),"
+                + " refunded_by=(SELECT id FROM users ORDER BY created_at LIMIT 1), refund_reason='LATE_PAYMENT', refund_transfer_ref='FT-FIXTURE-0001'"
+                + " WHERE payment_reference=?", reference);
         assertThat(paid(reference, "TXN-OLD", orderTotal(order.orderId()))).isEqualTo(200);
         assertThat(paymentStatus(reference)).isEqualTo("REFUNDED");
         assertThat(orderStatus(order.orderId())).isEqualTo("PENDING_PAYMENT");

@@ -39,7 +39,8 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "GET /api/v1/machines/{machineId}/restock-suggestions", "POST /api/v1/machines/{machineId}/restock-work-orders",
             "POST /api/v1/work-orders/{id}/restock-lines", "PATCH /api/v1/work-orders/{id}/restock-lines/{lineId}",
             "DELETE /api/v1/work-orders/{id}/restock-lines/{lineId}", "POST /api/v1/maintenance-plans", "PATCH /api/v1/maintenance-plans/{id}",
-            "POST /api/v1/maintenance-plans/{id}/activate", "POST /api/v1/maintenance-plans/{id}/deactivate", "POST /api/v1/maintenance-plans/{id}/generate-now");
+            "POST /api/v1/maintenance-plans/{id}/activate", "POST /api/v1/maintenance-plans/{id}/deactivate", "POST /api/v1/maintenance-plans/{id}/generate-now",
+            "POST /api/v1/payments/{paymentId}/refund", "GET /api/v1/refunds", "GET /api/v1/refunds/candidates", "GET /api/v1/refunds/summary");
     /**
      * Added by #53, #56, #58 and #61: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, PRICING_READ, or any
      * signed-in user for the own notifications); anonymous and kiosk keys are unauthenticated here.

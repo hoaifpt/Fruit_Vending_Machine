@@ -16,6 +16,9 @@ import com.fruitmachine.backend.order.repository.OrderItemAllocationRepository;
 import com.fruitmachine.backend.order.repository.OrderItemRepository;
 import com.fruitmachine.backend.order.repository.OrderRepository;
 import com.fruitmachine.backend.payment.dto.KioskPaymentResponse;
+import com.fruitmachine.backend.payment.dto.OrderRefundResponse;
+import com.fruitmachine.backend.payment.enums.PaymentStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.fruitmachine.backend.payment.mapper.PaymentMapper;
 import com.fruitmachine.backend.payment.repository.PaymentRepository;
 import com.fruitmachine.backend.pricing.model.BowlPrice;
@@ -176,7 +179,16 @@ public class OrderService {
         Map<UUID, List<OrderItemAllocation>> byLine = allocations.findDetailsByOrderId(id).stream()
                 .collect(Collectors.groupingBy(a -> a.getOrderItem().getId()));
         var payments = paymentRepository.findByOrderIdOrderByCreatedAtAscIdAsc(id).stream().map(paymentMapper::summary).toList();
-        return mapper.detail(order, byLine, payments);
+        // Refund details (transfer reference) are payment data: only REFUND_READ holders see them (STAFF reads orders, not payments).
+        var refunds = canReadRefunds() ? paymentRepository.findByOrderIdAndStatusOrderByRefundedAtAscIdAsc(id, PaymentStatus.REFUNDED).stream()
+                .map(paymentMapper::orderRefund).toList() : List.<OrderRefundResponse>of();
+        return mapper.detail(order, byLine, payments, refunds);
+    }
+
+    private static boolean canReadRefunds() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> Permissions.REFUND_READ.equals(authority.getAuthority()));
     }
 
     private KioskPaymentResponse currentPayment(Order order) {

@@ -46,7 +46,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | sensor_readings | id, machine_id, temperature, humidity, recorded_at |
 | alerts | id, machine_id, slot_id, type, severity, error_code, dedupe_key, title, message, status, triggered_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, resolution_note, created_at, updated_at |
 | notifications | id, user_id, alert_id, title, message, severity, read_at, created_at |
-| orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
+| orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline), refunded_at (V23) |
 | order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
 | pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
 | maintenance_plans | id, machine_id, title, instructions, interval_days, lead_days, due_time, priority, default_assignee_id, next_due_date, active, last_completed_at, created_by, version, created_at, updated_at |
@@ -56,7 +56,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | work_order_events | id, work_order_id, type, status_before, status_after, actor_id, note, details, created_at |
 | maintenance_commands | id, command_code, machine_id, slot_id, operation, status, reason, note, target_inventory_item_id, requested_by, idempotency_key, attempt_count, sent_at, accepted_at, finished_at, failure_reason, removed_count, reconciled_by, reconciled_at, reconciliation_outcome, created_at, updated_at |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
-| payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
+| payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at, refunded_at, refunded_by, refund_reason, refund_transfer_ref, refund_note (V23) |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
 | dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, failure_reason, created_at, updated_at |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
@@ -443,3 +443,15 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
 - Next due (MaintenancePlanWorkOrderListener, AFTER_COMMIT + REQUIRES_NEW): DONE -> completion date + interval and last_completed_at;
   CANCELLED -> scheduled_for + interval; a later date already set is kept.
 - Permissions MAINTENANCE_PLAN_READ (…032) -> ADMIN, STAFF; MAINTENANCE_PLAN_MANAGE (…033) -> ADMIN. Plan changes audited (MAINTENANCE_PLAN_*).
+
+## 26. Issue #72 — V23 manual refunds
+
+- No refund table: `payments` gets refunded_at, refunded_by (-> users), refund_reason (DISPENSE_FAILED, LATE_PAYMENT, DUPLICATE_PAYMENT,
+  PRODUCT_QUALITY, OTHER), refund_transfer_ref (^[A-Za-z0-9._/-]{4,64}$, partial UNIQUE), refund_note (OTHER needs one, NULL-safe CHECK).
+  CHECK status = REFUNDED <=> refunded_at/by, reason, transfer_ref all set; refunded_at >= paid_at; partial index on refunded_at.
+- `orders.refunded_at`, CHECK status = REFUNDED <=> refunded_at IS NOT NULL. REFUNDED is final for payment and order.
+- RefundService (payment.refund): lock Order -> Payments (-> DispenseCommand read -> WorkOrder); PaymentTransitions.refund (SUCCESS only),
+  OrderTransitions.refund (DISPENSE_FAILED / COMPLETED only) when the refunded payment is the paying one (earliest paid_at, then id).
+  One audit_logs row PAYMENT_REFUNDED (user, ip, old/new). Transfer ref / payer never logged.
+- Candidates and refund views are dynamic JPQL with fetch joins; payer from verified payment_webhook_logs (order_code = payment_reference).
+- Permissions PAYMENT_REFUND (…034), REFUND_READ (…035) -> ADMIN.

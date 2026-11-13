@@ -252,7 +252,8 @@ class AuthIntegrationTest {
                 "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "/api/v1/work-orders/{id}/restock",
                 "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/upcoming", "/api/v1/maintenance-plans/{id}",
                 "/api/v1/maintenance-plans/{id}/work-orders", "/api/v1/maintenance-plans/{id}/activate", "/api/v1/maintenance-plans/{id}/deactivate",
-                "/api/v1/maintenance-plans/{id}/generate-now");
+                "/api/v1/maintenance-plans/{id}/generate-now", "/api/v1/payments/{paymentId}/refund", "/api/v1/refunds",
+                "/api/v1/refunds/candidates", "/api/v1/refunds/summary");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

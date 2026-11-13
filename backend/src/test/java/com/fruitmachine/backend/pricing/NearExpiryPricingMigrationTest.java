@@ -46,7 +46,7 @@ class NearExpiryPricingMigrationTest {
         var jdbc = freshSchemaAtV17("v17ok", datasource);
         UUID legacy = order(jdbc, "35000", "35000");
         var flyway = Flyway.configure().dataSource(datasource).schemas("v17ok").load();
-        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(5);
+        assertThat(flyway.migrate().migrationsExecuted).isEqualTo(6);
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
         assertThat(jdbc.queryForMap("SELECT subtotal, discount_amount, total_amount FROM orders WHERE id = ?", legacy).values().stream().map(Object::toString))
                 .containsExactly("35000.00", "0.00", "35000.00");

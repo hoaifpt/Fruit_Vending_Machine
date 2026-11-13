@@ -42,6 +42,8 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `WORK_ORDER_MANAGE` (V20, #66) | tạo, sửa, giao, bỏ giao, hủy, liên kết cảnh báo, `POST /api/v1/alerts/{alertId}/work-orders` |
 | `MAINTENANCE_PLAN_READ` (V22, #70) | `GET /api/v1/maintenance-plans`, `/upcoming`, `/{id}`, `/{id}/work-orders` |
 | `MAINTENANCE_PLAN_MANAGE` (V22, #70) | tạo, sửa, kích hoạt / vô hiệu hóa kế hoạch, `generate-now` |
+| `PAYMENT_REFUND` (V23, #72) | `POST /api/v1/payments/{paymentId}/refund` |
+| `REFUND_READ` (V23, #72) | `GET /api/v1/refunds`, `/candidates`, `/summary`; khối `refunds` trong chi tiết order |
 | `RESTOCK_PLAN` (V21, #68) | gợi ý nạp hàng, tạo RESTOCK từ gợi ý, thêm/sửa/xóa dòng nạp |
 | `RESTOCK_EXECUTE` (V21, #68) | `POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads` (STAFF chỉ việc của mình) |
 | `INVENTORY_LOAD_DIRECT` (V21, #68) | `POST /api/v1/inventory/load` (chỉ ADMIN; STAFF nạp qua work order) |
@@ -73,6 +75,7 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `RESTOCK_EXECUTE` | ✓ | ✓ |
 | `MAINTENANCE_PLAN_READ` | ✓ | ✓ |
 | `MAINTENANCE_PLAN_MANAGE` | ✓ | |
+| `PAYMENT_REFUND`, `REFUND_READ` | ✓ | |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.
