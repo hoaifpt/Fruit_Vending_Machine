@@ -1,7 +1,7 @@
 # MQTT Contract — Backend ↔ Vending Machines
 
 ```text
-Contract version:        1.4.0
+Contract version:        1.5.0
 Envelope schemaVersion:  1
 Source of truth for:     topics, envelope, commands, events, payloads, timings, error codes, broker security
 Examples (fixtures):     api-contract/mqtt/examples/*.json
@@ -33,6 +33,7 @@ in its firmware; until it is merged into `dev` those items stay pending here.
 | 1.2.0 | 2026-11-10 | Issue #53: the backend subscribes to `heartbeat` and `telemetry`, validates every envelope strictly, keeps presence and diagnostics, derives connectivity (60 s / 180 s) and stores telemetry. No message shape changed. |
 | 1.3.0 | 2026-11-11 | Issue #56: every valid `events` and `status` message is stored once per `messageId` in the machine history (`machine_events`, source MACHINE); heartbeat and telemetry are not. No message shape changed. |
 | 1.4.0 | 2026-11-13 | Issue #58: the backend handles `FAULT`, `BOOT` and `FAULT_CLEARED` (HARDWARE_FAULT alerts, MAINTENANCE for the codes in §6.2), raises DISPENSE_FAILED / MULTIPLE_BOWLS_DETECTED alerts and MACHINE_OFFLINE alerts. No message shape changed. |
+| 1.5.0 | 2026-11-13 | Issue #59: connection section (§8.1): staging and production brokers accept MQTT only over TLS 1.2+ on 8883 (`mqtt.<domain>`, hostname-verified); 1883 stays for local development. No message shape changed. |
 
 ## Versioning rules
 
@@ -356,11 +357,30 @@ ACL (infra/mosquitto/acl):
   machine   read  vending/{own}/commands
             write vending/{own}/events | status | heartbeat | telemetry
 the topic machine code is trusted only because of the ACL; the envelope machineCode must match it
-TLS (8883) on staging and production → 3.7 + firmware (WiFiClientSecure); the local broker on 1883 is for a trusted LAN only
+TLS (8883) on staging (issue #59, §8.1); the local broker on 1883 is for a trusted LAN only
 no credentials, real machine codes or secrets in examples, logs or Git (passwd and secrets.h are ignored by Git)
 ```
 
-Accounts are created with `infra/mosquitto/add-user.ps1 <user>`; see `infra/mosquitto/README.md`.
+Accounts are created with `infra/mosquitto/add-user.ps1 <user>` (Windows) or `infra/mosquitto/add-user.sh <user>` (Linux host);
+see `infra/mosquitto/README.md`.
+
+### 8.1 Connection
+
+```text
+                local development             staging (issue #59)
+host            LAN IP of the broker          mqtt.<staging-domain> (a name, never an IP: it must match the certificate)
+port            1883                          8883
+transport       plain TCP (trusted LAN only)  TLS 1.2 minimum (1.3 when both sides support it); 1883 not reachable from outside
+server trust    —                             certificate for mqtt.<staging-domain> from Let's Encrypt; clients trust the
+                                              ISRG Root X1 root CA (valid until 2035), not the leaf, so 90-day renewals need no reflash
+hostname check  —                             required (backend: on for every ssl:// URL; ESP32: never setInsecure())
+client auth     username + password           username + password over TLS; no client certificates
+client id       machine code (backend: fruit-backend-<random suffix>)
+backend URL     tcp://127.0.0.1:1883          ssl://mqtt.<staging-domain>:8883 with MQTT_REQUIRE_TLS=true (startup fails otherwise)
+```
+
+ESP32 (FIRMWARE_PENDING): `WiFiClientSecure` + `setCACert(ISRG Root X1)`, host name and port 8883, NTP time sync before connecting,
+credentials in build flags / NVS. A private CA replaces ISRG Root X1 only when no domain is available (`infra/mosquitto/README.md`).
 
 ---
 

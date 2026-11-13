@@ -530,6 +530,7 @@ DB_PASSWORD
 JWT_SECRET
 MQTT_USERNAME
 MQTT_PASSWORD
+MQTT_TRUSTSTORE_PASSWORD
 PAYMENT_API_KEY
 ```
 
@@ -584,6 +585,11 @@ Do not put full business workflows inside MQTT callbacks.
 MQTT listeners should delegate to services.
 
 Duplicate/malformed MQTT messages must not corrupt application state.
+
+MQTT transport security (issue #59): staging uses `ssl://` with `MQTT_REQUIRE_TLS=true`; never disable hostname verification,
+never trust all certificates, never log broker passwords, truststore passwords, private keys or full connect options.
+`MqttProperties.toString()` masks secrets; keep it that way when adding fields. Broker private keys live only on the broker host
+(`/etc/fruit-mqtt/certs`); only clearly marked test material (`src/test/resources/mqtt-tls`) may contain keys in Git.
 
 ---
 

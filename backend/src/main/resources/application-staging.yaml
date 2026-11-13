@@ -1,0 +1,4 @@
+# Staging (issue #59): SPRING_PROFILES_ACTIVE=prod,staging. MQTT only over TLS; a tcp:// broker URL stops the backend at startup.
+app:
+  mqtt:
+    require-tls: true

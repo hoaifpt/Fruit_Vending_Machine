@@ -157,3 +157,24 @@ Chạy `mvn clean verify` trong module backend/ với Java21, Maven và Docker. 
 PostgreSQL18 Testcontainers riêng, kiểm toàn bộ M1 management, Flyway/JPA/JWT/RBAC và
 atomicity/concurrency của inventory. [Hướng dẫn testing/CI](docs/core-integration-testing.md)
 mô tả hạ tầng dùng chung, isolation, reports và GitHub Actions backend workflow.
+
+## Staging: MQTT qua TLS — Issue #59
+
+Trên staging broker chỉ nhận MQTT qua TLS 1.2+ ở cổng 8883 (`mqtt.<staging-domain>`, chứng chỉ Let's Encrypt); 1883 không mở ra ngoài.
+Cách dựng broker, cấp/gia hạn chứng chỉ, firewall và tài khoản máy: [infra/mosquitto/README.md](infra/mosquitto/README.md).
+Quy tắc kết nối cho backend và ESP32: [api-contract/mqtt-contract.md](api-contract/mqtt-contract.md) §8.1.
+
+Biến môi trường của backend trên staging (giá trị bí mật chỉ nằm trong `.env`, không commit):
+
+```text
+SPRING_PROFILES_ACTIVE=prod,staging
+MQTT_ENABLED=true
+MQTT_BROKER_URL=ssl://mqtt.<staging-domain>:8883
+MQTT_REQUIRE_TLS=true
+MQTT_USERNAME=backend
+MQTT_PASSWORD=<secret>
+MQTT_TRUSTSTORE_PATH=          # chỉ khi dùng CA riêng (PKCS12)
+MQTT_TRUSTSTORE_PASSWORD=
+```
+
+Local vẫn dùng `tcp://127.0.0.1:1883` không TLS (`docker compose -f infra/docker-compose.yml up -d`).

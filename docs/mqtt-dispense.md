@@ -70,8 +70,11 @@ Mỗi tin hợp lệ từ máy cập nhật `machines.last_seen_at` ("Lần cu�
    mã máy và mật khẩu broker của máy, rồi nạp: `pio run -t upload` (cần driver USB của board, ví dụ CP210x).
 4. Kiểm tra: `pio device monitor -b 115200` phải in `# MQTT connected as <mãMáy>, listening on vending/<mãMáy>/commands`.
 
-Cấu hình backend: `MQTT_ENABLED`, `MQTT_BROKER_URL`, `MQTT_CLIENT_ID`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_TOPIC_ROOT`,
+Cấu hình backend: `MQTT_ENABLED`, `MQTT_BROKER_URL` (`tcp://` local, `ssl://` staging), `MQTT_REQUIRE_TLS`, `MQTT_TRUSTSTORE_PATH`,
+`MQTT_TRUSTSTORE_PASSWORD`, `MQTT_CLIENT_ID`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_TOPIC_ROOT`,
 `DISPENSE_RESEND_AFTER`, `DISPENSE_TIMEOUT`, `DISPENSE_PENDING_TIMEOUT`, `DISPENSE_SWEEP_ENABLED`, `DISPENSE_SWEEP_INTERVAL`. Không ghi mật khẩu MQTT vào log hay Git.
+
+Staging chỉ dùng MQTT qua TLS trên 8883 (issue #59): xem [infra/mosquitto/README.md](../infra/mosquitto/README.md) và contract §8.1.
 
 ## Giới hạn hiện tại
 
