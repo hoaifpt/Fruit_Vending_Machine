@@ -27,6 +27,10 @@ public class Notification extends CreatedEntity {
     @JoinColumn(name = "alert_id")
     private Alert alert;
 
+    /** Issue #66: the work order this notification is about (null for alert notifications). */
+    @Column(name = "work_order_id")
+    private java.util.UUID workOrderId;
+
     @Column(name = "title", length = 255, nullable = false)
     private String title;
 

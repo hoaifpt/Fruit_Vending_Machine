@@ -1,5 +1,6 @@
 package com.fruitmachine.backend.alert.service;
 
+import com.fruitmachine.backend.workorder.repository.WorkOrderAlertRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fruitmachine.backend.alert.dto.AlertPageResponse;
 import com.fruitmachine.backend.alert.dto.AlertResponse;
@@ -71,6 +72,7 @@ public class AlertService {
     private final UserRepository users;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final WorkOrderAlertRepository workOrderLinks;
 
     // ---- system side ----
 
@@ -158,14 +160,14 @@ public class AlertService {
         TimeRange range = TimeRange.of(from, to);
         var result = alerts.search(status == null ? UNRESOLVED : Set.of(status), type, severity, machineId, slotId,
                 errorCode == null || errorCode.isBlank() ? null : errorCode.strip(), range.from(), range.to(), PageRequest.of(page, size));
-        return new AlertPageResponse(result.getContent().stream().map(AlertService::toResponse).toList(), page, size,
+        return new AlertPageResponse(responses(result.getContent()), page, size,
                 result.getTotalElements(), result.getTotalPages());
     }
 
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_ALERT_READ)
     public AlertResponse get(UUID id) {
-        return toResponse(alerts.findDetailsById(id).orElseThrow(AlertService::missing));
+        return response(alerts.findDetailsById(id).orElseThrow(AlertService::missing));
     }
 
     /** OPEN -> ACKNOWLEDGED; acknowledging again changes nothing; a RESOLVED alert is 409. */
@@ -180,7 +182,7 @@ public class AlertService {
             alert.setAcknowledgedBy(users.getReferenceById(actor()));
             alerts.flush();
         }
-        return toResponse(alerts.findDetailsById(id).orElseThrow(AlertService::missing));
+        return response(alerts.findDetailsById(id).orElseThrow(AlertService::missing));
     }
 
     /** OPEN or ACKNOWLEDGED -> RESOLVED by the caller, with an optional note; a RESOLVED alert is 409 (also when the system won the race). */
@@ -194,7 +196,7 @@ public class AlertService {
         alert.setResolvedBy(users.getReferenceById(actor()));
         alert.setResolutionNote(note == null || note.isBlank() ? null : note.strip());
         alerts.flush();
-        return toResponse(alerts.findDetailsById(id).orElseThrow(AlertService::missing));
+        return response(alerts.findDetailsById(id).orElseThrow(AlertService::missing));
     }
 
     // ---- helpers ----
@@ -220,7 +222,19 @@ public class AlertService {
         return ((AuthenticatedUser) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getId();
     }
 
-    static AlertResponse toResponse(Alert alert) {
+    private AlertResponse response(Alert alert) {
+        return responses(List.of(alert)).getFirst();
+    }
+
+    /** Issue #66: one query for the unfinished work orders handling the alerts of a page. */
+    private List<AlertResponse> responses(List<Alert> page) {
+        if (page.isEmpty()) return List.of();
+        var active = workOrderLinks.findActiveLinks(page.stream().map(Alert::getId).toList()).stream()
+                .collect(java.util.stream.Collectors.toMap(WorkOrderAlertRepository.ActiveLink::getAlertId, link -> link, (a, b) -> a));
+        return page.stream().map(alert -> toResponse(alert, active.get(alert.getId()))).toList();
+    }
+
+    static AlertResponse toResponse(Alert alert, WorkOrderAlertRepository.ActiveLink workOrder) {
         var slot = alert.getSlot();
         var acknowledgedBy = alert.getAcknowledgedBy();
         var resolvedBy = alert.getResolvedBy();
@@ -228,7 +242,8 @@ public class AlertService {
         return new AlertResponse(alert.getId(), alert.getMachine().getId(), alert.getMachine().getCode(), alert.getSlotId(),
                 slot == null ? null : slot.getSlotCode(), alert.getType(), alert.getSeverity(), alert.getErrorCode(), alert.getTitle(),
                 alert.getMessage(), alert.getStatus(), alert.getTriggeredAt(), alert.getAcknowledgedAt(),
-                acknowledgedBy == null ? null : acknowledgedBy.getEmail(), alert.getResolvedAt(), resolver, alert.getResolutionNote());
+                acknowledgedBy == null ? null : acknowledgedBy.getEmail(), alert.getResolvedAt(), resolver, alert.getResolutionNote(),
+                workOrder == null ? null : workOrder.getWorkOrderId(), workOrder == null ? null : workOrder.getCode());
     }
 
     private static ResourceNotFoundException missing() {

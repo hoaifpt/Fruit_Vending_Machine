@@ -78,7 +78,7 @@ public class NotificationService {
     }
 
     private static NotificationResponse toResponse(Notification n) {
-        return new NotificationResponse(n.getId(), n.getAlert() == null ? null : n.getAlert().getId(), n.getTitle(), n.getMessage(), n.getSeverity(),
+        return new NotificationResponse(n.getId(), n.getAlert() == null ? null : n.getAlert().getId(), n.getWorkOrderId(), n.getTitle(), n.getMessage(), n.getSeverity(),
                 n.getReadAt() != null, n.getReadAt(), n.getCreatedAt());
     }
 

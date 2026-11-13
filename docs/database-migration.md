@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V19 hiện có (25 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V20 hiện có (28 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -242,6 +242,47 @@ erDiagram
         varchar discount_reason "NONE, NEAR_EXPIRY (V18)"
         timestamptz created_at
     }
+    work_orders {
+        uuid id PK "V20"
+        varchar code UK "WO-yyyyMMdd-XXXX"
+        varchar type "RESTOCK, MAINTENANCE, INCIDENT"
+        varchar source "MANUAL, ALERT, SCHEDULE, CUSTOMER_REPORT"
+        uuid machine_id FK
+        varchar title
+        varchar description "nullable"
+        varchar priority "LOW, NORMAL, HIGH, URGENT"
+        varchar status "OPEN, ASSIGNED, IN_PROGRESS, DONE, CANCELLED"
+        uuid assignee_id FK "nullable"
+        timestamptz due_at "nullable"
+        uuid created_by FK "nullable = system"
+        timestamptz started_at "nullable"
+        timestamptz completed_at "nullable"
+        uuid completed_by FK "nullable"
+        varchar result_note "nullable; required for DONE"
+        timestamptz cancelled_at "nullable"
+        uuid cancelled_by FK "nullable"
+        varchar cancel_reason "nullable; required for CANCELLED"
+        timestamptz overdue_notified_at "nullable"
+        bigint version
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    work_order_alerts {
+        uuid work_order_id PK,FK
+        uuid alert_id PK,FK
+        timestamptz created_at
+    }
+    work_order_events {
+        uuid id PK "append-only (trigger)"
+        uuid work_order_id FK
+        varchar type "CREATED..OVERDUE"
+        varchar status_before "nullable"
+        varchar status_after "nullable"
+        uuid actor_id FK "nullable = system"
+        varchar note "nullable"
+        jsonb details "nullable"
+        timestamptz created_at
+    }
     maintenance_commands {
         uuid id PK "V19"
         varchar command_code UK "MC-<32 hex>"
@@ -347,6 +388,7 @@ erDiagram
         uuid id PK
         uuid user_id FK
         uuid alert_id FK "nullable"
+        uuid work_order_id FK "nullable (V20)"
         varchar title
         varchar message "nullable"
         varchar severity "INFO, WARNING, CRITICAL"
@@ -366,6 +408,13 @@ erDiagram
     users |o--o{ alerts : "acknowledged_by"
     users |o--o{ pricing_settings : "updated_by"
     users ||--o{ maintenance_commands : "requested_by"
+    machines ||--o{ work_orders : "work on"
+    users |o--o{ work_orders : "assignee, created_by, completed_by, cancelled_by"
+    work_orders ||--o{ work_order_alerts : "handles"
+    alerts ||--o{ work_order_alerts : "handled by"
+    work_orders ||--o{ work_order_events : "history"
+    users |o--o{ work_order_events : "actor"
+    work_orders |o--o{ notifications : "work_order_id"
     users |o--o{ maintenance_commands : "reconciled_by"
     machines ||--o{ maintenance_commands : "maintains"
     machine_slots |o--o{ maintenance_commands : "slot_id"
@@ -438,6 +487,9 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
 | orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
 | order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price; unit_price ≤ original_unit_price, discount_percent 0–90, discount_reason NONE/NEAR_EXPIRY nhất quán (V18) | order_id, product_id |
+| work_orders — việc tại máy (V20) | id; machine_id → machines; assignee/created_by/completed_by/cancelled_by → users | type/source/priority/status CHECK; OPEN không người nhận, các trạng thái khác (trừ CANCELLED) có; DONE cần completed_at/by + result_note; CANCELLED cần cancelled_at + cancel_reason; mã WO-… | assignee/status/due, machine/time, partial status/due khi chưa xong, created_by, completed_by, cancelled_by |
+| work_order_alerts — cảnh báo do WO xử lý (V20) | PK (work_order_id, alert_id) | một WO chưa xong mỗi cảnh báo (service, khóa dòng cảnh báo) | alert_id |
+| work_order_events — lịch sử WO (V20) | id; work_order_id → work_orders; actor_id → users nullable | type/status CHECK; append-only trigger | work_order/time, actor partial |
 | maintenance_commands — lệnh bảo trì từ xa (V19) | id; machine_id → machines; (slot_id, machine_id) → machine_slots; target → inventory_items; requested_by, reconciled_by → users | operation/status/reason/outcome CHECK; RESET không có slot, thao tác khác có slot; REMOVE_ITEM có target; OTHER cần note; command_code `MC-…`; UNIQUE (requested_by, idempotency_key) | partial UNIQUE machine_id khi PENDING/SENT/ACCEPTED, machine/time, status partial, slot, target, reconciler |
 | pricing_settings — giảm giá sắp hết hạn (V18) | id; updated_by → users nullable | một dòng (singleton UNIQUE + CHECK); percent 1–90 | updated_by partial |
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
@@ -477,6 +529,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
 | V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V20 | work_orders, work_order_alerts, work_order_events (append-only trigger), notifications.work_order_id; quyền WORK_ORDER_READ_ALL, WORK_ORDER_MANAGE → ADMIN, WORK_ORDER_READ_ASSIGNED, WORK_ORDER_EXECUTE → ADMIN, STAFF (issue #66, [work-orders.md](work-orders.md)) |
 | V19 | maintenance_commands (+ một lệnh chưa xong mỗi máy), machine_slots.refill_gate_open; quyền MAINTENANCE_COMMAND_READ, MAINTENANCE_COMMAND_EXECUTE → ADMIN, STAFF, MACHINE_RESET → ADMIN (issue #64, [maintenance-commands.md](maintenance-commands.md)) |
 | V18 | pricing_settings (singleton, seed bật / 50 %); orders.discount_amount + CHECK total = subtotal − discount; order_items.original_unit_price (backfill = unit_price), discount_percent, discount_reason + CHECK; dừng nếu có đơn total ≠ subtotal; index đơn có giảm giá; quyền PRICING_READ → ADMIN, STAFF, PRICING_MANAGE → ADMIN (issue #61, [near-expiry-pricing.md](near-expiry-pricing.md)) |
 

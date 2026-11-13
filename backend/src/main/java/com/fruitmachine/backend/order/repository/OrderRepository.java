@@ -20,6 +20,9 @@ import org.springframework.data.repository.query.Param;
 public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecificationExecutor<Order> {
     boolean existsByOrderCode(String orderCode);
 
+    /** Issue #66: a customer order of the machine in one of these states (work orders wait for it). */
+    boolean existsByMachineIdAndStatusIn(UUID machineId, java.util.Collection<com.fruitmachine.backend.order.enums.OrderStatus> statuses);
+
     /** To-one graph only: collections are never fetched while paging. */
     @Override
     @EntityGraph(attributePaths = {"machine"})

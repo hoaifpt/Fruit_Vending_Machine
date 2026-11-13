@@ -27,4 +27,6 @@ public record AlertResponse(
         @Schema(description = "When it was resolved, UTC; null while unresolved.", types = {"string", "null"}, format = "date-time") Instant resolvedAt,
         @Schema(description = "Email of the user who resolved it, \"system\" when the condition cleared by itself; null while unresolved.",
                 types = {"string", "null"}, example = "system") String resolvedBy,
-        @Schema(description = "Resolution note; \"Condition cleared\" for system resolutions.", types = {"string", "null"}) String resolutionNote) { }
+        @Schema(description = "Resolution note; \"Condition cleared\" for system resolutions.", types = {"string", "null"}) String resolutionNote,
+        @Schema(description = "Issue #66: unfinished work order handling this alert; null if none.", types = {"string", "null"}, format = "uuid") UUID workOrderId,
+        @Schema(description = "Issue #66: its code, e.g. WO-20261113-K7QF; null if none.", types = {"string", "null"}) String workOrderCode) { }

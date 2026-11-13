@@ -9,7 +9,8 @@ import java.util.UUID;
 public record NotificationResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Notification UUID.") UUID id,
         @Schema(description = "Alert that caused it; open it with GET /api/v1/alerts/{id} (needs ALERT_READ).", types = {"string", "null"}, format = "uuid") UUID alertId,
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Title (copied from the alert).") String title,
+        @Schema(description = "Issue #66: work order it is about; open it with GET /api/v1/work-orders/{id}.", types = {"string", "null"}, format = "uuid") UUID workOrderId,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "Title (copied from the alert or the work order).") String title,
         @Schema(description = "Message (copied from the alert).", types = {"string", "null"}) String message,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "INFO, WARNING or CRITICAL.") AlertSeverity severity,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "True once read.") boolean read,

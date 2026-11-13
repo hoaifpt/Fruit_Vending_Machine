@@ -49,6 +49,9 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
 | order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
 | pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
+| work_orders | id, code, type, source, machine_id, title, description, priority, status, assignee_id, due_at, created_by, started_at, completed_at, completed_by, result_note, cancelled_at, cancelled_by, cancel_reason, overdue_notified_at, version, created_at, updated_at |
+| work_order_alerts | work_order_id, alert_id, created_at |
+| work_order_events | id, work_order_id, type, status_before, status_after, actor_id, note, details, created_at |
 | maintenance_commands | id, command_code, machine_id, slot_id, operation, status, reason, note, target_inventory_item_id, requested_by, idempotency_key, attempt_count, sent_at, accepted_at, finished_at, failure_reason, removed_count, reconciled_by, reconciled_at, reconciliation_outcome, created_at, updated_at |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
@@ -398,3 +401,19 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   command id, performed_by = requester, reason "MAINTENANCE_<OP> <REASON>[: note]"). Batch quantities and machine/slot status never change.
 - Reconciliation writes audit_logs MAINTENANCE_COMMAND_RECONCILED. Dispense publishing waits while a maintenance command is unfinished.
 - Permissions MAINTENANCE_COMMAND_READ (…022), MAINTENANCE_COMMAND_EXECUTE (…023) → ADMIN, STAFF; MACHINE_RESET (…024) → ADMIN.
+
+## 23. Issue #66 — V20 work orders
+
+- `work_orders`: code `WO-yyyyMMdd-XXXX` (business-zone date, 4 Crockford base32, CHECK), type RESTOCK / MAINTENANCE / INCIDENT, source
+  MANUAL / ALERT / SCHEDULE / CUSTOMER_REPORT, priority LOW..URGENT, status OPEN / ASSIGNED / IN_PROGRESS / DONE / CANCELLED. CHECKs: OPEN
+  has no assignee and every other unfinished/done status has one; started_at set exactly for IN_PROGRESS/DONE; DONE needs completed_at,
+  completed_by and a non-blank result_note; CANCELLED needs cancelled_at and a non-blank cancel_reason (COALESCE so NULL fails); times
+  ordered. `version` (@Version) is the optimistic value sent back on edit / assign / unassign / cancel.
+- `work_order_alerts` (PK work_order_id, alert_id): kept as history; "one unfinished work order per alert" is enforced by WorkOrderService
+  under the alert row lock (findActiveLinks).
+- `work_order_events`: append-only (trigger `work_order_events_append_only`, like inventory_transactions); one row per action, actor NULL = system.
+- `notifications.work_order_id` (nullable FK): work order notifications, created AFTER_COMMIT in their own transaction.
+- Start locks: machine command advisory lock, Machine row, WorkOrder row; RESTOCK/MAINTENANCE (INCIDENT on request) call
+  MachineService.enterMaintenanceBySystem with reason `WORK_ORDER <code>`. Machine reactivation is refused while a work order is IN_PROGRESS.
+- Permissions WORK_ORDER_READ_ALL (…025) → ADMIN, WORK_ORDER_READ_ASSIGNED (…026) → ADMIN, STAFF, WORK_ORDER_MANAGE (…027) → ADMIN,
+  WORK_ORDER_EXECUTE (…028) → ADMIN, STAFF.

@@ -327,7 +327,11 @@ class AuthorizationIntegrationTest {
                 "/api/v1/notifications/me", "/api/v1/notifications/me/unread-count", "/api/v1/notifications/{id}/read",
                 "/api/v1/notifications/me/read-all", "/api/v1/pricing/near-expiry-discount",
                 "/api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands", "/api/v1/machines/{machineId}/reset",
-                "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/{id}", "/api/v1/maintenance-commands/{id}/reconcile");
+                "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/{id}", "/api/v1/maintenance-commands/{id}/reconcile",
+                "/api/v1/work-orders", "/api/v1/work-orders/me", "/api/v1/work-orders/{id}", "/api/v1/work-orders/{id}/events",
+                "/api/v1/work-orders/{id}/assign", "/api/v1/work-orders/{id}/unassign", "/api/v1/work-orders/{id}/start",
+                "/api/v1/work-orders/{id}/notes", "/api/v1/work-orders/{id}/complete", "/api/v1/work-orders/{id}/cancel",
+                "/api/v1/work-orders/{id}/alerts", "/api/v1/work-orders/{id}/alerts/{alertId}", "/api/v1/alerts/{alertId}/work-orders");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
@@ -346,7 +350,8 @@ class AuthorizationIntegrationTest {
             permissions.add("ROLE_" + role);
             permissions.addAll(role.equals("ADMIN") ? com.fruitmachine.backend.security.permission.Permissions.ALL
                     : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ",
-                            "ALERT_READ", "ALERT_MANAGE", "PRICING_READ", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_COMMAND_EXECUTE"));
+                            "ALERT_READ", "ALERT_MANAGE", "PRICING_READ", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_COMMAND_EXECUTE",
+                            "WORK_ORDER_READ_ASSIGNED", "WORK_ORDER_EXECUTE"));
         }
         return permissions.toArray(String[]::new);
     }

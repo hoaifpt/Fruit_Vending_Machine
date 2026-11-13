@@ -42,6 +42,7 @@ public class MachineService {
     private final ApplicationEventPublisher events;
     private final ConnectivityEvaluator connectivity;
     private final java.time.Clock clock;
+    private final com.fruitmachine.backend.workorder.repository.WorkOrderRepository workOrders;
 
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_MACHINE_READ)
@@ -109,6 +110,10 @@ public class MachineService {
     @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     public MachineResponse updateStatus(UUID id, @Valid UpdateMachineStatusRequest request) {
         Machine machine = machines.findForUpdateById(id).orElseThrow(this::notFound);
+        // Issue #66: the machine is being worked on; the Admin reactivates it after the work order is DONE or CANCELLED.
+        if (request.status() == MachineStatus.ACTIVE && machine.getStatus() != MachineStatus.ACTIVE
+                && workOrders.existsByMachineIdAndStatus(id, com.fruitmachine.backend.workorder.enums.WorkOrderStatus.IN_PROGRESS))
+            throw new ConflictException("WORK_ORDER_IN_PROGRESS: a work order of this machine is IN_PROGRESS; complete or cancel it first");
         machine.setStatus(request.status());
         machines.flush();
         return mapper.toResponse(machine);

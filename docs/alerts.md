@@ -72,7 +72,7 @@ khác là 404. Kiosk key không phải user: 401.
 | POST | `/api/v1/notifications/{id}/read` | đã đăng nhập | idempotent (`marked` 0 khi đã đọc) |
 | POST | `/api/v1/notifications/me/read-all` | đã đăng nhập | |
 
-Cảnh báo không được tạo hay xóa qua API. Hợp đồng đầy đủ: `api-contract/api.yaml` (tag Alerts, Notifications).
+Cảnh báo không được tạo hay xóa qua API. Từ issue #66, Admin tạo work order từ cảnh báo (`POST /api/v1/alerts/{alertId}/work-orders`); response cảnh báo có `workOrderId` / `workOrderCode` và thông báo có `workOrderId` ([work-orders.md](work-orders.md)). Hợp đồng đầy đủ: `api-contract/api.yaml` (tag Alerts, Notifications).
 
 ## Schema (V17)
 

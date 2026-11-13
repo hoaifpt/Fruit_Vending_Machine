@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Import(PermissionAuthoritiesIntegrationTest.KioskProbe.class)
 class PermissionAuthoritiesIntegrationTest extends AbstractCoreIntegrationTest {
     static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "INVENTORY_READ", "INVENTORY_WRITE",
-            "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ");
+            "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ",
+            "WORK_ORDER_EXECUTE", "WORK_ORDER_READ_ASSIGNED");
     static final UUID ADMIN_ROLE = UUID.fromString("10000000-0000-0000-0000-000000000001");
 
     /** Test-only kiosk endpoint (kiosk filter + ROLE_KIOSK rule apply) that reports the authenticated kiosk's authorities. */

@@ -75,6 +75,13 @@ public class SecurityConfig {
                             .hasAuthority(Permissions.PAYMENT_WEBHOOK_LOG_READ);
                     authorize.requestMatchers("/api/v1/payments", "/api/v1/payments/**").hasAuthority(Permissions.PAYMENT_READ);
                     authorize.requestMatchers("/api/v1/audit-logs", "/api/v1/audit-logs/**").hasAuthority(Permissions.AUDIT_LOG_READ);
+                    // Issue #66: before the alert rules (creating a work order from an alert is work order management).
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/alerts/*/work-orders").hasAuthority(Permissions.WORK_ORDER_MANAGE);
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/work-orders").hasAuthority(Permissions.WORK_ORDER_READ_ALL);
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/work-orders/**").hasAuthority(Permissions.WORK_ORDER_READ_ASSIGNED);
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/work-orders/*/start", "/api/v1/work-orders/*/notes", "/api/v1/work-orders/*/complete")
+                            .hasAuthority(Permissions.WORK_ORDER_EXECUTE);
+                    authorize.requestMatchers("/api/v1/work-orders", "/api/v1/work-orders/**").hasAuthority(Permissions.WORK_ORDER_MANAGE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/alerts", "/api/v1/alerts/**").hasAuthority(Permissions.ALERT_READ);
                     authorize.requestMatchers("/api/v1/alerts", "/api/v1/alerts/**").hasAuthority(Permissions.ALERT_MANAGE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/pricing/**").hasAuthority(Permissions.PRICING_READ);

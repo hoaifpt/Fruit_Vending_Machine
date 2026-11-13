@@ -52,6 +52,8 @@ tags:
     description: "Roles are sets of permissions; every protected endpoint checks a permission. An account with PERMISSION_MANAGE views roles and the catalog and replaces a role's permission set; changes apply on each member's next request. Roles and permissions cannot be created, renamed or deleted here."
   - name: Users
     description: Management accounts. Every operation requires an ACTIVE ADMIN; STAFF receives 403.
+  - name: "Work Orders"
+    description: "Jobs Staff do at a machine: RESTOCK, MAINTENANCE, INCIDENT. Admin (WORK_ORDER_MANAGE) creates, edits, assigns, cancels; the assignee (WORK_ORDER_EXECUTE) starts and completes; Admin may act for them. OPEN -> ASSIGNED -> IN_PROGRESS -> DONE, CANCELLED before DONE. Starting RESTOCK / MAINTENANCE (INCIDENT on request) puts the machine in MAINTENANCE; only an Admin reactivates it, and not while a work order is IN_PROGRESS. Without WORK_ORDER_READ_ALL, work orders assigned to others are 404. 409 messages start with a code: INVALID_WORK_ORDER_TRANSITION, STALE_VERSION, MACHINE_INACTIVE, MACHINE_HAS_ACTIVE_ORDERS, MACHINE_COMMAND_IN_PROGRESS, ALERT_ALREADY_HANDLED, ALERT_RESOLVED."
 paths:
   "/api/v1/inventory/transactions":
     "get":
@@ -7867,6 +7869,1103 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "MAINTENANCE_COMMAND_EXECUTE"
+  "/api/v1/work-orders":
+    "get":
+      "tags":
+        - "Work Orders"
+      "summary": "List work orders"
+      "description": "WORK_ORDER_READ_ALL. Filters: status (repeatable), type, source, machineId, assigneeId, priority, overdue=true, createdAt range (from inclusive, to exclusive). Sorted URGENT, HIGH, NORMAL, LOW, then due time (none last), then oldest; page >= 0, size 1 to 100 (default 20)."
+      "operationId": "listWorkOrders"
+      "parameters":
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional statuses (repeat the parameter); default all."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "enum":
+                - "OPEN"
+                - "ASSIGNED"
+                - "IN_PROGRESS"
+                - "DONE"
+                - "CANCELLED"
+        -
+          "name": "type"
+          "in": "query"
+          "description": "Optional type."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "RESTOCK"
+              - "MAINTENANCE"
+              - "INCIDENT"
+        -
+          "name": "source"
+          "in": "query"
+          "description": "Optional source."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "MANUAL"
+              - "ALERT"
+              - "SCHEDULE"
+              - "CUSTOMER_REPORT"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Optional machine UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "assigneeId"
+          "in": "query"
+          "description": "Optional assignee UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "priority"
+          "in": "query"
+          "description": "Optional priority."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "LOW"
+              - "NORMAL"
+              - "HIGH"
+              - "URGENT"
+        -
+          "name": "overdue"
+          "in": "query"
+          "description": "true: only unfinished work orders past their due time."
+          "required": false
+          "schema":
+            "type": "boolean"
+            "default": false
+        -
+          "name": "from"
+          "in": "query"
+          "description": "Optional start of createdAt, inclusive, ISO-8601."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Optional end of createdAt, exclusive, ISO-8601; after from."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of work orders"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_READ_ALL"
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Create a work order"
+      "description": "WORK_ORDER_MANAGE. Source MANUAL; OPEN without assignee, ASSIGNED (assignee notified) with one. Machine must exist and not be INACTIVE (409 MACHINE_INACTIVE); dueAt not in the past."
+      "operationId": "createWorkOrder"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateWorkOrderRequest"
+        "required": true
+      "responses":
+        "201":
+          "description": "Work order created"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Machine inactive"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/work-orders/me":
+    "get":
+      "tags":
+        - "Work Orders"
+      "summary": "List my work orders"
+      "description": "WORK_ORDER_READ_ASSIGNED. Work orders assigned to the caller; optional status (repeatable) and overdue; same order and paging as the full list."
+      "operationId": "listMyWorkOrders"
+      "parameters":
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional statuses (repeat the parameter); default all."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "enum":
+                - "OPEN"
+                - "ASSIGNED"
+                - "IN_PROGRESS"
+                - "DONE"
+                - "CANCELLED"
+        -
+          "name": "overdue"
+          "in": "query"
+          "description": "true: only unfinished work orders past their due time."
+          "required": false
+          "schema":
+            "type": "boolean"
+            "default": false
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of work orders"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_READ_ASSIGNED"
+  "/api/v1/work-orders/{id}":
+    "get":
+      "tags":
+        - "Work Orders"
+      "summary": "Get one work order"
+      "description": "WORK_ORDER_READ_ASSIGNED; without WORK_ORDER_READ_ALL only the caller's own work orders (others are 404). Includes linked alerts and version."
+      "operationId": "getWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_READ_ASSIGNED"
+    "patch":
+      "tags":
+        - "Work Orders"
+      "summary": "Edit a work order"
+      "description": "WORK_ORDER_MANAGE. title, description, priority, dueAt of an unfinished work order; stale version 409 STALE_VERSION. No change: 200 without history."
+      "operationId": "updateWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateWorkOrderRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/work-orders/{id}/events":
+    "get":
+      "tags":
+        - "Work Orders"
+      "summary": "Work order history"
+      "description": "Same visibility as the detail. Oldest first; append-only."
+      "operationId": "listWorkOrderEvents"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "History"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseListWorkOrderEventResponse"
+        "404":
+          "description": "Work order not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_READ_ASSIGNED"
+  "/api/v1/work-orders/{id}/assign":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Assign or reassign"
+      "description": "WORK_ORDER_MANAGE. OPEN -> ASSIGNED; ASSIGNED and IN_PROGRESS keep their status with the new assignee, who is notified."
+      "operationId": "assignWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AssignWorkOrderRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/work-orders/{id}/unassign":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Unassign"
+      "description": "WORK_ORDER_MANAGE. ASSIGNED -> OPEN."
+      "operationId": "unassignWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/VersionRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/work-orders/{id}/start":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Start a work order"
+      "description": "WORK_ORDER_EXECUTE, assignee (or Admin). ASSIGNED -> IN_PROGRESS; again: 200 unchanged. RESTOCK / MAINTENANCE (INCIDENT with stopMachine) put an ACTIVE machine in MAINTENANCE: 409 MACHINE_HAS_ACTIVE_ORDERS / MACHINE_COMMAND_IN_PROGRESS while customers are served; an INACTIVE machine is 409 MACHINE_INACTIVE. Body optional."
+      "operationId": "startWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/StartWorkOrderRequest"
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_EXECUTE"
+  "/api/v1/work-orders/{id}/notes":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Add a note"
+      "description": "WORK_ORDER_EXECUTE, assignee (or Admin); unfinished work orders only."
+      "operationId": "addWorkOrderNote"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/WorkOrderNoteRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_EXECUTE"
+  "/api/v1/work-orders/{id}/complete":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Complete a work order"
+      "description": "WORK_ORDER_EXECUTE, assignee (or Admin). IN_PROGRESS -> DONE with resultNote; 409 MACHINE_COMMAND_IN_PROGRESS while a maintenance command runs. Linked OPEN/ACKNOWLEDGED alerts are resolved (resolveLinkedAlerts, default true). The machine stays MAINTENANCE."
+      "operationId": "completeWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CompleteWorkOrderRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_EXECUTE"
+  "/api/v1/work-orders/{id}/cancel":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Cancel a work order"
+      "description": "WORK_ORDER_MANAGE. Any unfinished status -> CANCELLED with a reason; the machine status is not changed."
+      "operationId": "cancelWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CancelWorkOrderRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/work-orders/{id}/alerts":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Link an alert"
+      "description": "WORK_ORDER_MANAGE. An unresolved alert of the same machine (another machine: 400) not handled by another unfinished work order."
+      "operationId": "linkWorkOrderAlert"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/LinkAlertRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/work-orders/{id}/alerts/{alertId}":
+    "delete":
+      "tags":
+        - "Work Orders"
+      "summary": "Unlink an alert"
+      "description": "WORK_ORDER_MANAGE. Not after DONE or CANCELLED."
+      "operationId": "unlinkWorkOrderAlert"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "alertId"
+          "in": "path"
+          "description": "Alert UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Work order after the action"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Work order (or linked alert) not found, or assigned to someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Invalid transition, stale version or machine precondition (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/alerts/{alertId}/work-orders":
+    "post":
+      "tags":
+        - "Work Orders"
+      "summary": "Create a work order for an alert"
+      "description": "WORK_ORDER_MANAGE. Source ALERT, the alert's machine, linked to the alert; an OPEN alert becomes ACKNOWLEDGED. Defaults come from the alert. A RESOLVED alert is 409 ALERT_RESOLVED; an alert already handled by an unfinished work order is 409 ALERT_ALREADY_HANDLED (the message names that work order). Body optional."
+      "operationId": "createWorkOrderFromAlert"
+      "parameters":
+        -
+          "name": "alertId"
+          "in": "path"
+          "description": "Alert UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateWorkOrderFromAlertRequest"
+      "responses":
+        "201":
+          "description": "Work order created"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Alert not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Alert resolved or already handled"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks the WORK_ORDER_* permission of the operation"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_MANAGE"
 
 components:
   securitySchemes:
@@ -10417,6 +11516,17 @@ components:
             - "string"
             - "null"
           "description": "Resolution note; \"Condition cleared\" for system resolutions."
+        "workOrderId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Issue #66: unfinished work order handling this alert; null if none."
+        "workOrderCode":
+          "type":
+            - "string"
+            - "null"
+          "description": "Issue #66: its code, e.g. WO-20261113-K7QF; null if none."
       "required":
         - "id"
         - "machineCode"
@@ -10504,9 +11614,15 @@ components:
             - "null"
           "format": "uuid"
           "description": "Alert that caused it; open it with GET /api/v1/alerts/{id} (needs ALERT_READ)."
+        "workOrderId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Issue #66: work order it is about; open it with GET /api/v1/work-orders/{id}."
         "title":
           "type": "string"
-          "description": "Title (copied from the alert)."
+          "description": "Title (copied from the alert or the work order)."
         "message":
           "type":
             - "string"
@@ -10907,3 +12023,476 @@ components:
           "minLength": 0
       "required":
         - "outcome"
+    "ApiResponseWorkOrderPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/WorkOrderPageResponse"
+    "WorkOrderPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/WorkOrderResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "WorkOrderResponse":
+      "type": "object"
+      "description": "A work order. version is sent back on edit, assign, unassign and cancel."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+          "example": "WO-20261113-K7QF"
+        "type":
+          "type": "string"
+          "enum":
+            - "RESTOCK"
+            - "MAINTENANCE"
+            - "INCIDENT"
+        "source":
+          "type": "string"
+          "enum":
+            - "MANUAL"
+            - "ALERT"
+            - "SCHEDULE"
+            - "CUSTOMER_REPORT"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "machineName":
+          "type": "string"
+        "title":
+          "type": "string"
+        "description":
+          "type":
+            - "string"
+            - "null"
+        "priority":
+          "type": "string"
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "status":
+          "type": "string"
+          "enum":
+            - "OPEN"
+            - "ASSIGNED"
+            - "IN_PROGRESS"
+            - "DONE"
+            - "CANCELLED"
+        "assignee":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderUser"
+        "createdBy":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderUser"
+          "description": "null = created by the system."
+        "dueAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "overdue":
+          "type": "boolean"
+          "description": "Due time passed while unfinished."
+        "startedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "completedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "completedBy":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderUser"
+        "resultNote":
+          "type":
+            - "string"
+            - "null"
+        "cancelledAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "cancelledBy":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderUser"
+        "cancelReason":
+          "type":
+            - "string"
+            - "null"
+        "linkedAlerts":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/WorkOrderLinkedAlert"
+        "version":
+          "type": "integer"
+          "format": "int64"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+    "WorkOrderUser":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "fullName":
+          "type": "string"
+    "WorkOrderLinkedAlert":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "type":
+          "type": "string"
+          "enum":
+            - "HIGH_TEMPERATURE"
+            - "LOW_TEMPERATURE"
+            - "HIGH_HUMIDITY"
+            - "MACHINE_OFFLINE"
+            - "PRODUCT_EXPIRED"
+            - "PRODUCT_EXPIRING"
+            - "DISPENSE_FAILED"
+            - "LOW_STOCK"
+            - "HARDWARE_FAULT"
+        "severity":
+          "type": "string"
+          "enum":
+            - "INFO"
+            - "WARNING"
+            - "CRITICAL"
+        "status":
+          "type": "string"
+          "enum":
+            - "OPEN"
+            - "ACKNOWLEDGED"
+            - "RESOLVED"
+        "title":
+          "type": "string"
+    "CreateWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "A new work order (source MANUAL). Unknown fields are rejected."
+      "properties":
+        "type":
+          "type": "string"
+          "enum":
+            - "RESTOCK"
+            - "MAINTENANCE"
+            - "INCIDENT"
+          "example": "MAINTENANCE"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "title":
+          "type": "string"
+          "example": "Kiểm tra servo cột A"
+          "maxLength": 200
+          "minLength": 0
+        "description":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 2000
+          "minLength": 0
+        "priority":
+          "type":
+            - "string"
+            - "null"
+          "description": "Default NORMAL."
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+          "example": "HIGH"
+        "assigneeId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Optional: an ACTIVE user holding WORK_ORDER_EXECUTE."
+        "dueAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "Optional; not in the past."
+      "required":
+        - "machineId"
+        - "title"
+        - "type"
+    "ApiResponseWorkOrderResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/WorkOrderResponse"
+    "UpdateWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Partial edit: a field left out (or null) is unchanged; description \"\" clears it. version is required."
+      "properties":
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "description": "version from the last read; stale -> 409."
+        "title":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 200
+          "minLength": 0
+        "description":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 2000
+          "minLength": 0
+        "priority":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "dueAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "Not in the past; changing it re-arms the overdue notification."
+      "required":
+        - "version"
+    "ApiResponseListWorkOrderEventResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/WorkOrderEventResponse"
+    "WorkOrderEventResponse":
+      "type": "object"
+      "description": "One history row of a work order (append-only)."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "type":
+          "type": "string"
+          "enum":
+            - "CREATED"
+            - "ASSIGNED"
+            - "UNASSIGNED"
+            - "STARTED"
+            - "COMPLETED"
+            - "CANCELLED"
+            - "UPDATED"
+            - "NOTE"
+            - "OVERDUE"
+        "statusBefore":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "OPEN"
+            - "ASSIGNED"
+            - "IN_PROGRESS"
+            - "DONE"
+            - "CANCELLED"
+        "statusAfter":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "OPEN"
+            - "ASSIGNED"
+            - "IN_PROGRESS"
+            - "DONE"
+            - "CANCELLED"
+        "actor":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderUser"
+          "description": "null = the system."
+        "note":
+          "type":
+            - "string"
+            - "null"
+        "details":
+          "type":
+            - "object"
+            - "null"
+          "additionalProperties": {}
+          "description": "Changed fields, assignees, linked alerts, machine stop; keys depend on type."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+    "AssignWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "assigneeId":
+          "type": "string"
+          "format": "uuid"
+          "description": "An ACTIVE user holding WORK_ORDER_EXECUTE."
+        "version":
+          "type": "integer"
+          "format": "int64"
+      "required":
+        - "assigneeId"
+        - "version"
+    "VersionRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "The version from the last read; stale -> 409."
+      "properties":
+        "version":
+          "type": "integer"
+          "format": "int64"
+      "required":
+        - "version"
+    "StartWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Optional body. stopMachine only matters for INCIDENT (RESTOCK and MAINTENANCE always stop the machine)."
+      "properties":
+        "stopMachine":
+          "type":
+            - "boolean"
+            - "null"
+          "description": "INCIDENT: put the machine in MAINTENANCE. Default false."
+    "WorkOrderNoteRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "note":
+          "type": "string"
+          "maxLength": 2000
+          "minLength": 0
+      "required":
+        - "note"
+    "CompleteWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "resultNote":
+          "type": "string"
+          "example": "Thay servo 2"
+          "maxLength": 2000
+          "minLength": 0
+        "resolveLinkedAlerts":
+          "type":
+            - "boolean"
+            - "null"
+          "description": "Resolve the linked OPEN/ACKNOWLEDGED alerts. Default true."
+      "required":
+        - "resultNote"
+    "CancelWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "reason":
+          "type": "string"
+          "maxLength": 500
+          "minLength": 0
+        "version":
+          "type": "integer"
+          "format": "int64"
+      "required":
+        - "reason"
+        - "version"
+    "LinkAlertRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "alertId":
+          "type": "string"
+          "format": "uuid"
+      "required":
+        - "alertId"
+    "CreateWorkOrderFromAlertRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "A work order for an alert (source ALERT, the alert's machine). Every field is optional: type defaults from the alert type (LOW_STOCK, PRODUCT_* -> RESTOCK, others MAINTENANCE), title from the alert title, priority from its severity (CRITICAL -> URGENT, WARNING -> HIGH, INFO -> NORMAL)."
+      "properties":
+        "type":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "RESTOCK"
+            - "MAINTENANCE"
+            - "INCIDENT"
+        "title":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 200
+          "minLength": 0
+        "description":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 2000
+          "minLength": 0
+        "priority":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "assigneeId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+        "dueAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
