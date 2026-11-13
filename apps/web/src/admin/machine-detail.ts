@@ -19,14 +19,18 @@ type CredentialLike = Pick<S['KioskCredentialResponse'], 'status'>
 
 // ---- tabs
 
-/** `sensors` (FE 6.4): heartbeat, Wi-Fi, firmware, temperature/humidity and machine events with FAULT codes. */
-export const DETAIL_TABS = ['overview', 'sensors', 'slots', 'kiosk'] as const
+/**
+ * `sensors` (FE 6.4): heartbeat, Wi-Fi, firmware, temperature/humidity and machine events with FAULT codes.
+ * `maintenance` (FE 7.4): maintenance commands (open/close refill, take bowls out, reset) and their history; the
+ * history needs MACHINE_READ like the page, sending needs MACHINE_MAINTENANCE (the tab says so when it is missing).
+ */
+export const DETAIL_TABS = ['overview', 'sensors', 'maintenance', 'slots', 'kiosk'] as const
 export type DetailTab = (typeof DETAIL_TABS)[number]
-export const TAB_LABELS: Record<DetailTab, string> = { overview: 'Tổng quan', sensors: 'Cảm biến & Sự kiện', slots: 'Ngăn', kiosk: 'Khóa kiosk' }
+export const TAB_LABELS: Record<DetailTab, string> = { overview: 'Tổng quan', sensors: 'Cảm biến & Sự kiện', maintenance: 'Bảo trì', slots: 'Ngăn', kiosk: 'Khóa kiosk' }
 
 /** Tabs this person may open: the kiosk keys need KIOSK_CREDENTIAL_MANAGE (ADMIN), the others MACHINE_READ. */
 export function visibleTabs(canManageKeys: boolean): DetailTab[] {
-  return canManageKeys ? [...DETAIL_TABS] : ['overview', 'sensors', 'slots']
+  return canManageKeys ? [...DETAIL_TABS] : ['overview', 'sensors', 'maintenance', 'slots']
 }
 
 /** `?tab=` of the page; a missing, unknown or not-allowed value opens the overview (never an empty or forbidden tab). */

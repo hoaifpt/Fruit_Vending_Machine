@@ -18,6 +18,15 @@ export function formatDateTime(value: string | null | undefined): string {
   return `${part.day}/${part.month}/${part.year} ${part.hour}:${part.minute}`
 }
 
+/** Calendar date in Vietnam, `09/11/2026`: an instant, or a `YYYY-MM-DD` date that is already a Vietnam calendar day. */
+export function formatDate(value: string | null | undefined): string {
+  if (!value) return '—'
+  const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (plain) return `${plain[3]}/${plain[2]}/${plain[1]}`
+  const text = formatDateTime(value)
+  return text === '—' ? text : text.slice(0, 10)
+}
+
 /** `YYYY-MM-DD` (Vietnam local date) → UTC instant of that day's start. */
 export function localDateStartToInstant(date: string): string | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined

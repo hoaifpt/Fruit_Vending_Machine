@@ -2,12 +2,18 @@
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
 import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
-import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
+import type {
+  MockAlert, MockCredential, MockHeartbeat, MockItem, MockMaintenanceCommand, MockOrder, MockPayment, MockRestockLine, MockRole, MockSchedule, MockStore,
+  MockTicket, MockUser,
+} from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
+import { restockReconciliation } from './seed.ts'
+import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
 import { incidentReportRoutes } from './incident-reports.ts'
 import { refundRoutes } from './refunds.ts'
+import { boxPrice, linePricing } from './pricing.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -18,12 +24,24 @@ export interface HandlerContext {
   user: MockUser | undefined
   /** Machine of the kiosk key, for kiosk routes. */
   machineId: string
-  options: { autoPayMs: number; dispenseMs: number; autoPay: boolean }
+  options: KioskSimulation
+}
+/** How the mock plays the backend's background work for kiosk orders (payment webhook, dispensing, machine state). */
+export interface KioskSimulation {
+  autoPayMs: number
+  dispenseMs: number
+  autoPay: boolean
+  /** `fail`: the machine reports DISPENSE_FAILED; `slow`: the order stays DISPENSING (no report from the machine). */
+  dispense: 'ok' | 'fail' | 'slow'
+  /** The kiosk's machine is shown in MAINTENANCE (scenario `maintenance`), without changing the stored machine. */
+  maintenance: boolean
 }
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
  * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_WRITE of
- * drafts/alerts.yaml); checked against the web's proposed seed DRAFT_ROLE_PERMISSIONS.
+ * drafts/alerts.yaml, TICKET_READ/TICKET_WRITE of drafts/work-tickets.yaml, MAINTENANCE_SCHEDULE_READ/_WRITE of
+ * drafts/maintenance-schedules.yaml, MACHINE_MAINTENANCE of drafts/machine-maintenance.yaml); checked against the web's
+ * proposed seed DRAFT_ROLE_PERMISSIONS.
  */
 export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
 export interface Route { method: string; pattern: RegExp; policy: Policy; handle: (ctx: HandlerContext) => Reply }
@@ -112,6 +130,13 @@ const userView = ({ password: _password, ...user }: MockUser) => user
 const credentialView = ({ apiKey: _apiKey, machineId: _machineId, ...credential }: MockCredential) => credential
 const isExpired = (item: MockItem, now: number) => Date.parse(item.expiresAt) <= now
 const itemView = (item: MockItem, now: number) => ({ ...item, expired: isExpired(item, now) })
+/** Draft pricing-discount.yaml (FE 7.5): what a box sells at now; only boxes still on sale can be discounted. */
+function itemPricing(store: MockStore, item: MockItem, now: number) {
+  const listPrice = store.products.find(product => product.id === item.productId)?.price
+  if (typeof listPrice !== 'number') return {}
+  const { unitPrice, originalUnitPrice, discountPercent, discountReason } = item.status === 'AVAILABLE' || item.status === 'RESERVED' ? boxPrice(listPrice, item.expiresAt, now) : boxPrice(listPrice, undefined, now)
+  return { unitPrice, originalUnitPrice, discountPercent, discountReason }
+}
 const paymentRow = (ctx: HandlerContext, { qrCode: _qrCode, ...payment }: MockPayment) => {
   const order = ctx.store.orders.find(candidate => candidate.id === payment.orderId)
   return { ...payment, orderCode: order?.orderCode, machineCode: order?.machineCode }
@@ -148,7 +173,30 @@ function releaseOrder(ctx: HandlerContext, order: MockOrder, reason: string) {
   }
 }
 
-/** Simulates what the backend does in the background (payment webhook, dispensing, reservation sweep) for kiosk orders. */
+function markPaid(store: MockStore, order: MockOrder, payment: MockPayment, now: number) {
+  Object.assign(payment, { status: 'SUCCESS', paidAt: iso(now), transactionId: `MOCK-TXN-${randomCode(8)}`, qrCode: undefined })
+  order.status = 'PAID'
+  order.paidAt = iso(now)
+  createDispenseCommands(store, order, now)
+}
+
+/**
+ * Plays a verified payment webhook for the newest live kiosk order still waiting on a PENDING QR (mock-only control used
+ * by the UX tests to time PAID ≤ 3 s after the webhook). Returns the order code, or null when nothing was payable.
+ */
+export function payLatestKioskOrder(ctx: HandlerContext): string | null {
+  advanceOrders(ctx)
+  const order = [...ctx.store.orders].reverse().find(candidate => candidate.live && candidate.status === 'PENDING_PAYMENT' && latestPayment(ctx.store, candidate.id)?.status === 'PENDING')
+  if (!order) return null
+  markPaid(ctx.store, order, latestPayment(ctx.store, order.id)!, ctx.now)
+  return order.orderCode
+}
+
+/**
+ * Simulates what the backend does in the background (payment webhook, dispensing, reservation sweep) for kiosk orders:
+ * PENDING_PAYMENT → PAID (webhook) → DISPENSING (command acknowledged, after a quarter of dispenseMs) → COMPLETED or
+ * DISPENSE_FAILED (machine report, after dispenseMs). The real dispense-command read endpoint is BE 3.3 (due 30/11).
+ */
 export function advanceOrders(ctx: HandlerContext) {
   const { store, now, options } = ctx
   for (const order of store.orders) {
@@ -156,31 +204,36 @@ export function advanceOrders(ctx: HandlerContext) {
     const payment = latestPayment(store, order.id)
     if (order.status === 'PENDING_PAYMENT') {
       if (payment?.status === 'PENDING' && payment.expiredAt && Date.parse(payment.expiredAt) <= now) payment.status = 'EXPIRED'
-      if (options.autoPay && payment?.status === 'PENDING' && Date.parse(payment.createdAt) + options.autoPayMs <= now) {
-        Object.assign(payment, { status: 'SUCCESS', paidAt: iso(now), transactionId: `MOCK-TXN-${randomCode(8)}`, qrCode: undefined })
-        order.status = 'PAID'
-        order.paidAt = iso(now)
-        createDispenseCommands(store, order, now)
-      } else if (order.expiresAt && Date.parse(order.expiresAt) <= now) releaseOrder(ctx, order, 'RESERVATION_EXPIRED')
-    } else if (order.status === 'PAID' && order.paidAt && Date.parse(order.paidAt) + options.dispenseMs <= now) {
-      order.status = 'COMPLETED'
-      order.completedAt = iso(now)
-      for (const command of store.dispenseCommands) {
-        if (command.orderId === order.id) Object.assign(command, { status: 'SUCCESS', sentAt: command.sentAt ?? iso(now), acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
-      }
-      for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
-      for (const item of allocationItems(store, order)) {
-        setItemStatus(item, 'SOLD', now)
-        history(store, item, 'SALE', now, { referenceId: order.id, statusBefore: 'RESERVED', statusAfter: 'SOLD' })
-      }
+      if (options.autoPay && payment?.status === 'PENDING' && Date.parse(payment.createdAt) + options.autoPayMs <= now) markPaid(store, order, payment, now)
+      else if (order.expiresAt && Date.parse(order.expiresAt) <= now) releaseOrder(ctx, order, 'RESERVATION_EXPIRED')
+    }
+    const paidAt = order.paidAt ? Date.parse(order.paidAt) : NaN
+    const commands = store.dispenseCommands.filter(command => command.orderId === order.id)
+    if (order.status === 'PAID' && paidAt + options.dispenseMs / 4 <= now) {
+      order.status = 'DISPENSING'
+      for (const command of commands) if (command.status === 'PENDING') Object.assign(command, { status: 'SENT', sentAt: iso(now), updatedAt: iso(now) })
+    }
+    if (order.status !== 'DISPENSING' || paidAt + options.dispenseMs > now || options.dispense === 'slow') continue
+    if (options.dispense === 'fail') {
+      order.status = 'DISPENSE_FAILED'
+      for (const command of commands) Object.assign(command, { status: 'FAILED', acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
+      for (const item of allocationItems(store, order)) setItemStatus(item, 'DISPENSE_FAILED', now)
+      continue
+    }
+    order.status = 'COMPLETED'
+    order.completedAt = iso(now)
+    for (const command of commands) Object.assign(command, { status: 'SUCCESS', sentAt: command.sentAt ?? iso(now), acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
+    for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
+    for (const item of allocationItems(store, order)) {
+      setItemStatus(item, 'SOLD', now)
+      history(store, item, 'SALE', now, { referenceId: order.id, reason: 'ORDER_COMPLETED', statusBefore: 'RESERVED', statusAfter: 'SOLD' })
     }
   }
 }
 
 /**
  * Like the payment webhook + DispenseService for a kiosk order: one PENDING command per bowl, created with the move to
- * PAID. The mock keeps the order PAID until it completes (the kiosk shows PAID and DISPENSING alike), so the command stays
- * PENDING (a SENT command would mean DISPENSING) and ends SUCCESS with the order in advanceOrders.
+ * PAID. advanceOrders then sends them (SENT, order DISPENSING) and ends them SUCCESS, or FAILED with scenario `dispense-failed`.
  */
 function createDispenseCommands(store: MockStore, order: MockOrder, now: number) {
   for (const allocation of order.items.flatMap(line => line.allocations)) {
@@ -206,8 +259,8 @@ function kioskOrderView(store: MockStore, order: MockOrder) {
   const payment = latestPayment(store, order.id)
   return {
     id: order.id, orderCode: order.orderCode, machineId: order.machineId, status: order.status,
-    items: order.items.map(({ productId, sku, productName, quantity, unitPrice, totalPrice }) => ({ productId, sku, productName, quantity, unitPrice, totalPrice })),
-    subtotal: order.subtotal, totalAmount: order.totalAmount, createdAt: order.createdAt, expiresAt: order.expiresAt, cancelledAt: order.cancelledAt ?? null,
+    items: order.items.map(({ productId, sku, productName, quantity, unitPrice, totalPrice, originalUnitPrice, discountAmount, discountPercent, discountReason }) => ({ productId, sku, productName, quantity, unitPrice, totalPrice, originalUnitPrice: originalUnitPrice ?? unitPrice, discountAmount: discountAmount ?? 0, discountPercent: discountPercent ?? null, discountReason: discountReason ?? null })),
+    subtotal: order.subtotal, totalAmount: order.totalAmount, discountAmount: order.discountAmount ?? 0, createdAt: order.createdAt, expiresAt: order.expiresAt, cancelledAt: order.cancelledAt ?? null,
     currentPayment: payment ? kioskPaymentView(payment) : null,
   }
 }
@@ -264,6 +317,163 @@ function statusForm<T extends string>(ctx: HandlerContext, values: readonly T[])
   const status = form.oneOf('status', values)
   form.done()
   return status
+}
+
+// ---- work tickets (draft of backend 4.3, api-contract/drafts/work-tickets.yaml). Messages in English as the backend would send.
+const TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const
+const TICKET_TYPES = ['RESTOCK', 'MAINTENANCE'] as const
+/** Holds TICKET_WRITE: sees every ticket, opens, assigns and cancels. Everyone else only ever gets their own. */
+const managesTickets = (user: MockUser) => draftPermissionsOfUser(user).includes('TICKET_WRITE')
+function findTicket(ctx: HandlerContext): MockTicket {
+  if (!UUID_PATTERN.test(decode(ctx.params.id))) throw new MockHttpError(400, 'Invalid request parameter', { id: 'Must be a valid UUID' })
+  const ticket = byId(ctx.store.tickets, ctx.params.id, 'Work ticket not found')
+  // Not disclosed to someone who may not see it: the same 404 as an unknown id.
+  if (!managesTickets(ctx.user!) && ticket.assigneeId !== ctx.user!.id) throw notFound('Work ticket not found')
+  return ticket
+}
+/** assigneeId of a body: an ACTIVE account holding STAFF; otherwise a field error (and null). */
+function ticketAssignee(ctx: HandlerContext, form: Form, value: unknown): MockUser | null {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) { form.reject('assigneeId', 'Must be a valid UUID'); return null }
+  const user = ctx.store.users.find(candidate => candidate.id === value)
+  if (!user || user.status !== 'ACTIVE' || !user.roles.includes('STAFF')) { form.reject('assigneeId', 'Assignee must be an active STAFF account'); return null }
+  return user
+}
+function assignTo(ticket: MockTicket, assignee: MockUser, by: MockUser, at: string) {
+  Object.assign(ticket, { status: 'ASSIGNED', assigneeId: assignee.id, assigneeName: assignee.fullName, assignedAt: at, assignedById: by.id, assignedByName: by.fullName, updatedAt: at })
+}
+function onlyAssignee(ctx: HandlerContext, ticket: MockTicket) {
+  if (ticket.assigneeId !== ctx.user!.id) throw new MockHttpError(403, 'Only the assignee can do this')
+}
+/** FE 7.2: the line of a RESTOCK ticket the assignee (with INVENTORY_WRITE) works on, while IN_PROGRESS. */
+function findRestockLine(ctx: HandlerContext) {
+  const ticket = findTicket(ctx)
+  onlyAssignee(ctx, ticket)
+  if (!permissionsOfUser(ctx.store, ctx.user!).includes('INVENTORY_WRITE')) throw new MockHttpError(403, 'Access denied')
+  const line = ticket.restockLines?.find(candidate => candidate.id === decode(ctx.params.lineId))
+  if (!line) throw notFound('Restock line not found')
+  if (ticket.type !== 'RESTOCK' || ticket.status !== 'IN_PROGRESS') throw conflict('Ticket is not IN_PROGRESS')
+  return { ticket, line }
+}
+function touchRestock(ticket: MockTicket, now: number) {
+  ticket.reconciliation = restockReconciliation(ticket.restockLines ?? [])
+  ticket.updatedAt = iso(now)
+}
+/** Runs another mock endpoint with this request's caller (the restock lines reuse the inventory rules as they are). */
+function callRoute(ctx: HandlerContext, method: string, path: string, body: unknown): Reply {
+  for (const candidate of routes) {
+    const match = candidate.method === method ? candidate.pattern.exec(path) : null
+    if (match) return candidate.handle({ ...ctx, params: match.groups ?? {}, body })
+  }
+  throw new MockHttpError(501, `Mock chưa có handler cho ${method} ${path}`)
+}
+/** Same as LOW_STOCK_THRESHOLD of src/admin/overview.ts: an ACTIVE slot with at most this many sellable bowls is low. */
+export const MOCK_LOW_STOCK_THRESHOLD = 1
+/**
+ * Lines the server writes when a RESTOCK ticket is created (proposal of drafts/work-tickets.yaml): one per ACTIVE slot of
+ * the machine below the low-stock threshold (sellable = AVAILABLE and not expired, at most MOCK_LOW_STOCK_THRESHOLD),
+ * planned = the slot's free places, product = the one of the newest bowl ever loaded in the slot, batch = the loadable
+ * batch of that product (not expired, bowls left) expiring first, or null when there is none. Slot code order. A slot
+ * without a free place, or that never held a bowl (no product to plan), gets no line.
+ */
+export function planRestockLines(store: MockStore, machineId: string, now: number): MockRestockLine[] {
+  const lines: MockRestockLine[] = []
+  const slots = store.slots.filter(slot => slot.machineId === machineId && slot.status === 'ACTIVE').sort((a, b) => a.slotCode.localeCompare(b.slotCode))
+  for (const slot of slots) {
+    const present = presentItems(store, slot.id)
+    const sellable = present.filter(item => item.status === 'AVAILABLE' && !isExpired(item, now)).length
+    const free = slot.capacity - present.length
+    if (sellable > MOCK_LOW_STOCK_THRESHOLD || free <= 0) continue
+    const newest = store.items.filter(item => item.slotId === slot.id).sort((a, b) => b.loadedAt.localeCompare(a.loadedAt))[0]
+    const product = newest && store.products.find(candidate => candidate.id === newest.productId)
+    if (!product?.id) continue
+    const batch = store.batches
+      .filter(candidate => candidate.productId === product.id && Date.parse(candidate.expiresAt) > now
+        && store.items.filter(item => item.batchId === candidate.id).length < candidate.quantity)
+      .sort((a, b) => a.expiresAt.localeCompare(b.expiresAt))[0]
+    lines.push({
+      id: newId(), slotId: slot.id, slotCode: slot.slotCode, productId: product.id, productName: product.name ?? '',
+      batchId: batch?.id ?? null, batchCode: batch?.batchCode ?? null, batchExpiresAt: batch?.expiresAt ?? null,
+      plannedQuantity: free, loadedQuantity: 0, removedQuantity: 0,
+    })
+  }
+  return lines
+}
+/**
+ * Rule of POST /complete for a RESTOCK ticket (draft): the LOW_STOCK alerts of its machine still open whose slot has a
+ * line loaded in full (or, without a slot, when every line is) are resolved by the system. Returns their ids.
+ */
+function resolveLowStock(store: MockStore, ticket: MockTicket, now: number): string[] {
+  const lines = ticket.restockLines ?? []
+  const full = lines.filter(line => line.loadedQuantity >= line.plannedQuantity)
+  const resolved: string[] = []
+  for (const alert of store.alerts) {
+    if (alert.type !== 'LOW_STOCK' || alert.machineId !== ticket.machineId || alert.status === 'RESOLVED') continue
+    const line = alert.slotId ? full.find(candidate => candidate.slotId === alert.slotId) : undefined
+    if (alert.slotId ? !line : full.length !== lines.length) continue
+    const at = iso(Math.max(now, Date.parse(alert.triggeredAt)))
+    const what = line ? `đã nạp ${line.loadedQuantity} hộp vào ngăn ${line.slotCode}.` : `đã nạp đủ ${lines.length} ngăn theo kế hoạch.`
+    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedById: null, resolvedByName: 'Hệ thống', resolutionNote: `Tự đóng khi hoàn tất phiếu nạp hàng “${ticket.title}”: ${what}`, updatedAt: at })
+    resolved.push(alert.id)
+  }
+  return resolved
+}
+
+// ---- maintenance schedules (draft of backend 4.5, api-contract/drafts/maintenance-schedules.yaml). English messages.
+const SCHEDULE_FIELDS = ['machineId', 'title', 'intervalDays', 'startDate', 'assigneeId', 'note'] as const
+function findSchedule(ctx: HandlerContext): MockSchedule {
+  if (!UUID_PATTERN.test(decode(ctx.params.id))) throw new MockHttpError(400, 'Invalid request parameter', { id: 'Must be a valid UUID' })
+  return byId(ctx.store.schedules, ctx.params.id, 'Maintenance schedule not found')
+}
+const dueDateOf = (schedule: MockSchedule) => vietnamDateOf(schedule.nextDueAt)
+/** What the server answers: the stored row plus `overdue` as of now (active and the due day is before today). */
+function scheduleView(schedule: MockSchedule, now: number) {
+  const due = dueDateOf(schedule)
+  return { ...schedule, overdue: schedule.active && !!due && due < vietnamDate(now) }
+}
+/** The due date rule of the draft (same function as the web's preview). */
+function recomputeDue(schedule: MockSchedule, now: number) {
+  schedule.nextDueAt = schedule.active ? dueInstant(nextDueDate(scheduleBase(schedule), schedule.intervalDays, vietnamDate(now))) : null
+}
+/** 409 when another active schedule of the same machine already has this title (case-insensitive). */
+function duplicateTitle(store: MockStore, machineId: string, title: string, except?: string): boolean {
+  return store.schedules.some(other => other.active && other.id !== except && other.machineId === machineId && other.title.toLowerCase() === title.toLowerCase())
+}
+/** The daily job of the draft: one MAINTENANCE ticket for a schedule due today or earlier, given to its assignee. */
+function openScheduleTicket(store: MockStore, schedule: MockSchedule, now: number) {
+  const at = iso(now)
+  const assignee = schedule.assigneeId ? store.users.find(user => user.id === schedule.assigneeId && user.status === 'ACTIVE' && user.roles.includes('STAFF')) : undefined
+  const ticket: MockTicket = {
+    id: newId(), type: 'MAINTENANCE', status: assignee ? 'ASSIGNED' : 'OPEN', title: `${schedule.title} · máy ${schedule.machineCode}`.slice(0, 200),
+    description: [`Bảo trì định kỳ theo lịch (mỗi ${schedule.intervalDays} ngày).`, schedule.note].filter(Boolean).join(' '),
+    machineId: schedule.machineId, machineCode: schedule.machineCode, machineName: schedule.machineName ?? null, alertId: null,
+    dueAt: dueInstant(addDays(dueDateOf(schedule)!, 1)), assigneeId: assignee?.id ?? null, assigneeName: assignee?.fullName ?? null,
+    createdById: schedule.createdById, createdByName: schedule.createdByName ?? null,
+    assignedAt: assignee ? at : null, assignedById: assignee ? schedule.createdById : null, assignedByName: assignee ? schedule.createdByName ?? null : null,
+    startedAt: null, startedById: null, startedByName: null, completedAt: null, completedById: null, completedByName: null, completionNote: null,
+    cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: at, updatedAt: at,
+  }
+  store.tickets.push(ticket)
+  Object.assign(schedule, { openTicketId: ticket.id, openTicketStatus: ticket.status })
+}
+/**
+ * Plays the server's background work whenever schedules are read or written: a COMPLETED ticket moves its schedule
+ * (lastCompletedAt, nextDueAt = completed day + N), a CANCELLED one only frees it, and a due schedule without a ticket
+ * gets one. Not run on other endpoints, so the work ticket screens see the seed unchanged until schedules are opened.
+ */
+function syncSchedules(store: MockStore, now: number) {
+  const today = vietnamDate(now)
+  for (const schedule of store.schedules) {
+    if (schedule.openTicketId) {
+      const ticket = store.tickets.find(candidate => candidate.id === schedule.openTicketId)
+      if (!ticket || ticket.status === 'CANCELLED') Object.assign(schedule, { openTicketId: null, openTicketStatus: null })
+      else if (ticket.status === 'COMPLETED') {
+        Object.assign(schedule, { openTicketId: null, openTicketStatus: null, lastCompletedAt: ticket.completedAt, updatedAt: ticket.completedAt ?? iso(now) })
+        recomputeDue(schedule, now)
+      } else schedule.openTicketStatus = ticket.status
+    }
+    const due = dueDateOf(schedule)
+    if (schedule.active && !schedule.openTicketId && due && due <= today) openScheduleTicket(store, schedule, now)
+  }
 }
 
 function route(method: string, template: string, policy: Policy, handle: Route['handle']): Route {
@@ -497,6 +707,14 @@ export const routes: Route[] = [
     return ok(paginate(rows, ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc' }))
   }),
 
+  // ---- maintenance commands: draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml), FE 7.4
+  route('GET', '/machines/:machineId/maintenance-commands', { permission: 'MACHINE_READ' }, ctx => {
+    const machine = findMachine(ctx)
+    const rows = ctx.store.maintenanceCommands.filter(command => command.machineId === machine.id)
+    return ok(paginate(rows.map(command => ({ ...command })), ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc', fixedSort: true }))
+  }),
+  route('POST', '/machines/:machineId/maintenance-commands', { draftPermission: 'MACHINE_MAINTENANCE' }, ctx => created(createMaintenanceCommand(ctx))),
+
   // ---- product batches
   route('GET', '/product-batches', 'any', ctx => {
     const rows = ctx.store.batches.filter(batch => eq(ctx.query, 'productId', batch.productId))
@@ -524,7 +742,7 @@ export const routes: Route[] = [
   route('GET', '/inventory', 'any', ctx => {
     const { query, now } = ctx
     const rows = ctx.store.items.filter(item => eq(query, 'machineId', item.machineId) && eq(query, 'slotId', item.slotId) && eq(query, 'batchId', item.batchId) && eq(query, 'status', item.status) && flag(query, 'expired', isExpired(item, now)))
-    return ok(paginate(rows.map(item => itemView(item, now)), query, { sorts: { id: row => row.id, status: row => row.status, loadedAt: row => row.loadedAt, createdAt: row => row.createdAt, updatedAt: row => row.updatedAt }, defaultSort: 'createdAt,desc' }))
+    return ok(paginate(rows.map(item => ({ ...itemView(item, now), ...itemPricing(ctx.store, item, now) })), query, { sorts: { id: row => row.id, status: row => row.status, loadedAt: row => row.loadedAt, createdAt: row => row.createdAt, updatedAt: row => row.updatedAt }, defaultSort: 'createdAt,desc' }))
   }),
   route('GET', '/inventory/transactions', 'any', ctx => {
     const { query } = ctx
@@ -577,13 +795,15 @@ export const routes: Route[] = [
     const { query } = ctx
     const rows = ctx.store.orders.filter(order => eq(query, 'status', order.status) && eq(query, 'machineId', order.machineId) && within(query, 'createdFrom', 'createdTo', order.createdAt) && contains(query.get('search'), order.orderCode)).map(order => ({
       id: order.id, orderCode: order.orderCode, machineId: order.machineId, machineCode: order.machineCode, status: order.status,
-      itemCount: order.items.length, totalQuantity: order.items.reduce((sum, line) => sum + line.quantity, 0), totalAmount: order.totalAmount,
+      itemCount: order.items.length, totalQuantity: order.items.reduce((sum, line) => sum + line.quantity, 0), totalAmount: order.totalAmount, discountAmount: order.discountAmount ?? 0,
       createdAt: order.createdAt, expiresAt: order.expiresAt, cancelledAt: order.cancelledAt,
     }))
     return ok(paginate(rows, query, { sorts: { createdAt: row => row.createdAt, totalAmount: row => row.totalAmount, orderCode: row => row.orderCode }, defaultSort: 'createdAt,desc' }))
   }),
   route('GET', '/orders/:id', 'any', ctx => {
-    const { live: _live, ...order } = byId(ctx.store.orders, ctx.params.id, 'Không tìm thấy đơn hàng.')
+    const { live: _live, ...stored } = byId(ctx.store.orders, ctx.params.id, 'Không tìm thấy đơn hàng.')
+    // Draft pricing-discount.yaml (FE 7.5): 0 / equal prices when the line had no discount.
+    const order = { ...stored, discountAmount: stored.discountAmount ?? 0, items: stored.items.map(line => ({ ...line, originalUnitPrice: line.originalUnitPrice ?? line.unitPrice, discountAmount: line.discountAmount ?? 0, discountPercent: line.discountPercent ?? null, discountReason: line.discountReason ?? null })) }
     const payments = ctx.store.payments.filter(payment => payment.orderId === order.id).map(({ id, provider, status, amount, createdAt, paidAt, expiredAt }) => ({ id, provider, status, amount, createdAt, paidAt, expiredAt }))
     return ok({ ...order, payments })
   }),
@@ -627,6 +847,223 @@ export const routes: Route[] = [
     return ok({ ...alert })
   }),
 
+  // ---- work tickets: draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
+  route('GET', '/work-tickets', { draftPermission: 'TICKET_READ' }, ctx => {
+    const { query } = ctx
+    const errors: Record<string, string> = {}
+    if (query.get('status') && !(TICKET_STATUSES as readonly string[]).includes(query.get('status')!)) errors.status = `Must be one of: ${TICKET_STATUSES.join(', ')}`
+    if (query.get('type') && !(TICKET_TYPES as readonly string[]).includes(query.get('type')!)) errors.type = `Must be one of: ${TICKET_TYPES.join(', ')}`
+    for (const name of ['machineId', 'assigneeId']) if (query.get(name) && !UUID_PATTERN.test(query.get(name)!)) errors[name] = 'Must be a valid UUID'
+    if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
+    // Server-side scope: without TICKET_WRITE the assignee filter is always the caller.
+    const assignee = managesTickets(ctx.user!) ? query.get('assigneeId') : ctx.user!.id
+    const rows = ctx.store.tickets.filter(ticket => eq(query, 'status', ticket.status) && eq(query, 'type', ticket.type) && eq(query, 'machineId', ticket.machineId)
+      && (!assignee || ticket.assigneeId === assignee)).map(ticket => ({ ...ticket }))
+    return ok(paginate(rows, query, { sorts: { createdAt: row => row.createdAt, dueAt: row => row.dueAt }, defaultSort: 'createdAt,desc' }))
+  }),
+  route('GET', '/work-tickets/:id', { draftPermission: 'TICKET_READ' }, ctx => ok({ ...findTicket(ctx) })),
+  route('POST', '/work-tickets', { draftPermission: 'TICKET_WRITE' }, ctx => {
+    const form = new Form(ctx.body, ['type', 'machineId', 'title', 'description', 'dueAt', 'alertId', 'assigneeId'])
+    const data = ctx.body as Record<string, unknown>
+    const type = form.oneOf('type', TICKET_TYPES)
+    const title = form.text('title', 200)
+    const description = form.optionalText('description', 1000)
+    const machineIdValid = typeof data.machineId === 'string' && UUID_PATTERN.test(data.machineId)
+    const machine = machineIdValid ? ctx.store.machines.find(candidate => candidate.id === data.machineId) : undefined
+    if (!machine) form.reject('machineId', machineIdValid ? 'Machine not found' : 'Must be a valid UUID')
+    let dueAt: string | null = null
+    if (data.dueAt !== undefined && data.dueAt !== null) {
+      const due = form.instant('dueAt')
+      if (due && due <= ctx.now) form.reject('dueAt', 'Must be in the future')
+      else if (due) dueAt = iso(due)
+    }
+    let alert: MockAlert | undefined
+    if (data.alertId !== undefined && data.alertId !== null) {
+      alert = typeof data.alertId === 'string' ? ctx.store.alerts.find(candidate => candidate.id === data.alertId) : undefined
+      if (!alert) form.reject('alertId', 'Alert not found')
+      else if (machine && alert.machineId !== machine.id) form.reject('alertId', 'Alert belongs to another machine')
+    }
+    const assignee = data.assigneeId !== undefined && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    form.done()
+    if (alert?.status === 'RESOLVED') throw conflict('Alert is already RESOLVED')
+    const at = iso(ctx.now)
+    const ticket: MockTicket = {
+      id: newId(), type, status: 'OPEN', title, description, machineId: machine!.id, machineCode: machine!.code, machineName: machine!.name,
+      alertId: alert?.id ?? null, dueAt, assigneeId: null, assigneeName: null, createdById: ctx.user!.id, createdByName: ctx.user!.fullName,
+      assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
+      completedAt: null, completedById: null, completedByName: null, completionNote: null,
+      cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: at, updatedAt: at,
+    }
+    if (type === 'RESTOCK') {
+      const restockLines = planRestockLines(ctx.store, ticket.machineId, ctx.now)
+      Object.assign(ticket, { restockLines, reconciliation: restockReconciliation(restockLines) })
+    }
+    if (assignee) assignTo(ticket, assignee, ctx.user!, at)
+    ctx.store.tickets.push(ticket)
+    return created({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/assign', { draftPermission: 'TICKET_WRITE' }, ctx => {
+    const form = new Form(ctx.body, ['assigneeId'])
+    const assignee = ticketAssignee(ctx, form, (ctx.body as Record<string, unknown>).assigneeId)
+    form.done()
+    const ticket = findTicket(ctx)
+    if (ticket.status !== 'OPEN' && ticket.status !== 'ASSIGNED') throw conflict('Ticket can only be assigned while OPEN or ASSIGNED')
+    assignTo(ticket, assignee!, ctx.user!, iso(ctx.now))
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/start', { draftPermission: 'TICKET_READ' }, ctx => {
+    const ticket = findTicket(ctx)
+    onlyAssignee(ctx, ticket)
+    if (ticket.status !== 'ASSIGNED') throw conflict('Ticket is not ASSIGNED')
+    const at = iso(ctx.now)
+    Object.assign(ticket, { status: 'IN_PROGRESS', startedAt: at, startedById: ctx.user!.id, startedByName: ctx.user!.fullName, updatedAt: at })
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/complete', { draftPermission: 'TICKET_READ' }, ctx => {
+    let note: string | null = null
+    if (ctx.body !== undefined) {
+      const form = new Form(ctx.body, ['note'])
+      note = form.optionalText('note', 500)
+      form.done()
+    }
+    const ticket = findTicket(ctx)
+    onlyAssignee(ctx, ticket)
+    if (ticket.status !== 'IN_PROGRESS') throw conflict('Ticket is not IN_PROGRESS')
+    // FE 7.2 (restock lines): a note is mandatory when the result differs from the plan.
+    const lines = ticket.type === 'RESTOCK' ? ticket.restockLines ?? [] : []
+    if (lines.some(line => line.loadedQuantity !== line.plannedQuantity) && !note) {
+      throw new MockHttpError(400, 'Dữ liệu gửi lên chưa hợp lệ.', { note: 'must not be blank when loaded differs from planned' })
+    }
+    const at = iso(ctx.now)
+    Object.assign(ticket, { status: 'COMPLETED', completedAt: at, completedById: ctx.user!.id, completedByName: ctx.user!.fullName, completionNote: note, updatedAt: at })
+    if (lines.length) ticket.resolvedAlertIds = resolveLowStock(ctx.store, ticket, ctx.now)
+    return ok({ ...ticket })
+  }),
+  // FE 7.2: loading and removing through the lines of a RESTOCK ticket, with the rules of /inventory/load and /remove.
+  route('POST', '/work-tickets/:id/restock-lines/:lineId/load', { draftPermission: 'TICKET_READ' }, ctx => {
+    const form = new Form(ctx.body, ['batchId', 'quantity'])
+    const batchId = form.text('batchId'), quantity = form.integer('quantity', 1, 1000)
+    form.done()
+    const { ticket, line } = findRestockLine(ctx)
+    const batch = ctx.store.batches.find(candidate => candidate.id === batchId)
+    if (!batch) throw notFound('Không tìm thấy lô hàng.')
+    if (batch.productId !== line.productId) throw conflict('Batch product does not match the restock line')
+    const reply = callRoute(ctx, 'POST', '/inventory/load', { batchId, slotId: line.slotId, quantity })
+    const operationId = (reply.data as { operationId: string }).operationId
+    for (const row of ctx.store.transactions) if (row.referenceId === operationId) row.referenceId = ticket.id
+    line.loadedQuantity += quantity
+    touchRestock(ticket, ctx.now)
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/restock-lines/:lineId/remove', { draftPermission: 'TICKET_READ' }, ctx => {
+    const form = new Form(ctx.body, ['inventoryItemId', 'reason'])
+    const itemId = form.text('inventoryItemId')
+    form.text('reason', 500)
+    form.done()
+    const { ticket, line } = findRestockLine(ctx)
+    const item = ctx.store.items.find(candidate => candidate.id === itemId)
+    if (!item) throw notFound('Không tìm thấy hộp hàng.')
+    if (item.slotId !== line.slotId) throw new MockHttpError(400, 'Dữ liệu gửi lên chưa hợp lệ.', { inventoryItemId: 'Item is not in the slot of this restock line' })
+    callRoute(ctx, 'POST', `/inventory/${item.id}/remove`, { reason: (ctx.body as { reason: unknown }).reason })
+    const row = ctx.store.transactions.findLast(candidate => candidate.inventoryItemId === item.id && candidate.type === 'REMOVE')
+    if (row) row.referenceId = ticket.id
+    line.removedQuantity += 1
+    touchRestock(ticket, ctx.now)
+    return ok({ ...ticket })
+  }),
+  route('POST', '/work-tickets/:id/cancel', { draftPermission: 'TICKET_WRITE' }, ctx => {
+    const form = new Form(ctx.body, ['reason'])
+    const reason = form.text('reason', 500)
+    form.done()
+    const ticket = findTicket(ctx)
+    if (ticket.status === 'COMPLETED' || ticket.status === 'CANCELLED') throw conflict('Ticket is already COMPLETED or CANCELLED')
+    const at = iso(ctx.now)
+    Object.assign(ticket, { status: 'CANCELLED', cancelledAt: at, cancelledById: ctx.user!.id, cancelledByName: ctx.user!.fullName, cancelReason: reason, updatedAt: at })
+    return ok({ ...ticket })
+  }),
+
+  // ---- maintenance schedules: draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml). Never deleted.
+  route('GET', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_SCHEDULE_READ' }, ctx => {
+    const { query } = ctx
+    const errors: Record<string, string> = {}
+    if (query.get('machineId') && !UUID_PATTERN.test(query.get('machineId')!)) errors.machineId = 'Must be a valid UUID'
+    if (query.get('active') && !['true', 'false'].includes(query.get('active')!)) errors.active = 'Must be true or false'
+    if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
+    syncSchedules(ctx.store, ctx.now)
+    const rows = ctx.store.schedules.filter(schedule => eq(query, 'machineId', schedule.machineId) && flag(query, 'active', schedule.active)).map(schedule => scheduleView(schedule, ctx.now))
+    return ok(paginate(rows, query, { sorts: { nextDueAt: row => row.nextDueAt, createdAt: row => row.createdAt }, defaultSort: 'nextDueAt,asc' }))
+  }),
+  route('GET', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_SCHEDULE_READ' }, ctx => {
+    const schedule = findSchedule(ctx)
+    syncSchedules(ctx.store, ctx.now)
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+  route('POST', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const form = new Form(ctx.body, SCHEDULE_FIELDS)
+    const data = ctx.body as Record<string, unknown>
+    const title = form.text('title', 200)
+    const intervalDays = form.integer('intervalDays', 1, 365)
+    if (!isDateString(typeof data.startDate === 'string' ? data.startDate : '')) form.reject('startDate', 'Must be a date (yyyy-MM-dd)')
+    const note = form.optionalText('note', 1000)
+    const machineIdValid = typeof data.machineId === 'string' && UUID_PATTERN.test(data.machineId)
+    const machine = machineIdValid ? ctx.store.machines.find(candidate => candidate.id === data.machineId) : undefined
+    if (!machine) form.reject('machineId', machineIdValid ? 'Machine not found' : 'Must be a valid UUID')
+    const assignee = data.assigneeId !== undefined && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    form.done()
+    if (duplicateTitle(ctx.store, machine!.id, title)) throw conflict('An active schedule with this title already exists for this machine')
+    const at = iso(ctx.now)
+    const schedule: MockSchedule = {
+      id: newId(), machineId: machine!.id, machineCode: machine!.code, machineName: machine!.name ?? null, title, note, intervalDays, startDate: data.startDate as string,
+      assigneeId: assignee?.id ?? null, assigneeName: assignee?.fullName ?? null, active: true, nextDueAt: null, lastCompletedAt: null,
+      openTicketId: null, openTicketStatus: null, createdById: ctx.user!.id, createdByName: ctx.user!.fullName,
+      deactivatedAt: null, deactivatedById: null, deactivatedByName: null, createdAt: at, updatedAt: at,
+    }
+    recomputeDue(schedule, ctx.now)
+    ctx.store.schedules.push(schedule)
+    syncSchedules(ctx.store, ctx.now)
+    return created(scheduleView(schedule, ctx.now))
+  }),
+  route('PATCH', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const form = new Form(ctx.body, SCHEDULE_FIELDS.filter(field => field !== 'machineId'))
+    const data = ctx.body as Record<string, unknown>
+    if (!Object.keys(data).length) throw new MockHttpError(400, 'At least one field is required', {})
+    const has = (field: string) => Object.hasOwn(data, field)
+    const title = has('title') ? form.text('title', 200) : undefined
+    const intervalDays = has('intervalDays') ? form.integer('intervalDays', 1, 365) : undefined
+    if (has('startDate') && !isDateString(typeof data.startDate === 'string' ? data.startDate : '')) form.reject('startDate', 'Must be a date (yyyy-MM-dd)')
+    const assignee = has('assigneeId') && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    const note = has('note') ? form.optionalText('note', 1000) : undefined
+    form.done()
+    const schedule = findSchedule(ctx)
+    if (title !== undefined && schedule.active && duplicateTitle(ctx.store, schedule.machineId, title, schedule.id)) throw conflict('An active schedule with this title already exists for this machine')
+    const cycleChanged = (intervalDays !== undefined && intervalDays !== schedule.intervalDays) || (has('startDate') && data.startDate !== schedule.startDate)
+    if (title !== undefined) schedule.title = title
+    if (intervalDays !== undefined) schedule.intervalDays = intervalDays
+    if (has('startDate')) schedule.startDate = data.startDate as string
+    if (has('assigneeId')) Object.assign(schedule, { assigneeId: assignee?.id ?? null, assigneeName: assignee?.fullName ?? null })
+    if (note !== undefined) schedule.note = note
+    schedule.updatedAt = iso(ctx.now)
+    if (cycleChanged) recomputeDue(schedule, ctx.now)
+    syncSchedules(ctx.store, ctx.now)
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+  route('POST', '/maintenance-schedules/:id/deactivate', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const schedule = findSchedule(ctx)
+    if (!schedule.active) throw conflict('Schedule is already inactive')
+    const at = iso(ctx.now)
+    Object.assign(schedule, { active: false, nextDueAt: null, deactivatedAt: at, deactivatedById: ctx.user!.id, deactivatedByName: ctx.user!.fullName, updatedAt: at })
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+  route('POST', '/maintenance-schedules/:id/activate', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+    const schedule = findSchedule(ctx)
+    if (schedule.active) throw conflict('Schedule is already active')
+    if (duplicateTitle(ctx.store, schedule.machineId, schedule.title, schedule.id)) throw conflict('An active schedule with this title already exists for this machine')
+    Object.assign(schedule, { active: true, deactivatedAt: null, deactivatedById: null, deactivatedByName: null, updatedAt: iso(ctx.now) })
+    recomputeDue(schedule, ctx.now)
+    syncSchedules(ctx.store, ctx.now)
+    return ok(scheduleView(schedule, ctx.now))
+  }),
+
   // ---- payments (ADMIN)
   route('GET', '/payments', 'admin', ctx => {
     const { store, query } = ctx
@@ -659,19 +1096,22 @@ export const routes: Route[] = [
   // ---- kiosk (X-Kiosk-Key)
   route('GET', '/kiosk/me', 'kiosk', ctx => {
     const machine = findMachine(ctx, ctx.machineId)
-    return ok({ machineId: machine.id, machineCode: machine.code, machineName: machine.name, machineStatus: machine.status })
+    return ok({ machineId: machine.id, machineCode: machine.code, machineName: machine.name, machineStatus: ctx.options.maintenance ? 'MAINTENANCE' : machine.status })
   }),
   route('GET', '/kiosk/catalog', 'kiosk', ctx => {
     const { store, now } = ctx
     const machine = findMachine(ctx, ctx.machineId)
-    if (machine.status !== 'ACTIVE') return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: false, products: [] })
+    if (machine.status !== 'ACTIVE' || ctx.options.maintenance) return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: false, products: [] })
     const heads = sellableHeads(ctx, machine.id)
     const holdUntil = now + RESERVATION_MS
     const products = [...new Set(heads.map(({ head }) => head.productId))].map(productId => {
       const product = store.products.find(candidate => candidate.id === productId)!
       const slotIds = new Set(heads.filter(({ head }) => head.productId === productId).map(({ slot }) => slot.id))
       const availableQuantity = store.items.filter(item => item.productId === productId && slotIds.has(item.slotId) && item.status === 'AVAILABLE' && Date.parse(item.expiresAt) > holdUntil).length
-      return { productId, sku: product.sku, name: product.name, description: product.description ?? undefined, price: product.price, imageUrl: product.imageUrl ?? undefined, availableQuantity }
+      // Draft pricing-discount.yaml (FE 7.5): price of the head POST /kiosk/orders would pick now (FEFO between heads).
+      const next = heads.filter(({ head }) => head.productId === productId).map(({ head }) => head).sort((a, b) => a.expiresAt.localeCompare(b.expiresAt) || a.loadedAt.localeCompare(b.loadedAt))[0]
+      const pricing = boxPrice(product.price, next?.expiresAt, now)
+      return { productId, sku: product.sku, name: product.name, description: product.description ?? undefined, price: pricing.unitPrice, originalUnitPrice: pricing.originalUnitPrice, discountPercent: pricing.discountPercent, discountReason: pricing.discountReason, imageUrl: product.imageUrl ?? undefined, availableQuantity }
     })
     return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: true, products })
   }),
@@ -683,6 +1123,7 @@ export const routes: Route[] = [
     const product = store.products.find(candidate => candidate.id === productId)
     if (!product) throw notFound('Không tìm thấy sản phẩm.')
     const machine = findMachine(ctx, ctx.machineId)
+    if (ctx.options.maintenance) throw conflict('Requested product is not available on this machine')
     // First-expiring head between sellable slots; never a bowl behind a head.
     const choice = sellableHeads(ctx, machine.id).filter(({ head }) => head.productId === productId)
       .sort((a, b) => a.head.expiresAt.localeCompare(b.head.expiresAt) || a.head.loadedAt.localeCompare(b.head.loadedAt) || a.slot.slotCode.localeCompare(b.slot.slotCode))[0]
@@ -690,11 +1131,13 @@ export const routes: Route[] = [
     const { head, slot } = choice
     const batch = store.batches.find(candidate => candidate.id === head.batchId)
     const createdAt = iso(now)
+    // Price snapshot of the chosen box (draft pricing-discount.yaml, FE 7.5): near-expiry boxes sell at 50% off.
+    const line = linePricing(boxPrice(product.price, head.expiresAt, now), 1)
     setItemStatus(head, 'RESERVED', now)
     const order: MockOrder = {
       id: newId(), orderCode: `ORD-${createdAt.slice(0, 10).replaceAll('-', '')}-${randomCode(8)}`, machineId: machine.id, machineCode: machine.code, status: 'PENDING_PAYMENT',
-      subtotal: product.price, totalAmount: product.price, createdAt, expiresAt: iso(now + RESERVATION_MS), live: true,
-      items: [{ id: newId(), productId, sku: product.sku, productName: product.name, quantity: 1, unitPrice: product.price, totalPrice: product.price, allocations: [{ id: newId(), inventoryItemId: head.id, slotCode: slot.slotCode, batchCode: head.batchCode, batchExpiresAt: batch?.expiresAt, status: 'RESERVED' }] }],
+      subtotal: line.totalPrice, totalAmount: line.totalPrice, discountAmount: line.discountAmount, createdAt, expiresAt: iso(now + RESERVATION_MS), live: true,
+      items: [{ id: newId(), productId, sku: product.sku, productName: product.name, quantity: 1, ...line, allocations: [{ id: newId(), inventoryItemId: head.id, slotCode: slot.slotCode, batchCode: head.batchCode, batchExpiresAt: batch?.expiresAt, status: 'RESERVED' }] }],
     }
     store.orders.push(order)
     history(store, head, 'RESERVE', now, { referenceId: order.id, statusBefore: 'AVAILABLE', statusAfter: 'RESERVED' })
@@ -790,4 +1233,119 @@ export function setHeartbeat(store: MockStore, now: number, machine: string, liv
   Object.assign(heartbeat, { live, lastSeenAt: at, reportedAt: at, state: 'ONLINE', bootedAt: heartbeat.bootedAt ?? at })
   target.lastSeenAt = at
   return at
+}
+
+// ---- maintenance commands (draft of backend 4.2, api-contract/drafts/machine-maintenance.yaml, FE 7.4). Messages in
+// English as the backend would send them.
+const MAINTENANCE_TYPES = ['OPEN_REFILL', 'CLOSE_REFILL', 'REMOVE_ITEM', 'EMPTY_COLUMN', 'RESET'] as const
+const MAINTENANCE_SLOT_TYPES: readonly string[] = ['REMOVE_ITEM', 'EMPTY_COLUMN']
+const MAINTENANCE_UNFINISHED: readonly string[] = ['PENDING', 'SENT', 'ACKNOWLEDGED']
+const REMOVABLE: readonly MockItem['status'][] = ['AVAILABLE', 'EXPIRED']
+/** Same as DISPENSE_TIMEOUT (60 s from createdAt), and the web's OFFLINE rule (180 s without a message). */
+const MAINTENANCE_TIMEOUT_MS = 60_000
+const MACHINE_OFFLINE_AFTER_MS = 180_000
+
+/** Physically present bowls of a slot, head (next out) first. */
+function presentItems(store: MockStore, slotId: string): MockItem[] {
+  return store.items.filter(item => item.slotId === slotId && PRESENT_STATUSES.includes(item.status))
+    .sort((a, b) => a.loadedAt.localeCompare(b.loadedAt) || a.id.localeCompare(b.id))
+}
+
+function createMaintenanceCommand(ctx: HandlerContext): MockMaintenanceCommand {
+  const { store, now } = ctx
+  const machine = findMachine(ctx)
+  const form = new Form(ctx.body, ['type', 'slotId', 'inventoryItemId', 'reason'])
+  const body = ctx.body as Record<string, unknown>
+  const type = form.oneOf('type', MAINTENANCE_TYPES)
+  const slotCommand = MAINTENANCE_SLOT_TYPES.includes(type)
+  const { slotId, inventoryItemId } = body
+  if (slotCommand) {
+    if (slotId === undefined || slotId === null) form.reject('slotId', `must not be null for ${type}`)
+    else if (typeof slotId !== 'string' || !UUID_PATTERN.test(slotId)) form.reject('slotId', 'Must be a valid UUID')
+  } else if (slotId !== undefined && slotId !== null) form.reject('slotId', `must be null for ${type}`)
+  if (inventoryItemId !== undefined && inventoryItemId !== null) {
+    if (type !== 'REMOVE_ITEM') form.reject('inventoryItemId', `must be null for ${type}`)
+    else if (typeof inventoryItemId !== 'string' || !UUID_PATTERN.test(inventoryItemId)) form.reject('inventoryItemId', 'Must be a valid UUID')
+  }
+  const reason = form.optionalText('reason', 500)
+  form.done()
+  if (machine.status !== 'MAINTENANCE') throw conflict('Machine is not in MAINTENANCE')
+  const seen = machine.lastSeenAt ? Date.parse(machine.lastSeenAt) : NaN
+  if (!Number.isFinite(seen) || now - seen > MACHINE_OFFLINE_AFTER_MS) throw conflict('Machine is offline')
+  if (store.maintenanceCommands.some(command => command.machineId === machine.id && MAINTENANCE_UNFINISHED.includes(command.status))) throw conflict('Another maintenance command is still running')
+  let slot: MockStore['slots'][number] | undefined
+  let items: MockItem[] = []
+  if (slotCommand) {
+    slot = store.slots.find(candidate => candidate.id === slotId && candidate.machineId === machine.id)
+    if (!slot) throw notFound('Slot not found in specified machine')
+    const present = presentItems(store, slot.id)
+    if (!present.length) throw conflict('Slot is empty')
+    if (type === 'REMOVE_ITEM') {
+      if (!REMOVABLE.includes(present[0].status)) throw conflict('Slot head cannot be removed')
+      if (inventoryItemId && inventoryItemId !== present[0].id) throw conflict('Inventory item is not the slot head')
+      items = [present[0]]
+    } else {
+      if (present.some(item => !REMOVABLE.includes(item.status))) throw conflict('Slot holds reserved or dispense-failed bowls')
+      items = present
+    }
+  }
+  const at = iso(now)
+  const command: MockMaintenanceCommand = {
+    id: newId(), commandCode: `M-${Array.from({ length: 16 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('')}`, machineId: machine.id, type,
+    slotId: slot?.id ?? null, slotCode: slot?.slotCode ?? null, inventoryItemId: type === 'REMOVE_ITEM' ? items[0].id : null, itemCount: slotCommand ? items.length : null,
+    removedCount: null, reason, status: 'PENDING', failureCode: null, requestedById: ctx.user!.id, requestedByName: ctx.user!.fullName,
+    createdAt: at, sentAt: null, acknowledgedAt: null, completedAt: null, updatedAt: at,
+  }
+  store.maintenanceCommands.push(command)
+  return { ...command }
+}
+
+/** The machine reports success: bowls taken out become REMOVED with a REMOVE transaction (reference = the command). */
+function completeMaintenanceCommand(store: MockStore, command: MockMaintenanceCommand, now: number) {
+  const at = iso(now)
+  const heartbeat = store.heartbeats.find(candidate => candidate.machineId === command.machineId)
+  if (command.type === 'RESET' && heartbeat?.dispenseState !== 'FAULT') {
+    Object.assign(command, { status: 'FAILED', failureCode: 'NOT_IN_FAULT', completedAt: at, updatedAt: at })
+    return
+  }
+  if (command.type === 'RESET' && heartbeat) heartbeat.dispenseState = 'IDLE'
+  let removed: number | null = null
+  if (command.slotId) {
+    const present = presentItems(store, command.slotId).filter(item => REMOVABLE.includes(item.status))
+    const taken = command.type === 'REMOVE_ITEM' ? present.filter(item => item.id === command.inventoryItemId) : present.slice(0, command.itemCount ?? present.length)
+    for (const item of taken) {
+      const before = item.status
+      setItemStatus(item, 'REMOVED', now)
+      item.removedAt = at
+      history(store, item, 'REMOVE', now, { referenceId: command.id, performedBy: command.requestedById, reason: command.reason ?? `Maintenance command ${command.commandCode} (${command.type})`, statusBefore: before, statusAfter: 'REMOVED' })
+    }
+    removed = taken.length
+  }
+  Object.assign(command, { status: 'SUCCESS', removedCount: removed, completedAt: at, updatedAt: at })
+}
+
+/**
+ * What the backend and the machine do in the background, applied before each request (like advanceOrders): a command
+ * is published (SENT) after a quarter of dispenseMs, accepted (ACKNOWLEDGED) after half, and ends after dispenseMs.
+ * A silent machine (heartbeat stopped) or scenario `dispense-slow` never answers, so the command becomes TIMEOUT 60 s
+ * after createdAt; scenario `dispense-failed` makes the machine abort (FAILED, ABORTED); RESET on a controller that is
+ * not in FAULT is refused (FAILED, NOT_IN_FAULT).
+ */
+export function advanceMaintenanceCommands(ctx: HandlerContext) {
+  const { store, now, options } = ctx
+  for (const command of store.maintenanceCommands) {
+    if (!MAINTENANCE_UNFINISHED.includes(command.status)) continue
+    const created = Date.parse(command.createdAt)
+    const answers = options.dispense !== 'slow' && !!store.heartbeats.find(candidate => candidate.machineId === command.machineId)?.live
+    if (command.status === 'PENDING' && created + options.dispenseMs / 4 <= now) Object.assign(command, { status: 'SENT', sentAt: iso(created + options.dispenseMs / 4), updatedAt: iso(now) })
+    if (answers && command.status === 'SENT' && created + options.dispenseMs / 2 <= now) Object.assign(command, { status: 'ACKNOWLEDGED', acknowledgedAt: iso(created + options.dispenseMs / 2), updatedAt: iso(now) })
+    if (answers && command.status === 'ACKNOWLEDGED' && created + options.dispenseMs <= now) {
+      if (options.dispense === 'fail') Object.assign(command, { status: 'FAILED', failureCode: 'ABORTED', completedAt: iso(now), updatedAt: iso(now) })
+      else completeMaintenanceCommand(store, command, now)
+      continue
+    }
+    if (MAINTENANCE_UNFINISHED.includes(command.status) && created + MAINTENANCE_TIMEOUT_MS <= now) {
+      Object.assign(command, { status: 'TIMEOUT', completedAt: iso(now), updatedAt: iso(now) })
+    }
+  }
 }

@@ -1,10 +1,12 @@
-// C3 Chi tiết máy: tabs kept in the URL (`?tab=overview|sensors|slots|kiosk`). The header shows, on every tab, the
+// C3 Chi tiết máy: tabs kept in the URL (`?tab=overview|sensors|maintenance|slots|kiosk`). The header shows, on every tab, the
 // administrative status and the connectivity (Trực tuyến / Mất kết nối (OFFLINE) after 180 s without a message, FE 6.4);
 // the machine is read again every 30 s and turns OFFLINE on screen the moment its 180 s are up.
 // - Tổng quan: whether the kiosk sells and why, what it still needs (active slots, a kiosk key) before switching the
 //   machine to ACTIVE, status changes with a confirmation, configuration (edited in a Sheet).
 // - Cảm biến & Sự kiện (FE 6.4, ./MachineSensorsTab.tsx): heartbeat, Wi-Fi, firmware, temperature/humidity, events
 //   with FAULT codes; draft API waiting for BE 3.4/3.5.
+// - Bảo trì (FE 7.4, ./MachineMaintenanceTab.tsx): maintenance commands (refill door, take bowls out, reset) with their
+//   history; locked with the reason while the machine is not in MAINTENANCE or OFFLINE; draft API waiting for BE 4.2.
 // - Ngăn: slots with server paging/sort/status filter in the URL; add a slot, change its capacity or status.
 // - Khóa kiosk (ADMIN, KIOSK_CREDENTIAL_MANAGE): key history by prefix; issue a key (shown once, with a copy button, and
 //   never stored anywhere), revoke with a confirmation.
@@ -44,6 +46,7 @@ import {
 import type { DetailTab, ReadinessItem, SlotStatus, SlotValues } from '../machine-detail.ts'
 import { MachineSheet } from './MachinesPage.tsx'
 import MachineSensorsTab from './MachineSensorsTab.tsx'
+import MachineMaintenanceTab from './MachineMaintenanceTab.tsx'
 
 const BACK = { to: '/admin/machines', label: 'Danh sách máy' }
 const PANEL = 'mb-5 min-w-0 rounded-xl border bg-card p-5 shadow-xs max-[680px]:p-4'
@@ -125,6 +128,8 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
       </TabsList>
       <TabsContent value="overview"><Overview machine={data} canWrite={canWrite} canKeys={canKeys} canInventory={canInventory} reload={machine.reload} jumpTo={jumpTo} /></TabsContent>
       <TabsContent value="sensors"><MachineSensorsTab machine={data} connection={machine} /></TabsContent>
+      <TabsContent value="maintenance"><MachineMaintenanceTab machine={data} connection={machine} reloadMachine={machine.reload}
+        openStatusChange={canWrite && data.status !== 'MAINTENANCE' ? () => jumpTo('overview', 'machine-status-MAINTENANCE') : undefined} /></TabsContent>
       <TabsContent value="slots"><SlotsTab machine={data} canWrite={canWrite} canKeys={canKeys} canInventory={canInventory} jumpTo={jumpTo} /></TabsContent>
       {canKeys && <TabsContent value="kiosk"><KioskTab machine={data} /></TabsContent>}
     </Tabs>

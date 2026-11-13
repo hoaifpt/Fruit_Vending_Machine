@@ -1,14 +1,14 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceOrders, draftPermissionsOfUser, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
-import type { HandlerContext, Policy, RaiseAlertInput } from './handlers.ts'
+import { advanceMaintenanceCommands, advanceOrders, draftPermissionsOfUser, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
+import type { HandlerContext, KioskSimulation, Policy, RaiseAlertInput } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
 import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'incident-reports', 'refunds'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'incident-reports', 'refunds'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -29,6 +29,10 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   alerts: 'alerts',
   // Draft of backend 5.1 (api-contract/drafts/refunds.yaml, FE 8.1).
   refunds: 'refunds',
+  // Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
+  'work-tickets': 'tickets',
+  // Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml).
+  'maintenance-schedules': 'maintenance-schedules',
 }
 
 export function groupOf(path: string): MockGroup | null {
@@ -42,6 +46,8 @@ export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/(heartbeat|sensor-readings|events)(\/|$)/.test(path)) return 'telemetry'
   // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): public report form of FE 8.2.
   if (/^\/public\/incident-reports(\/|$)/.test(path)) return 'incident-reports'
+  // Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): its own group, like telemetry.
+  if (/^\/machines\/[^/]+\/maintenance-commands(\/|$)/.test(path)) return 'maintenance-commands'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
 }
 
@@ -133,8 +139,22 @@ export interface MockControl {
   resumeHeartbeat: (machine: string) => string | null
   /** Mocked requests so far whose path (without /api/v1) starts with `prefix`, with the mock time they arrived. */
   requests: (prefix?: string) => { method: string; path: string; at: number }[]
+  /** Plays a verified payment webhook for the newest kiosk order showing a QR; returns its order code or null. */
+  payKioskOrder: () => string | null
+  /** An administrator elsewhere changes a machine's status (id or code), e.g. to MAINTENANCE before a restock (FE 7.2). */
+  setMachineStatus: (machine: string, status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE') => void
 }
 export type MockFetcher = typeof fetch & { control: MockControl }
+/** Kept for the FM5 kiosk tests: `window.__freshvendMock`. */
+export type MockControls = Pick<MockControl, 'payKioskOrder'>
+
+function kioskSimulation(options: MockOptions, scenario: Scenario | null): KioskSimulation {
+  const name = scenario?.name
+  return {
+    autoPayMs: options.autoPayMs, dispenseMs: options.dispenseMs, autoPay: name !== 'pending', maintenance: name === 'maintenance',
+    dispense: name === 'dispense-failed' ? 'fail' : name === 'dispense-slow' ? 'slow' : 'ok',
+  }
+}
 
 export function createMockFetcher(selection: MockSelection, overrides: Partial<MockOptions> = {}): MockFetcher {
   const options: MockOptions = {
@@ -185,15 +205,16 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     return credential?.machineId ?? store.machines[0].id
   }
 
-  function dispatch(method: string, path: string, query: URLSearchParams, headers: Headers, body: unknown, autoPay: boolean): Reply {
+  function dispatch(method: string, path: string, query: URLSearchParams, headers: Headers, body: unknown, simulation: KioskSimulation): Reply {
     for (const route of routes) {
       if (route.method !== method) continue
       const match = route.pattern.exec(path)
       if (!match) continue
-      const ctx: HandlerContext = { store, now: options.now(), params: match.groups ?? {}, query, body, user: undefined, machineId: '', options: { autoPayMs: options.autoPayMs, dispenseMs: options.dispenseMs, autoPay } }
+      const ctx: HandlerContext = { store, now: options.now(), params: match.groups ?? {}, query, body, user: undefined, machineId: '', options: simulation }
       if (route.policy === 'kiosk') ctx.machineId = kioskMachineId(headers.get('x-kiosk-key'))
       else if (route.policy !== 'public') ctx.user = authenticate(route.policy, headers.get('authorization'))
       advanceOrders(ctx)
+      advanceMaintenanceCommands(ctx)
       syncHeartbeats(store, ctx.now)
       return route.handle(ctx)
     }
@@ -203,10 +224,19 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
   /** Last mocked requests (at most 500), for tests that must prove how many polls happened. */
   const requestLog: { method: string; path: string; at: number }[] = []
   const control: MockControl = {
+    payKioskOrder: () => payLatestKioskOrder({
+      store, now: options.now(), params: {}, query: new URLSearchParams(), body: undefined, user: undefined, machineId: '',
+      options: kioskSimulation(options, readScenario(options.getSearch(), options.storage)),
+    }),
     requests: (prefix = '') => requestLog.filter(entry => entry.path.startsWith(prefix)).map(entry => ({ ...entry })),
     raiseAlert: input => raiseAlert(store, options.now(), input),
     stopHeartbeat: machine => setHeartbeat(store, options.now(), machine, false),
     resumeHeartbeat: machine => setHeartbeat(store, options.now(), machine, true),
+    setMachineStatus: (machine, status) => {
+      const target = store.machines.find(candidate => candidate.id === machine || candidate.code === machine)
+      if (!target) throw new Error(`Không có máy ${machine}`)
+      Object.assign(target, { status, updatedAt: new Date(options.now()).toISOString() })
+    },
   }
   const fetcher: typeof fetch = async (input, init) => {
     const url = requestUrl(input)
@@ -237,7 +267,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
         const message = simulated.status === 409 ? CONTRACT_CONFLICTS[path] ?? simulated.message : simulated.message
         return errorResponse(simulated.status, message, fullPath, now, fields)
       }
-      const reply = dispatch(method, path, url.searchParams, new Headers(init?.headers), body, current?.name !== 'pending')
+      const reply = dispatch(method, path, url.searchParams, new Headers(init?.headers), body, kioskSimulation(options, current))
       return successResponse(scenario?.name === 'empty' && method === 'GET' ? { ...reply, data: emptied(reply.data) } : reply, now)
     } catch (error) {
       if (error instanceof MockHttpError) return errorResponse(error.status, error.message, fullPath, now, error.fieldErrors)

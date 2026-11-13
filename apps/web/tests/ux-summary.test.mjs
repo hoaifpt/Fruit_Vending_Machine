@@ -49,9 +49,15 @@ test('axe known list: every entry has a reason and only matches its own screen, 
     assert.ok(entry.target || entry.within, `${entry.screen}/${entry.rule} must be narrowed to some nodes`)
   }
   const node = (target, within = {}) => ({ target, within })
-  assert.ok(knownViolation('kiosk-catalog', 'label-content-name-mismatch', [node('button[aria-label="Táo, 35.000 ₫"]')]))
-  assert.equal(knownViolation('kiosk-catalog', 'label-content-name-mismatch', [node('button[aria-label="Táo"]'), node('.other')]), null, 'one uncovered node keeps it blocking')
-  assert.equal(knownViolation('orders', 'label-content-name-mismatch', [node('button[aria-label="x"]')]), null, 'other screens are not covered')
+  // FE 5.1 fixed the kiosk product button: its label mismatch is no longer excused.
+  assert.equal(knownViolation('kiosk-catalog', 'label-content-name-mismatch', [node('button[aria-label="Táo, 35.000 ₫"]')]), null)
+  const entry = { screen: 'test-screen', rule: 'label-content-name-mismatch', target: 'button[aria-label=', reason: 'mục thử cho bài kiểm tra cơ chế target' }
+  KNOWN_VIOLATIONS.push(entry)
+  try {
+    assert.ok(knownViolation('test-screen', 'label-content-name-mismatch', [node('button[aria-label="Táo, 35.000 ₫"]')]))
+    assert.equal(knownViolation('test-screen', 'label-content-name-mismatch', [node('button[aria-label="Táo"]'), node('.other')]), null, 'one uncovered node keeps it blocking')
+    assert.equal(knownViolation('orders', 'label-content-name-mismatch', [node('button[aria-label="x"]')]), null, 'other screens are not covered')
+  } finally { KNOWN_VIOLATIONS.splice(KNOWN_VIOLATIONS.indexOf(entry), 1) }
   // The reloading DataTable keeps full contrast now: no contrast finding on the kit is excused any more.
   assert.deepEqual(withinSelectors('kit', 'color-contrast'), [])
   assert.equal(knownViolation('kit', 'color-contrast', [node('.badge', { '[aria-busy="true"]': true })]), null)

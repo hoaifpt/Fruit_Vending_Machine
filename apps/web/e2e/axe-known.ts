@@ -13,12 +13,8 @@ export interface KnownViolation {
   reason: string
 }
 
-export const KNOWN_VIOLATIONS: KnownViolation[] = [
-  {
-    screen: 'kiosk-catalog', rule: 'label-content-name-mismatch', target: 'button[aria-label=',
-    reason: 'Kiosk (ngoài FM2, src/pages/PurchasePage.tsx): nút sản phẩm có aria-label "tên, giá" nhưng chữ hiển thị còn có mô tả; sửa khi làm lại màn kiosk',
-  },
-]
+// FE 5.1 removed the kiosk product-button entry: the button's visible text is now its accessible name.
+export const KNOWN_VIOLATIONS: KnownViolation[] = []
 
 export interface NodeInfo { target: string; within: Record<string, boolean> }
 

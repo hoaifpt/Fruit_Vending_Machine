@@ -21,6 +21,7 @@ export function installMock(raw: string | undefined, overrides: Partial<MockOpti
   configureClient({ fetcher })
   // Mock-only controls for e2e tests and demos, e.g. `window.__fvMock.raiseAlert()` makes a machine raise a new alert.
   if (typeof window !== 'undefined') (window as unknown as { __fvMock?: MockControl }).__fvMock = fetcher.control
+  if (typeof window !== 'undefined') (window as typeof window & { __freshvendMock?: Pick<MockControl, 'payKioskOrder'> }).__freshvendMock = fetcher.control
   console.info(`[mock] API giả đang bật: ${selection.all ? 'tất cả nhóm' : selection.groups.join(', ')}. Dữ liệu chỉ nằm trong bộ nhớ.`)
   return selection
 }

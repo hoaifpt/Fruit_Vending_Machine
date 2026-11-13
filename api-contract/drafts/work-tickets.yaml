@@ -1,0 +1,926 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - work tickets
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issue FE 7.1, screen O3 "Phiếu công việc") for backend issue 4.3; the backend has
+    not implemented these endpoints yet and has no table for them. A work ticket is a job at one machine (restock or
+    maintenance), optionally raised from an alert. Lifecycle: OPEN (no assignee) -> ASSIGNED -> IN_PROGRESS ->
+    COMPLETED; CANCELLED from any state before COMPLETED. Statuses follow the SRS vocabulary already used by the web
+    (OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED). Every step records who and when (assignedAt/By,
+    startedAt/By, completedAt/By with an optional note, cancelledAt/By with a mandatory reason); tickets are never
+    deleted. Proposed table work_tickets (id UUID PK, type, status, machine_id FK machines, alert_id FK alerts NULL,
+    title VARCHAR(200), description TEXT NULL, due_at TIMESTAMPTZ NULL, assignee_id FK users NULL, created_by FK users,
+    assigned_at/assigned_by, started_at/started_by, completed_at/completed_by, completion_note, cancelled_at/cancelled_by,
+    cancel_reason, created_at, updated_at) with CHECK (status <> 'OPEN' OR assignee_id IS NULL), CHECK (assignee_id IS
+    NOT NULL OR status IN ('OPEN', 'CANCELLED')) (a ticket cancelled while OPEN has no assignee), CHECK (status <> 'COMPLETED' OR completed_at IS NOT NULL),
+    CHECK (status <> 'CANCELLED' OR (cancelled_at IS NOT NULL AND cancel_reason IS NOT NULL)), and indexes on
+    (assignee_id, status) and (machine_id, status). RESTOCK tickets also carry restock lines (FE 7.2, screen O4, BE
+    4.4): one line per slot to fill, with the product, a suggested batch and the planned number of bowls, and the bowls
+    actually loaded and removed through the ticket (POST .../restock-lines/{lineId}/load and /remove, which run the same
+    rules as POST /inventory/load and POST /inventory/{id}/remove and write the same inventory history, with
+    referenceId = the ticket id). Proposed table work_ticket_restock_lines (id UUID PK, ticket_id FK work_tickets,
+    slot_id FK machine_slots, product_id FK products, batch_id FK product_batches NULL, planned_quantity INT CHECK > 0,
+    loaded_quantity INT DEFAULT 0 CHECK >= 0, removed_quantity INT DEFAULT 0 CHECK >= 0, UNIQUE (ticket_id, slot_id)).
+    The lines are written by the server when a RESTOCK ticket is created (proposal: every ACTIVE slot of the machine
+    below the low-stock threshold, planned = free places, batch = the loadable batch of that product expiring first);
+    editing lines is not part of this draft. The refill door is opened and closed with the maintenance commands of
+    drafts/machine-maintenance.yaml (OPEN_REFILL / CLOSE_REFILL, machine in MAINTENANCE); the web derives the step of a
+    restock from the ticket and that command history, so it resumes at the right step after a reload. Completing a
+    RESTOCK ticket reconciles plan and result (a note is mandatory when they differ) and resolves the related LOW_STOCK
+    alerts automatically (see POST /complete). Proposed permissions (not in backend #48 yet):
+    TICKET_READ (ADMIN, STAFF) and TICKET_WRITE (ADMIN). A caller without TICKET_WRITE only ever sees tickets assigned
+    to itself (the server filters; the web never relies on its own filtering). Starting and completing a ticket is done
+    by its assignee only. Used by the mock layer until the backend ships it, then this file is deleted and the paths
+    move to api.yaml.
+paths:
+  /api/v1/work-tickets:
+    get:
+      tags: [WorkTickets]
+      operationId: listWorkTickets
+      summary: List and filter work tickets (draft)
+      description: >-
+        TICKET_READ. Database pagination page0/size20/max100. Filters combine: status, type, machineId, assigneeId.
+        Approved sort: createdAt (default desc) or dueAt (nulls last), with a UUID tie-break. A caller without
+        TICKET_WRITE only receives tickets whose assignee is the caller: the server replaces any assigneeId filter with
+        the caller's own id (no 403, the list is simply theirs).
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Zero-based page.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          description: Page size 1..100.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          description: Exact ticket status.
+          required: false
+          schema:
+            type: string
+            enum: [OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED]
+        - name: type
+          in: query
+          description: Exact ticket type.
+          required: false
+          schema:
+            type: string
+            enum: [RESTOCK, MAINTENANCE]
+        - name: machineId
+          in: query
+          description: Machine UUID filter.
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: assigneeId
+          in: query
+          description: Assignee account UUID filter (ignored and replaced by the caller for callers without TICKET_WRITE).
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: sort
+          in: query
+          description: createdAt or dueAt with optional asc/desc.
+          required: false
+          schema:
+            type: string
+            default: createdAt,desc
+      responses:
+        "200":
+          description: One page of work tickets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponsePageWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/ServerError"
+    post:
+      tags: [WorkTickets]
+      operationId: createWorkTicket
+      summary: Open a work ticket (draft)
+      description: >-
+        TICKET_WRITE. Creates an OPEN ticket, or an ASSIGNED one when assigneeId is given (assignedAt/assignedBy are then
+        the creation time and the caller). machineId must be an existing machine; alertId, when given, must be an alert
+        of that same machine that is not RESOLVED; assigneeId must be an ACTIVE account holding the STAFF role. Unknown
+        or invalid references are reported as fieldErrors (400). dueAt must be in the future. Unknown fields are rejected
+        (400).
+      x-required-permission: TICKET_WRITE
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkTicketRequest"
+      responses:
+        "201":
+          description: The new ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: The alert given in alertId is already RESOLVED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}:
+    get:
+      tags: [WorkTickets]
+      operationId: getWorkTicket
+      summary: One work ticket (draft)
+      description: >-
+        TICKET_READ. A caller without TICKET_WRITE gets 404 for a ticket not assigned to it (its existence is not
+        disclosed).
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      responses:
+        "200":
+          description: The ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/assign:
+    post:
+      tags: [WorkTickets]
+      operationId: assignWorkTicket
+      summary: Assign or reassign a ticket (draft)
+      description: >-
+        TICKET_WRITE. OPEN or ASSIGNED -> ASSIGNED; records assignedAt (now) and assignedBy (the caller), replacing the
+        previous assignee. assigneeId must be an ACTIVE account holding the STAFF role (400 otherwise). Assigning to the
+        current assignee again is accepted and only refreshes assignedAt/By. The row is locked while changing.
+      x-required-permission: TICKET_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignWorkTicketRequest"
+      responses:
+        "200":
+          description: The assigned ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is already IN_PROGRESS, COMPLETED or CANCELLED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket can only be assigned while OPEN or ASSIGNED
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000001/assign
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/start:
+    post:
+      tags: [WorkTickets]
+      operationId: startWorkTicket
+      summary: Start working on a ticket (draft)
+      description: >-
+        TICKET_READ and the caller must be the assignee (403 otherwise, also for admins). ASSIGNED -> IN_PROGRESS;
+        records startedAt (now) and startedBy (the caller). No request body.
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      responses:
+        "200":
+          description: The started ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not the assignee of this ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is not ASSIGNED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket is not ASSIGNED
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000002/start
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/complete:
+    post:
+      tags: [WorkTickets]
+      operationId: completeWorkTicket
+      summary: Complete a ticket (draft)
+      description: >-
+        TICKET_READ and the caller must be the assignee (403 otherwise). IN_PROGRESS -> COMPLETED; records completedAt
+        (now), completedBy (the caller) and the optional note. The body may be omitted. Not reversible. For a RESTOCK
+        ticket with restock lines the note becomes mandatory when any line's loadedQuantity differs from its
+        plannedQuantity (400 with fieldErrors.note "must not be blank when loaded differs from planned"), and the
+        response carries the reconciliation. In the same transaction the server resolves, as the system, every LOW_STOCK
+        alert of the ticket's machine that is not RESOLVED and whose slot has a line loaded in full (loadedQuantity >=
+        plannedQuantity); a LOW_STOCK alert without a slot is resolved only when every line is loaded in full. Each one
+        gets resolvedAt = completedAt, resolvedById = null, resolvedByName = "Hệ thống" and resolutionNote "Tự đóng khi
+        hoàn tất phiếu nạp hàng “<ticket title>”: đã nạp <n> hộp vào ngăn <slot>." Their ids are returned in
+        resolvedAlertIds. The ticket's own alertId is treated the same way (it is closed only if it is such a LOW_STOCK
+        alert).
+      x-required-permission: TICKET_READ
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteWorkTicketRequest"
+      responses:
+        "200":
+          description: The completed ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not the assignee of this ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is not IN_PROGRESS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket is not IN_PROGRESS
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000003/complete
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/restock-lines/{lineId}/load:
+    post:
+      tags: [WorkTickets]
+      operationId: loadWorkTicketRestockLine
+      summary: Record bowls loaded into the slot of a restock line (draft, FE 7.2)
+      description: >-
+        TICKET_READ and INVENTORY_WRITE, and the caller must be the assignee (403 otherwise). The ticket must be a
+        RESTOCK ticket IN_PROGRESS (409 otherwise). Runs exactly the rules of POST /inventory/load on the line's slot
+        (product ACTIVE, batch not expired, machine ACTIVE or MAINTENANCE, slot ACTIVE, free places of the slot, bowls
+        left in the batch; same 409 messages: "Slot capacity exceeded", "Batch declared quantity exceeded", ...), creates
+        the bowls AVAILABLE with LOAD rows in the inventory history whose referenceId is the ticket id, and adds the
+        quantity to the line's loadedQuantity. The batch must be of the line's product (409 "Batch product does not
+        match the restock line"). May be called several times per line (several batches, or a second round); loading
+        more than planned is allowed within the slot's capacity and shows up as a difference at reconciliation. The
+        ticket row and the slot are locked while loading. Answers the whole ticket with its lines.
+      x-required-permission: TICKET_READ, INVENTORY_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+        - $ref: "#/components/parameters/LineId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoadRestockLineRequest"
+      responses:
+        "200":
+          description: The ticket with the updated line
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not the assignee, or lacks INVENTORY_WRITE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Ticket, line or batch not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Ticket not IN_PROGRESS, or one of the loading rules of POST /inventory/load
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Slot capacity exceeded
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000002/restock-lines/63000000-0000-0000-0000-000000000001/load
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/restock-lines/{lineId}/remove:
+    post:
+      tags: [WorkTickets]
+      operationId: removeWorkTicketRestockItem
+      summary: Record a damaged or expired bowl taken out of the slot of a restock line (draft, FE 7.2)
+      description: >-
+        TICKET_READ and INVENTORY_WRITE, and the caller must be the assignee (403 otherwise). The ticket must be a
+        RESTOCK ticket IN_PROGRESS (409 otherwise). With the refill door open the staff takes the bowl out by hand; this
+        records it with the rules of POST /inventory/{id}/remove: the bowl must be in the line's slot (400 with
+        fieldErrors.inventoryItemId otherwise) and AVAILABLE or EXPIRED (409 otherwise); it becomes REMOVED with a REMOVE
+        row in the inventory history (reason, referenceId = the ticket id), and the line's removedQuantity grows by one.
+        Never a delete. Answers the whole ticket with its lines.
+      x-required-permission: TICKET_READ, INVENTORY_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+        - $ref: "#/components/parameters/LineId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveRestockItemRequest"
+      responses:
+        "200":
+          description: The ticket with the updated line
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The caller is not the assignee, or lacks INVENTORY_WRITE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: Ticket, line or bowl not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "409":
+          description: Ticket not IN_PROGRESS, or the bowl is not AVAILABLE or EXPIRED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /api/v1/work-tickets/{id}/cancel:
+    post:
+      tags: [WorkTickets]
+      operationId: cancelWorkTicket
+      summary: Cancel a ticket (draft)
+      description: >-
+        TICKET_WRITE. OPEN, ASSIGNED or IN_PROGRESS -> CANCELLED; records cancelledAt (now), cancelledBy (the caller) and
+        the mandatory reason. The assignee is kept for the record. Not reversible; tickets are never deleted.
+      x-required-permission: TICKET_WRITE
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TicketId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelWorkTicketRequest"
+      responses:
+        "200":
+          description: The cancelled ticket
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponseWorkTicketResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The ticket is already COMPLETED or CANCELLED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+              example:
+                status: 409
+                error: Conflict
+                message: Ticket is already COMPLETED or CANCELLED
+                path: /api/v1/work-tickets/61000000-0000-0000-0000-000000000001/cancel
+                timestamp: "2026-12-04T04:00:00Z"
+        "500":
+          $ref: "#/components/responses/ServerError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TicketId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    LineId:
+      name: lineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid parameters or body (fieldErrors per field)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Unauthorized:
+      description: Missing, invalid or expired access token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    Forbidden:
+      description: The account lacks the required permission
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    NotFound:
+      description: Ticket not found (or not visible to the caller)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+    ServerError:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorResponse"
+  schemas:
+    WorkTicketResponse:
+      type: object
+      description: One work ticket. Times are UTC instants. People are named by their fullName.
+      required: [id, type, status, title, machineId, machineCode, createdAt, createdById, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [RESTOCK, MAINTENANCE]
+        status:
+          type: string
+          enum: [OPEN, ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED]
+        title:
+          type: string
+          maxLength: 200
+        description:
+          type:
+            - string
+            - "null"
+          description: Plain text; clients show it as text, never as HTML.
+        machineId:
+          type: string
+          format: uuid
+        machineCode:
+          type: string
+        machineName:
+          type:
+            - string
+            - "null"
+        alertId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: The alert this ticket was opened from, when there is one.
+        dueAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        assigneeId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        assigneeName:
+          type:
+            - string
+            - "null"
+          description: fullName of the assignee.
+        createdById:
+          type: string
+          format: uuid
+        createdByName:
+          type:
+            - string
+            - "null"
+        assignedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: Last (re)assignment.
+        assignedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        assignedByName:
+          type:
+            - string
+            - "null"
+        startedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        startedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        startedByName:
+          type:
+            - string
+            - "null"
+        completedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        completedById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        completedByName:
+          type:
+            - string
+            - "null"
+        completionNote:
+          type:
+            - string
+            - "null"
+        cancelledAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        cancelledById:
+          type:
+            - string
+            - "null"
+          format: uuid
+        cancelledByName:
+          type:
+            - string
+            - "null"
+        cancelReason:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        restockLines:
+          type: array
+          description: >-
+            RESTOCK tickets only (absent or empty for MAINTENANCE): the slots to fill, in slot code order. Empty when
+            the server had nothing to plan.
+          items:
+            $ref: "#/components/schemas/RestockLineResponse"
+        reconciliation:
+          description: RESTOCK tickets with lines only, null otherwise. Plan against result, computed by the server.
+          oneOf:
+            - $ref: "#/components/schemas/RestockReconciliation"
+            - type: "null"
+        resolvedAlertIds:
+          type: array
+          description: >-
+            LOW_STOCK alerts the server resolved automatically when this RESTOCK ticket was completed (empty before, and
+            for other tickets).
+          items:
+            type: string
+            format: uuid
+    RestockLineResponse:
+      type: object
+      description: One slot to fill during a restock.
+      required: [id, slotId, slotCode, productId, productName, plannedQuantity, loadedQuantity, removedQuantity]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slotId:
+          type: string
+          format: uuid
+        slotCode:
+          type: string
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+        batchId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: >-
+            Suggested batch (the loadable one of this product expiring first when planned); another batch of the same
+            product may be used.
+        batchCode:
+          type:
+            - string
+            - "null"
+        batchExpiresAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        plannedQuantity:
+          type: integer
+          format: int32
+          minimum: 1
+        loadedQuantity:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Bowls loaded through this ticket so far (all batches).
+        removedQuantity:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Damaged or expired bowls taken out of the slot through this ticket so far.
+    RestockReconciliation:
+      type: object
+      description: >-
+        Totals over the lines. difference = loaded - planned (negative: fewer bowls than planned). noteRequired is true
+        when any line's loadedQuantity differs from its plannedQuantity: POST /complete then needs a note.
+      required: [plannedQuantity, loadedQuantity, removedQuantity, difference, noteRequired]
+      properties:
+        plannedQuantity:
+          type: integer
+          format: int32
+        loadedQuantity:
+          type: integer
+          format: int32
+        removedQuantity:
+          type: integer
+          format: int32
+        difference:
+          type: integer
+          format: int32
+        noteRequired:
+          type: boolean
+    LoadRestockLineRequest:
+      type: object
+      additionalProperties: false
+      required: [batchId, quantity]
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          description: A batch of the line's product, not expired.
+        quantity:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 1000
+          description: Bowls placed in the slot now (same bounds as LoadInventoryRequest).
+    RemoveRestockItemRequest:
+      type: object
+      additionalProperties: false
+      required: [inventoryItemId, reason]
+      properties:
+        inventoryItemId:
+          type: string
+          format: uuid
+          description: A bowl of the line's slot, AVAILABLE or EXPIRED.
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    CreateWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [type, machineId, title]
+      properties:
+        type:
+          type: string
+          enum: [RESTOCK, MAINTENANCE]
+        machineId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+          description: Blank is stored as null.
+        dueAt:
+          type: string
+          format: date-time
+          description: Must be in the future.
+        alertId:
+          type: string
+          format: uuid
+        assigneeId:
+          type: string
+          format: uuid
+          description: When given the ticket starts ASSIGNED.
+    AssignWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [assigneeId]
+      properties:
+        assigneeId:
+          type: string
+          format: uuid
+    CompleteWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          maxLength: 500
+          description: What was done; blank is stored as null.
+    CancelWorkTicketRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    PageWorkTicketResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkTicketResponse"
+        page:
+          type: integer
+          format: int32
+        size:
+          type: integer
+          format: int32
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+          format: int32
+    ApiResponsePageWorkTicketResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PageWorkTicketResponse"
+    ApiResponseWorkTicketResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/WorkTicketResponse"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string

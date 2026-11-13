@@ -20,6 +20,8 @@ import { Skeleton } from '../../components/ui/skeleton.tsx'
 import { StatusBadge } from '../../components/ui/status-badge.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime } from '../../lib/format.ts'
+import { discountReasonText, priceView } from '../../lib/price.ts'
+import { PriceTag } from '../../components/ui/price-tag.tsx'
 import { linkHandler, useQueryParams } from '../../lib/router.ts'
 import { statusMeta } from '../../lib/status.ts'
 import { countLoaded } from '../batches.ts'
@@ -320,8 +322,8 @@ function Column({ column, canWrite, remove, load }: { column: SlotColumn; canWri
 
 /**
  * One box. The head (position 1) carries the marker of what happens next; a blocking head explains why and offers
- * "Rút hộp" when the API allows it. The discount slot on the right is reserved (empty for now) so a "-50%" label can
- * be added later without moving anything.
+ * "Rút hộp" when the API allows it. The discount slot on the right holds the "-50%" tag of a near-expiry box (FE 7.5,
+ * draft pricing-discount.yaml; the server decides the discount) and stays empty, keeping the layout, otherwise.
  */
 function Box({ item, position, column, canWrite, remove }: { item: InventoryItem; position: number; column: SlotColumn; canWrite: boolean; remove: (target: RemoveTarget) => void }) {
   const head = position === 1
@@ -331,6 +333,7 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
   const describedBy = useId()
   const lockedId = useId()
   const isAdmin = useSession().roles.includes('ADMIN')
+  const price = boxPriceView(item)
   const tone = blocking
     ? 'border-2 border-destructive bg-destructive/8'
     : head && state.kind === 'reserved' ? 'border-2 border-status-warning-foreground/50 bg-status-warning'
@@ -340,7 +343,7 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
             : status ? 'border border-destructive/40 bg-destructive/5' : 'border bg-background'
   const headTone = blocking ? 'text-destructive' : state.kind === 'reserved' ? 'text-status-warning-foreground' : column.selling ? 'text-primary' : 'text-foreground'
   return <li data-box-status={item.status} data-head={head || undefined} data-blocking={blocking || undefined} className={cn('grid gap-1 rounded-md px-2 py-1.5', tone)}>
-    <span className="sr-only">{boxDescription(item, position, column)}</span>
+    <span className="sr-only">{boxDescription(item, position, column)}{price.discounted ? `, ${discountReasonText(item.discountReason).toLowerCase()}: ${price.spoken}` : ''}</span>
     {head && <span aria-hidden="true" className={cn('text-[11px] font-semibold tracking-wide uppercase', headTone)}>{headLabel(column)}</span>}
     <div aria-hidden="true" className="flex items-start gap-1.5">
       <span className="min-w-5 pt-px text-[11px] tabular-nums text-muted-foreground">#{position}</span>
@@ -348,8 +351,9 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
         <span className="truncate text-[13px] font-medium" title={item.productName}>{item.productName}</span>
         <span className="text-[11px] leading-tight whitespace-nowrap text-muted-foreground">HSD {formatDateTime(item.expiresAt)}</span>
         <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground" title={item.batchCode}>{item.batchCode}</span>
+        {price.discounted && <span data-box-price="" className="text-[11px] leading-tight whitespace-nowrap"><span className="font-semibold">{price.current}</span> <s className="text-muted-foreground">{price.original}</s></span>}
       </span>
-      <DiscountSlot />
+      <DiscountSlot label={price.tag} />
     </div>
     {status && !head && <span aria-hidden="true" className={cn('justify-self-start rounded-full px-1.5 text-[11px] font-medium', item.status === 'RESERVED' ? 'bg-status-warning text-status-warning-foreground' : 'bg-status-danger text-status-danger-foreground')}>{status}</span>}
     {/* A held or plain head: its marker above already says it; an expired box behind a held head keeps its word. */}
@@ -375,7 +379,10 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
   </li>
 }
 
-/** Reserved place for a discount label such as "-50%" (pricing comes later): keeps box layout stable when it appears. */
+/** Selling price of a box now, from the server's draft pricing fields; no fields (real API today) reads as no discount. */
+const boxPriceView = (item: InventoryItem) => priceView({ price: item.unitPrice, originalPrice: item.originalUnitPrice, discountPercent: item.discountPercent })
+
+/** Place of the discount tag ("-50%", FE 7.5): empty but kept when the box has no discount, so box layout never moves. */
 function DiscountSlot({ label }: { label?: string }) {
   if (!label) return <span data-discount-slot="" aria-hidden="true" className="h-5 w-10 shrink-0" />
   return <span data-discount-slot="" className="inline-flex h-5 w-10 shrink-0 items-center justify-center rounded-full bg-status-danger text-[11px] font-semibold text-status-danger-foreground">{label}</span>
@@ -404,6 +411,8 @@ function ListView({ canWrite, changes, changed, load, hideLoad }: {
   const forbidden = state.error instanceof ApiError && state.error.status === 403
   useReportLoadable(forbidden, hideLoad)
   const filters = listFilterCount(query)
+  // Selling price column only when the server sends it (draft pricing-discount.yaml, FE 7.5).
+  const priced = state.data?.content?.some(item => typeof item.unitPrice === 'number') ?? false
   const clearFilters = () => update(Object.fromEntries(LIST_FILTER_KEYS.map(key => [key, undefined])))
 
   const empty = filters
@@ -442,6 +451,7 @@ function ListView({ canWrite, changes, changed, load, hideLoad }: {
       { head: 'Ngăn', cell: item => item.slotCode },
       { head: 'Trạng thái', cell: item => <Badge domain="box" value={item.status} /> },
       { head: 'Hết hạn', cell: item => <>{formatDateTime(item.expiresAt)}{item.expired && <> <Badge value="expired" /></>}</> },
+      ...(priced ? [{ head: 'Giá bán', nowrap: true, cell: (item: InventoryItem) => <PriceTag view={boxPriceView(item)} reason={item.discountReason} /> }] : []),
       { head: 'Nạp lúc', cell: item => formatDateTime(item.loadedAt) },
       { head: 'Thao tác', cell: item => <div className="flex flex-wrap items-center gap-1.5">
         <Button asChild size="sm" variant="ghost"><a href={boxHistoryPath(item.id)} onClick={linkHandler(boxHistoryPath(item.id))}

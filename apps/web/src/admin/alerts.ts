@@ -178,11 +178,16 @@ export function handledByLines(alert: Alert): string[] {
   return handlingSteps(alert).filter(step => step.key !== 'triggered').map(step => `${step.label}: ${step.by}, ${step.at}`)
 }
 
-// ---- "Mở phiếu" (work tickets are FM7, backend 4.3)
+// ---- "Mở phiếu" (work tickets: FE 7.1 on the draft of backend 4.3)
 
-/** Off until the work ticket screens (FE 7.1) and API (BE 4.3) exist; the button is shown disabled with the reason. */
-export const TICKETS_AVAILABLE = false
+/**
+ * On since the work ticket screens (FE 7.1) exist: "Mở phiếu" opens the create form pre-filled with the alert's machine
+ * and id, for accounts with TICKET_WRITE. Set to false to show the button disabled with TICKET_PENDING_TEXT instead.
+ */
+export const TICKETS_AVAILABLE: boolean = true
 export const TICKET_PENDING_TEXT = 'Chưa mở được phiếu công việc: chức năng phiếu sẽ có trong đợt cập nhật Phiếu công việc (FM7). Tạm thời hãy xác nhận cảnh báo và báo trực tiếp cho người phụ trách.'
+/** Shown instead of the button to accounts that may not open tickets (staff). */
+export const TICKET_ADMIN_ONLY_TEXT = 'Phiếu công việc do quản trị viên mở. Nếu cần người tới máy xử lý, hãy báo quản trị viên.'
 
 // ---- bell
 

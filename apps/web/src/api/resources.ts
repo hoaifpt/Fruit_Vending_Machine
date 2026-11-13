@@ -7,6 +7,10 @@ import type { components as AlertsDraft, operations as AlertOperations } from '.
 import type { components as TelemetryDraft, operations as TelemetryOperations } from './drafts/machine-telemetry'
 import type { components as RefundsDraft, operations as RefundOperations } from './drafts/refunds'
 import type { components as IncidentDraft } from './drafts/incident-reports'
+import type { components as TicketsDraft, operations as TicketOperations } from './drafts/work-tickets'
+import type { components as SchedulesDraft, operations as ScheduleOperations } from './drafts/maintenance-schedules'
+import type { components as MaintenanceDraft, operations as MaintenanceOperations } from './drafts/machine-maintenance'
+import type { components as PricingDraft } from './drafts/pricing-discount'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -14,13 +18,17 @@ export type Machine = S['MachineResponse']
 export type Slot = S['MachineSlotResponse']
 export type User = S['UserResponse']
 export type Batch = S['ProductBatchResponse']
-export type InventoryItem = S['InventoryItemResponse']
+// Near-expiry discount fields (FE 7.5): DRAFT api-contract/drafts/pricing-discount.yaml, backend 4.1. Optional, so the
+// real API without them still type-checks and shows plain prices; drop the intersections once they reach api.yaml.
+type P = PricingDraft['schemas']
+export type InventoryItem = S['InventoryItemResponse'] & P['InventoryItemPricing']
 export type InventorySummary = S['InventorySummaryResponse']
 export type InventoryTransaction = S['InventoryTransactionResponse']
 export type KioskCredential = S['KioskCredentialResponse']
 export type IssuedKioskCredential = S['IssuedKioskCredentialResponse']
-export type OrderSummary = S['OrderSummaryResponse']
-export type OrderDetail = S['OrderDetailResponse']
+export type OrderSummary = S['OrderSummaryResponse'] & P['OrderPricing']
+export type OrderLine = S['OrderItemDetailResponse'] & P['OrderItemPricing']
+export type OrderDetail = Omit<S['OrderDetailResponse'], 'items'> & P['OrderPricing'] & { items?: OrderLine[] }
 export type Payment = S['PaymentResponse']
 export type PaymentDetail = S['PaymentDetailResponse']
 export type WebhookLogSummary = S['PaymentWebhookLogSummaryResponse']
@@ -173,6 +181,82 @@ export const refundsApi = {
   list: (query: RefundListQuery, signal?: AbortSignal) => list<Refund>('/refunds', query, signal),
   /** REFUND_RECORD (ADMIN): payment SUCCESS → REFUNDED; 409 when already refunded or not a refund case. Never retried. */
   record: (orderId: string, body: RefundBody) => api.post<Refund>(`/orders/${id(orderId)}/refund`, body),
+}
+
+// Work tickets (screen O3, FE 7.1): draft contract api-contract/drafts/work-tickets.yaml, waiting for backend issue 4.3.
+// Until it ships the real backend answers 404 here; the screens then say "chưa có dữ liệu" (ticketsAvailability in
+// src/admin/tickets.ts). A caller without TICKET_WRITE only receives its own tickets (server-side). When 4.3 lands: move
+// the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
+type T = TicketsDraft['schemas']
+export type WorkTicket = T['WorkTicketResponse']
+export type WorkTicketListQuery = NonNullable<TicketOperations['listWorkTickets']['parameters']['query']>
+export type CreateWorkTicketBody = T['CreateWorkTicketRequest']
+export type AssignWorkTicketBody = T['AssignWorkTicketRequest']
+export type CompleteWorkTicketBody = T['CompleteWorkTicketRequest']
+export type CancelWorkTicketBody = T['CancelWorkTicketRequest']
+// Restock lines of a RESTOCK ticket (FE 7.2, screen O4): same draft, waiting for backend issue 4.4.
+export type RestockLine = T['RestockLineResponse']
+export type RestockReconciliation = T['RestockReconciliation']
+export type LoadRestockLineBody = T['LoadRestockLineRequest']
+export type RemoveRestockItemBody = T['RemoveRestockItemRequest']
+
+export const ticketsApi = {
+  list: (query: WorkTicketListQuery, signal?: AbortSignal) => list<WorkTicket>('/work-tickets', query, signal),
+  get: (ticketId: string, signal?: AbortSignal) => api.get<WorkTicket>(`/work-tickets/${id(ticketId)}`, undefined, signal),
+  /** OPEN, or ASSIGNED when assigneeId is sent. Only fields of CreateWorkTicketRequest. */
+  create: (body: CreateWorkTicketBody) => api.post<WorkTicket>('/work-tickets', body),
+  /** OPEN/ASSIGNED → ASSIGNED (also a reassignment). */
+  assign: (ticketId: string, body: AssignWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/assign`, body),
+  /** ASSIGNED → IN_PROGRESS, assignee only, no body. */
+  start: (ticketId: string) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/start`),
+  /** IN_PROGRESS → COMPLETED, assignee only; the note only when there is one. */
+  complete: (ticketId: string, body: CompleteWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/complete`, body),
+  /** Any state before COMPLETED → CANCELLED, with a mandatory reason. */
+  cancel: (ticketId: string, body: CancelWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/cancel`, body),
+  /** RESTOCK, IN_PROGRESS, assignee: bowls placed in the line's slot (rules of POST /inventory/load). Answers the ticket. */
+  loadLine: (ticketId: string, lineId: string, body: LoadRestockLineBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/restock-lines/${id(lineId)}/load`, body),
+  /** RESTOCK, IN_PROGRESS, assignee: a bowl of the line's slot taken out by hand (rules of POST /inventory/{id}/remove). */
+  removeItem: (ticketId: string, lineId: string, body: RemoveRestockItemBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/restock-lines/${id(lineId)}/remove`, body),
+}
+
+// Maintenance schedules (screen O5, FE 7.3): draft contract api-contract/drafts/maintenance-schedules.yaml, waiting for
+// backend issue 4.5. Until it ships the real backend answers 404 here; the screen then says "chưa có dữ liệu"
+// (schedulesAvailability in src/admin/maintenance-schedules.ts). nextDueAt is always the server's. When 4.5 lands: move
+// the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
+type MS = SchedulesDraft['schemas']
+export type MaintenanceSchedule = MS['MaintenanceScheduleResponse']
+export type MaintenanceScheduleListQuery = NonNullable<ScheduleOperations['listMaintenanceSchedules']['parameters']['query']>
+export type CreateMaintenanceScheduleBody = MS['CreateMaintenanceScheduleRequest']
+export type UpdateMaintenanceScheduleBody = MS['UpdateMaintenanceScheduleRequest']
+
+export const maintenanceSchedulesApi = {
+  list: (query: MaintenanceScheduleListQuery, signal?: AbortSignal) => list<MaintenanceSchedule>('/maintenance-schedules', query, signal),
+  get: (scheduleId: string, signal?: AbortSignal) => api.get<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}`, undefined, signal),
+  /** Only fields of CreateMaintenanceScheduleRequest; the answer carries the server's nextDueAt. */
+  create: (body: CreateMaintenanceScheduleBody) => api.post<MaintenanceSchedule>('/maintenance-schedules', body),
+  /** Partial update: only the changed fields. */
+  update: (scheduleId: string, body: UpdateMaintenanceScheduleBody) => api.patch<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}`, body),
+  /** active → paused, no body; 409 when already paused. Schedules are never deleted. */
+  deactivate: (scheduleId: string) => api.post<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}/deactivate`),
+  /** paused → active, no body; nextDueAt recomputed. 409 when already active. */
+  activate: (scheduleId: string) => api.post<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}/activate`),
+}
+
+// Maintenance commands of a machine (tab "Bảo trì" of C3, FE 7.4; reused by the restock ticket of FE 7.2): draft contract
+// api-contract/drafts/machine-maintenance.yaml, waiting for backend issue 4.2. Until it ships the real backend answers 404
+// here; the tab then says "chưa có" (maintenanceAvailability in src/admin/maintenance-commands.ts, which also builds the
+// bodies and words the errors). When 4.2 lands: move the paths into api.yaml, run gen:api, switch these types to
+// schema.d.ts and delete the draft.
+export type MaintenanceCommand = MaintenanceDraft['schemas']['MaintenanceCommandResponse']
+export type MaintenanceCommandType = MaintenanceDraft['schemas']['MaintenanceCommandType']
+export type CreateMaintenanceCommandBody = MaintenanceDraft['schemas']['CreateMaintenanceCommandRequest']
+export type MaintenanceCommandQuery = NonNullable<MaintenanceOperations['listMachineMaintenanceCommands']['parameters']['query']>
+
+export const maintenanceCommandsApi = {
+  /** Newest first (fixed order), unfinished commands included. MACHINE_READ. */
+  list: (machineId: string, query: MaintenanceCommandQuery, signal?: AbortSignal) => list<MaintenanceCommand>(`/machines/${id(machineId)}/maintenance-commands`, query, signal),
+  /** Creates the command PENDING (MACHINE_MAINTENANCE). Build the body with maintenanceCommandBody. */
+  create: (machineId: string, body: CreateMaintenanceCommandBody) => api.post<MaintenanceCommand>(`/machines/${id(machineId)}/maintenance-commands`, body),
 }
 
 export type { Q as QueryParams }

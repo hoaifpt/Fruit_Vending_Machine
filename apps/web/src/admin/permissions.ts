@@ -18,11 +18,13 @@ export const PERMISSIONS = [
 
 /**
  * Codes proposed by the web's draft contracts, not in the backend yet (so not in PERMISSIONS, which mirrors V13 of #48):
- * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6) and REFUND_RECORD of
- * api-contract/drafts/refunds.yaml (FE 8.1, waiting for BE 5.1). When the backend adds them to its permissions table,
- * move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
+ * ALERT_READ / ALERT_WRITE of api-contract/drafts/alerts.yaml (FE 6.3, waiting for BE 3.6) and TICKET_READ /
+ * TICKET_WRITE of api-contract/drafts/work-tickets.yaml (FE 7.1, waiting for BE 4.3); MAINTENANCE_SCHEDULE_READ /
+ * MAINTENANCE_SCHEDULE_WRITE of api-contract/drafts/maintenance-schedules.yaml (FE 7.3, waiting for BE 4.5); REFUND_RECORD
+ * of api-contract/drafts/refunds.yaml (FE 8.1, waiting for BE 5.1). When the backend adds them to its
+ * permissions table, move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
  */
-export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE', 'REFUND_RECORD'] as const
+export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE', 'TICKET_READ', 'TICKET_WRITE', 'MAINTENANCE_SCHEDULE_READ', 'MAINTENANCE_SCHEDULE_WRITE', 'MACHINE_MAINTENANCE', 'REFUND_RECORD'] as const
 export type DraftPermission = (typeof DRAFT_PERMISSIONS)[number]
 export type Permission = (typeof PERMISSIONS)[number] | DraftPermission
 
@@ -39,12 +41,16 @@ export const ROLE_PERMISSIONS: Readonly<Record<Role, readonly Permission[]>> = {
 }
 
 /**
- * Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do. Recording a refund
- * (REFUND_RECORD) is ADMIN only and never granted to STAFF (BR-19/20: payments and refunds are admin-only).
+ * Proposed seed of the draft codes: staff on site see, acknowledge and close alerts like admins do; they read (only their
+ * own, the server filters) and carry out work tickets, while opening, assigning and cancelling tickets is for admins.
+ * Staff read maintenance schedules (to plan visits); creating, changing and pausing them is for admins.
+ * MACHINE_MAINTENANCE (api-contract/drafts/machine-maintenance.yaml, FE 7.4, waiting for BE 4.2): staff on site send
+ * maintenance commands to the machine (open/close refill, take bowls out, reset) like admins do.
+ * Recording a refund (REFUND_RECORD) is ADMIN only and never granted to STAFF (BR-19/20: payments and refunds are admin-only).
  */
 export const DRAFT_ROLE_PERMISSIONS: Readonly<Record<Role, readonly DraftPermission[]>> = {
   ADMIN: DRAFT_PERMISSIONS,
-  STAFF: ['ALERT_READ', 'ALERT_WRITE'],
+  STAFF: ['ALERT_READ', 'ALERT_WRITE', 'TICKET_READ', 'MAINTENANCE_SCHEDULE_READ', 'MACHINE_MAINTENANCE'],
 }
 const KNOWN: readonly string[] = [...PERMISSIONS, ...DRAFT_PERMISSIONS]
 
