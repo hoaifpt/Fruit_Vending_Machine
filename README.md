@@ -200,3 +200,8 @@ cảnh báo liên kết được đóng, lịch sử đầy đủ và thông bá
 Admin xem gợi ý nạp từng cột và lập work order RESTOCK có dòng; Staff xả tô cũ bằng lệnh bảo trì, nạp tô theo dòng (giữ đúng FIFO và
 hạn dùng) rồi hoàn thành với đối soát planned/loaded; cảnh báo tồn kho đóng ngay. Nạp trực tiếp chỉ còn cho ADMIN.
 Xem [docs/restock.md](docs/restock.md).
+
+## Lịch bảo trì định kỳ — Issue #70
+
+Admin lập kế hoạch bảo trì theo máy (mỗi N ngày, báo trước, giờ hạn, người nhận); hệ thống tự tạo work order MAINTENANCE khi tới hạn
+và tính hạn kế tiếp khi hoàn thành. Mọi ngày theo giờ Việt Nam. Xem [docs/maintenance-plans.md](docs/maintenance-plans.md).

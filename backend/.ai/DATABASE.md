@@ -49,6 +49,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
 | order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
 | pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
+| maintenance_plans | id, machine_id, title, instructions, interval_days, lead_days, due_time, priority, default_assignee_id, next_due_date, active, last_completed_at, created_by, version, created_at, updated_at |
 | restock_lines | id, work_order_id, machine_id, slot_id, product_id, planned_quantity, loaded_quantity, variance_reason, created_at, updated_at |
 | work_orders | id, code, type, source, machine_id, title, description, priority, status, assignee_id, due_at, created_by, started_at, completed_at, completed_by, result_note, cancelled_at, cancelled_by, cancel_reason, overdue_notified_at, version, created_at, updated_at |
 | work_order_alerts | work_order_id, alert_id, created_at |
@@ -430,3 +431,15 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   declared quantity checked under those locks; restock bowls get loaded_at = now + i µs (strict FIFO).
 - Permissions RESTOCK_PLAN (…029) → ADMIN, RESTOCK_EXECUTE (…030) → ADMIN, STAFF, INVENTORY_LOAD_DIRECT (…031) → ADMIN; POST
   /api/v1/inventory/load now needs INVENTORY_LOAD_DIRECT (STAFF keeps INVENTORY_WRITE for removals).
+
+## 25. Issue #70 — V22 maintenance plans
+
+- `maintenance_plans`: interval 1..365, lead 0..30 and < interval, due_time TIME (local time in the business zone, default 17:00),
+  next_due_date DATE (business-zone date), active, last_completed_at, created_by, version (optimistic, sent back on PATCH). Never deleted.
+- `work_orders.maintenance_plan_id` + `scheduled_for`: CHECK source = SCHEDULE <=> both set; plan only on MAINTENANCE; partial UNIQUE
+  (plan, scheduled_for) and (plan) while OPEN / ASSIGNED / IN_PROGRESS -> generation is idempotent.
+- Generation (MaintenancePlanScheduler): pg_try_advisory_xact_lock(0x46564D, 5) for the run, each plan REQUIRES_NEW under its row lock;
+  WorkOrderService.createScheduled (created_by NULL). Missed runs create only the current occurrence.
+- Next due (MaintenancePlanWorkOrderListener, AFTER_COMMIT + REQUIRES_NEW): DONE -> completion date + interval and last_completed_at;
+  CANCELLED -> scheduled_for + interval; a later date already set is kept.
+- Permissions MAINTENANCE_PLAN_READ (…032) -> ADMIN, STAFF; MAINTENANCE_PLAN_MANAGE (…033) -> ADMIN. Plan changes audited (MAINTENANCE_PLAN_*).

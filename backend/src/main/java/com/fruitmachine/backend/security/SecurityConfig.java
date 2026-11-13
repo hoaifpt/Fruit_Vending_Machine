@@ -101,6 +101,8 @@ public class SecurityConfig {
                     // Issue #64: before the generic machine rules (STAFF runs maintenance commands without MACHINE_WRITE).
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/slots/*/maintenance-commands").hasAuthority(Permissions.MAINTENANCE_COMMAND_EXECUTE);
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/reset").hasAuthority(Permissions.MACHINE_RESET);
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/**").hasAuthority(Permissions.MAINTENANCE_PLAN_READ);
+                    authorize.requestMatchers("/api/v1/maintenance-plans", "/api/v1/maintenance-plans/**").hasAuthority(Permissions.MAINTENANCE_PLAN_MANAGE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/**").hasAuthority(Permissions.MAINTENANCE_COMMAND_READ);
                     authorize.requestMatchers("/api/v1/maintenance-commands", "/api/v1/maintenance-commands/**").hasAuthority(Permissions.MAINTENANCE_COMMAND_EXECUTE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines", "/api/v1/machines/**").hasAuthority(Permissions.MACHINE_READ);

@@ -334,7 +334,10 @@ class AuthorizationIntegrationTest {
                 "/api/v1/work-orders/{id}/alerts", "/api/v1/work-orders/{id}/alerts/{alertId}", "/api/v1/alerts/{alertId}/work-orders",
                 "/api/v1/machines/{machineId}/restock-suggestions", "/api/v1/machines/{machineId}/restock-work-orders",
                 "/api/v1/work-orders/{id}/restock-lines", "/api/v1/work-orders/{id}/restock-lines/{lineId}",
-                "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "/api/v1/work-orders/{id}/restock");
+                "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "/api/v1/work-orders/{id}/restock",
+                "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/upcoming", "/api/v1/maintenance-plans/{id}",
+                "/api/v1/maintenance-plans/{id}/work-orders", "/api/v1/maintenance-plans/{id}/activate", "/api/v1/maintenance-plans/{id}/deactivate",
+                "/api/v1/maintenance-plans/{id}/generate-now");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
@@ -354,7 +357,8 @@ class AuthorizationIntegrationTest {
             permissions.addAll(role.equals("ADMIN") ? com.fruitmachine.backend.security.permission.Permissions.ALL
                     : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ",
                             "ALERT_READ", "ALERT_MANAGE", "PRICING_READ", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_COMMAND_EXECUTE",
-                            "WORK_ORDER_READ_ASSIGNED", "WORK_ORDER_EXECUTE", "RESTOCK_EXECUTE"));
+                            "WORK_ORDER_READ_ASSIGNED", "WORK_ORDER_EXECUTE", "RESTOCK_EXECUTE",
+                            "MAINTENANCE_PLAN_READ"));
         }
         return permissions.toArray(String[]::new);
     }

@@ -104,3 +104,9 @@ CANCELLED cần cancelled_at và cancel_reason; mã `WO-yyyyMMdd-XXXX` theo ngà
 RESTOCK dùng các điểm mở rộng: dòng nạp gửi khi tạo (`WorkOrderCreationExtension`), không bắt đầu khi chưa có dòng (`WorkOrderStartCheck`),
 hoàn thành cần planned = loaded hoặc lý do và cổng nạp đóng (`WorkOrderCompletionCheck`, request thêm `lineVariances`), chi tiết có
 `restockSummary` (`WorkOrderSummaryProvider`). Xem [restock.md](restock.md).
+
+## Bảo trì định kỳ (issue #70)
+
+Work order nguồn `SCHEDULE` chỉ được tạo từ kế hoạch bảo trì (`createScheduled`, có `maintenancePlan` và `scheduledFor`); `createBySystem`
+dùng cho `ALERT` / `CUSTOMER_REPORT`. Hoàn thành / hủy phát `WorkOrderCompletedEvent` / `WorkOrderCancelledEvent` để kế hoạch tính hạn kế.
+Xem [maintenance-plans.md](maintenance-plans.md).

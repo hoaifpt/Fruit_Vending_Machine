@@ -32,6 +32,8 @@ tags:
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
   - name: "Maintenance Commands"
     description: "Remote column maintenance while a machine is in MAINTENANCE: remove the head bowl, empty a column, open or close the refill gate (Staff/Admin), and RESET of a controller fault (Admin). One unfinished command per machine; dispense and maintenance never overlap. Inventory changes only when the machine reports COMPLETED, or when Staff reconciles an uncertain command as DONE. 409 messages start with a code: MACHINE_NOT_IN_MAINTENANCE, MACHINE_COMMAND_IN_PROGRESS, MACHINE_OFFLINE, SLOT_HAS_RESERVED_ITEM, SLOT_EMPTY, NOT_HEAD_ITEM, HEAD_NOT_REMOVABLE, REFILL_GATE_OPEN, IDEMPOTENCY_KEY_REUSED, NOT_RECONCILABLE, EFFECT_NOT_POSSIBLE."
+  - name: "Maintenance Plans"
+    description: "Recurring maintenance per machine: every intervalDays the system creates one MAINTENANCE work order (source SCHEDULE) leadDays before the due date, due at dueTime (Asia/Ho_Chi_Minh), assigned to the default assignee or announced to managers. Completing it moves the next due date to completion date + interval; cancelling skips the occurrence. MAINTENANCE_PLAN_READ (ADMIN, STAFF) reads, MAINTENANCE_PLAN_MANAGE (ADMIN) changes; every change is audited. Plans are deactivated, never deleted."
   - name: "Notifications"
     description: "Portal notifications of the signed-in user: one per new alert for users holding ALERT_NOTIFY (ADMIN by default). Any signed-in user, own notifications only; no extra permission. Poll unread-count every 30 s."
   - name: Orders
@@ -7970,6 +7972,14 @@ paths:
             "type": "string"
             "format": "date-time"
         -
+          "name": "maintenancePlanId"
+          "in": "query"
+          "description": "Issue #70: optional maintenance plan UUID (SCHEDULE work orders of that plan)."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
           "name": "page"
           "in": "query"
           "description": "Zero-based page index."
@@ -9444,6 +9454,572 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "WORK_ORDER_READ_ASSIGNED"
+  "/api/v1/maintenance-plans":
+    "get":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "List maintenance plans"
+      "description": "MAINTENANCE_PLAN_READ. Optional machineId and active; by next due date; page >= 0, size 1 to 100 (default 20)."
+      "operationId": "listMaintenancePlans"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Optional machine UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "active"
+          "in": "query"
+          "description": "Optional true / false."
+          "required": false
+          "schema":
+            "type": "boolean"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of plans"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenancePlanPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_READ"
+    "post":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Create a maintenance plan"
+      "description": "MAINTENANCE_PLAN_MANAGE. Machine not INACTIVE (409 MACHINE_INACTIVE); interval 1..365, lead 0..30 and below the interval; firstDueDate today or later (default today + interval); default assignee ACTIVE with WORK_ORDER_EXECUTE."
+      "operationId": "createMaintenancePlan"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateMaintenancePlanRequest"
+        "required": true
+      "responses":
+        "201":
+          "description": "Plan created"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenancePlanResponse"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Machine inactive"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_MANAGE"
+  "/api/v1/maintenance-plans/upcoming":
+    "get":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Upcoming maintenance"
+      "description": "MAINTENANCE_PLAN_READ. Active plans due within days (1 to 90, default 30; overdue ones included), with their unfinished work orders, by date."
+      "operationId": "listUpcomingMaintenance"
+      "parameters":
+        -
+          "name": "days"
+          "in": "query"
+          "description": "Days ahead, 1 to 90."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 30
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Optional machine UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Upcoming plans"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseListMaintenancePlanResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_READ"
+  "/api/v1/maintenance-plans/{id}":
+    "get":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Get one maintenance plan"
+      "description": "MAINTENANCE_PLAN_READ."
+      "operationId": "getMaintenancePlan"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Plan UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenancePlanResponse"
+        "404":
+          "description": "Plan not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_READ"
+    "patch":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Change a maintenance plan"
+      "description": "MAINTENANCE_PLAN_MANAGE. Partial; version required (stale 409 STALE_VERSION). nextDueDate today or later; changing intervalDays does not move nextDueDate. No change: 200 without an audit row."
+      "operationId": "updateMaintenancePlan"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Plan UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateMaintenancePlanRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Plan after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenancePlanResponse"
+        "404":
+          "description": "Plan not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Stale version"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_MANAGE"
+  "/api/v1/maintenance-plans/{id}/work-orders":
+    "get":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Work orders of a plan"
+      "description": "MAINTENANCE_PLAN_READ. Newest occurrence first."
+      "operationId": "listMaintenancePlanWorkOrders"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Plan UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseListPlanWorkOrderResponse"
+        "404":
+          "description": "Plan not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_READ"
+  "/api/v1/maintenance-plans/{id}/activate":
+    "post":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Activate a plan"
+      "description": "MAINTENANCE_PLAN_MANAGE. Idempotent."
+      "operationId": "activateMaintenancePlan"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Plan UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Plan after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenancePlanResponse"
+        "404":
+          "description": "Plan not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Stale version"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_MANAGE"
+  "/api/v1/maintenance-plans/{id}/deactivate":
+    "post":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Deactivate a plan"
+      "description": "MAINTENANCE_PLAN_MANAGE. Idempotent. No new work orders; existing ones stay linked (plans are never deleted)."
+      "operationId": "deactivateMaintenancePlan"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Plan UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Plan after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenancePlanResponse"
+        "404":
+          "description": "Plan not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Stale version"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_MANAGE"
+  "/api/v1/maintenance-plans/{id}/generate-now":
+    "post":
+      "tags":
+        - "Maintenance Plans"
+      "summary": "Create the plan's work order now"
+      "description": "MAINTENANCE_PLAN_MANAGE. The current occurrence regardless of lead days. 409 MAINTENANCE_PLAN_INACTIVE, PLAN_HAS_OPEN_WORK_ORDER, OCCURRENCE_ALREADY_GENERATED or MACHINE_INACTIVE."
+      "operationId": "generateMaintenancePlanWorkOrder"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Plan UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "201":
+          "description": "Work order created"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Plan not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Plan inactive, unfinished work order, occurrence generated or machine inactive"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid body, interval/lead, dates or paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_PLAN_MANAGE"
 
 components:
   securitySchemes:
@@ -12645,6 +13221,16 @@ components:
           "type": "null"
           "$ref": "#/components/schemas/WorkOrderRestockSummary"
           "description": "Issue #68: RESTOCK work orders only."
+        "maintenancePlan":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderPlan"
+          "description": "Issue #70: the maintenance plan of a SCHEDULE work order."
+        "scheduledFor":
+          "type":
+            - "string"
+            - "null"
+          "format": "date"
+          "description": "Issue #70: the plan occurrence (business-zone date) of a SCHEDULE work order."
         "version":
           "type": "integer"
           "format": "int64"
@@ -13391,3 +13977,330 @@ components:
       "required":
         - "lineId"
         - "reason"
+    "ApiResponseMaintenancePlanPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MaintenancePlanPageResponse"
+    "MaintenancePlanPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MaintenancePlanResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "MaintenancePlanResponse":
+      "type": "object"
+      "description": "A maintenance plan. Dates are business-zone dates; dueTime is a local time there."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "machineName":
+          "type": "string"
+        "title":
+          "type": "string"
+        "instructions":
+          "type":
+            - "string"
+            - "null"
+        "intervalDays":
+          "type": "integer"
+          "format": "int32"
+        "leadDays":
+          "type": "integer"
+          "format": "int32"
+        "dueTime":
+          "type": "string"
+          "example": "17:00"
+        "priority":
+          "type": "string"
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "defaultAssignee":
+          "type": "null"
+          "$ref": "#/components/schemas/PlanUser"
+        "nextDueDate":
+          "type": "string"
+          "format": "date"
+        "active":
+          "type": "boolean"
+        "overdue":
+          "type": "boolean"
+          "description": "next due date passed and no unfinished work order."
+        "currentWorkOrder":
+          "type": "null"
+          "$ref": "#/components/schemas/PlanWorkOrder"
+          "description": "The unfinished work order of the plan, if any."
+        "lastCompletedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "createdBy":
+          "$ref": "#/components/schemas/PlanUser"
+        "version":
+          "type": "integer"
+          "format": "int64"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+    "PlanUser":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "fullName":
+          "type": "string"
+    "PlanWorkOrder":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "status":
+          "type": "string"
+    "CreateMaintenancePlanRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "A recurring maintenance plan. Dates are business-zone (Asia/Ho_Chi_Minh) dates, dueTime a local time there."
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "title":
+          "type": "string"
+          "example": "Vệ sinh khoang lạnh"
+          "maxLength": 200
+          "minLength": 0
+        "instructions":
+          "type":
+            - "string"
+            - "null"
+          "example": "Lau khay, kiểm tra gioăng"
+          "maxLength": 2000
+          "minLength": 0
+        "intervalDays":
+          "type": "integer"
+          "format": "int32"
+          "example": 7
+          "maximum": 365
+          "minimum": 1
+        "leadDays":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+          "description": "Days before the due date the work order is created; < intervalDays. Default 0."
+          "example": 1
+          "maximum": 30
+          "minimum": 0
+        "dueTime":
+          "type":
+            - "string"
+            - "null"
+          "format": "time-local"
+          "description": "Default 17:00."
+          "example": "17:00"
+          "pattern": "^[0-2][0-9]:[0-5][0-9]$"
+        "priority":
+          "type":
+            - "string"
+            - "null"
+          "description": "Default NORMAL."
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "defaultAssigneeId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "An ACTIVE user holding WORK_ORDER_EXECUTE."
+        "firstDueDate":
+          "type":
+            - "string"
+            - "null"
+          "format": "date"
+          "description": "Today or later; default today + intervalDays."
+          "example": "2026-11-20"
+      "required":
+        - "intervalDays"
+        - "machineId"
+        - "title"
+    "ApiResponseMaintenancePlanResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MaintenancePlanResponse"
+    "ApiResponseListMaintenancePlanResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MaintenancePlanResponse"
+    "UpdateMaintenancePlanRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Partial change; a field left out (or null) is unchanged. instructions \"\" clears them; clearDefaultAssignee=true removes the default assignee. Changing intervalDays does not move nextDueDate."
+      "properties":
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "description": "version from the last read; stale -> 409."
+        "title":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 200
+          "minLength": 0
+        "instructions":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 2000
+          "minLength": 0
+        "intervalDays":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+          "maximum": 365
+          "minimum": 1
+        "leadDays":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+          "maximum": 30
+          "minimum": 0
+        "dueTime":
+          "type":
+            - "string"
+            - "null"
+          "format": "time-local"
+          "example": "17:00"
+          "pattern": "^[0-2][0-9]:[0-5][0-9]$"
+        "priority":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "defaultAssigneeId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+        "clearDefaultAssignee":
+          "type":
+            - "boolean"
+            - "null"
+          "description": "true: no default assignee."
+        "nextDueDate":
+          "type":
+            - "string"
+            - "null"
+          "format": "date"
+          "description": "Today or later."
+      "required":
+        - "version"
+    "ApiResponseListPlanWorkOrderResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/PlanWorkOrderResponse"
+    "PlanWorkOrderResponse":
+      "type": "object"
+      "description": "A work order generated by the plan (history of the plan)."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "status":
+          "type": "string"
+        "scheduledFor":
+          "type": "string"
+          "format": "date"
+        "dueAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "assignee":
+          "type": "null"
+          "$ref": "#/components/schemas/PlanUser"
+        "completedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "cancelledAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+    "WorkOrderPlan":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "title":
+          "type": "string"
