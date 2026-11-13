@@ -57,12 +57,12 @@ export interface components {
             paidAmount: number;
             /**
              * Format: int32
-             * @description Orders refunded (counted at refund time).
+             * @description Orders refunded (counted at refunds.refundedAt). Only DISPENSE_FAILED refunds, not late/duplicate payments.
              * @example 1
              */
             refundCount: number;
             /**
-             * @description Money returned (counted at refund time).
+             * @description Money returned (refunds.amount, counted at refunds.refundedAt). Excludes refunds of late (PAYMENT_LATE) and duplicate (PAYMENT_DUPLICATE) payments, which were never revenue.
              * @example 35000
              */
             refundAmount: number;

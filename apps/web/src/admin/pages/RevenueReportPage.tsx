@@ -21,7 +21,7 @@ import { vietnamDate } from '../maintenance-schedules.ts'
 import { ErrorState, Loading, Notice, PageHead } from '../kit.tsx'
 import { HINT, PANEL } from '../payment-parts.tsx'
 import {
-  FIGURES, FILTER_LABELS, GROUP_LABELS, PRESETS, REVENUE_MISSING, bucketKey, bucketLabel, bucketShortLabel, chartScale, compactMoney, consistencyIssues,
+  CSV_EXCEL_HINT, FIGURES, FILTER_LABELS, GROUP_LABELS, PRESETS, REVENUE_MISSING, bucketKey, bucketLabel, bucketShortLabel, chartScale, compactMoney, consistencyIssues,
   csvFileName, figureText, hasActivity, labelEvery, loadRevenueReport, presetOf, productNotFound, presetRange, readRevenueFilters, revenueCsv, revenueKey, revenueMissing, scopeText, validateRange,
 } from '../revenue.ts'
 import type { FigureKey, ProductRevenue, RevenueBucket, RevenueFigures, RevenueFilters, RevenueReport } from '../revenue.ts'
@@ -100,8 +100,9 @@ function RevenueReportPage() {
         <Button type="button" variant="outline" onClick={state.reload} disabled={!valid || state.loading} className="max-sm:h-11">
           <RefreshCw aria-hidden="true" className={cn(state.loading && valid && 'motion-safe:animate-spin')} />Làm mới
         </Button>
-        <Button type="button" variant="outline" onClick={exportCsv} disabled={!report} className="max-sm:h-11"><Download aria-hidden="true" />Xuất CSV</Button>
+        <Button type="button" variant="outline" onClick={exportCsv} disabled={!report} aria-describedby="revenue-csv-hint" className="max-sm:h-11"><Download aria-hidden="true" />Xuất CSV</Button>
         <Button type="button" variant="outline" onClick={() => window.print()} disabled={!report} className="max-sm:h-11"><Printer aria-hidden="true" />In / Lưu PDF</Button>
+        <p id="revenue-csv-hint" className="basis-full text-xs text-muted-foreground">{CSV_EXCEL_HINT}</p>
       </div>} />
 
     <div className="print:hidden">
@@ -151,12 +152,12 @@ function RevenueReportPage() {
             : !report
               ? <Loading label="Đang tải báo cáo doanh thu…" rows={5} />
               : <ReportBody report={report} productName={filters.productId ? productName : undefined} issues={issues} loading={state.loading}
-                  refreshError={state.error} onWiden={() => update(presetRange('30d', today))} onAllProducts={filters.productId ? () => update({ productId: undefined }) : undefined} />}
+                  onWiden={() => update(presetRange('30d', today))} onAllProducts={filters.productId ? () => update({ productId: undefined }) : undefined} />}
   </>
 }
 
-function ReportBody({ report, productName, issues, loading, refreshError, onWiden, onAllProducts }: {
-  report: RevenueReport; productName: string | undefined; issues: string[]; loading: boolean; refreshError: unknown
+function ReportBody({ report, productName, issues, loading, onWiden, onAllProducts }: {
+  report: RevenueReport; productName: string | undefined; issues: string[]; loading: boolean
   onWiden: () => void; onAllProducts?: () => void
 }) {
   const bucketHead = report.groupBy === 'DAY' ? 'Ngày' : 'Giờ'
@@ -169,7 +170,6 @@ function ReportBody({ report, productName, issues, loading, refreshError, onWide
     <p className="text-[13px] text-muted-foreground" data-scope>
       {scopeText(report, productName)} · Lập lúc {formatDateTime(report.generatedAt)} (giờ Việt Nam)
     </p>
-    {refreshError instanceof Error && <p role="status" className="text-xs text-destructive print:hidden">Chưa làm mới được: {refreshError.message}. Đang hiện số liệu lúc {formatDateTime(report.generatedAt)}.</p>}
     {issues.length > 0 && <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 px-3.5 py-2.5 text-[13px] text-destructive">
       <p className="font-medium">Số liệu máy chủ trả về không khớp nhau. Đừng dùng báo cáo này để đối soát; báo cho đội phát triển kèm khoảng ngày đang xem.</p>
       <ul className="mt-1 list-disc pl-5">{issues.slice(0, 5).map(issue => <li key={issue}>{issue}</li>)}</ul>
@@ -217,8 +217,8 @@ function ReportBody({ report, productName, issues, loading, refreshError, onWide
       <ul className="grid list-disc gap-0.5 pl-5">
         <li>Chỉ tính đơn đã thanh toán (đang nhả hàng, đã xong, nhả hàng lỗi hoặc đã hoàn tiền), vào thời điểm thanh toán. Đơn hủy, hết hạn hay thanh toán lỗi không tính.</li>
         <li>Giá gốc − Tiền giảm (giảm giá cận hạn) = Khách trả. Khách trả − Tiền hoàn = Thực thu.</li>
-        <li>Tiền hoàn tính vào lúc hoàn tiền, nên có thể rơi vào ngày khác với ngày bán.</li>
-        <li>File CSV chứa đúng các số trên màn, số tiền ghi bằng đồng (VND) không dấu phân cách.</li>
+        <li>Tiền hoàn tính vào lúc hoàn tiền, nên có thể rơi vào ngày khác với ngày bán. Chỉ gồm tiền hoàn cho đơn nhả hàng lỗi; hoàn khoản thanh toán muộn hoặc trùng không tính vì khoản đó chưa từng vào doanh thu.</li>
+        <li>File CSV chứa đúng các số trên màn: số tiền ghi bằng đồng (VND) không dấu phân cách, ngày ghi dạng năm-tháng-ngày (2026-11-13) để Excel không đảo ngày và tháng.</li>
       </ul>
     </section>
   </div>

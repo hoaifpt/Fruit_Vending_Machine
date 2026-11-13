@@ -4,7 +4,7 @@
 // waiting for BE 6.1) through loadRevenueReport, and display it with the same FIGURES list.
 import { api, ApiError } from '../api/client.ts'
 import type { components } from '../api/drafts/revenue-reports'
-import { formatDate, formatDateTime, formatMoney } from '../lib/format.ts'
+import { formatDate, formatMoney } from '../lib/format.ts'
 import { uuidParam } from '../lib/table-query.ts'
 import { addDays, daysBetween, isDateString } from './maintenance-schedules.ts'
 
@@ -226,13 +226,14 @@ export function scopeText(report: Pick<RevenueReport, 'fromDate' | 'toDate' | 'g
 
 /**
  * One cell. Numbers are written as plain integers (no thousands separator, no ₫) so a spreadsheet reads them as numbers.
- * Text that a spreadsheet would run as a formula (= + - @, tab, CR) gets a leading apostrophe; text with a comma,
- * quote or line break is quoted.
+ * Text that a spreadsheet would run as a formula (= + - @, tab, CR, LF) gets a leading apostrophe, also when spaces,
+ * NBSP or zero-width spaces come first (Excel skips them before a formula); text with a comma, quote or line break is
+ * quoted.
  */
 export function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''
-  let text = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+  let text = /^[\s\u200b]*[=+\-@\t\r\n]/.test(value) ? `'${value}` : value
   if (/[",\r\n]/.test(text) || text !== text.trim()) text = `"${text.replaceAll('"', '""')}"`
   return text
 }
@@ -240,19 +241,33 @@ const csvRow = (cells: readonly (string | number | null | undefined)[]) => cells
 const figureCells = (row: RevenueFigures) => FIGURES.map(({ key }) => row[key])
 const figureHeads = () => FIGURES.map(({ label, money }) => money ? `${label} (VND)` : label)
 
+/** A day in the CSV: ISO `2026-11-13`, read as the same date by Excel whatever the regional settings (13/11 vs 11/13). */
+export const csvDate = (date: string) => date
+/** A moment in the CSV, Vietnam time: `2026-11-13 13:05`. */
+export function csvDateTime(instant: string): string {
+  const ms = Date.parse(instant)
+  return Number.isFinite(ms) ? new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ') : instant
+}
+/** Row label of a bucket in the CSV: the ISO day, or the same hour range as the screen. */
+export const csvBucketLabel = (bucket: Pick<RevenueBucket, 'date' | 'hour'>) => bucket.date ? csvDate(bucket.date) : bucketLabel(bucket)
+/** Shown next to the export button: what to do when Excel puts a whole row in one column (list separator `;`). */
+export const CSV_EXCEL_HINT = 'Nếu Excel dồn mọi thứ vào một cột: mở bằng Dữ liệu > Từ văn bản/CSV, chọn dấu phẩy.'
+
 /**
  * The CSV file of a report: the scope, the totals, one row per day/hour and one row per product, with exactly the
- * figures and labels of the screen. UTF-8 with BOM (Excel reads Vietnamese), CRLF line ends.
+ * figures of the screen. UTF-8 with BOM (Excel reads Vietnamese), comma separated, CRLF line ends; dates are ISO
+ * (yyyy-MM-dd, Vietnam calendar) so no regional setting can swap day and month. No `sep=,` line: Excel then ignores
+ * the BOM and breaks the Vietnamese text.
  */
 export function revenueCsv(report: RevenueReport, productName: string | undefined): string {
   const rows: (string | number | null | undefined)[][] = [
     ['Báo cáo doanh thu FreshVend'],
-    ['Từ ngày', formatDate(report.fromDate)],
-    ['Đến ngày', formatDate(report.toDate)],
+    ['Từ ngày', csvDate(report.fromDate)],
+    ['Đến ngày', csvDate(report.toDate)],
     ['Sản phẩm', productName ?? 'Tất cả sản phẩm'],
     ['Nhóm theo', GROUP_LABELS[report.groupBy]],
     ['Múi giờ', report.timeZone],
-    ['Lập lúc', formatDateTime(report.generatedAt)],
+    ['Lập lúc', csvDateTime(report.generatedAt)],
     [],
     ['Tổng'],
     ['', ...figureHeads()],
@@ -260,7 +275,7 @@ export function revenueCsv(report: RevenueReport, productName: string | undefine
     [],
     [GROUP_LABELS[report.groupBy]],
     [report.groupBy === 'DAY' ? 'Ngày' : 'Giờ', ...figureHeads()],
-    ...report.buckets.map(bucket => [bucketLabel(bucket), ...figureCells(bucket)]),
+    ...report.buckets.map(bucket => [csvBucketLabel(bucket), ...figureCells(bucket)]),
     [],
     ['Theo sản phẩm'],
     ['SKU', 'Sản phẩm', ...figureHeads()],

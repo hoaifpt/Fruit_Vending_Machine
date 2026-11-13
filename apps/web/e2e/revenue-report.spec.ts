@@ -72,7 +72,9 @@ test('Tiêu chí xong 9.1: số trên màn khớp file CSV; tiền giảm và ti
   expect(totals.paidAmount - totals.refundAmount).toBe(totals.netAmount)
   await expect(page.getByRole('img', { name: /Biểu đồ cột thực thu theo ngày, 7 cột/ })).toBeVisible()
 
+  await expect(page.getByRole('button', { name: 'Xuất CSV' })).toHaveAccessibleDescription(/Dữ liệu > Từ văn bản\/CSV/)
   const { name, rows } = await downloadCsv(page)
+  expect(rows[1][1]).toMatch(/^\d{4}-\d{2}-\d{2}$/)
   expect(name).toMatch(/^doanh-thu_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/)
   const totalRow = rows.find(row => row[0] === 'Tổng' && row.length > 1)!
   expect(totalRow.slice(1).map(Number)).toEqual(FIGURE_KEYS.map(key => totals[key]))
@@ -81,7 +83,9 @@ test('Tiêu chí xong 9.1: số trên màn khớp file CSV; tiền giảm và ti
   expect(days).toHaveLength(7)
   const dayHead = rows.findIndex(row => row[0] === 'Ngày')
   for (const [index, day] of days.entries()) {
-    expect(rows[dayHead + 1 + index][0]).toBe(day.label)
+    // Screen 13/11/2026, CSV ISO 2026-11-13 (Excel reads it the same date in any region): both name the same day.
+    expect(rows[dayHead + 1 + index][0]).toBe(day.key)
+    expect(day.label).toBe(`${day.key.slice(8, 10)}/${day.key.slice(5, 7)}/${day.key.slice(0, 4)}`)
     expect(rows[dayHead + 1 + index].slice(1).map(Number)).toEqual(day.figures)
   }
   const products = await tableRows(page, 'data-product')

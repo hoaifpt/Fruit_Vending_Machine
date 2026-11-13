@@ -4,15 +4,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ApiError, configureClient } from '../src/api/client.ts'
-import { authApi } from '../src/api/resources.ts'
+import { authApi, ordersApi, refundsApi } from '../src/api/resources.ts'
 import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
-import { mockRefundedAt } from '../src/api/mock/revenue.ts'
+import { refundShares, refundsRevenue, revenueReport } from '../src/api/mock/revenue.ts'
 import { can } from '../src/admin/permissions.ts'
 import { matchRoute, navFor } from '../src/admin/routes.ts'
 import { vietnamDate } from '../src/admin/maintenance-schedules.ts'
 import {
-  FIGURES, MAX_RANGE_DAYS, REVENUE_PATH, ZERO_FIGURES, bucketLabel, bucketShortLabel, chartScale, compactMoney, consistencyIssues, csvCell, csvFileName,
+  CSV_EXCEL_HINT, FIGURES, MAX_RANGE_DAYS, REVENUE_PATH, ZERO_FIGURES, bucketLabel, bucketShortLabel, chartScale, compactMoney, consistencyIssues, csvBucketLabel, csvCell, csvDateTime, csvFileName,
   figureText, figuresOfDay, hasActivity, labelEvery, loadRevenueReport, overviewRevenueFilters, parseCsv, productNotFound, presetOf, presetRange, readRevenueFilters,
   revenueCsv, revenueHref, revenueMissing, revenueQuery, scopeText, validateRange,
 } from '../src/admin/revenue.ts'
@@ -135,6 +135,24 @@ test('CSV cells: numbers plain, formulas neutralised, quotes and commas escaped'
   assert.equal(csvCell('a,b'), '"a,b"')
   assert.equal(csvCell('say "hi"'), '"say ""hi"""')
   assert.equal(csvCell(null), '')
+  // Excel skips leading spaces (also NBSP, zero-width space) before a formula: still neutralised.
+  assert.equal(csvCell(' =1+1'), `' =1+1`)
+  assert.equal(csvCell('\u00a0=HYPERLINK("x")'), `"'\u00a0=HYPERLINK(""x"")"`)
+  assert.equal(csvCell('\u200b+1'), `'\u200b+1`)
+  assert.equal(csvCell('  @SUM(A1)'), `'  @SUM(A1)`)
+  assert.equal(csvCell('\n=1'), `"'\n=1"`)
+  assert.equal(csvCell('Dưa - hấu'), 'Dưa - hấu', 'a dash inside the text is not a formula')
+})
+
+test('CSV dates are ISO (Excel reads them the same in any region), times in Vietnam time', () => {
+  assert.equal(csvBucketLabel({ date: TODAY, hour: null }), TODAY)
+  assert.equal(csvBucketLabel({ date: null, hour: 9 }), '09:00–09:59')
+  assert.equal(csvDateTime('2026-11-13T06:05:00Z'), '2026-11-13 13:05')
+  assert.equal(csvDateTime('2026-11-12T17:00:00Z'), '2026-11-13 00:00', 'from 17:00 UTC it is the next Vietnam day')
+  assert.match(CSV_EXCEL_HINT, /Dữ liệu > Từ văn bản\/CSV/)
+  const text = revenueCsv(sample(), undefined)
+  assert.ok(!/^﻿?sep=/.test(text), 'no sep= line: it would make Excel ignore the UTF-8 BOM')
+  assert.ok(!/\d{2}\/\d{2}\/\d{4}/.test(text), 'no dd/MM/yyyy date that a region could swap')
 })
 
 test('CSV holds exactly the figures of the screen (totals, every row, every product)', () => {
@@ -144,14 +162,16 @@ test('CSV holds exactly the figures of the screen (totals, every row, every prod
   assert.ok(text.includes('\r\n'))
   const rows = parseCsv(text)
   const heads = FIGURES.map(({ label, money }) => money ? `${label} (VND)` : label)
-  assert.deepEqual(rows[1], ['Từ ngày', '12/11/2026'])
+  assert.deepEqual(rows[1], ['Từ ngày', '2026-11-12'])
+  assert.deepEqual(rows[2], ['Đến ngày', TODAY])
+  assert.deepEqual(rows[6], ['Lập lúc', '2026-11-13 13:05'])
   assert.deepEqual(rows[3], ['Sản phẩm', 'Tất cả sản phẩm'])
   const totalRow = rows.find(row => row[0] === 'Tổng' && row.length > 1)
   assert.deepEqual(totalRow.slice(1).map(Number), FIGURES.map(({ key }) => report.totals[key]))
   const dayHead = rows.findIndex(row => row[0] === 'Ngày')
   assert.deepEqual(rows[dayHead].slice(1), heads)
   for (const [index, bucket] of report.buckets.entries()) {
-    assert.equal(rows[dayHead + 1 + index][0], bucketLabel(bucket))
+    assert.equal(rows[dayHead + 1 + index][0], bucket.date)
     assert.deepEqual(rows[dayHead + 1 + index].slice(1).map(Number), FIGURES.map(({ key }) => bucket[key]))
   }
   const productHead = rows.findIndex(row => row[0] === 'SKU')
@@ -219,11 +239,9 @@ test('mock: hour-of-day report adds up to the same totals; product filter keeps 
   assert.deepEqual(consistencyIssues(one), [])
 })
 
-test('mock: refunds count at refund time; a range with no sale is empty, not an error', async () => {
+test('mock: a range with no sale is empty, not an error', async () => {
   const state = setup()
   await signIn(state, 'admin')
-  assert.equal(mockRefundedAt({ status: 'REFUNDED', paidAt: '2026-11-13T00:00:00Z' }), Date.parse('2026-11-13T00:30:00Z'))
-  assert.equal(mockRefundedAt({ status: 'COMPLETED', paidAt: '2026-11-13T00:00:00Z' }), null)
   const past = await loadRevenueReport({ from: '2020-01-01', to: '2020-01-07', productId: '', groupBy: 'DAY' })
   assert.equal(hasActivity(past.totals), false)
   assert.equal(past.buckets.length, 7)
@@ -248,4 +266,94 @@ test('mock: STAFF gets 403, bad ranges 400 with field errors, unknown product 40
   assert.equal(productNotFound(unknown, true), true)
   assert.equal(revenueMissing(new ApiError(404, 'No static resource found.')), true)
   assert.equal(productNotFound(new ApiError(404, 'x'), false), false)
+})
+
+// ---- refunds from the recorded refunds (FE 8.1) and Vietnam day / hour edges, on a hand-made store
+
+const P2 = '40000000-0000-0000-0000-000000000002'
+const line = (productId, totalPrice) => ({ productId, sku: productId === P1 ? 'FRUIT-1' : 'FRUIT-2', productName: productId === P1 ? 'Táo' : 'Dưa hấu', quantity: 1, unitPrice: totalPrice, originalUnitPrice: totalPrice, discountAmount: 0, totalPrice })
+const order = (n, status, paidAt, items) => ({ id: `50000000-0000-0000-0000-${String(n).padStart(12, '0')}`, status, paidAt, items })
+const refund = (n, orderId, amount, reason, refundedAt) => ({ id: `95000000-0000-0000-0000-${String(n).padStart(12, '0')}`, orderId, paymentId: 'x', amount, reason, transferRef: 'FT1', note: null, refundedAt, refundedById: 'a', refundedByName: null })
+const handMade = (orders, refunds = []) => ({ products: [{ id: P1 }, { id: P2 }], orders, refunds })
+const report = (store, params) => revenueReport(store, new URLSearchParams({ groupBy: 'DAY', ...params }), Date.parse('2026-11-13T06:00:00Z'))
+
+test('mock refunds: only refunds of revenue (DISPENSE_FAILED on a paid order), at refundedAt, for the recorded amount', () => {
+  assert.equal(refundsRevenue({ reason: 'DISPENSE_FAILED' }, { status: 'REFUNDED', paidAt: '2026-11-10T01:00:00Z' }), true)
+  assert.equal(refundsRevenue({ reason: 'PAYMENT_LATE' }, { status: 'CANCELLED', paidAt: null }), false)
+  assert.equal(refundsRevenue({ reason: 'PAYMENT_DUPLICATE' }, { status: 'COMPLETED', paidAt: '2026-11-10T01:00:00Z' }), false)
+  const old = order(1, 'REFUNDED', '2026-11-10T01:00:00Z', [line(P1, 35000), line(P2, 35000)])
+  const duplicate = order(2, 'COMPLETED', '2026-11-12T01:00:00Z', [line(P1, 35000)])
+  const late = order(3, 'CANCELLED', null, [line(P1, 35000)])
+  const store = handMade([old, duplicate, late], [
+    refund(1, old.id, 70000, 'DISPENSE_FAILED', '2026-11-13T02:00:00Z'), // recorded today for an order paid 3 days ago
+    refund(2, duplicate.id, 35000, 'PAYMENT_DUPLICATE', '2026-11-13T03:00:00Z'),
+    refund(3, late.id, 35000, 'PAYMENT_LATE', '2026-11-13T04:00:00Z'),
+  ])
+  const week = report(store, { fromDate: '2026-11-07', toDate: TODAY })
+  assert.deepEqual(consistencyIssues(week), [])
+  const today = figuresOfDay(week, TODAY)
+  assert.equal(today.refundCount, 1, 'late and duplicate payments are not revenue refunds')
+  assert.equal(today.refundAmount, 70000)
+  assert.equal(today.netAmount, -70000)
+  assert.equal(figuresOfDay(week, '2026-11-10').refundAmount, 0, 'not on the day of the sale')
+  assert.equal(figuresOfDay(week, '2026-11-10').paidAmount, 70000)
+  assert.equal(week.totals.refundAmount, 70000)
+  // The overview's "Hôm nay" reads the same figures as the report of today: it sees the refund too.
+  const todayOnly = report(store, { fromDate: TODAY, toDate: TODAY })
+  assert.equal(todayOnly.totals.refundAmount, 70000)
+  assert.equal(todayOnly.totals.paidAmount, 0)
+  assert.deepEqual(figuresOfDay(week, TODAY), todayOnly.totals)
+  // A range ending before the refund has the sale and no refund.
+  assert.equal(report(store, { fromDate: '2026-11-10', toDate: '2026-11-12' }).totals.refundAmount, 0)
+  // Product filter: the refunded lines of that product.
+  const one = report(store, { fromDate: '2026-11-07', toDate: TODAY, productId: P2 })
+  assert.equal(one.totals.refundAmount, 35000)
+  assert.equal(one.totals.refundCount, 1)
+  assert.deepEqual(consistencyIssues(one), [])
+})
+
+test('mock refunds: a recorded amount other than the lines is split over them and still adds up', () => {
+  assert.deepEqual(refundShares([{ totalPrice: 35000 }, { totalPrice: 17500 }], 52500), [35000, 17500])
+  assert.deepEqual(refundShares([{ totalPrice: 20000 }, { totalPrice: 10000 }], 10000), [6666, 3334])
+  const paid = order(1, 'REFUNDED', '2026-11-12T01:00:00Z', [line(P1, 20000), line(P2, 10000)])
+  const week = report(handMade([paid], [refund(1, paid.id, 10000, 'DISPENSE_FAILED', '2026-11-12T03:00:00Z')]), { fromDate: '2026-11-07', toDate: TODAY })
+  assert.equal(week.totals.refundAmount, 10000)
+  assert.deepEqual(consistencyIssues(week), [])
+})
+
+test('mock: through the API, a refund recorded today for an older order shows in today (report and overview)', async () => {
+  const state = setup()
+  state.clock += 3 * 86_400_000 // the seed's dispense failure is now three days old
+  await signIn(state, 'admin')
+  const today = vietnamDate(state.clock)
+  const before = await loadRevenueReport(overviewRevenueFilters(today))
+  const failed = (await ordersApi.list({ status: 'DISPENSE_FAILED', page: 0, size: 20 })).content[0]
+  assert.ok(failed, 'the seed has a DISPENSE_FAILED order')
+  assert.notEqual(vietnamDate(Date.parse(failed.createdAt)), today)
+  const recorded = await refundsApi.record(failed.id, { transferRef: 'FT26317TEST01' })
+  assert.equal(vietnamDate(Date.parse(recorded.refundedAt)), today)
+  const after = await loadRevenueReport(overviewRevenueFilters(today))
+  assert.deepEqual(consistencyIssues(after), [])
+  assert.equal(recorded.amount > 0, true)
+  assert.equal(figuresOfDay(after, today).refundAmount - figuresOfDay(before, today).refundAmount, recorded.amount)
+  assert.equal(after.totals.refundAmount - before.totals.refundAmount, recorded.amount)
+  const todayReport = await loadRevenueReport({ from: today, to: today, productId: '', groupBy: 'DAY' })
+  assert.deepEqual(figuresOfDay(after, today), todayReport.totals, 'O1 "Hôm nay" = report of today')
+})
+
+test('mock: Vietnam day and hour edges (UTC 16:59:59 is 23h of the day, 17:00:00 is 0h of the next)', () => {
+  const store = handMade([
+    order(1, 'COMPLETED', '2026-11-12T16:59:59Z', [line(P1, 35000)]),
+    order(2, 'COMPLETED', '2026-11-12T17:00:00Z', [line(P2, 17500)]),
+  ])
+  const days = report(store, { fromDate: '2026-11-12', toDate: TODAY })
+  assert.equal(figuresOfDay(days, '2026-11-12').paidAmount, 35000)
+  assert.equal(figuresOfDay(days, TODAY).paidAmount, 17500)
+  assert.equal(report(store, { fromDate: TODAY, toDate: TODAY }).totals.paidAmount, 17500, 'the range starts at 00:00 Vietnam time')
+  assert.equal(report(store, { fromDate: '2026-11-12', toDate: '2026-11-12' }).totals.paidAmount, 35000, 'and ends before 00:00 of the next day')
+  const hours = report(store, { fromDate: '2026-11-12', toDate: TODAY, groupBy: 'HOUR_OF_DAY' })
+  assert.equal(hours.buckets.find(bucket => bucket.hour === 23).paidAmount, 35000)
+  assert.equal(hours.buckets.find(bucket => bucket.hour === 0).paidAmount, 17500)
+  assert.equal(hours.buckets.filter(bucket => bucket.paidAmount > 0).length, 2)
+  assert.deepEqual(consistencyIssues(hours), [])
 })

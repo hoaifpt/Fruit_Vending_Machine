@@ -21,14 +21,16 @@ info:
        discountAmount = sum of the lines' discountAmount (near-expiry discount, FE 7.5 / BE 4.1);
        paidAmount = what customers paid = sum of totalPrice = grossAmount - discountAmount.
 
-    3. A refund counts at the moment the money was returned (refunded_at), in the bucket of that moment, which may be a
-       later day than the sale (or outside the range). refundAmount is the amount returned; refundCount the number of
-       refunded orders. The report only shows the total, it does not depend on how refunds are made (FE 8.x / BE 5.x).
+    3. A refund counts at the moment the money was returned (refunds.refundedAt, draft refunds.yaml / BE 5.1), in the
+       bucket of that moment, which may be a later day than the sale (or outside the range). refundAmount is the amount
+       returned (refunds.amount); refundCount the number of refunded orders. Only refunds of revenue count: reason
+       DISPENSE_FAILED on a paid order. Refunds of a late payment (PAYMENT_LATE, cancelled order) or of a duplicate
+       payment (PAYMENT_DUPLICATE) are NOT in refundAmount, since that money was never in paidAmount (point 1).
 
     4. netAmount = paidAmount - refundAmount (may be negative on a day with refunds and no sales).
 
     5. With productId only the lines of that product count (orderCount = paid orders containing it; a refund counts the
-       refunded lines of that product).
+       refunded lines of that product: the refund amount split over the order's lines in proportion to their totalPrice).
 
     Invariants the web checks (and reports on screen when broken): for totals, every bucket and every product row,
     grossAmount - discountAmount = paidAmount and paidAmount - refundAmount = netAmount; the buckets add up to the totals;
@@ -41,8 +43,9 @@ info:
     - Q1 Permission: proposed new code REPORT_READ, ADMIN only (revenue is financial data like PAYMENT_READ). Staff do
       not see the report nor the revenue block of the overview.
 
-    - Q2 Refund time: there is no refunded_at yet (payments.status REFUNDED has no timestamp of its own). Please add one
-      (or a refunds table) so a refund is counted on the day the money left. Until then the mock uses paidAt + 30 min.
+    - Q2 Refund time: use the refunds table of draft refunds.yaml (refundedAt, amount, reason). The mock reads the
+      refunds it records (FE 8.1), so a refund recorded today for an older order lands in today's bucket. Confirm the
+      backend report reads the same table and leaves PAYMENT_LATE / PAYMENT_DUPLICATE refunds out.
 
     - Q3 Late payment on a cancelled order and duplicate SUCCESS payments: proposed NOT revenue (point 1). Confirm, or
       add a separate "tiền cần hoàn" figure later.
@@ -170,11 +173,11 @@ components:
         refundCount:
           type: integer
           format: int32
-          description: Orders refunded (counted at refund time).
+          description: Orders refunded (counted at refunds.refundedAt). Only DISPENSE_FAILED refunds, not late/duplicate payments.
           examples: [1]
         refundAmount:
           type: number
-          description: Money returned (counted at refund time).
+          description: Money returned (refunds.amount, counted at refunds.refundedAt). Excludes refunds of late (PAYMENT_LATE) and duplicate (PAYMENT_DUPLICATE) payments, which were never revenue.
           examples: [35000]
         netAmount:
           type: number
