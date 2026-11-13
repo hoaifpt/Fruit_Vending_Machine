@@ -8,7 +8,7 @@ import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'reports'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -31,6 +31,8 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   'work-tickets': 'tickets',
   // Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml).
   'maintenance-schedules': 'maintenance-schedules',
+  // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml).
+  reports: 'reports',
 }
 
 export function groupOf(path: string): MockGroup | null {

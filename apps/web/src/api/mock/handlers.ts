@@ -12,6 +12,7 @@ import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDa
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
 import { boxPrice, linePricing } from './pricing.ts'
+import { revenueReport } from './revenue.ts'
 
 export interface HandlerContext {
   store: MockStore
@@ -1063,6 +1064,8 @@ export const routes: Route[] = [
   }),
 
   // ---- payments (ADMIN)
+  // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml, FE 9.1/9.2).
+  route('GET', '/reports/revenue', { draftPermission: 'REPORT_READ' }, ctx => ok(revenueReport(ctx.store, ctx.query, ctx.now))),
   route('GET', '/payments', 'admin', ctx => {
     const { store, query } = ctx
     const orderOf = (payment: MockPayment) => store.orders.find(order => order.id === payment.orderId)

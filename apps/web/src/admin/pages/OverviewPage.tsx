@@ -23,6 +23,7 @@ import { errorMessage, useApi } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
 import type { Permission } from '../permissions.ts'
 import { useSession } from '../useSession.ts'
+import { OverviewRevenue } from './OverviewRevenue.tsx'
 
 const isMissing = (error: unknown) => alertsAvailability(error) === 'missing'
 const nothing = () => Promise.resolve(undefined)
@@ -30,6 +31,9 @@ const nothing = () => Promise.resolve(undefined)
 function OverviewPage() {
   const { can } = useSession()
   const canMachines = can('MACHINE_READ'), canStock = canMachines && can('INVENTORY_READ'), canAlerts = can('ALERT_READ')
+  // FE 9.2: revenue block for accounts with REPORT_READ (ADMIN); Làm mới reloads it too.
+  const canRevenue = can('REPORT_READ')
+  const [revenueTick, setRevenueTick] = useState(0)
   const poll = (allowed: boolean) => ({ pollMs: allowed ? OVERVIEW_POLL_MS : undefined })
   // A block the account may not read never calls its API (the backend would answer 403 anyway).
   const scan = useApi(signal => canMachines ? loadMachineScan(signal) : nothing(), `overview-scan|${canMachines}`, poll(canMachines))
@@ -37,7 +41,7 @@ function OverviewPage() {
   const stock = useApi(signal => canStock ? loadLowStock(signal) : nothing(), `overview-stock|${canStock}`, poll(canStock))
   // A backend without BE 3.6 answers 404: that block says so and stops asking.
   const critical = useApi(signal => canAlerts ? loadCritical(signal) : nothing(), `overview-critical|${canAlerts}`, { ...poll(canAlerts), stopOn: isMissing })
-  const reloadAll = () => { scan.reload(); maintenance.reload(); stock.reload(); critical.reload() }
+  const reloadAll = () => { scan.reload(); maintenance.reload(); stock.reload(); critical.reload(); setRevenueTick(tick => tick + 1) }
   const busy = [scan, maintenance, stock, critical].some(state => state.loading || state.refreshing)
 
   // OFFLINE is decided at the time the list was received, on the server's clock (re-checked on every 30 s poll).
@@ -104,6 +108,7 @@ function OverviewPage() {
           detail: <><StatusBadge domain="alertSeverity" value={alert.severity} describe={false} className="mr-1.5 align-middle" />
             <span className="font-mono">{alert.machineCode}</span>{alert.slotCode ? ` · Ngăn ${alert.slotCode}` : ''} · {formatDateTime(alert.triggeredAt)}</>,
         }))} />
+      {canRevenue && <OverviewRevenue refresh={revenueTick} />}
     </div>
   </>
 }

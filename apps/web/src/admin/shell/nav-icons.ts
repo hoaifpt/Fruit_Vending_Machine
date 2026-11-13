@@ -1,4 +1,4 @@
-import { Apple, BellRing, Boxes, CalendarClock, ClipboardList, CreditCard, KeyRound, LayoutDashboard, ReceiptText, Refrigerator, UserCog, Warehouse, Webhook } from 'lucide-react'
+import { Apple, BellRing, Boxes, CalendarClock, ChartColumn,ClipboardList, CreditCard, KeyRound, LayoutDashboard, ReceiptText, Refrigerator, UserCog, Warehouse, Webhook } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 export const NAV_ICONS: Record<string, LucideIcon> = {
@@ -13,6 +13,7 @@ export const NAV_ICONS: Record<string, LucideIcon> = {
   '/admin/orders': ReceiptText,
   '/admin/payments': CreditCard,
   '/admin/webhook-logs': Webhook,
+  '/admin/reports/revenue': ChartColumn,
   '/admin/users': UserCog,
   '/admin/roles': KeyRound,
 }

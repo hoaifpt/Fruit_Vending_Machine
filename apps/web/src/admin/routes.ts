@@ -8,6 +8,7 @@ export type PageKey =
   | 'overview' | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
   | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
   | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail' | 'ticket-restock' | 'maintenance-schedules'
+  | 'revenue-report'
 
 /** `roles` lists the roles that hold `permission` today (derived, for display and older callers). */
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
@@ -38,6 +39,8 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/payments\/([^/]+)$/, page: 'payment-detail', permission: 'PAYMENT_READ' },
   { pattern: /^\/admin\/webhook-logs$/, page: 'webhook-logs', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   { pattern: /^\/admin\/webhook-logs\/([^/]+)$/, page: 'webhook-log-detail', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
+  // R1 (FE 9.1): draft permission of api-contract/drafts/revenue-reports.yaml (BE 6.1), ADMIN only.
+  { pattern: /^\/admin\/reports\/revenue$/, page: 'revenue-report', permission: 'REPORT_READ' },
 ]
 
 export function matchRoute(pathname: string): RouteMatch | undefined {
@@ -68,6 +71,8 @@ export const NAV: NavItem[] = [
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },
+  // Draft permission (api-contract/drafts/revenue-reports.yaml, BE 6.1).
+  { to: '/admin/reports/revenue', label: 'Báo cáo doanh thu', group: 'Giao dịch', permission: 'REPORT_READ', match: ['revenue-report'] },
   { to: '/admin/users', label: 'Tài khoản', group: 'Hệ thống', permission: 'USER_READ', match: ['users'] },
   { to: '/admin/roles', label: 'Vai trò & quyền', group: 'Hệ thống', permission: 'PERMISSION_MANAGE', match: ['roles'] },
 ]

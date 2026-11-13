@@ -22,8 +22,9 @@ export const PERMISSIONS = [
  * TICKET_WRITE of api-contract/drafts/work-tickets.yaml (FE 7.1, waiting for BE 4.3); MAINTENANCE_SCHEDULE_READ /
  * MAINTENANCE_SCHEDULE_WRITE of api-contract/drafts/maintenance-schedules.yaml (FE 7.3, waiting for BE 4.5). When the backend adds them to its
  * permissions table, move them into PERMISSIONS and ROLE_PERMISSIONS and drop them here.
+ * REPORT_READ of api-contract/drafts/revenue-reports.yaml (FE 9.1/9.2, waiting for BE 6.1): revenue report, ADMIN only.
  */
-export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE', 'TICKET_READ', 'TICKET_WRITE', 'MAINTENANCE_SCHEDULE_READ', 'MAINTENANCE_SCHEDULE_WRITE', 'MACHINE_MAINTENANCE'] as const
+export const DRAFT_PERMISSIONS = ['ALERT_READ', 'ALERT_WRITE', 'TICKET_READ', 'TICKET_WRITE', 'MAINTENANCE_SCHEDULE_READ', 'MAINTENANCE_SCHEDULE_WRITE', 'MACHINE_MAINTENANCE', 'REPORT_READ'] as const
 export type DraftPermission = (typeof DRAFT_PERMISSIONS)[number]
 export type Permission = (typeof PERMISSIONS)[number] | DraftPermission
 

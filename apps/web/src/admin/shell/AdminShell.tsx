@@ -65,7 +65,7 @@ export function AdminShell({ nav, route, email, roles, onLogout, children, bell 
       <TopProgress />
       <a href="#admin-main" className="fixed top-2 left-2 z-[70] -translate-y-16 rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground transition-transform focus:translate-y-0">Đến nội dung</a>
 
-      <aside className={cn('sticky top-0 hidden h-svh shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out lg:flex', collapsed ? 'w-[3.75rem]' : 'w-60')}>
+      <aside className={cn('sticky top-0 hidden h-svh print:hidden! shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out lg:flex', collapsed ? 'w-[3.75rem]' : 'w-60')}>
         <SidebarBody nav={nav} route={route} collapsed={collapsed} account={account} />
       </aside>
 
@@ -78,7 +78,7 @@ export function AdminShell({ nav, route, email, roles, onLogout, children, bell 
       </Sheet>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b bg-background/85 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-5">
+        <header className="sticky top-0 z-30 flex h-14 print:hidden items-center gap-2 border-b bg-background/85 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/70 sm:px-5">
           <Button variant="ghost" size="icon-sm" className="lg:hidden" aria-label="Mở điều hướng" onClick={() => setDrawer(true)}><Menu /></Button>
           <Tooltip>
             <TooltipTrigger asChild>

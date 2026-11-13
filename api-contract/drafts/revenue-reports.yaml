@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: FreshVend draft - revenue report
+  version: draft
+  description: >-
+    Draft proposed by the frontend (issues FE 9.1 "Báo cáo doanh thu", screen R1, and FE 9.2 "Tổng quan bước 2", screen
+    O1) for backend issue 6.1 (dashboard, reports, PDF/CSV export). One read-only endpoint returns, for a range of Vietnam
+    calendar days, the totals, one row per day (or per hour of the day) and one row per product. The web draws the chart,
+    the tables and the CSV file from this single response, so the numbers on screen and in the file are the same.
+    The overview (O1) calls the same endpoint with the same parameters as the report link it shows.
+
+
+    Definitions (all amounts are whole VND, never null; a figure with nothing to count is 0):
+
+    1. A sale is an order that was paid: status PAID, DISPENSING, COMPLETED, DISPENSE_FAILED or REFUNDED. It counts at
+       orders.paid_at (Vietnam day / hour of paid_at). Orders never paid (PENDING_PAYMENT, CANCELLED, PAYMENT_FAILED)
+       never count, even with a late SUCCESS payment on a cancelled order (that money is a refund case, not a sale).
+       Amounts come from the order snapshot, never from payments, so a duplicate SUCCESS payment does not double a sale.
+
+    2. grossAmount = price before discount = sum of originalUnitPrice x quantity of the lines (draft pricing-discount.yaml);
+       discountAmount = sum of the lines' discountAmount (near-expiry discount, FE 7.5 / BE 4.1);
+       paidAmount = what customers paid = sum of totalPrice = grossAmount - discountAmount.
+
+    3. A refund counts at the moment the money was returned (refunded_at), in the bucket of that moment, which may be a
+       later day than the sale (or outside the range). refundAmount is the amount returned; refundCount the number of
+       refunded orders. The report only shows the total, it does not depend on how refunds are made (FE 8.x / BE 5.x).
+
+    4. netAmount = paidAmount - refundAmount (may be negative on a day with refunds and no sales).
+
+    5. With productId only the lines of that product count (orderCount = paid orders containing it; a refund counts the
+       refunded lines of that product).
+
+    Invariants the web checks (and reports on screen when broken): for totals, every bucket and every product row,
+    grossAmount - discountAmount = paidAmount and paidAmount - refundAmount = netAmount; the buckets add up to the totals;
+    the product rows add up to the totals for quantity and every amount (orderCount and refundCount do not: an order
+    with several products counts once in each of their rows).
+
+
+    Open questions for the backend (BE 6.1):
+
+    - Q1 Permission: proposed new code REPORT_READ, ADMIN only (revenue is financial data like PAYMENT_READ). Staff do
+      not see the report nor the revenue block of the overview.
+
+    - Q2 Refund time: there is no refunded_at yet (payments.status REFUNDED has no timestamp of its own). Please add one
+      (or a refunds table) so a refund is counted on the day the money left. Until then the mock uses paidAt + 30 min.
+
+    - Q3 Late payment on a cancelled order and duplicate SUCCESS payments: proposed NOT revenue (point 1). Confirm, or
+      add a separate "tiền cần hoàn" figure later.
+
+    - Q4 DISPENSE_FAILED orders count as sales until refunded (the customer paid). Confirm.
+
+    - Q5 Export: the web builds the CSV from this response (UTF-8 with BOM, plain integer amounts) and prints the page
+      to PDF with the browser, so no export endpoint is needed for FE 9.1. If the backend wants a server-side file
+      (e.g. GET /api/v1/reports/revenue/export?format=csv|pdf) it must use exactly these figures.
+
+    - Q6 Range limit: at most 92 days (one quarter) per request; longer ranges answer 400 on fromDate. Machine filter
+      (machineId) is not asked by FE 9.1 but would be cheap to add later.
+paths:
+  /api/v1/reports/revenue:
+    get:
+      tags: [Reports]
+      operationId: getRevenueReport
+      summary: Revenue of a range of Vietnam calendar days, per day or hour of day and per product (draft)
+      x-required-permission: REPORT_READ
+      parameters:
+        - name: fromDate
+          in: query
+          required: true
+          description: First Vietnam calendar day (Asia/Ho_Chi_Minh), inclusive.
+          schema:
+            type: string
+            format: date
+            examples: ["2026-11-07"]
+        - name: toDate
+          in: query
+          required: true
+          description: Last Vietnam calendar day, inclusive. Not before fromDate; at most 92 days after it (counting both ends).
+          schema:
+            type: string
+            format: date
+            examples: ["2026-11-13"]
+        - name: productId
+          in: query
+          required: false
+          description: Only the lines of this product. Unknown id -> 404 "Product not found".
+          schema:
+            type: string
+            format: uuid
+        - name: groupBy
+          in: query
+          required: false
+          description: >-
+            DAY (default): one bucket per day of the range, oldest first. HOUR_OF_DAY: 24 buckets (0..23, Vietnam time),
+            each adding up that hour over every day of the range (when do people buy).
+          schema:
+            $ref: "#/components/schemas/RevenueGroupBy"
+      responses:
+        "200":
+          description: Report. Every day (or hour) of the range is present, zero-filled, so a chart has no gaps.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [timestamp, data]
+                properties:
+                  timestamp:
+                    type: string
+                    format: date-time
+                  message:
+                    type: string
+                  data:
+                    $ref: "#/components/schemas/RevenueReportResponse"
+        "400":
+          description: >-
+            Invalid parameters, fieldErrors per parameter: fromDate / toDate not a date, toDate before fromDate (on
+            toDate), range over 92 days (on fromDate), groupBy not DAY / HOUR_OF_DAY, productId not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "401":
+          description: Not signed in or token expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "403":
+          description: Missing REPORT_READ.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+        "404":
+          description: productId does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiErrorResponse"
+components:
+  schemas:
+    RevenueGroupBy:
+      type: string
+      enum: [DAY, HOUR_OF_DAY]
+    RevenueFigures:
+      type: object
+      required: [orderCount, quantity, grossAmount, discountAmount, paidAmount, refundCount, refundAmount, netAmount]
+      properties:
+        orderCount:
+          type: integer
+          format: int32
+          description: Paid orders (counted at paidAt).
+          examples: [12]
+        quantity:
+          type: integer
+          format: int32
+          description: Boxes sold in those orders.
+          examples: [14]
+        grossAmount:
+          type: number
+          description: Price before discount (originalUnitPrice x quantity).
+          examples: [490000]
+        discountAmount:
+          type: number
+          description: Near-expiry discount given.
+          examples: [17500]
+        paidAmount:
+          type: number
+          description: What customers paid = grossAmount - discountAmount.
+          examples: [472500]
+        refundCount:
+          type: integer
+          format: int32
+          description: Orders refunded (counted at refund time).
+          examples: [1]
+        refundAmount:
+          type: number
+          description: Money returned (counted at refund time).
+          examples: [35000]
+        netAmount:
+          type: number
+          description: paidAmount - refundAmount.
+          examples: [437500]
+    RevenueBucket:
+      allOf:
+        - $ref: "#/components/schemas/RevenueFigures"
+        - type: object
+          properties:
+            date:
+              type:
+                - string
+                - "null"
+              format: date
+              description: Vietnam calendar day (groupBy DAY), else null.
+              examples: ["2026-11-13"]
+            hour:
+              type:
+                - integer
+                - "null"
+              format: int32
+              minimum: 0
+              maximum: 23
+              description: Hour of the day, Vietnam time (groupBy HOUR_OF_DAY), else null.
+              examples: [null]
+    ProductRevenue:
+      allOf:
+        - $ref: "#/components/schemas/RevenueFigures"
+        - type: object
+          required: [productId, sku, productName]
+          properties:
+            productId:
+              type: string
+              format: uuid
+            sku:
+              type: string
+              examples: ["FRUIT-MIX-001"]
+            productName:
+              type: string
+              examples: ["Hộp trái cây thập cẩm"]
+    RevenueReportResponse:
+      type: object
+      required: [fromDate, toDate, groupBy, timeZone, generatedAt, totals, buckets, byProduct]
+      properties:
+        fromDate:
+          type: string
+          format: date
+        toDate:
+          type: string
+          format: date
+        productId:
+          type:
+            - string
+            - "null"
+          format: uuid
+        groupBy:
+          $ref: "#/components/schemas/RevenueGroupBy"
+        timeZone:
+          type: string
+          description: Always Asia/Ho_Chi_Minh.
+          examples: ["Asia/Ho_Chi_Minh"]
+        generatedAt:
+          type: string
+          format: date-time
+        totals:
+          $ref: "#/components/schemas/RevenueFigures"
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/RevenueBucket"
+        byProduct:
+          type: array
+          description: Products with at least one sale or refund in the range, netAmount descending then sku.
+          items:
+            $ref: "#/components/schemas/ProductRevenue"
+    ApiErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          format: int32
+        error:
+          type: string
+        message:
+          type: string
+        path:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string
