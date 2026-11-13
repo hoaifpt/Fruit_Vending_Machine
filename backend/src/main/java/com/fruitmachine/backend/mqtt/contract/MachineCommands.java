@@ -19,4 +19,27 @@ public final class MachineCommands {
                         MachineCommandType.COMMAND_ID_FIELD, commandId,
                         MachineCommandType.COLUMN_CODE_FIELD, columnCode));
     }
+
+    /** Issue #64: {@code MAINTENANCE_*} command for one column. */
+    public static Map<String, Object> maintenance(String machineCode, String commandType, String commandId, String columnCode) {
+        if (!commandType.startsWith("MAINTENANCE_") || !MachineCommandType.ALL.contains(commandType))
+            throw new IllegalArgumentException("Not a maintenance command type: " + commandType);
+        return envelope(machineCode, Map.of(
+                MachineCommandType.TYPE_FIELD, commandType,
+                MachineCommandType.COMMAND_ID_FIELD, commandId,
+                MachineCommandType.COLUMN_CODE_FIELD, columnCode));
+    }
+
+    /** Issue #64: RESET (no column). */
+    public static Map<String, Object> reset(String machineCode, String commandId) {
+        return envelope(machineCode, Map.of(MachineCommandType.TYPE_FIELD, MachineCommandType.RESET, MachineCommandType.COMMAND_ID_FIELD, commandId));
+    }
+
+    private static Map<String, Object> envelope(String machineCode, Map<String, Object> payload) {
+        return Map.of(
+                MqttContract.SCHEMA_VERSION_FIELD, MqttContract.SCHEMA_VERSION,
+                MqttContract.MESSAGE_ID_FIELD, UUID.randomUUID().toString(),
+                MqttContract.MACHINE_CODE_FIELD, machineCode,
+                MqttContract.PAYLOAD_FIELD, payload);
+    }
 }

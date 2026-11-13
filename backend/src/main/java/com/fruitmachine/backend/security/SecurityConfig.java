@@ -86,6 +86,11 @@ public class SecurityConfig {
                     // Inventory views nested under a machine are inventory reads, not machine reads (same permission as their @PreAuthorize).
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines/*/inventory", "/api/v1/machines/*/slots/*/inventory",
                             "/api/v1/machines/*/slots/*/inventory/**").hasAuthority(Permissions.INVENTORY_READ);
+                    // Issue #64: before the generic machine rules (STAFF runs maintenance commands without MACHINE_WRITE).
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/slots/*/maintenance-commands").hasAuthority(Permissions.MAINTENANCE_COMMAND_EXECUTE);
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/reset").hasAuthority(Permissions.MACHINE_RESET);
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/**").hasAuthority(Permissions.MAINTENANCE_COMMAND_READ);
+                    authorize.requestMatchers("/api/v1/maintenance-commands", "/api/v1/maintenance-commands/**").hasAuthority(Permissions.MAINTENANCE_COMMAND_EXECUTE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines", "/api/v1/machines/**").hasAuthority(Permissions.MACHINE_READ);
                     authorize.requestMatchers("/api/v1/machines", "/api/v1/machines/**").hasAuthority(Permissions.MACHINE_WRITE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/product-batches", "/api/v1/product-batches/**").hasAuthority(Permissions.BATCH_READ);

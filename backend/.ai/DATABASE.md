@@ -49,6 +49,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
 | order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
 | pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
+| maintenance_commands | id, command_code, machine_id, slot_id, operation, status, reason, note, target_inventory_item_id, requested_by, idempotency_key, attempt_count, sent_at, accepted_at, finished_at, failure_reason, removed_count, reconciled_by, reconciled_at, reconciliation_outcome, created_at, updated_at |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
@@ -381,3 +382,19 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
 - Price decided in `OrderService.createOrder` from the bowl locked by `selectHead` (NearExpiryPricingService, business day in
   `app.business-zone`); never recalculated. Catalog SQL applies the same rule with dayStart/dayEnd/percent parameters.
 - Permissions PRICING_READ (…020) → ADMIN, STAFF; PRICING_MANAGE (…021) → ADMIN. Partial index ix_orders_discounted_time.
+
+## 22. Issue #64 — V19 maintenance commands
+
+- `maintenance_commands` (see table list): command_code `MC-<32 hex>` (CHECK, firmware limit 39), operation REMOVE_ITEM / EMPTY_COLUMN /
+  OPEN_REFILL / CLOSE_REFILL / RESET (RESET has no slot, the others do; composite FK (slot_id, machine_id)), status PENDING / SENT /
+  ACCEPTED / COMPLETED / FAILED / NEEDS_RECONCILIATION / RECONCILED, reason required to remove bowls (OTHER needs a non-blank note),
+  REMOVE_ITEM stores the head bowl at creation (target_inventory_item_id), UNIQUE (requested_by, idempotency_key), RECONCILED <=>
+  outcome + reconciled_at + reconciled_by.
+- Partial UNIQUE `uq_maintenance_commands_open (machine_id) WHERE status IN (PENDING, SENT, ACCEPTED)`: one unfinished command per machine.
+- `machine_slots.refill_gate_open` BOOLEAN NOT NULL DEFAULT FALSE: set/cleared by completed OPEN/CLOSE_REFILL; such a slot is excluded
+  from the catalog and head selection and cannot be set ACTIVE.
+- Effects only on COMPLETED or reconciliation DONE, under the machine command advisory lock (shared with dispense), then Slot, command
+  row, InventoryItems in id order: bowls become REMOVED (removed_at) with one inventory_transactions REMOVE row each (reference_id =
+  command id, performed_by = requester, reason "MAINTENANCE_<OP> <REASON>[: note]"). Batch quantities and machine/slot status never change.
+- Reconciliation writes audit_logs MAINTENANCE_COMMAND_RECONCILED. Dispense publishing waits while a maintenance command is unfinished.
+- Permissions MAINTENANCE_COMMAND_READ (…022), MAINTENANCE_COMMAND_EXECUTE (…023) → ADMIN, STAFF; MACHINE_RESET (…024) → ADMIN.

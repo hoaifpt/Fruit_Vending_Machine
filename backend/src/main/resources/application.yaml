@@ -96,6 +96,14 @@ app:
     # Only for a private CA: PKCS12 truststore; empty = JVM trust store (Let's Encrypt). Never log the password.
     truststore-path: ${MQTT_TRUSTSTORE_PATH:}
     truststore-password: ${MQTT_TRUSTSTORE_PASSWORD:}
+  # Issue #64: maintenance commands (re-send, accept and completion timeouts, dispatcher tick).
+  maintenance-command:
+    resend-interval: ${MAINT_CMD_RESEND:PT5S}
+    accept-timeout: ${MAINT_CMD_ACCEPT_TIMEOUT:PT30S}
+    complete-timeout: ${MAINT_CMD_COMPLETE_TIMEOUT:PT90S}
+    dispatcher:
+      enabled: ${MAINT_CMD_DISPATCHER_ENABLED:true}
+      interval: ${MAINT_CMD_DISPATCHER_INTERVAL:PT1S}
   dispense:
     resend-after: ${DISPENSE_RESEND_AFTER:PT5S}
     # Published command without a result, counted from its first delivery: outcome unknown, bowl blocked, machine MAINTENANCE.

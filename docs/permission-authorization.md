@@ -34,6 +34,9 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `ALERT_NOTIFY` (V17, #58) | không mở endpoint nào: người có quyền nhận thông báo cho mỗi cảnh báo mới |
 | `PRICING_READ` (V18, #61) | `GET /api/v1/pricing/near-expiry-discount` |
 | `PRICING_MANAGE` (V18, #61) | `PUT /api/v1/pricing/near-expiry-discount` |
+| `MAINTENANCE_COMMAND_READ` (V19, #64) | `GET /api/v1/maintenance-commands`, `/{id}` |
+| `MAINTENANCE_COMMAND_EXECUTE` (V19, #64) | `POST /api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands`, `POST /api/v1/maintenance-commands/{id}/reconcile` |
+| `MACHINE_RESET` (V19, #64) | `POST /api/v1/machines/{machineId}/reset` (chỉ ADMIN) |
 
 Code có dạng `^[A-Z][A-Z0-9_]{2,63}$` (CHECK trong DB) và không bao giờ bắt đầu bằng `ROLE_`, nên không trùng authority của role.
 UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọi môi trường có cùng dữ liệu tham chiếu.
@@ -53,6 +56,8 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `ALERT_NOTIFY` | ✓ | |
 | `PRICING_READ` | ✓ | ✓ |
 | `PRICING_MANAGE` | ✓ | |
+| `MAINTENANCE_COMMAND_READ`, `MAINTENANCE_COMMAND_EXECUTE` | ✓ | ✓ |
+| `MACHINE_RESET` | ✓ | |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.

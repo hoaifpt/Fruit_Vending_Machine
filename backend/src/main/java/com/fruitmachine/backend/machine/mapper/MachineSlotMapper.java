@@ -10,6 +10,6 @@ public class MachineSlotMapper {
         // The read-only machineId mirror is not hydrated on a newly persisted entity.
         // A parent proxy's identifier is available without initializing its collections.
         return new MachineSlotResponse(slot.getId(), slot.getMachine().getId(), slot.getSlotCode(),
-                slot.getCapacity(), slot.getStatus(), slot.getCreatedAt(), slot.getUpdatedAt());
+                slot.getCapacity(), slot.getStatus(), slot.isRefillGateOpen(), slot.getCreatedAt(), slot.getUpdatedAt());
     }
 }

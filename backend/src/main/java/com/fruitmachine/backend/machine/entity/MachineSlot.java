@@ -43,6 +43,10 @@ public class MachineSlot extends UpdatedEntity {
     @Column(name = "status", length = 16, nullable = false)
     private SlotStatus status = SlotStatus.ACTIVE;
 
+    /** Issue #64: the upper (refill) gate is open after MAINTENANCE_OPEN_REFILL completed; such a slot never sells. */
+    @Column(name = "refill_gate_open", nullable = false)
+    private boolean refillGateOpen;
+
     @OneToMany(mappedBy = "slot", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)
     private Set<InventoryItem> inventoryItems = new HashSet<>();

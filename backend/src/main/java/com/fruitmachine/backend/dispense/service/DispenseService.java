@@ -1,5 +1,7 @@
 package com.fruitmachine.backend.dispense.service;
 
+import com.fruitmachine.backend.maintenance.enums.MaintenanceCommandStatus;
+import com.fruitmachine.backend.maintenance.repository.MaintenanceCommandRepository;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fruitmachine.backend.audit.entity.AuditLog;
 import com.fruitmachine.backend.audit.repository.AuditLogRepository;
@@ -99,6 +101,7 @@ public class DispenseService {
     private final MachineService machineService;
     private final AuditLogRepository audits;
     private final MachineCommandGateway gateway;
+    private final MaintenanceCommandRepository maintenanceCommands;
     private final ApplicationEventPublisher events;
     private final DispenseProperties properties;
     private final Clock clock;
@@ -223,6 +226,11 @@ public class DispenseService {
         if (machine.getStatus() != MachineStatus.ACTIVE || slot.getStatus() != SlotStatus.ACTIVE) {
             log.debug("Dispense command {} waits: machine {} is {}, slot {} is {}", command.getCommandCode(), machine.getCode(),
                     machine.getStatus(), slot.getSlotCode(), slot.getStatus());
+            return;
+        }
+        if (maintenanceCommands.existsByMachineIdAndStatusIn(machine.getId(), MaintenanceCommandStatus.UNFINISHED)) {
+            // Issue #64: the controller runs one command at a time; a maintenance command blocks dispensing until it finishes.
+            log.debug("Dispense command {} waits: machine {} has an unfinished maintenance command", command.getCommandCode(), machine.getCode());
             return;
         }
         if (commands.existsOtherByMachineIdAndStatusIn(machine.getId(), IN_FLIGHT, command.getId())) {

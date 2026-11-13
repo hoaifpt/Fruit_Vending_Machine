@@ -124,16 +124,29 @@ public class MqttMachineGateway implements MachineCommandGateway, MqttCallbackEx
 
     @Override
     public boolean sendDispense(String machineCode, String commandCode, String columnCode) {
+        return publish(machineCode, commandCode, MachineCommands.dispense(machineCode, commandCode, columnCode));
+    }
+
+    @Override
+    public boolean sendMaintenance(String machineCode, String commandType, String commandCode, String columnCode) {
+        return publish(machineCode, commandCode, MachineCommands.maintenance(machineCode, commandType, commandCode, columnCode));
+    }
+
+    @Override
+    public boolean sendReset(String machineCode, String commandCode) {
+        return publish(machineCode, commandCode, MachineCommands.reset(machineCode, commandCode));
+    }
+
+    private boolean publish(String machineCode, String commandCode, Object envelope) {
         if (!client.isConnected()) return false;
         try {
-            byte[] body = json.writeValueAsBytes(MachineCommands.dispense(machineCode, commandCode, columnCode));
-            var message = new MqttMessage(body);
+            var message = new MqttMessage(json.writeValueAsBytes(envelope));
             message.setQos(QOS);
             message.setRetained(false);
             client.publish(properties.commandTopic(machineCode), message);
             return true;
         } catch (Exception ex) {
-            log.warn("Publishing dispense command {} to {} failed: {}", commandCode, machineCode, ex.getMessage());
+            log.warn("Publishing command {} to {} failed: {}", commandCode, machineCode, ex.getMessage());
             return false;
         }
     }
