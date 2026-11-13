@@ -2,6 +2,7 @@ package com.fruitmachine.backend.mqtt;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fruitmachine.backend.alert.service.AlertService;
 import com.fruitmachine.backend.dispense.service.DispenseReport;
 import com.fruitmachine.backend.dispense.service.DispenseService;
 import com.fruitmachine.backend.machine.repository.MachineRepository;
@@ -42,6 +43,7 @@ public class MachineMessageHandler {
     private final MachinePresenceService presence;
     private final TelemetryService telemetry;
     private final MachineEventRecorder history;
+    private final AlertService alerts;
     private final Clock clock;
 
     /** @param topicMachineCode the machine segment of the topic; the broker ACL ties it to the machine's account. */
@@ -94,6 +96,13 @@ public class MachineMessageHandler {
                     bowlCount.isIntegralNumber() && bowlCount.canConvertToInt() ? bowlCount.asInt() : null);
             var outcome = dispense.handleMachineEvent(envelope.machineCode(), report);
             log.info("Machine {} reported {} for {}: {}", envelope.machineCode(), eventType, commandId, outcome);
+        } else if (MachineEventType.FAULT.equals(eventType) || MachineEventType.BOOT.equals(eventType) || MachineEventType.FAULT_CLEARED.equals(eventType)) {
+            // Alerts (issue #58): own transaction; a failure is logged and never reaches the MQTT callback.
+            try {
+                alerts.onMachineEvent(machineId, envelope.machineCode(), eventType, details, now);
+            } catch (RuntimeException ex) {
+                log.error("Machine {} {} could not be turned into an alert", envelope.machineCode(), eventType, ex);
+            }
         }
     }
 

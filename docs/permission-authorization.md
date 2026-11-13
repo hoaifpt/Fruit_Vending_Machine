@@ -29,6 +29,9 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `PAYMENT_READ` | `GET /api/v1/payments`, `GET /api/v1/payments/{id}` |
 | `PAYMENT_WEBHOOK_LOG_READ` | `GET /api/v1/payment-webhook-logs`, `/{id}` |
 | `AUDIT_LOG_READ` (V16, #56) | `GET /api/v1/audit-logs`, `/{id}` (chỉ ADMIN) |
+| `ALERT_READ` (V17, #58) | `GET /api/v1/alerts`, `/{id}` |
+| `ALERT_MANAGE` (V17, #58) | `POST /api/v1/alerts/{id}/acknowledge`, `/{id}/resolve` |
+| `ALERT_NOTIFY` (V17, #58) | không mở endpoint nào: người có quyền nhận thông báo cho mỗi cảnh báo mới |
 
 Code có dạng `^[A-Z][A-Z0-9_]{2,63}$` (CHECK trong DB) và không bao giờ bắt đầu bằng `ROLE_`, nên không trùng authority của role.
 UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọi môi trường có cùng dữ liệu tham chiếu.
@@ -44,6 +47,8 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `MACHINE_WRITE`, `KIOSK_CREDENTIAL_MANAGE` | ✓ | |
 | `BATCH_READ`, `BATCH_CREATE`, `INVENTORY_READ`, `INVENTORY_WRITE`, `ORDER_READ` | ✓ | ✓ |
 | `PAYMENT_READ`, `PAYMENT_WEBHOOK_LOG_READ`, `AUDIT_LOG_READ` | ✓ | |
+| `ALERT_READ`, `ALERT_MANAGE` | ✓ | ✓ |
+| `ALERT_NOTIFY` | ✓ | |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.
@@ -104,5 +109,7 @@ kiosk key trên API quản trị → `401`; JWT người dùng trên API kiosk �
 3. Dùng nó ở URL rule trong `SecurityConfig` và ở `@PreAuthorize` của endpoint.
 4. Mở rộng test: ma trận phân quyền (`AuthorizationMatrixIntegrationTest`, ghi lại baseline có chủ đích),
    `PermissionSchemaIntegrationTest` (danh mục, mapping). `PermissionRuleConsistencyIntegrationTest` tự kiểm endpoint mới.
+
+`/api/v1/notifications/**` (#58) chỉ cần đăng nhập (`isAuthenticated()`), không cần permission: mỗi user chỉ thấy thông báo của mình.
 
 Swagger tự gắn `x-required-permission` cho mỗi operation, đọc từ `@PreAuthorize` của handler. Nhớ cập nhật cả `api-contract/api.yaml`.

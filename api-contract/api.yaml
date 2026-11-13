@@ -6,6 +6,8 @@ info:
 servers:
   - url: http://localhost:8080
 tags:
+  - name: "Alerts"
+    description: "Machine and slot problems found by the 60 s health check, dispense failures and machine faults. One unresolved alert per problem; the system resolves state-based alerts when the condition clears. ALERT_READ lists, ALERT_MANAGE acknowledges and resolves (ADMIN and STAFF). Alerts are never created or deleted through the API."
   - name: "Audit Log"
     description: "Read-only audit log (who changed what, and when) for AUDIT_LOG_READ, held by ADMIN. Entries are written by the services that make the changes; there is no create, update or delete endpoint."
   - name: Auth
@@ -28,6 +30,8 @@ tags:
     description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: "Notifications"
+    description: "Portal notifications of the signed-in user: one per new alert for users holding ALERT_NOTIFY (ADMIN by default). Any signed-in user, own notifications only; no extra permission. Poll unread-count every 30 s."
   - name: Orders
     description: "Read-only order management for ADMIN and STAFF. There is no write, delete or status endpoint; order status is produced only by backend workflows."
   - name: Payment Webhook Logs
@@ -6832,6 +6836,517 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "AUDIT_LOG_READ"
+  "/api/v1/alerts":
+    "get":
+      "tags":
+        - "Alerts"
+      "summary": "List alerts"
+      "description": "ALERT_READ. Default status filter: OPEN and ACKNOWLEDGED; status selects exactly one status. Optional type, severity, machineId, slotId, errorCode and triggeredAt range (from inclusive, to exclusive, to after from). Sorted CRITICAL, WARNING, INFO, then newest first, id tie-break; paged in the database (page >= 0, size 1 to 200, default 50)."
+      "operationId": "listAlerts"
+      "parameters":
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional OPEN, ACKNOWLEDGED or RESOLVED; default OPEN and ACKNOWLEDGED."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "OPEN"
+              - "ACKNOWLEDGED"
+              - "RESOLVED"
+        -
+          "name": "type"
+          "in": "query"
+          "description": "Optional alert type."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "HIGH_TEMPERATURE"
+              - "LOW_TEMPERATURE"
+              - "HIGH_HUMIDITY"
+              - "MACHINE_OFFLINE"
+              - "PRODUCT_EXPIRED"
+              - "PRODUCT_EXPIRING"
+              - "DISPENSE_FAILED"
+              - "LOW_STOCK"
+              - "HARDWARE_FAULT"
+        -
+          "name": "severity"
+          "in": "query"
+          "description": "Optional INFO, WARNING or CRITICAL."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "INFO"
+              - "WARNING"
+              - "CRITICAL"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Optional machine UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "query"
+          "description": "Optional slot UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "errorCode"
+          "in": "query"
+          "description": "Optional exact error code, for example SERVO_INIT_FAILED."
+          "required": false
+          "schema":
+            "type": "string"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "Optional start of triggeredAt, inclusive, ISO-8601."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-13T00:00:00Z"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Optional end of triggeredAt, exclusive, ISO-8601; after from."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+          "example": "2026-11-14T00:00:00Z"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 200."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 50
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid filter, time range, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks ALERT_READ / ALERT_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of alerts"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseAlertPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "ALERT_READ"
+  "/api/v1/alerts/{id}":
+    "get":
+      "tags":
+        - "Alerts"
+      "summary": "Get one alert"
+      "description": "ALERT_READ. One alert by UUID, with machine and slot codes and actors."
+      "operationId": "getAlert"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Alert UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Alert"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseAlertResponse"
+        "404":
+          "description": "Alert not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, time range, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks ALERT_READ / ALERT_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "ALERT_READ"
+  "/api/v1/alerts/{id}/acknowledge":
+    "post":
+      "tags":
+        - "Alerts"
+      "summary": "Acknowledge an alert"
+      "description": "ALERT_MANAGE. OPEN -> ACKNOWLEDGED with the caller and time; acknowledging an ACKNOWLEDGED alert again returns it unchanged. A RESOLVED alert is 409. No request body."
+      "operationId": "acknowledgeAlert"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Alert UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Acknowledged alert"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseAlertResponse"
+        "404":
+          "description": "Alert not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Alert is already resolved"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, time range, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks ALERT_READ / ALERT_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "ALERT_MANAGE"
+  "/api/v1/alerts/{id}/resolve":
+    "post":
+      "tags":
+        - "Alerts"
+      "summary": "Resolve an alert"
+      "description": "ALERT_MANAGE. OPEN or ACKNOWLEDGED -> RESOLVED with the caller, time and an optional note (at most 500 characters; body optional). A RESOLVED alert is 409, also when the system resolved it a moment earlier. A state-based alert whose condition still holds is raised again as a new alert by the next health check."
+      "operationId": "resolveAlert"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Alert UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ResolveAlertRequest"
+      "responses":
+        "200":
+          "description": "Resolved alert"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseAlertResponse"
+        "404":
+          "description": "Alert not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Alert is already resolved"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, time range, paging or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks ALERT_READ / ALERT_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "ALERT_MANAGE"
+  "/api/v1/notifications/me":
+    "get":
+      "tags":
+        - "Notifications"
+      "summary": "List my notifications"
+      "description": "Signed-in user. Own notifications, newest first; unreadOnly=true keeps unread ones. page >= 0, size 1 to 100 (default 20)."
+      "operationId": "listMyNotifications"
+      "parameters":
+        -
+          "name": "unreadOnly"
+          "in": "query"
+          "description": "Only unread notifications."
+          "required": false
+          "schema":
+            "type": "boolean"
+            "default": false
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+      "responses":
+        "400":
+          "description": "Malformed UUID or invalid paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of notifications"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseNotificationPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/notifications/me/unread-count":
+    "get":
+      "tags":
+        - "Notifications"
+      "summary": "Count my unread notifications"
+      "description": "Signed-in user. Cheap count for polling (every 30 s recommended)."
+      "operationId": "countMyUnreadNotifications"
+      "responses":
+        "400":
+          "description": "Malformed UUID or invalid paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Unread count"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseUnreadCountResponse"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/notifications/{id}/read":
+    "post":
+      "tags":
+        - "Notifications"
+      "summary": "Mark one notification read"
+      "description": "Signed-in user, own notification only (another user's id is 404). Idempotent: marked is 0 when it was already read."
+      "operationId": "markNotificationRead"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Notification UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Marked read"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMarkedReadResponse"
+        "404":
+          "description": "Notification not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or invalid paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+  "/api/v1/notifications/me/read-all":
+    "post":
+      "tags":
+        - "Notifications"
+      "summary": "Mark all my notifications read"
+      "description": "Signed-in user. Marks every unread own notification read."
+      "operationId": "markAllMyNotificationsRead"
+      "responses":
+        "400":
+          "description": "Malformed UUID or invalid paging"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Number marked read"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMarkedReadResponse"
+      "security":
+        -
+          "bearerAuth": []
 
 components:
   securitySchemes:
@@ -9175,3 +9690,308 @@ components:
           "type": "string"
         "data":
           "$ref": "#/components/schemas/AuditLogResponse"
+    "ApiResponseAlertPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/AlertPageResponse"
+    "AlertPageResponse":
+      "type": "object"
+      "description": "Database page of alerts: CRITICAL first, then WARNING, then INFO; newest first within a severity (then id DESC)."
+      "properties":
+        "content":
+          "type": "array"
+          "description": "Alerts of this page."
+          "items":
+            "$ref": "#/components/schemas/AlertResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Matching alerts."
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Pages of matching alerts."
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+    "AlertResponse":
+      "type": "object"
+      "description": "One alert. title/message are Vietnamese UI text; type and errorCode let a frontend localize."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "description": "Alert UUID."
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+          "description": "Machine UUID."
+        "machineCode":
+          "type": "string"
+          "description": "Machine code."
+          "example": "FV-DEV-001"
+        "slotId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Slot UUID for slot alerts (stock, expiry, dispense); null for machine alerts."
+        "slotCode":
+          "type":
+            - "string"
+            - "null"
+          "description": "Slot code (A or B) for slot alerts; null otherwise."
+          "example": "A"
+        "type":
+          "type": "string"
+          "description": "Alert type."
+          "enum":
+            - "HIGH_TEMPERATURE"
+            - "LOW_TEMPERATURE"
+            - "HIGH_HUMIDITY"
+            - "MACHINE_OFFLINE"
+            - "PRODUCT_EXPIRED"
+            - "PRODUCT_EXPIRING"
+            - "DISPENSE_FAILED"
+            - "LOW_STOCK"
+            - "HARDWARE_FAULT"
+        "severity":
+          "type": "string"
+          "description": "INFO, WARNING or CRITICAL."
+          "enum":
+            - "INFO"
+            - "WARNING"
+            - "CRITICAL"
+        "errorCode":
+          "type":
+            - "string"
+            - "null"
+          "description": "Error code for HARDWARE_FAULT (contract codes, REBOOT_<REASON>, MULTIPLE_BOWLS_DETECTED, UNKNOWN_FAULT) and the failure reason for DISPENSE_FAILED; null otherwise."
+          "example": "SERVO_INIT_FAILED"
+        "title":
+          "type": "string"
+          "description": "Short title."
+        "message":
+          "type":
+            - "string"
+            - "null"
+          "description": "Details."
+        "status":
+          "type": "string"
+          "description": "OPEN, ACKNOWLEDGED or RESOLVED."
+          "enum":
+            - "OPEN"
+            - "ACKNOWLEDGED"
+            - "RESOLVED"
+        "triggeredAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "When the problem was detected, UTC."
+        "acknowledgedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "When it was acknowledged, UTC; null if not."
+        "acknowledgedBy":
+          "type":
+            - "string"
+            - "null"
+          "description": "Email of the user who acknowledged it; null if not acknowledged."
+        "resolvedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "When it was resolved, UTC; null while unresolved."
+        "resolvedBy":
+          "type":
+            - "string"
+            - "null"
+          "description": "Email of the user who resolved it, \"system\" when the condition cleared by itself; null while unresolved."
+          "example": "system"
+        "resolutionNote":
+          "type":
+            - "string"
+            - "null"
+          "description": "Resolution note; \"Condition cleared\" for system resolutions."
+      "required":
+        - "id"
+        - "machineCode"
+        - "machineId"
+        - "severity"
+        - "status"
+        - "title"
+        - "triggeredAt"
+        - "type"
+    "ApiResponseAlertResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/AlertResponse"
+    "ResolveAlertRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Optional resolution note. The body may be omitted."
+      "properties":
+        "note":
+          "type":
+            - "string"
+            - "null"
+          "description": "What was done, at most 500 characters; blank means no note."
+          "example": "Cleared the jam in column A and tested a dispense"
+          "maxLength": 500
+          "minLength": 0
+    "ApiResponseNotificationPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/NotificationPageResponse"
+    "NotificationPageResponse":
+      "type": "object"
+      "description": "Database page of the signed-in user's notifications, newest first."
+      "properties":
+        "content":
+          "type": "array"
+          "description": "Notifications of this page."
+          "items":
+            "$ref": "#/components/schemas/NotificationResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+          "description": "Zero-based page index."
+        "size":
+          "type": "integer"
+          "format": "int32"
+          "description": "Requested page size."
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "description": "Matching notifications."
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+          "description": "Pages of matching notifications."
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+    "NotificationResponse":
+      "type": "object"
+      "description": "One portal notification of the signed-in user."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+          "description": "Notification UUID."
+        "alertId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Alert that caused it; open it with GET /api/v1/alerts/{id} (needs ALERT_READ)."
+        "title":
+          "type": "string"
+          "description": "Title (copied from the alert)."
+        "message":
+          "type":
+            - "string"
+            - "null"
+          "description": "Message (copied from the alert)."
+        "severity":
+          "type": "string"
+          "description": "INFO, WARNING or CRITICAL."
+          "enum":
+            - "INFO"
+            - "WARNING"
+            - "CRITICAL"
+        "read":
+          "type": "boolean"
+          "description": "True once read."
+        "readAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+          "description": "When it was marked read, UTC; null while unread."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Creation instant, UTC."
+      "required":
+        - "createdAt"
+        - "id"
+        - "read"
+        - "severity"
+        - "title"
+    "ApiResponseUnreadCountResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/UnreadCountResponse"
+    "UnreadCountResponse":
+      "type": "object"
+      "description": "Number of unread notifications of the signed-in user (poll every 30 s)."
+      "properties":
+        "unread":
+          "type": "integer"
+          "format": "int64"
+          "description": "Unread notifications."
+          "example": 3
+      "required":
+        - "unread"
+    "ApiResponseMarkedReadResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MarkedReadResponse"
+    "MarkedReadResponse":
+      "type": "object"
+      "description": "How many notifications this call marked read (already read ones are not counted)."
+      "properties":
+        "marked":
+          "type": "integer"
+          "format": "int32"
+          "description": "Notifications marked read."
+          "example": 3
+      "required":
+        - "marked"

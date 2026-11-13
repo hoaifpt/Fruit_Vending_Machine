@@ -44,7 +44,8 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | product_batches | id, batch_code, product_id, manufactured_at, expires_at, quantity, created_by, created_at |
 | inventory_items | id, batch_id, slot_id, status, loaded_at, reserved_at, sold_at, removed_at, created_at, updated_at |
 | sensor_readings | id, machine_id, temperature, humidity, recorded_at |
-| alerts | id, machine_id, type, severity, title, message, status, triggered_at, resolved_at, resolved_by, created_at, updated_at |
+| alerts | id, machine_id, slot_id, type, severity, error_code, dedupe_key, title, message, status, triggered_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, resolution_note, created_at, updated_at |
+| notifications | id, user_id, alert_id, title, message, severity, read_at, created_at |
 | orders | id, order_code, machine_id, status, subtotal, total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
 | order_items | id, order_id, product_id, quantity, unit_price, total_price, created_at |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
@@ -99,7 +100,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | products.status | ACTIVE, INACTIVE |
 | inventory_items.status | AVAILABLE, RESERVED, SOLD, EXPIRED, REMOVED, DISPENSE_FAILED |
 | inventory_transactions.type | LOAD, RESERVE, SALE, EXPIRE, REMOVE, RETURN, ADJUSTMENT |
-| alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK |
+| alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK, HARDWARE_FAULT |
 | alerts.severity | INFO, WARNING, CRITICAL |
 | alerts.status | OPEN, ACKNOWLEDGED, RESOLVED |
 | orders.status | PENDING_PAYMENT, PAID, DISPENSING, COMPLETED, CANCELLED, PAYMENT_FAILED, DISPENSE_FAILED, REFUNDED |
@@ -352,3 +353,16 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   backend events are written AFTER_COMMIT of the deciding transaction. `MachineEvent` and `AuditLog` are `@Immutable`;
   `MachineEventRepository` and `AuditLogRepository` are plain Repositories without update/delete methods (append-only by policy).
 - Permission `AUDIT_LOG_READ` (20000000-0000-0000-0000-000000000016) granted to ADMIN only.
+
+## 20. Issue #58 — V17 alerts and notifications
+
+- `alerts`: slot_id with composite FK (slot_id, machine_id) → machine_slots, error_code (CHECK `^[A-Z][A-Z0-9_]{1,63}$`),
+  dedupe_key NOT NULL (pre-V17 rows backfilled `LEGACY:{id}`), acknowledged_at/acknowledged_by (CHECK both NULL or at >= triggered_at),
+  resolution_note (not blank). Type HARDWARE_FAULT added.
+- Partial UNIQUE `uq_alerts_open_dedupe (dedupe_key) WHERE status <> 'RESOLVED'`: at most one unresolved alert per problem. Writes go
+  through `AlertWriter` (INSERT ON CONFLICT DO NOTHING RETURNING id; system resolve UPDATE … WHERE status <> 'RESOLVED', resolved_by NULL).
+  Manual acknowledge/resolve lock the row (PESSIMISTIC_WRITE); a resolved alert is 409.
+- `notifications` (user_id → users ON DELETE CASCADE, alert_id → alerts RESTRICT, severity CHECK, read_at >= created_at); one row per
+  ACTIVE ALERT_NOTIFY user per new alert, inserted AFTER_COMMIT of the alert in its own transaction.
+- Permissions ALERT_READ (…017), ALERT_MANAGE (…018) → ADMIN and STAFF; ALERT_NOTIFY (…019) → ADMIN.
+- Health check (`app.health-check.*`) holds `pg_try_advisory_xact_lock(0x46564D, 4)` for the run; each machine in REQUIRES_NEW.

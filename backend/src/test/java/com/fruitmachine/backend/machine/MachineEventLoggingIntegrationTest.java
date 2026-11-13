@@ -122,9 +122,10 @@ class MachineEventLoggingIntegrationTest extends AbstractWebhookIntegrationTest 
         var rows = jdbc.queryForList("SELECT event_type, source, message_id, payload::text AS payload FROM machine_events WHERE machine_id=? AND source='MACHINE'", machine);
         assertThat(rows).extracting(r -> r.get("event_type")).containsExactlyInAnyOrderElementsOf(expected);
         assertThat(rows).hasSize(8);
-        // status-online (uptime 12) arrives after heartbeat (uptime 12345): the backend records that reboot, nothing else.
+        // status-online (uptime 12) arrives after heartbeat (uptime 12345): the backend records that reboot. The FAULT SERVO_INIT_FAILED
+        // example puts the machine in MAINTENANCE (#58). Nothing else.
         assertThat(jdbc.queryForList("SELECT event_type FROM machine_events WHERE machine_id=? AND source='BACKEND'", String.class, machine))
-                .containsExactly("BACKEND_REBOOT_DETECTED");
+                .containsExactlyInAnyOrder("BACKEND_REBOOT_DETECTED", "BACKEND_MAINTENANCE_ENTERED");
         assertThat(rows).extracting(r -> r.get("event_type")).doesNotContain("heartbeat", "telemetry", "STATUS_HEARTBEAT");
         // The stored payload is the envelope payload as sent.
         var aborted = rows.stream().filter(r -> r.get("event_type").equals("DISPENSE_ABORTED")).findFirst().orElseThrow();

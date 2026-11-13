@@ -237,7 +237,10 @@ class AuthIntegrationTest {
                 "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}",
                 "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions",
                 "/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest",
-                "/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}");
+                "/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}",
+                "/api/v1/alerts", "/api/v1/alerts/{id}", "/api/v1/alerts/{id}/acknowledge", "/api/v1/alerts/{id}/resolve",
+                "/api/v1/notifications/me", "/api/v1/notifications/me/unread-count", "/api/v1/notifications/{id}/read",
+                "/api/v1/notifications/me/read-all");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

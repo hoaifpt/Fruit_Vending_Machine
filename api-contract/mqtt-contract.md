@@ -1,7 +1,7 @@
 # MQTT Contract — Backend ↔ Vending Machines
 
 ```text
-Contract version:        1.3.0
+Contract version:        1.4.0
 Envelope schemaVersion:  1
 Source of truth for:     topics, envelope, commands, events, payloads, timings, error codes, broker security
 Examples (fixtures):     api-contract/mqtt/examples/*.json
@@ -32,6 +32,7 @@ in its firmware; until it is merged into `dev` those items stay pending here.
 | 1.1.0 | 2026-11-10 | Issue #52: the backend sends `columnCode` and handles `details.reason` / `details.bowlCount`; separate result and pending timeouts; one in-flight command per machine; late-result rule. No message shape changed. |
 | 1.2.0 | 2026-11-10 | Issue #53: the backend subscribes to `heartbeat` and `telemetry`, validates every envelope strictly, keeps presence and diagnostics, derives connectivity (60 s / 180 s) and stores telemetry. No message shape changed. |
 | 1.3.0 | 2026-11-11 | Issue #56: every valid `events` and `status` message is stored once per `messageId` in the machine history (`machine_events`, source MACHINE); heartbeat and telemetry are not. No message shape changed. |
+| 1.4.0 | 2026-11-13 | Issue #58: the backend handles `FAULT`, `BOOT` and `FAULT_CLEARED` (HARDWARE_FAULT alerts, MAINTENANCE for the codes in §6.2), raises DISPENSE_FAILED / MULTIPLE_BOWLS_DETECTED alerts and MACHINE_OFFLINE alerts. No message shape changed. |
 
 ## Versioning rules
 
@@ -213,9 +214,9 @@ values `RESULT_TIMEOUT`, `NOT_DELIVERED` and `LEGACY_UNKNOWN` (rows from before 
 | Event type | Meaning | `details` | Status |
 | --- | --- | --- | --- |
 | `BOWL_SENSOR_TRIGGERED` | the IR sensor saw a bowl pass (information, not an error) | `dispenseState` | IMPLEMENTED — stored in the machine history (#56); no other backend action |
-| `FAULT` | hardware fault | `code` (§6.2), optional `state`, `columnCode` | PLANNED |
-| `FAULT_CLEARED` | the fault was cleared by RESET | `code` | PLANNED |
-| `BOOT` | the device started | `resetReason` (§6.3), `firmwareVersion` | PLANNED |
+| `FAULT` | hardware fault | `code` (§6.2), optional `state`, `columnCode` | FIRMWARE_PENDING — backend: one open HARDWARE_FAULT alert per machine and code (#58); a missing or malformed `code` is `UNKNOWN_FAULT`, an unknown well-formed code a WARNING alert |
+| `FAULT_CLEARED` | the fault was cleared by RESET | `code` | FIRMWARE_PENDING — backend resolves the open CONTROLLER_FAULT alert (#58); the machine stays MAINTENANCE until staff activate it |
+| `BOOT` | the device started | `resetReason` (§6.3), `firmwareVersion` | FIRMWARE_PENDING — backend raises `REBOOT_{resetReason}` alerts per §6.3 (#58) |
 
 ---
 
@@ -281,13 +282,13 @@ not send `reason`, `FAULT` or `BOOT` yet (today a rejection carries only the con
 | Reason | Catalog | When | Backend action (issue) |
 | --- | --- | --- | --- |
 | `BUSY` | PROPOSED — awaiting firmware sign-off | another command is running | keep the command open and resend (implemented) |
-| `CONTROLLER_FAULT` | PROPOSED — awaiting firmware sign-off | controller in FAULT | REJECTED: bowl returned, machine MAINTENANCE (implemented #52); HARDWARE_FAULT alert (3.6) |
+| `CONTROLLER_FAULT` | PROPOSED — awaiting firmware sign-off | controller in FAULT | REJECTED: bowl returned, machine MAINTENANCE (implemented #52); HARDWARE_FAULT alert for the failed command (#58) |
 | `INVALID_COMMAND_ID` | PROPOSED — awaiting firmware sign-off | commandId empty, too long or bad characters | REJECTED: bowl returned, log ERROR, no resend (implemented #52) |
 | `INVALID_COLUMN` | PROPOSED — awaiting firmware sign-off | columnCode not A/B | REJECTED: bowl returned, log ERROR, no resend (implemented #52) |
 | `UNSUPPORTED_SCHEMA` | PROPOSED — awaiting firmware sign-off | unknown schemaVersion | REJECTED: bowl returned, log ERROR, no resend (implemented #52) |
 | `MANUAL_STOP` | PROPOSED — awaiting firmware sign-off | technician STOP over Serial | ABORTED: command FAILED, bowl DISPENSE_FAILED, machine MAINTENANCE (implemented #52) |
 | `NO_BOWL_DETECTED` | PROPOSED — awaiting firmware sign-off | cycle done, IR counted 0 bowls | ABORTED: FAILED; order DISPENSE_FAILED; machine MAINTENANCE (implemented #52) |
-| `MULTIPLE_BOWLS_DETECTED` | PROPOSED — awaiting firmware sign-off | IR counted more than 1 bowl | COMPLETED: SUCCESS for this bowl; machine MAINTENANCE (implemented #52); CRITICAL alert (3.6); staff reconciles stock |
+| `MULTIPLE_BOWLS_DETECTED` | PROPOSED — awaiting firmware sign-off | IR counted more than 1 bowl | COMPLETED: SUCCESS for this bowl; machine MAINTENANCE (implemented #52); CRITICAL HARDWARE_FAULT alert `MULTIPLE_BOWLS_DETECTED` (#58); staff reconciles stock |
 | `INTERRUPTED_BY_REBOOT` | PROPOSED — awaiting firmware sign-off | reboot during a command (from NVS) | ABORTED: unsafe failure, never resent (implemented #52) |
 
 ### 6.2 `FAULT` event `details.code`
@@ -308,9 +309,9 @@ not send `reason`, `FAULT` or `BOOT` yet (today a rejection carries only the con
 | --- | --- | --- |
 | `POWERON` | PROPOSED — awaiting firmware sign-off | none |
 | `SOFTWARE` | PROPOSED — awaiting firmware sign-off | none |
-| `WATCHDOG` | PROPOSED — awaiting firmware sign-off | WARNING alert (3.6) |
-| `PANIC` | PROPOSED — awaiting firmware sign-off | WARNING alert (3.6) |
-| `BROWNOUT` | PROPOSED — awaiting firmware sign-off | WARNING alert (3.6) |
+| `WATCHDOG` | PROPOSED — awaiting firmware sign-off | WARNING HARDWARE_FAULT alert `REBOOT_WATCHDOG` (#58) |
+| `PANIC` | PROPOSED — awaiting firmware sign-off | WARNING HARDWARE_FAULT alert `REBOOT_PANIC` (#58) |
+| `BROWNOUT` | PROPOSED — awaiting firmware sign-off | WARNING HARDWARE_FAULT alert `REBOOT_BROWNOUT` (#58) |
 | `UNKNOWN` | PROPOSED — awaiting firmware sign-off | none |
 
 The values map from the ESP32 `esp_reset_reason()` result; every other value is reported as `UNKNOWN`.
@@ -319,7 +320,7 @@ The values map from the ESP32 `esp_reset_reason()` result; every other value is 
 
 ```text
 Serial "ERR ..." replies and Logger output → local debugging only, never sent over MQTT
-Wi-Fi / MQTT connection loss → inferred by the backend (no message for 180 s, Last Will) → MACHINE_OFFLINE alert (3.4, 3.6)
+Wi-Fi / MQTT connection loss → inferred by the backend (no message for 180 s, Last Will) → MACHINE_OFFLINE alert from the 60 s health check (#58)
 ```
 
 ---
@@ -377,8 +378,8 @@ Backend tests parse every example on each build; the firmware team may use them 
 | `event-dispense-completed.json` | DISPENSE_COMPLETED | IMPLEMENTED |
 | `event-dispense-aborted-no-bowl.json` | DISPENSE_ABORTED with reason NO_BOWL_DETECTED | IMPLEMENTED (reason PLANNED) |
 | `event-dispense-rejected-busy.json` | DISPENSE_REJECTED with reason BUSY | IMPLEMENTED (reason PLANNED) |
-| `event-fault-servo-init-failed.json` | FAULT SERVO_INIT_FAILED | PLANNED |
-| `event-boot.json` | BOOT | PLANNED |
+| `event-fault-servo-init-failed.json` | FAULT SERVO_INIT_FAILED | FIRMWARE_PENDING (backend implemented #58) |
+| `event-boot.json` | BOOT | FIRMWARE_PENDING (backend implemented #58) |
 | `status-online.json` | status ONLINE | IMPLEMENTED |
 | `status-offline-lwt.json` | status OFFLINE (Last Will) | IMPLEMENTED |
 | `heartbeat.json` | heartbeat | FIRMWARE_PENDING (backend implemented) |

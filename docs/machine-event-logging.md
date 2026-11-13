@@ -9,8 +9,8 @@ Hai câu hỏi backend trả lời được sau issue này:
 "Ai đã đổi gì, lúc nào?"                      → GET /api/v1/audit-logs
 ```
 
-Lịch sử là **bằng chứng, không phải quy trình**: không phần nào của hệ thống đọc `machine_events` để ra quyết định. Cảnh báo (3.6)
-sẽ dùng cùng các sự kiện miền.
+Lịch sử là **bằng chứng, không phải quy trình**: không phần nào của hệ thống đọc `machine_events` để ra quyết định. Cảnh báo (#58, [alerts.md](alerts.md))
+dùng cùng các sự kiện miền nhưng không đọc bảng này.
 
 ## `machine_events` (V16)
 

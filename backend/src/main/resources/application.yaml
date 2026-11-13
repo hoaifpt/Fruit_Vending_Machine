@@ -99,6 +99,13 @@ app:
   machine-health:
     warning-after: ${MACHINE_WARNING_AFTER:PT60S}
     offline-after: ${MACHINE_OFFLINE_AFTER:PT180S}
+  # Machine health check (issue #58): state-based alerts every interval for ACTIVE and MAINTENANCE machines.
+  health-check:
+    enabled: ${HEALTH_CHECK_ENABLED:true}
+    interval: ${HEALTH_CHECK_INTERVAL:PT60S}
+    low-stock-threshold: ${ALERT_LOW_STOCK_THRESHOLD:2}
+    expiring-within: ${ALERT_EXPIRING_WITHIN:PT12H}
+    environment-grace: ${ALERT_ENVIRONMENT_GRACE:PT5M}
   # Telemetry intake (in memory, one backend instance): readings closer than min-interval and repeated messageIds are dropped.
   telemetry:
     min-interval: ${TELEMETRY_MIN_INTERVAL:PT10S}

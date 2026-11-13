@@ -4,7 +4,7 @@ import java.util.regex.Pattern;
 
 /** Version and envelope of api-contract/mqtt-contract.md (issue #49). Tests keep these values equal to the contract. */
 public final class MqttContract {
-    public static final String CONTRACT_VERSION = "1.3.0";
+    public static final String CONTRACT_VERSION = "1.4.0";
     public static final int SCHEMA_VERSION = 1;
 
     public static final String SCHEMA_VERSION_FIELD = "schemaVersion";

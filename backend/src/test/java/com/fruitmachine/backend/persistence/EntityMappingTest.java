@@ -107,10 +107,10 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(16);
+                .isEqualTo(17);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
-        assertThat(entities).hasSize(22);
+        assertThat(entities).hasSize(23);
         Set<String> tables = jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -130,7 +130,8 @@ class EntityMappingTest {
                 Map.entry("alerts", "alert"), Map.entry("orders", "order"), Map.entry("order_items", "order"),
                 Map.entry("order_item_allocations", "order"), Map.entry("payments", "payment"),
                 Map.entry("payment_webhook_logs", "payment"), Map.entry("dispense_commands", "dispense"),
-                Map.entry("audit_logs", "audit"), Map.entry("kiosk_credentials", "machine.kiosk"));
+                Map.entry("audit_logs", "audit"), Map.entry("kiosk_credentials", "machine.kiosk"),
+                Map.entry("notifications", "notification"));
         for (var entity : entities) {
             String table = entity.getJavaType().getAnnotation(Table.class).name();
             assertThat(entity.getJavaType().getPackageName()).as("Feature owner of %s", table)
@@ -209,6 +210,7 @@ class EntityMappingTest {
         alert.setType(AlertType.LOW_STOCK);
         alert.setSeverity(AlertSeverity.WARNING);
         alert.setTitle("Low stock");
+        alert.setDedupeKey("ENTITY_TEST:" + java.util.UUID.randomUUID());
         entityManager.persist(alert);
 
         Order order = new Order();
