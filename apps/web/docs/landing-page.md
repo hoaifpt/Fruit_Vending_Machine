@@ -26,3 +26,7 @@ Khởi động lại Vite hoặc build lại sau khi đổi biến môi trườn
 Tiêu đề dùng Source Serif 4 để giữ hướng chữ serif của mẫu A và hiển thị tiếng Việt đồng nhất; chỉ self-host subset latin/vietnamese, weight 600, WOFF2 khoảng 28 KB. Nội dung và form vẫn dùng sans-serif hệ thống. Font nguồn Google Fonts qua gói @fontsource/source-serif-4, giấy phép OFL-1.1.
 
 Màu OKLCH và giao diện login được giữ riêng. Các mục tiêu đề/CTA/ảnh chính bám hướng A; phần giải pháp, hỏi đáp và trạng thái liên hệ bổ sung theo kế hoạch đã duyệt. Hỗ trợ reduced motion; menu có Escape, nhấp bên ngoài và tự đóng khi chuyển sang desktop; hỏi đáp dùng details/summary native.
+
+## Triển khai trên Tailwind (FE 9.3)
+
+`src/pages/LandingPage.tsx` dùng utility Tailwind v4, `Button` (`src/components/ui`, render dạng liên kết) và icon lucide; nội dung và thứ tự mục giữ nguyên hướng A. Màu lấy từ token OKLCH trong `src/index.css` (`--ink`, `--muted`, `--brand`, `--surface`, `--identity`) cùng hai token riêng khai báo ở gốc trang (`--landing-line`, `--landing-dark`). Trang luôn nền sáng (`color-scheme: light`), không đổi theo theme tối của khu quản trị. `LandingPage.css` chỉ còn `@font-face` Source Serif 4 và cuộn mượt; `.route-message` (404, fallback route) tạm ở đây đến khi dọn CSS (FE 9.4). Kiểm tra: `e2e/landing.spec.ts` (axe, ảnh 1440/768/390, bàn phím); Lighthouse bản build: hiệu năng 92 (mobile) / 100 (desktop), truy cập 100.
