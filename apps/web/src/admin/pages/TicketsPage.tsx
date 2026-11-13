@@ -1,4 +1,4 @@
-// O3 Phiếu công việc (FE 7.1): restock and maintenance jobs at a machine, newest first, server-side filters on the URL.
+// O3 Phiếu công việc (FE 7.1): restock, maintenance and (FE 8.3) incident jobs at a machine, newest first, server-side filters on the URL.
 // Admins (TICKET_WRITE) see every ticket, open, assign and cancel; staff only receive the tickets given to them (the
 // server filters) and start / complete them. Each row only offers the valid next step. No delete.
 // API: draft contract api-contract/drafts/work-tickets.yaml (waiting for BE 4.3); on a backend without it (404) the
@@ -21,7 +21,7 @@ import { CreateTicketSheet, DueText, TicketActionButtons, TicketActionDialog } f
 import type { TicketActionState } from '../ticket-parts.tsx'
 import {
   TICKETS_MISSING, TICKET_SORT_RULE, TICKET_STATUSES, TICKET_TYPE_OPTIONS, assigneeText, isClosed, isOverdue, nextActions, readTicketFilters, ticketFilterKeys,
-  ticketListQuery, ticketPath, ticketTypeLabel, ticketsAvailability,
+  ticketListQuery, ticketOrigin, ticketPath, ticketTypeLabel, ticketsAvailability,
 } from '../tickets.ts'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
@@ -52,7 +52,7 @@ function TicketsPage() {
   const columns: Column<WorkTicket>[] = [
     { head: 'Phiếu', cell: ticket => <span className="grid max-w-[46ch] gap-0.5">
       <Link to={ticketPath(ticket.id)} className={LINK}>{ticket.title}</Link>
-      <span className="text-xs text-muted-foreground">{ticketTypeLabel(ticket.type)}{ticket.alertId ? ' · từ cảnh báo' : ''}</span>
+      <span className="text-xs text-muted-foreground">{ticketTypeLabel(ticket.type)}{ticketOrigin(ticket) ? ` · ${ticketOrigin(ticket)}` : ''}</span>
     </span> },
     { head: 'Máy', nowrap: true, cell: ticket => canMachines && machinePath(ticket.machineId)
       ? <Link to={machinePath(ticket.machineId)} className={`${LINK} font-mono text-[13px]`} label={`Máy ${ticket.machineCode}, mở chi tiết máy`}>{ticket.machineCode}</Link>
@@ -67,8 +67,8 @@ function TicketsPage() {
   ]
 
   const subtitle = viewer.canWrite
-    ? 'Việc nạp hàng và bảo trì tại máy. Tạo phiếu, giao cho nhân viên, theo dõi đến khi hoàn tất; mỗi bước ghi người và thời điểm. Phiếu không xóa được, chỉ hủy kèm lý do.'
-    : 'Phiếu được giao cho bạn: việc nạp hàng và bảo trì tại máy. Bấm “Bắt đầu” khi tới máy và “Hoàn tất” khi xong; mỗi bước ghi tên bạn và thời điểm.'
+    ? 'Việc nạp hàng, bảo trì và xử lý sự cố tại máy. Tạo phiếu, giao cho nhân viên, theo dõi đến khi hoàn tất; mỗi bước ghi người và thời điểm. Phiếu sự cố được tạo tự động khi khách gửi báo cáo. Phiếu không xóa được, chỉ hủy kèm lý do.'
+    : 'Phiếu được giao cho bạn: việc nạp hàng, bảo trì và xử lý sự cố tại máy. Bấm “Bắt đầu” khi tới máy và “Hoàn tất” khi xong; mỗi bước ghi tên bạn và thời điểm.'
   const head = <PageHead title="Phiếu công việc" subtitle={subtitle}
     actions={viewer.canWrite && !forbidden && !missing ? <Button type="button" data-focus-key="tickets-create" onClick={() => create.open()}><ClipboardPlus aria-hidden="true" />Tạo phiếu</Button> : undefined} />
 

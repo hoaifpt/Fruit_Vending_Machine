@@ -11,6 +11,8 @@ import { restockReconciliation } from './seed.ts'
 import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
 import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
+import { incidentReportRoutes } from './incident-reports.ts'
+import { refundRoutes } from './refunds.ts'
 import { boxPrice, linePricing } from './pricing.ts'
 import { revenueReport } from './revenue.ts'
 
@@ -320,9 +322,17 @@ function statusForm<T extends string>(ctx: HandlerContext, values: readonly T[])
 
 // ---- work tickets (draft of backend 4.3, api-contract/drafts/work-tickets.yaml). Messages in English as the backend would send.
 const TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const
+/** Types POST /work-tickets accepts; INCIDENT tickets are opened by the server from customer reports (FE 8.3). */
 const TICKET_TYPES = ['RESTOCK', 'MAINTENANCE'] as const
+const LISTED_TICKET_TYPES = ['RESTOCK', 'MAINTENANCE', 'INCIDENT'] as const
 /** Holds TICKET_WRITE: sees every ticket, opens, assigns and cancels. Everyone else only ever gets their own. */
 const managesTickets = (user: MockUser) => draftPermissionsOfUser(user).includes('TICKET_WRITE')
+/** FE 8.3: a ticket as the caller sees it; the customer's phone number of an INCIDENT ticket only reaches TICKET_WRITE. */
+function ticketView(ctx: HandlerContext, ticket: MockTicket): MockTicket {
+  const view = { ...ticket }
+  if (view.incidentReport && !managesTickets(ctx.user!)) view.incidentReport = { ...view.incidentReport, contactPhone: null }
+  return view
+}
 function findTicket(ctx: HandlerContext): MockTicket {
   if (!UUID_PATTERN.test(decode(ctx.params.id))) throw new MockHttpError(400, 'Invalid request parameter', { id: 'Must be a valid UUID' })
   const ticket = byId(ctx.store.tickets, ctx.params.id, 'Work ticket not found')
@@ -851,16 +861,16 @@ export const routes: Route[] = [
     const { query } = ctx
     const errors: Record<string, string> = {}
     if (query.get('status') && !(TICKET_STATUSES as readonly string[]).includes(query.get('status')!)) errors.status = `Must be one of: ${TICKET_STATUSES.join(', ')}`
-    if (query.get('type') && !(TICKET_TYPES as readonly string[]).includes(query.get('type')!)) errors.type = `Must be one of: ${TICKET_TYPES.join(', ')}`
+    if (query.get('type') && !(LISTED_TICKET_TYPES as readonly string[]).includes(query.get('type')!)) errors.type = `Must be one of: ${LISTED_TICKET_TYPES.join(', ')}`
     for (const name of ['machineId', 'assigneeId']) if (query.get(name) && !UUID_PATTERN.test(query.get(name)!)) errors[name] = 'Must be a valid UUID'
     if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
     // Server-side scope: without TICKET_WRITE the assignee filter is always the caller.
     const assignee = managesTickets(ctx.user!) ? query.get('assigneeId') : ctx.user!.id
     const rows = ctx.store.tickets.filter(ticket => eq(query, 'status', ticket.status) && eq(query, 'type', ticket.type) && eq(query, 'machineId', ticket.machineId)
-      && (!assignee || ticket.assigneeId === assignee)).map(ticket => ({ ...ticket }))
+      && (!assignee || ticket.assigneeId === assignee)).map(ticket => ticketView(ctx, ticket))
     return ok(paginate(rows, query, { sorts: { createdAt: row => row.createdAt, dueAt: row => row.dueAt }, defaultSort: 'createdAt,desc' }))
   }),
-  route('GET', '/work-tickets/:id', { draftPermission: 'TICKET_READ' }, ctx => ok({ ...findTicket(ctx) })),
+  route('GET', '/work-tickets/:id', { draftPermission: 'TICKET_READ' }, ctx => ok(ticketView(ctx, findTicket(ctx)))),
   route('POST', '/work-tickets', { draftPermission: 'TICKET_WRITE' }, ctx => {
     const form = new Form(ctx.body, ['type', 'machineId', 'title', 'description', 'dueAt', 'alertId', 'assigneeId'])
     const data = ctx.body as Record<string, unknown>
@@ -899,7 +909,7 @@ export const routes: Route[] = [
     }
     if (assignee) assignTo(ticket, assignee, ctx.user!, at)
     ctx.store.tickets.push(ticket)
-    return created({ ...ticket })
+    return created(ticketView(ctx, ticket))
   }),
   route('POST', '/work-tickets/:id/assign', { draftPermission: 'TICKET_WRITE' }, ctx => {
     const form = new Form(ctx.body, ['assigneeId'])
@@ -908,7 +918,7 @@ export const routes: Route[] = [
     const ticket = findTicket(ctx)
     if (ticket.status !== 'OPEN' && ticket.status !== 'ASSIGNED') throw conflict('Ticket can only be assigned while OPEN or ASSIGNED')
     assignTo(ticket, assignee!, ctx.user!, iso(ctx.now))
-    return ok({ ...ticket })
+    return ok(ticketView(ctx, ticket))
   }),
   route('POST', '/work-tickets/:id/start', { draftPermission: 'TICKET_READ' }, ctx => {
     const ticket = findTicket(ctx)
@@ -916,7 +926,7 @@ export const routes: Route[] = [
     if (ticket.status !== 'ASSIGNED') throw conflict('Ticket is not ASSIGNED')
     const at = iso(ctx.now)
     Object.assign(ticket, { status: 'IN_PROGRESS', startedAt: at, startedById: ctx.user!.id, startedByName: ctx.user!.fullName, updatedAt: at })
-    return ok({ ...ticket })
+    return ok(ticketView(ctx, ticket))
   }),
   route('POST', '/work-tickets/:id/complete', { draftPermission: 'TICKET_READ' }, ctx => {
     let note: string | null = null
@@ -936,7 +946,7 @@ export const routes: Route[] = [
     const at = iso(ctx.now)
     Object.assign(ticket, { status: 'COMPLETED', completedAt: at, completedById: ctx.user!.id, completedByName: ctx.user!.fullName, completionNote: note, updatedAt: at })
     if (lines.length) ticket.resolvedAlertIds = resolveLowStock(ctx.store, ticket, ctx.now)
-    return ok({ ...ticket })
+    return ok(ticketView(ctx, ticket))
   }),
   // FE 7.2: loading and removing through the lines of a RESTOCK ticket, with the rules of /inventory/load and /remove.
   route('POST', '/work-tickets/:id/restock-lines/:lineId/load', { draftPermission: 'TICKET_READ' }, ctx => {
@@ -952,7 +962,7 @@ export const routes: Route[] = [
     for (const row of ctx.store.transactions) if (row.referenceId === operationId) row.referenceId = ticket.id
     line.loadedQuantity += quantity
     touchRestock(ticket, ctx.now)
-    return ok({ ...ticket })
+    return ok(ticketView(ctx, ticket))
   }),
   route('POST', '/work-tickets/:id/restock-lines/:lineId/remove', { draftPermission: 'TICKET_READ' }, ctx => {
     const form = new Form(ctx.body, ['inventoryItemId', 'reason'])
@@ -968,7 +978,7 @@ export const routes: Route[] = [
     if (row) row.referenceId = ticket.id
     line.removedQuantity += 1
     touchRestock(ticket, ctx.now)
-    return ok({ ...ticket })
+    return ok(ticketView(ctx, ticket))
   }),
   route('POST', '/work-tickets/:id/cancel', { draftPermission: 'TICKET_WRITE' }, ctx => {
     const form = new Form(ctx.body, ['reason'])
@@ -978,7 +988,7 @@ export const routes: Route[] = [
     if (ticket.status === 'COMPLETED' || ticket.status === 'CANCELLED') throw conflict('Ticket is already COMPLETED or CANCELLED')
     const at = iso(ctx.now)
     Object.assign(ticket, { status: 'CANCELLED', cancelledAt: at, cancelledById: ctx.user!.id, cancelledByName: ctx.user!.fullName, cancelReason: reason, updatedAt: at })
-    return ok({ ...ticket })
+    return ok(ticketView(ctx, ticket))
   }),
 
   // ---- maintenance schedules: draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml). Never deleted.
@@ -1165,6 +1175,12 @@ export const routes: Route[] = [
     store.payments.push(payment)
     return created(kioskPaymentView(payment))
   }),
+
+  // ---- public incident report (FE 8.2, draft api-contract/drafts/incident-reports.yaml)
+  ...incidentReportRoutes,
+
+  // ---- manual refunds (FE 8.1, draft api-contract/drafts/refunds.yaml)
+  ...refundRoutes,
 ]
 
 export interface RaiseAlertInput { type?: MockAlert['type']; severity?: MockAlert['severity']; machineId?: string; title?: string; message?: string | null }

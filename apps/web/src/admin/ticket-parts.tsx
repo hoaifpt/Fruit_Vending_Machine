@@ -16,7 +16,7 @@ import { useMachineOptions, useStaffOptions } from './options.ts'
 import { restockPath } from './restock.ts'
 import { useSession } from './useSession.ts'
 import {
-  NEW_TICKET, TICKETS_MISSING, TICKET_LIMITS, TICKET_TYPE_OPTIONS, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, isStale,
+  CREATABLE_TICKET_TYPE_OPTIONS, NEW_TICKET, TICKETS_MISSING, TICKET_LIMITS, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, isStale,
   nextActions, ticketActionError, ticketSteps, ticketTypeLabel, ticketsAvailability, validateTicket,
 } from './tickets.ts'
 import type { TicketAction, TicketScreen, TicketValues, TicketViewer } from './tickets.ts'
@@ -209,7 +209,7 @@ export function CreateTicketSheet({ initial = NEW_TICKET, alertLabel, close, cre
       <FormField label="Loại phiếu" required error={errors.type} className="mb-4" hint="Nạp hàng: mang hộp tới ngăn. Bảo trì: sửa, vệ sinh, kiểm tra máy.">
         <NativeSelect value={values.type} className="max-sm:h-11 max-sm:text-base" onChange={event => form.set('type')(event.target.value)}>
           <option value="">Chọn loại…</option>
-          {TICKET_TYPE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {CREATABLE_TICKET_TYPE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
         </NativeSelect>
       </FormField>
       <FormField label="Máy" required error={errors.machineId} className="mb-4" disabled={fromAlert}

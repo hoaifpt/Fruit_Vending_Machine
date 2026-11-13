@@ -29,6 +29,7 @@ const WebhookLogsPage = lazy(() => import('./pages/WebhookLogsPage.tsx'))
 const WebhookLogDetailPage = lazy(() => import('./pages/WebhookLogDetailPage.tsx'))
 const AlertsPage = lazy(() => import('./pages/AlertsPage.tsx'))
 const AlertDetailPage = lazy(() => import('./pages/AlertDetailPage.tsx'))
+const RefundsPage = lazy(() => import('./pages/RefundsPage.tsx'))
 const TicketsPage = lazy(() => import('./pages/TicketsPage.tsx'))
 const TicketDetailPage = lazy(() => import('./pages/TicketDetailPage.tsx'))
 const TicketRestockPage = lazy(() => import('./pages/TicketRestockPage.tsx'))
@@ -94,6 +95,7 @@ function AdminApp() {
       'webhook-log-detail': <WebhookLogDetailPage key={id} logId={id} />,
       alerts: <AlertsPage />,
       'alert-detail': <AlertDetailPage key={id} alertId={id} />,
+      refunds: <RefundsPage />,
       tickets: <TicketsPage />,
       'ticket-detail': <TicketDetailPage key={id} ticketId={id} />,
       'ticket-restock': <TicketRestockPage key={id} ticketId={id} />,

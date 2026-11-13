@@ -30,7 +30,7 @@ npm run dev:mock
 
 Toàn bộ web (admin, đăng nhập, kiosk) chạy trên dữ liệu giả trong bộ nhớ, dựng từ seed dev; tải lại trang là về dữ liệu ban đầu. Đăng nhập bằng `admin@freshvend.test` / `mock-admin-password` hoặc `staff@freshvend.test` / `mock-staff-password` (giá trị giả, chỉ dùng cho mock). Kiosk `/buy` tự xác nhận thanh toán sau 15 giây.
 
-Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,dispense-commands,payments,webhook-logs,kiosk,roles,alerts`; `alerts` là API nháp cảnh báo (chờ BE 3.6); `dispense-commands` là API nháp lệnh nhả hàng (chờ BE 3.3), mock riêng được khi đơn hàng đi API thật nhưng chỉ trả dữ liệu cho đơn có trong mock, đơn khác nhận 404 và màn chi tiết đơn hiện "chưa có dữ liệu"), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ. Khi không mock nhóm `auth`, đăng nhập đi qua backend thật; token thật mang tài khoản mà dữ liệu mock không có, nên mock dựng một tài khoản tạm từ claim của token (`sub`, `email`, `roles`) và xét quyền theo bảng vai trò của mock thay vì trả 401. Token hết hạn hoặc thiếu `roles` vẫn bị 401.
+Chỉ mock một phần: đặt `VITE_API_MOCK` trong `.env.local` (`all` hoặc danh sách nhóm: `auth,users,products,machines,slots,kiosk-credentials,batches,inventory,orders,dispense-commands,payments,webhook-logs,kiosk,roles,alerts,incident-reports,refunds`; `alerts` là API nháp cảnh báo (chờ BE 3.6); `refunds` là API nháp ghi nhận hoàn tiền (chờ BE 5.1), chỉ ghi nhận được cho đơn có trong mock; `incident-reports` là API nháp báo sự cố công khai (chờ BE 5.2), giới hạn 5 lần gửi/phút trong bộ nhớ, mỗi báo cáo mở một phiếu INCIDENT trong nhóm `tickets`, kèm `GET /incident-reports` cho màn Hoàn tiền (FE 8.3); `dispense-commands` là API nháp lệnh nhả hàng (chờ BE 3.3), mock riêng được khi đơn hàng đi API thật nhưng chỉ trả dữ liệu cho đơn có trong mock, đơn khác nhận 404 và màn chi tiết đơn hiện "chưa có dữ liệu"), rồi chạy `npm run dev`; nhóm không bật vẫn gọi API thật. Muốn mock nhóm `kiosk` theo cách này thì đặt thêm `VITE_KIOSK_API_KEY` một giá trị bất kỳ. Khi không mock nhóm `auth`, đăng nhập đi qua backend thật; token thật mang tài khoản mà dữ liệu mock không có, nên mock dựng một tài khoản tạm từ claim của token (`sub`, `email`, `roles`) và xét quyền theo bảng vai trò của mock thay vì trả 401. Token hết hạn hoặc thiếu `roles` vẫn bị 401.
 
 Mock chỉ dành cho máy phát triển và demo, **không bao giờ triển khai**:
 
@@ -65,9 +65,11 @@ Kịch bản giữ nguyên khi chuyển trang cho tới khi đóng tab hoặc m�
 | `/admin/orders`, `/admin/orders/:id` | Đơn hàng (chỉ xem) |
 | `/admin/payments`, `/admin/payments/:id` | Thanh toán và danh sách "Cần xử lý" (ADMIN, chỉ xem) |
 | `/admin/alerts`, `/admin/alerts/:id` | Cảnh báo của máy: lọc, xác nhận, đóng (ghi người và thời điểm); chuông trên thanh trên cùng cập nhật mỗi 30 giây (API nháp, chờ BE 3.6) |
+| `/admin/refunds` | Hoàn tiền (chỉ ADMIN): lọc nhanh "Cần hoàn tiền" (đơn nhả hàng thất bại, thanh toán muộn hoặc trùng) và "Đã hoàn tiền" (`?view=refunded`); sau khi chuyển khoản trả khách, nhập mã giao dịch để ghi nhận, mỗi khoản chỉ một lần (API nháp, chờ BE 5.1) |
 | `/admin/webhook-logs`, `/admin/webhook-logs/:id` | Log webhook thanh toán (ADMIN, chỉ xem) |
 | `/admin/users` | Tài khoản nhân viên (ADMIN) |
 | `/buy` | Màn hình kiosk: chọn sản phẩm và thanh toán VietQR (cần `VITE_KIOSK_API_KEY`) |
+| `/bao-su-co` | Báo sự cố công khai cho khách (không cần tài khoản, ưu tiên điện thoại), mở từ QR trên kiosk với `?machine=<mã máy>`; thiếu hoặc sai mã thì khách tự nhập mã in trên máy. Loại sự cố quyết định trường bắt buộc, ảnh tùy chọn (API nháp, chờ BE 5.2) |
 
 Các đường dẫn `/admin/*` yêu cầu đăng nhập; chưa đăng nhập hoặc token hết hạn (`401`) sẽ chuyển tới `/login`. Menu và nút thao tác ẩn theo vai trò, nhưng backend mới là nơi kiểm tra quyền. Bảng quyền và quy ước chi tiết: [web quản trị tích hợp backend](docs/admin-implementation.md).
 
@@ -95,11 +97,11 @@ Bộ đếm dùng `min(currentPayment.expiresAt, order.expiresAt)` và hiệu ch
 
 ## Chức năng quản trị và nhân viên
 
-- **ADMIN:** toàn quyền quản lý người dùng, sản phẩm, máy, ngăn, khóa kiosk; xem thanh toán và log webhook.
+- **ADMIN:** toàn quyền quản lý người dùng, sản phẩm, máy, ngăn, khóa kiosk; xem thanh toán và log webhook; ghi nhận hoàn tiền.
 - **STAFF:** chỉ xem sản phẩm, máy, ngăn; tạo/xem lô hàng; nạp/gỡ hộp và xem tồn kho; xem đơn hàng.
 - Danh sách phân trang, sắp xếp, lọc phía server; bộ lọc nằm trong URL.
 - Khóa API kiosk chỉ hiện một lần khi cấp; web không lưu lại.
-- Dữ liệu thanh toán/đơn hàng chỉ đọc: không có thao tác hoàn tiền, đánh dấu đã thanh toán, hủy hay sửa đơn.
+- Dữ liệu thanh toán/đơn hàng chỉ đọc: không có thao tác đánh dấu đã thanh toán, hủy hay sửa đơn. Thao tác duy nhất là ADMIN ghi nhận hoàn tiền (mã giao dịch chuyển khoản) cho đơn nhả hàng thất bại, thanh toán muộn hoặc trùng ở `/admin/refunds`; STAFF không thấy màn này.
 
 ## Cấu hình môi trường
 

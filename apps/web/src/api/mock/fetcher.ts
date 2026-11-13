@@ -8,7 +8,7 @@ import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'reports'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'incident-reports', 'refunds', 'reports'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -27,8 +27,12 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   roles: 'roles', permissions: 'roles',
   // Draft of backend 3.6 (api-contract/drafts/alerts.yaml).
   alerts: 'alerts',
+  // Draft of backend 5.1 (api-contract/drafts/refunds.yaml, FE 8.1).
+  refunds: 'refunds',
   // Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
   'work-tickets': 'tickets',
+  // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): admin read of reports for W-12 (FE 8.3).
+  'incident-reports': 'incident-reports',
   // Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml).
   'maintenance-schedules': 'maintenance-schedules',
   // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml).
@@ -40,8 +44,12 @@ export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/slots(\/|$)/.test(path)) return 'slots'
   // Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): its own group, so it can be mocked while orders are real.
   if (/^\/orders\/[^/]+\/dispense-commands(\/|$)/.test(path)) return 'dispense-commands'
+  // Draft of backend 5.1 (api-contract/drafts/refunds.yaml): recording a refund belongs with GET /refunds, not orders.
+  if (/^\/orders\/[^/]+\/refund\/?$/.test(path)) return 'refunds'
   // Draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml): its own group, like dispense-commands.
   if (/^\/machines\/[^/]+\/(heartbeat|sensor-readings|events)(\/|$)/.test(path)) return 'telemetry'
+  // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): public report form of FE 8.2.
+  if (/^\/public\/incident-reports(\/|$)/.test(path)) return 'incident-reports'
   // Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): its own group, like telemetry.
   if (/^\/machines\/[^/]+\/maintenance-commands(\/|$)/.test(path)) return 'maintenance-commands'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
@@ -94,6 +102,10 @@ function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
 }
 
 function parseBody(init?: RequestInit): unknown {
+  // multipart/form-data (FE 8.2 incident report): plain fields as strings, file parts as { name, type, size } only.
+  if (typeof FormData !== 'undefined' && init?.body instanceof FormData) {
+    return Object.fromEntries([...init.body.entries()].map(([key, value]) => [key, typeof value === 'string' ? value : { name: value.name, type: value.type, size: value.size }]))
+  }
   if (typeof init?.body !== 'string') return undefined
   try { return JSON.parse(init.body) } catch { throw new MockHttpError(400, 'Nội dung yêu cầu không phải JSON hợp lệ.') }
 }

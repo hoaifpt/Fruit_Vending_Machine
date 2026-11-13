@@ -4,21 +4,30 @@
 // never deleted. Opening, assigning and cancelling need TICKET_WRITE; starting and completing are for the assignee only.
 // Who sees which ticket is decided by the server (a caller without TICKET_WRITE only receives its own); the web never
 // filters on its own and only uses the viewer's id to decide which buttons to show.
+// FE 8.3: INCIDENT tickets ("Sự cố") are opened by the server from a customer report (drafts/incident-reports.yaml,
+// BE 5.2), never from the "Tạo phiếu" form; they carry the report summary (incidentReport) and follow the same lifecycle.
 import { ApiError } from '../api/client.ts'
 import type { Alert, CancelWorkTicketBody, CompleteWorkTicketBody, CreateWorkTicketBody, WorkTicket, WorkTicketListQuery } from '../api/resources.ts'
 import { formatDateTime, localDateTimeToInstant } from '../lib/format.ts'
 import { formatSort, oneOf, parseSort, uuidParam } from '../lib/table-query.ts'
 import type { SortRule, SortState } from '../lib/table-query.ts'
 import { alertTypeHint, alertTypeLabel } from './alerts.ts'
+import { INCIDENT_TYPES } from '../features/incident/incident.ts'
 
 /** Same order as the `ticket` domain of STATUS_CATALOG (and the lifecycle). */
 export const TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const
 export type TicketStatus = typeof TICKET_STATUSES[number]
-export const TICKET_TYPES = ['RESTOCK', 'MAINTENANCE'] as const
+export const TICKET_TYPES = ['RESTOCK', 'MAINTENANCE', 'INCIDENT'] as const
 export type TicketType = typeof TICKET_TYPES[number]
+/** Types an admin can open by hand (POST /work-tickets); INCIDENT only comes from a customer report. */
+export const CREATABLE_TICKET_TYPES = ['RESTOCK', 'MAINTENANCE'] as const
+export type CreatableTicketType = typeof CREATABLE_TICKET_TYPES[number]
 
-export const TICKET_TYPE_LABELS: Readonly<Record<TicketType, string>> = { RESTOCK: 'Nạp hàng', MAINTENANCE: 'Bảo trì' }
+export const TICKET_TYPE_LABELS: Readonly<Record<TicketType, string>> = { RESTOCK: 'Nạp hàng', MAINTENANCE: 'Bảo trì', INCIDENT: 'Sự cố' }
+/** Options of the "Loại" filter of the list (every type). */
 export const TICKET_TYPE_OPTIONS = TICKET_TYPES.map(type => ({ value: type, label: TICKET_TYPE_LABELS[type] }))
+/** Options of the "Tạo phiếu" form (no INCIDENT). */
+export const CREATABLE_TICKET_TYPE_OPTIONS = CREATABLE_TICKET_TYPES.map(type => ({ value: type, label: TICKET_TYPE_LABELS[type] }))
 export function ticketTypeLabel(type: string | undefined): string {
   return type && Object.hasOwn(TICKET_TYPE_LABELS, type) ? TICKET_TYPE_LABELS[type as TicketType] : (type || 'Phiếu')
 }
@@ -145,6 +154,10 @@ export function assigneeText(ticket: Pick<WorkTicket, 'assigneeId' | 'assigneeNa
 export function nextStepText(ticket: WorkTicket, viewer: TicketViewer): string {
   const mine = isMine(ticket, viewer)
   const who = person(ticket.assigneeName, ticket.assigneeId)
+  if (ticket.type === 'INCIDENT') {
+    if (ticket.status === 'OPEN' && viewer.canWrite) return 'Đọc báo cáo của khách bên dưới, rồi chọn nhân viên kiểm tra máy.'
+    if (ticket.status === 'IN_PROGRESS' && mine) return 'Kiểm tra máy theo báo cáo của khách, xong thì bấm “Hoàn tất” và ghi lại đã thấy gì, đã làm gì. Hoàn tất phiếu không hoàn tiền cho khách.'
+  }
   if (mine && hasRestockLines(ticket)) {
     if (ticket.status === 'ASSIGNED') return 'Khi tới máy, mở “Thực hiện nạp hàng” và làm theo từng bước: bắt đầu phiếu, mở cửa nạp, rút hộp hỏng, nạp theo dòng, đóng cửa nạp, đối chiếu.'
     if (ticket.status === 'IN_PROGRESS') return 'Tiếp tục ở “Thực hiện nạp hàng”: phiếu chỉ hoàn tất được sau khi đóng cửa nạp và đối chiếu số hộp.'
@@ -180,6 +193,32 @@ export function ticketSteps(ticket: WorkTicket): TicketStep[] {
   return steps
 }
 
+// ---- INCIDENT tickets (FE 8.3)
+
+export type TicketIncident = NonNullable<WorkTicket['incidentReport']>
+/** Vietnamese label of a customer report type (same labels as the public form, SRS 3.6.4). */
+export function incidentTypeLabel(type: string | undefined | null): string {
+  return INCIDENT_TYPES.find(option => option.value === type)?.label ?? (type || 'Sự cố khác')
+}
+/** Small line under a ticket title in the list: where the ticket came from. */
+export function ticketOrigin(ticket: Pick<WorkTicket, 'type' | 'alertId'> & Partial<Pick<WorkTicket, 'incidentReport'>>): string {
+  if (ticket.type === 'INCIDENT') return ticket.incidentReport?.reportCode ? `từ báo cáo ${ticket.incidentReport.reportCode}` : 'từ báo cáo của khách'
+  return ticket.alertId ? 'từ cảnh báo' : ''
+}
+/**
+ * A photo link the page may render: only an absolute https URL (signed by the server), or http on localhost for
+ * development; anything else (javascript:, data:, relative) is dropped.
+ */
+export function safePhotoUrl(value: string | null | undefined): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'https:') return url.toString()
+    if (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) return url.toString()
+  } catch { /* not a URL */ }
+  return null
+}
+
 // ---- forms
 
 export const TICKET_LIMITS = { title: 200, description: 1000, note: 500, reason: 500 } as const
@@ -197,6 +236,7 @@ export const NEW_TICKET: TicketValues = { type: '', machineId: '', title: '', de
 export function validateTicket(values: TicketValues, now = Date.now()): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!values.type) errors.type = 'Chọn loại phiếu.'
+  else if (!(CREATABLE_TICKET_TYPES as readonly string[]).includes(values.type)) errors.type = 'Phiếu sự cố chỉ được tạo tự động từ báo cáo của khách. Chọn Nạp hàng hoặc Bảo trì.'
   if (!uuidParam(values.machineId)) errors.machineId = 'Chọn máy cần làm việc.'
   const title = values.title.trim()
   if (!title) errors.title = 'Nhập tiêu đề ngắn cho công việc.'
@@ -213,7 +253,7 @@ export function validateTicket(values: TicketValues, now = Date.now()): Record<s
 
 /** Body of POST /work-tickets: required fields, and each optional field only when it is filled in. */
 export function createTicketBody(values: TicketValues): CreateWorkTicketBody {
-  const body: CreateWorkTicketBody = { type: values.type as TicketType, machineId: values.machineId, title: values.title.trim() }
+  const body: CreateWorkTicketBody = { type: values.type as CreatableTicketType, machineId: values.machineId, title: values.title.trim() }
   const description = values.description.trim()
   if (description) body.description = description
   const dueAt = values.dueAt ? localDateTimeToInstant(values.dueAt) : undefined

@@ -61,8 +61,9 @@ test('the draft contract follows table alerts and records who acknowledged and c
 
 test('ALERT_READ / ALERT_WRITE are draft codes: both roles hold them, the 15 codes of #48 are unchanged', () => {
   assert.equal(PERMISSIONS.length, 15)
-  // FE 7.1 added the work ticket codes after the alert ones (tests/tickets.test.mjs).
+  // FE 7.1 added the work ticket codes after the alert ones (tests/tickets.test.mjs); FE 8.1 added REFUND_RECORD.
   assert.deepEqual(DRAFT_PERMISSIONS.slice(0, 2), ['ALERT_READ', 'ALERT_WRITE'])
+  assert.ok(DRAFT_PERMISSIONS.includes('REFUND_RECORD'))
   for (const role of ['ADMIN', 'STAFF']) {
     assert.equal(can([role], 'ALERT_READ'), true, role)
     assert.equal(can([role], 'ALERT_WRITE'), true, role)

@@ -7,7 +7,7 @@ import type { Permission, Subject } from './permissions.ts'
 export type PageKey =
   | 'overview' | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
   | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
-  | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail' | 'ticket-restock' | 'maintenance-schedules'
+  | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail' | 'ticket-restock' | 'maintenance-schedules' | 'refunds'
   | 'revenue-report'
 
 /** `roles` lists the roles that hold `permission` today (derived, for display and older callers). */
@@ -37,6 +37,8 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/orders\/([^/]+)$/, page: 'order-detail', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/payments$/, page: 'payments', permission: 'PAYMENT_READ' },
   { pattern: /^\/admin\/payments\/([^/]+)$/, page: 'payment-detail', permission: 'PAYMENT_READ' },
+  // T3 / W-12 (FE 8.1): draft permission REFUND_RECORD, ADMIN only (api-contract/drafts/refunds.yaml, BE 5.1).
+  { pattern: /^\/admin\/refunds$/, page: 'refunds', permission: 'REFUND_RECORD' },
   { pattern: /^\/admin\/webhook-logs$/, page: 'webhook-logs', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   { pattern: /^\/admin\/webhook-logs\/([^/]+)$/, page: 'webhook-log-detail', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   // R1 (FE 9.1): draft permission of api-contract/drafts/revenue-reports.yaml (BE 6.1), ADMIN only.
@@ -70,6 +72,8 @@ export const NAV: NavItem[] = [
   { to: '/admin/maintenance-schedules', label: 'Lịch bảo trì', group: 'Vận hành', permission: 'MAINTENANCE_SCHEDULE_READ', match: ['maintenance-schedules'] },
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },
+  // Draft permission (api-contract/drafts/refunds.yaml, BE 5.1), ADMIN only: see DRAFT_PERMISSIONS in permissions.ts.
+  { to: '/admin/refunds', label: 'Hoàn tiền', group: 'Giao dịch', permission: 'REFUND_RECORD', match: ['refunds'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },
   // Draft permission (api-contract/drafts/revenue-reports.yaml, BE 6.1).
   { to: '/admin/reports/revenue', label: 'Báo cáo doanh thu', group: 'Giao dịch', permission: 'REPORT_READ', match: ['revenue-report'] },

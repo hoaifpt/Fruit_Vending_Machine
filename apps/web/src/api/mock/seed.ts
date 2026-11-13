@@ -5,6 +5,9 @@ import type { components } from '../schema'
 import type { components as DispenseDraft } from '../drafts/dispense-commands'
 import type { components as AlertsDraft } from '../drafts/alerts'
 import type { components as TelemetryDraft } from '../drafts/machine-telemetry'
+import type { MockIncidentReport } from './incident-reports.ts'
+import { seedRefunds } from './refunds.ts'
+import type { MockRefund } from './refunds.ts'
 import type { components as TicketsDraft } from '../drafts/work-tickets'
 import type { components as SchedulesDraft } from '../drafts/maintenance-schedules'
 import type { components as MaintenanceDraft } from '../drafts/machine-maintenance'
@@ -86,6 +89,11 @@ export interface MockStore {
   readings: MockReading[]
   machineEvents: MockMachineEvent[]
   webhookLogs: MockWebhookLog[]
+  /** FE 8.1 (draft refunds.yaml): manual refunds recorded by an admin. */
+  refunds: MockRefund[]
+  /** FE 8.2 (draft incident-reports.yaml): public reports, and when the last POSTs arrived (5 per minute, BR-32). */
+  incidentReports: MockIncidentReport[]
+  incidentRequestLog: number[]
   /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
   permissions: MockPermission[]
   roles: MockRole[]
@@ -359,6 +367,7 @@ export function createStore(nowMs: number): MockStore {
   return {
     users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, tickets, schedules, webhookLogs,
     heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, users }),
+    incidentReports: [], incidentRequestLog: [], refunds: seedRefunds(payments, users[0]),
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
 }
