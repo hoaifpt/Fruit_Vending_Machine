@@ -8,8 +8,9 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
 /** Issue #48: the authorities a principal of a seeded role gets from V13, for tests that build a principal by hand. */
 public final class SeededAuthorities {
-    public static final List<String> STAFF_PERMISSIONS = List.of(Permissions.BATCH_CREATE, Permissions.BATCH_READ, Permissions.INVENTORY_READ,
-            Permissions.INVENTORY_WRITE, Permissions.MACHINE_READ, Permissions.ORDER_READ, Permissions.PRODUCT_READ);
+    public static final List<String> STAFF_PERMISSIONS = List.of(Permissions.ALERT_MANAGE, Permissions.ALERT_READ, Permissions.BATCH_CREATE,
+            Permissions.BATCH_READ, Permissions.INVENTORY_READ, Permissions.INVENTORY_WRITE, Permissions.MACHINE_READ, Permissions.ORDER_READ,
+            Permissions.PRODUCT_READ);
 
     private SeededAuthorities() {
     }

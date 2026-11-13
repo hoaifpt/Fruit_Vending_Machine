@@ -75,9 +75,10 @@ CROSS JOIN generate_series(0, 23) AS h
 WHERE m.code = 'DEV-MACHINE-01'
   AND NOT EXISTS (SELECT 1 FROM sensor_readings r WHERE r.machine_id = m.id);
 
-INSERT INTO alerts (id, machine_id, type, severity, title, message, triggered_at)
+-- dedupe_key (V17) uses the health-check key, so the check resolves it once readings are back in range.
+INSERT INTO alerts (id, machine_id, type, severity, title, message, triggered_at, dedupe_key)
 SELECT '60000000-0000-0000-0000-000000000001', m.id, 'HIGH_TEMPERATURE', 'WARNING', 'Temperature above range',
-       'Seeded reading of 9.50 C exceeds the 8.00 C maximum.', CURRENT_TIMESTAMP - INTERVAL '2 hours'
+       'Seeded reading of 9.50 C exceeds the 8.00 C maximum.', CURRENT_TIMESTAMP - INTERVAL '2 hours', 'HIGH_TEMPERATURE:' || m.id
 FROM machines m
 WHERE m.code = 'DEV-MACHINE-01'
 ON CONFLICT DO NOTHING;

@@ -396,7 +396,7 @@ class MachineManagementIntegrationTest {
         jdbc.update("INSERT INTO machine_events(machine_id,event_type,payload,source) VALUES (?,'FIXTURE','{}','BACKEND')", campus.getId());
         jdbc.update("INSERT INTO orders(id,order_code,machine_id,subtotal,total_amount) VALUES (?,'FIXTURE',?,1,1)", order, campus.getId());
         jdbc.update("INSERT INTO payments(order_id,provider,amount) VALUES (?,'TEST',1)", order);
-        jdbc.update("INSERT INTO alerts(machine_id,type,severity,title,message,triggered_at) VALUES (?,'HIGH_TEMPERATURE','WARNING','Fixture','Fixture',now())", campus.getId());
+        jdbc.update("INSERT INTO alerts(machine_id,type,severity,title,message,triggered_at,dedupe_key) VALUES (?,'HIGH_TEMPERATURE','WARNING','Fixture','Fixture',now(),'FIXTURE:' || ?)", campus.getId(), campus.getId());
         var tables = List.of("machine_slots", "products", "product_batches", "inventory_items", "sensor_readings", "machine_events", "orders", "payments", "alerts");
         var before = tables.stream().map(table -> jdbc.queryForList("SELECT * FROM " + table)).toList();
         mvc.perform(admin(put("/api/v1/machines/" + campus.getId())).contentType("application/json").content(updateBody().toString())).andExpect(status().isOk());

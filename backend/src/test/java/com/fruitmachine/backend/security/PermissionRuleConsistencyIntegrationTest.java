@@ -45,7 +45,8 @@ class PermissionRuleConsistencyIntegrationTest extends AbstractCoreIntegrationTe
         docs.path("paths").fields().forEachRemaining(path -> path.getValue().fields().forEachRemaining(op -> {
             JsonNode security = op.getValue().path("security");
             boolean bearer = security.isArray() && security.size() > 0 && security.get(0).has("bearerAuth");
-            if (!bearer) return;
+            // Own notifications (#58) need a signed-in user only: no permission to compare.
+            if (!bearer || path.getKey().startsWith("/api/v1/notifications")) return;
             String permission = op.getValue().path("x-required-permission").asText(null);
             boolean page = false;
             for (JsonNode parameter : op.getValue().path("parameters")) page |= "page".equals(parameter.path("name").asText());

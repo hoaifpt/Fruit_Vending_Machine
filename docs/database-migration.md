@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V16 hiện có (22 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V17 hiện có (23 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -206,6 +206,12 @@ erDiagram
         timestamptz triggered_at
         timestamptz resolved_at "nullable"
         uuid resolved_by FK "nullable"
+        uuid slot_id FK "nullable, (slot_id, machine_id) (V17)"
+        varchar error_code "nullable (V17)"
+        varchar dedupe_key "one unresolved per key (V17)"
+        timestamptz acknowledged_at "nullable (V17)"
+        uuid acknowledged_by FK "nullable (V17)"
+        varchar resolution_note "nullable (V17)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -299,6 +305,16 @@ erDiagram
         varchar ip_address "nullable"
         timestamptz created_at
     }
+    notifications {
+        uuid id PK
+        uuid user_id FK
+        uuid alert_id FK "nullable"
+        varchar title
+        varchar message "nullable"
+        varchar severity "INFO, WARNING, CRITICAL"
+        timestamptz read_at "nullable"
+        timestamptz created_at
+    }
 
     users ||--o{ user_roles : "has"
     roles ||--o{ user_roles : "granted in"
@@ -309,6 +325,10 @@ erDiagram
     users |o--o{ product_batches : "created_by"
     users |o--o{ inventory_transactions : "performed_by"
     users |o--o{ alerts : "resolved_by"
+    users |o--o{ alerts : "acknowledged_by"
+    users ||--o{ notifications : "receives"
+    alerts |o--o{ notifications : "announced by"
+    machine_slots |o--o{ alerts : "slot_id"
     users |o--o{ audit_logs : "user_id"
 
     machines ||--o{ machine_slots : "has"
@@ -343,7 +363,7 @@ Các cột trạng thái dài được ghi mã E1–E6 trong sơ đồ; giá tr�
 | E2 | dispense_commands.status | PENDING, SENT, ACKNOWLEDGED, SUCCESS, FAILED, TIMEOUT |
 | E3 | inventory_items.status | AVAILABLE, RESERVED, SOLD, EXPIRED, REMOVED, DISPENSE_FAILED |
 | E4 | inventory_transactions.type | LOAD, RESERVE, SALE, EXPIRE, REMOVE, RETURN, ADJUSTMENT |
-| E5 | alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK |
+| E5 | alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK, HARDWARE_FAULT (V17) |
 | E6 | payments.status | PENDING, SUCCESS, FAILED, EXPIRED, REFUNDED |
 
 Webhook logs độc lập với payment/order ở cấp FK: đối soát bằng provider, order_code và
@@ -371,7 +391,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | product_batches — lô sản xuất | id; product_id → products; created_by → users nullable | batch_code UNIQUE; quantity > 0; finite expires_at > manufactured_at | product_id, expires_at, creator partial |
 | inventory_items — từng tô | id; batch_id → batches; slot_id → slots nullable | status CHECK; loaded/reserved/sold/removed timestamps cơ bản; UNIQUE(id, slot_id) cho FK | (slot_id, status), batch_id, status |
 | sensor_readings — chuỗi thời gian | BIGINT identity id; machine_id → machines | ít nhất một reading; giá trị trong miền; finite recorded_at | (machine_id, recorded_at DESC), BRIN(recorded_at) |
-| alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at | machine/time, status/time, triggered_at, resolver partial |
+| alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
 | orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
 | order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price | order_id, product_id |
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
@@ -381,6 +401,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | inventory_transactions — lịch sử bất biến | id; inventory_item_id → inventory_items; (slot_id, machine_id) → slots; performed_by → users nullable | type CHECK; MATCH FULL snapshot vị trí; append-only trigger | item/time, machine/time, slot_id, created_at, actor partial |
 | machine_events — lịch sử máy | id; machine_id → machines | event_type mở không rỗng; payload JSONB; source MACHINE/BACKEND, message_id bắt buộc với MACHINE (V16) | machine/time, created_at, machine/type/time (V16), partial UNIQUE (machine_id, message_id) (V16) |
 | audit_logs — lịch sử thay đổi | id; user_id → users nullable; entity_id đa hình | action/entity_type không rỗng; old/new JSONB | user/time, entity_type/entity_id/time, created_at |
+| notifications — thông báo portal (V17) | id; user_id → users (CASCADE); alert_id → alerts nullable | title không rỗng; severity CHECK; read_at ≥ created_at | user/time, user unread partial, alert partial |
 
 Các index prefix khác nhau không thay thế nhau: machine/time không phục vụ tốt lọc status
 toàn hệ thống; index thời gian riêng phục vụ báo cáo/retention toàn hệ thống. Index transaction
@@ -409,6 +430,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V14 | machine_slots: đổi `A1`/`B1` → `A`/`B` khi không mơ hồ (mơ hồ thì dừng, không đổi gì), CHECK slot_code A/B; dispense_commands.failure_reason (+ CHECK, backfill `LEGACY_UNKNOWN`), index lệnh đang chạy theo máy (issue #52, [mqtt-dispense.md](mqtt-dispense.md)) |
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
+| V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)

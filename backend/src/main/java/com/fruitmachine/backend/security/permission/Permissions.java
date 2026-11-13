@@ -3,7 +3,7 @@ package com.fruitmachine.backend.security.permission;
 import java.util.List;
 
 /**
- * Permission codes (V13 catalog, AUDIT_LOG_READ from V16) and the matching method-security expressions. Annotations reference these constants, so a
+ * Permission codes (V13 catalog, AUDIT_LOG_READ from V16, ALERT_* from V17) and the matching method-security expressions. Annotations reference these constants, so a
  * typo fails compilation instead of silently denying access. A new permission needs: a migration inserting the permission and
  * its role_permissions rows (fixed UUIDs), a constant here (code + HAS_ expression, and an entry in ALL), the URL rule in
  * SecurityConfig, the @PreAuthorize on the endpoint and an entry in the authorization tests. See docs/permission-authorization.md.
@@ -25,6 +25,10 @@ public final class Permissions {
     public static final String PAYMENT_READ = "PAYMENT_READ";
     public static final String PAYMENT_WEBHOOK_LOG_READ = "PAYMENT_WEBHOOK_LOG_READ";
     public static final String AUDIT_LOG_READ = "AUDIT_LOG_READ";
+    public static final String ALERT_READ = "ALERT_READ";
+    public static final String ALERT_MANAGE = "ALERT_MANAGE";
+    /** Not checked by an endpoint: users holding it receive a notification for every new alert. */
+    public static final String ALERT_NOTIFY = "ALERT_NOTIFY";
 
     public static final String HAS_USER_READ = "hasAuthority('" + USER_READ + "')";
     public static final String HAS_USER_WRITE = "hasAuthority('" + USER_WRITE + "')";
@@ -42,11 +46,15 @@ public final class Permissions {
     public static final String HAS_PAYMENT_READ = "hasAuthority('" + PAYMENT_READ + "')";
     public static final String HAS_PAYMENT_WEBHOOK_LOG_READ = "hasAuthority('" + PAYMENT_WEBHOOK_LOG_READ + "')";
     public static final String HAS_AUDIT_LOG_READ = "hasAuthority('" + AUDIT_LOG_READ + "')";
+    public static final String HAS_ALERT_READ = "hasAuthority('" + ALERT_READ + "')";
+    public static final String HAS_ALERT_MANAGE = "hasAuthority('" + ALERT_MANAGE + "')";
+    /** Endpoints on the caller's own data (notifications): any signed-in user, no permission. */
+    public static final String IS_USER = "isAuthenticated()";
 
-    /** The full catalog of this release, in migration order (V13, then V16). */
+    /** The full catalog of this release, in migration order (V13, V16, V17). */
     public static final List<String> ALL = List.of(USER_READ, USER_WRITE, PERMISSION_MANAGE, PRODUCT_READ, PRODUCT_WRITE, MACHINE_READ,
             MACHINE_WRITE, KIOSK_CREDENTIAL_MANAGE, BATCH_READ, BATCH_CREATE, INVENTORY_READ, INVENTORY_WRITE, ORDER_READ, PAYMENT_READ,
-            PAYMENT_WEBHOOK_LOG_READ, AUDIT_LOG_READ);
+            PAYMENT_WEBHOOK_LOG_READ, AUDIT_LOG_READ, ALERT_READ, ALERT_MANAGE, ALERT_NOTIFY);
 
     /** The ADMIN role must always keep these, otherwise nobody could manage users or permissions any more. */
     public static final List<String> ADMIN_REQUIRED = List.of(PERMISSION_MANAGE, USER_WRITE);

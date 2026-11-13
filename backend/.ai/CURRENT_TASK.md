@@ -1,90 +1,115 @@
-# Issue #56 — [BE] Implement Machine Event Logging
+# Issue #58 — [BE] Alert & Notification Management
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/56
-Branch: feature/56-machine-event-logging (from origin/dev d02980a, includes #48, #49, #52, #53)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/58
+Branch: feature/58-alert-notification (from dev 49e8f17, includes #48, #49, #52, #53, #56)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
 
 ## Scope
-V16 (machine_events.source + message_id with CHECKs, partial unique (machine_id, message_id), type/time index, AUDIT_LOG_READ -> ADMIN),
-recording of every valid events/status message (source MACHINE, once per messageId, own transaction, never breaks MQTT processing),
-recording of 3.3 / 3.4 domain events AFTER_COMMIT (source BACKEND), machine event timeline API (MACHINE_READ), audit log read API
-(AUDIT_LOG_READ), append-only repositories, docs/Swagger/api.yaml/mqtt-contract.
+V17 (alert slot/error_code/dedupe_key/acknowledgement/resolution note, partial unique open dedupe index, HARDWARE_FAULT, notifications,
+ALERT_READ/ALERT_MANAGE -> ADMIN+STAFF, ALERT_NOTIFY -> ADMIN), 60 s health check (offline, temperature/humidity with 5 min grace,
+LOW_STOCK <= 2, PRODUCT_EXPIRING 12 h, PRODUCT_EXPIRED, auto-resolve), event alerts (dispense failures, late success, multi-bowl,
+FAULT/BOOT/FAULT_CLEARED), notifications for ALERT_NOTIFY users, alert and notification APIs, docs/Swagger/api.yaml/mqtt-contract 1.4.0.
 
 ## Non-goals
-Alerts (3.6), heartbeat/telemetry history, replay, retention/purge, global event search, editing history, frontend timeline.
-
-## Database / API impact
-New V16 (V1-V15 untouched). New GET /api/v1/machines/{machineId}/events, GET /api/v1/audit-logs, GET /api/v1/audit-logs/{id}
-(tags Machine Events, Audit Log). MQTT contract 1.3.0 (statuses only). New permission AUDIT_LOG_READ (ADMIN).
+Email/push/SMS delivery, alert rules editable at runtime, frontend pages, firmware changes (FAULT/BOOT stay FIRMWARE_PENDING).
 
 ## Status and verification
-Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 740 tests, 0 failures,
-BUILD SUCCESS. Existing fixture in MachineManagementIntegrationTest now inserts its machine_events row as BACKEND (V16 CHECK). New: MachineEventLoggingIntegrationTest (9),
-MachineEventLoggingDocumentationTest (1).
+Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 + Mosquitto 2.0.20 Testcontainers): 753 tests, 0 failures,
+BUILD SUCCESS. New: AlertIntegrationTest (12), AlertNotificationDocumentationTest (1). Updated: migration/table/entity counts, permission
+lists and matrix, MachineEventLoggingIntegrationTest (FAULT example now also yields BACKEND_MAINTENANCE_ENTERED),
+MachineManagementIntegrationTest fixture (dedupe_key). First full run had one Testcontainers postgres startup timeout (infra), passed on rerun.
 
 Decisions / notes:
-- Legacy machine_events rows (none expected; nothing wrote the table before) have no message id: V16 marks them BACKEND.
-- events messages: missing/blank eventType stored as UNSPECIFIED, longer than 64 characters truncated to 64; unknown types kept.
-- Hibernate @Immutable was tried on MachineEvent/AuditLog and removed: existing writers then failed ("Lock mode not supported").
-  Append-only is enforced by the repositories (plain Repository, no update/delete methods) and the single JDBC writer.
-- DispenseService publishes DispenseFailedEvent before entering MAINTENANCE, so the timeline reads failure -> maintenance.
-- Backend events are written AFTER_COMMIT in REQUIRES_NEW, the same pattern as the existing dispense dispatcher (needs a second pool
-  connection briefly; see the #47 load-test finding).
+- Machine protection (MAINTENANCE) and notifications happen only when an alert is newly created; auto-resolve never re-activates a machine.
+- Notification endpoints need only a signed-in user (isAuthenticated()); own rows only, others 404; kiosk keys 401.
+- Health check: advisory try-lock for the run, each machine in REQUIRES_NEW; one failing machine is logged and skipped.
+- Unknown well-formed FAULT code -> WARNING alert with that code; malformed/missing -> UNKNOWN_FAULT.
+- FAULT_CLEARED resolves CONTROLLER_FAULT only; other faults are resolved by staff.
+- BM04 is not in the repo; thresholds follow the issue text (F-06, F-07, F-14).
 
-# Testing
+## 9. Migration
 
-## 7. Migration
+- [x] V17 applies; Flyway + Hibernate validation pass
+- [x] Two unresolved alerts with the same dedupe_key rejected; resolved + new open allowed
+- [x] Slot of another machine rejected by composite FK
+- [x] HARDWARE_FAULT accepted; unknown type rejected
 
-- [x] V16 applies; Flyway + Hibernate validation pass
-- [x] MACHINE row without message_id rejected; BACKEND row without message_id accepted
-- [x] Duplicate (machine_id, message_id) rejected by the unique index
-- [x] `AUDIT_LOG_READ` seeded for ADMIN only
+## 10. Health Check (fixed Clock, real PostgreSQL)
 
-## 8. Recording Machine Messages
+- [x] OFFLINE machine → one MACHINE_OFFLINE; ONLINE again → auto-resolved
+- [x] Temperature out of range shorter than grace → no alert; longer → CRITICAL + machine MAINTENANCE
+- [x] Back in range → alert auto-resolved; machine stays MAINTENANCE
+- [x] No telemetry → no temperature evaluation
+- [x] Slot with 2 sellable bowls → LOW_STOCK; 3 → resolved
+- [x] Bowl expiring in 11 h → PRODUCT_EXPIRING; expired bowl → PRODUCT_EXPIRED; removed → resolved
+- [x] INACTIVE machines skipped
+- [x] Repeated runs create no duplicates; one machine's failure does not stop others
+- [x] Overlapping runs prevented
 
-- [x] Each `events` example from `api-contract/mqtt/examples/` stored once with its eventType and payload
-- [x] status ONLINE / OFFLINE stored as STATUS_ONLINE / STATUS_OFFLINE
-- [x] heartbeat and telemetry NOT stored in machine_events
-- [x] Same message delivered twice → one row; dispense handling still idempotent
-- [x] Invalid envelope → no row
-- [x] Unknown eventType stored (forward compatibility)
-- [x] Recorder failure (simulated) → ERROR log, dispense handling still runs, MQTT callback does not throw
+## 11. Event-based Alerts
 
-## 9. Recording Backend Events
+- [x] Unsafe dispense failure → CRITICAL DISPENSE_FAILED; safe → WARNING
+- [x] Late success → that alert auto-resolved
+- [x] Each FAULT code → mapped severity and machine action
+- [x] Unknown FAULT code → WARNING with code or UNKNOWN_FAULT
+- [x] BOOT WATCHDOG → WARNING; BOOT POWERON → no alert
+- [x] FAULT_CLEARED resolves CONTROLLER_FAULT only
+- [x] Duplicate FAULT message → one alert
 
-- [x] Each 3.3 / 3.4 domain event creates one BACKEND row after commit
-- [x] Rolled-back business transaction → no BACKEND row
-- [x] Payload contains ids/reason only (no secrets, no customer contact data)
+## 12. Notifications
 
-## 10. Machine Event API
+- [x] New alert → one notification per ACTIVE user with ALERT_NOTIFY; STAFF none by default
+- [x] Existing open alert (dedupe) → no new notification
+- [x] Auto-resolve → no notification
+- [x] List / unread-count / read / read-all work; other user's notification → 404
 
-- [x] Filters type / source / from / to; DESC order; DB paging; size limit `400`
-- [x] Missing machine `404`
-- [x] ADMIN, STAFF allowed; anonymous `401`; kiosk key `401`; role without MACHINE_READ `403`
+## 13. Alert APIs
 
-## 11. Audit Log API
+- [x] Filters, default status filter, severity-first ordering, DB paging
+- [x] Acknowledge / resolve transitions; RESOLVED → 409; acknowledge twice idempotent
+- [x] Concurrent resolve + auto-resolve → consistent single resolution
+- [x] ALERT_READ / ALERT_MANAGE enforced; anonymous 401; kiosk key 401
 
-- [x] Rows written by 3.1 / 3.3 visible with old/new values
-- [x] Filters and paging work; system rows show userId null
-- [x] ADMIN allowed; STAFF `403`; anonymous `401`
-- [x] No write endpoints exist
+## 14. Regression
 
-## 12. Regression
+- [x] Dispense, telemetry, event logging tests pass
+- [x] Authorization matrix extended with new endpoints
+- [x] All tests pass (`mvn clean verify`); Swagger / `api.yaml` / `mqtt-contract.md` consistent
 
-- [x] All tests pass (`mvn clean verify`)
-- [x] Swagger, `api.yaml`, `mqtt-contract.md` consistent
-- [x] Authorization matrix test (3.1) extended with the new endpoints
+---
+
+# Out of Scope
+
+- Email, SMS, mobile push, WebSocket push
+- Work orders from alerts → 4.3
+- Payment anomaly alerts
+- Escalation, on-call schedules, alert muting
+- Per-machine staff assignment / filtering
+- Retention / purge of alerts and notifications
 
 ---
 
 # Acceptance Criteria
 
-- [x] machine_events extended with source + message_id and duplicate protection (V16)
-- [x] Every valid machine event and status message logged once
-- [x] Backend decisions from 3.3 / 3.4 logged after commit
-- [x] Logging never blocks or breaks MQTT processing
-- [x] Machine event timeline API (MACHINE_READ)
-- [x] Audit log read API (AUDIT_LOG_READ, ADMIN)
-- [x] History append-only; no write endpoints
-- [x] Docs, Swagger, `api.yaml`, `mqtt-contract.md` updated
+- [x] V17 adds alert columns, dedupe index, HARDWARE_FAULT, notifications, permissions
+- [x] Health check runs every 60 s and raises/auto-resolves all state-based alerts of §2
+- [x] Temperature breach after grace raises CRITICAL and puts the machine in MAINTENANCE (F-06)
+- [x] LOW_STOCK (≤ 2) and PRODUCT_EXPIRING (12 h) thresholds per F-07
+- [x] Dispense failures and machine faults raise alerts with error codes (F-14)
+- [x] No duplicate open alerts; each new alert notifies Admins once
+- [x] Alert list/detail/acknowledge/resolve and notification APIs work with permissions
+- [x] Docs, Swagger, `api.yaml`, `mqtt-contract.md`, ERD updated
 - [x] Tests pass (`mvn clean verify`); Flyway / Hibernate validation pass; applied migrations unchanged
+
+---
+
+# Definition of Done
+
+```text
+Machine problem (offline, hot, faulty, empty, expiring, jam)
+   → exactly one OPEN alert with type + error code
+   → machine protected (MAINTENANCE) when it is unsafe to sell
+   → Admins see a notification in the portal
+   → Staff/Admin acknowledge and resolve, or the system resolves when it clears
+```
+

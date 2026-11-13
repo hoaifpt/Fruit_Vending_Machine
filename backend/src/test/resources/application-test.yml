@@ -26,3 +26,6 @@ app:
     sweep:
       # Tests call DispenseService.expireOrResend directly.
       enabled: false
+  health-check:
+    # Tests call MachineHealthCheckRunner.runOnce directly with a controlled clock.
+    enabled: false

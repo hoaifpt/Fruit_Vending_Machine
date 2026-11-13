@@ -322,7 +322,10 @@ class AuthorizationIntegrationTest {
                 "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}",
                 "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions",
                 "/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest",
-                "/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}");
+                "/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}",
+                "/api/v1/alerts", "/api/v1/alerts/{id}", "/api/v1/alerts/{id}/acknowledge", "/api/v1/alerts/{id}/resolve",
+                "/api/v1/notifications/me", "/api/v1/notifications/me/unread-count", "/api/v1/notifications/{id}/read",
+                "/api/v1/notifications/me/read-all");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
@@ -340,7 +343,8 @@ class AuthorizationIntegrationTest {
         for (String role : roles) {
             permissions.add("ROLE_" + role);
             permissions.addAll(role.equals("ADMIN") ? com.fruitmachine.backend.security.permission.Permissions.ALL
-                    : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ"));
+                    : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ",
+                            "ALERT_READ", "ALERT_MANAGE"));
         }
         return permissions.toArray(String[]::new);
     }
