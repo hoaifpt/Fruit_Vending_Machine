@@ -22,7 +22,7 @@ class PaymentSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void v12IsAppliedAndValidatedWithTheReferenceIndex() throws Exception {
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("22");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_indexes WHERE indexname='uq_payments_provider_reference' AND indexdef LIKE '%UNIQUE%' AND indexdef LIKE '%payment_reference IS NOT NULL%'", Long.class)).isEqualTo(1);
     }
 

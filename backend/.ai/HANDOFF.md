@@ -1,14 +1,14 @@
-# Chat handoff - Issue #70, 2026-11-13
+# Chat handoff - Issue #72, 2026-11-13
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/70, [BE] Implement Maintenance Scheduling.
-Branch feature/70-maintenance-scheduling from origin/dev 89d8cb2 (includes #68).
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/72, [BE] Implement Refund Management.
+Branch feature/72-refunds from origin/dev 1753feb (includes #70).
 Git delivery: see the final report; do not assume commit/push/PR/merge happened.
 
-Delivered: V22 (maintenance_plans, work order plan columns + CHECKs + unique indexes, 2 permissions), maintenanceplan package
-(MaintenancePlanService, MaintenancePlanGenerator, MaintenancePlanScheduler, MaintenancePlanJob, MaintenancePlanWorkOrderListener,
-MaintenancePlanController), WorkOrderService.createScheduled, WorkOrderCancelledEvent, work order maintenancePlan / scheduledFor / filter.
-Docs: docs/maintenance-plans.md, api.yaml, database-migration.md, permission-authorization.md, work-orders.md, .ai/DATABASE.md §25, README.
+Delivered: V23 (refund columns on payments + CHECKs + unique transfer ref, orders.refunded_at, 2 permissions), payment.refund package
+(RefundService, RefundQueryService, PayerAccountResolver, RefundController), PaymentTransitions.refund, OrderTransitions, refund blocks
+in payment / order detail, OpenAPI examples. Docs: docs/refunds.md, api.yaml, database-migration.md, permission-authorization.md,
+payment-service.md, order-management.md, .ai/DATABASE.md §26, README.
 
-Verification: `mvn clean verify` 814 tests, 0 failures.
-Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...`.
+Verification: `mvn clean verify` 832 tests, 0 failures.
+Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, use `mvn` (no wrapper), always `mvn clean ...`.

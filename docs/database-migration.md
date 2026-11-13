@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V22 hiện có (30 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V23 hiện có (30 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -229,6 +229,7 @@ erDiagram
         timestamptz paid_at "nullable"
         timestamptz completed_at "nullable"
         timestamptz cancelled_at "nullable"
+        timestamptz refunded_at "nullable; set iff REFUNDED (V23)"
     }
     order_items {
         uuid id PK
@@ -370,6 +371,11 @@ erDiagram
         timestamptz created_at
         timestamptz paid_at "nullable"
         timestamptz expired_at "nullable"
+        timestamptz refunded_at "nullable (V23)"
+        uuid refunded_by FK "nullable (V23)"
+        varchar refund_reason "nullable (V23)"
+        varchar refund_transfer_ref "nullable; partial UK (V23)"
+        varchar refund_note "nullable (V23)"
     }
     payment_webhook_logs {
         uuid id PK
@@ -446,6 +452,7 @@ erDiagram
     machines ||--o{ maintenance_plans : "maintained by"
     users |o--o{ maintenance_plans : "default_assignee, created_by"
     maintenance_plans |o--o{ work_orders : "maintenance_plan_id (V22)"
+    users |o--o{ payments : "refunded_by (V23)"
     machine_slots ||--o{ restock_lines : "slot"
     products ||--o{ restock_lines : "product"
     work_orders |o--o{ maintenance_commands : "work_order_id (V21)"
@@ -525,7 +532,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | inventory_items — từng tô | id; batch_id → batches; slot_id → slots nullable | status CHECK; loaded/reserved/sold/removed timestamps cơ bản; UNIQUE(id, slot_id) cho FK | (slot_id, status), batch_id, status |
 | sensor_readings — chuỗi thời gian | BIGINT identity id; machine_id → machines | ít nhất một reading; giá trị trong miền; finite recorded_at | (machine_id, recorded_at DESC), BRIN(recorded_at) |
 | alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
-| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
+| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18); REFUNDED ⇔ refunded_at (V23) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
 | order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price; unit_price ≤ original_unit_price, discount_percent 0–90, discount_reason NONE/NEAR_EXPIRY nhất quán (V18) | order_id, product_id |
 | maintenance_plans — kế hoạch bảo trì (V22) | id; machine_id → machines; default_assignee_id, created_by → users | title không rỗng; interval 1–365; lead 0–30 < interval; priority CHECK | next_due_date partial khi active, machine, assignee partial, created_by |
 | restock_lines — dòng nạp hàng (V21) | id; work_order_id → work_orders; (slot_id, machine_id) → machine_slots; product_id → products | UNIQUE (work_order, slot, product); planned/loaded 0–1000; variance_reason không rỗng | work_order, slot, product |
@@ -535,7 +542,7 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | maintenance_commands — lệnh bảo trì từ xa (V19) | id; machine_id → machines; (slot_id, machine_id) → machine_slots; target → inventory_items; requested_by, reconciled_by → users | operation/status/reason/outcome CHECK; RESET không có slot, thao tác khác có slot; REMOVE_ITEM có target; OTHER cần note; command_code `MC-…`; UNIQUE (requested_by, idempotency_key) | partial UNIQUE machine_id khi PENDING/SENT/ACCEPTED, machine/time, status partial, slot, target, reconciler |
 | pricing_settings — giảm giá sắp hết hạn (V18) | id; updated_by → users nullable | một dòng (singleton UNIQUE + CHECK); percent 1–90 | updated_by partial |
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
-| payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12) |
+| payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at; refunded_by → users (V23); REFUNDED ⇔ đủ refunded_at/by, reason, transfer_ref; reason CHECK; mã chuyển khoản theo mẫu; OTHER cần note; refunded_at ≥ paid_at (V23) | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12), partial UNIQUE(refund_transfer_ref), partial refunded_at khi REFUNDED (V23) |
 | payment_webhook_logs — callback thô kể cả lỗi | id; không FK order | provider không rỗng; raw_body bắt buộc; JSONB nullable; is_verified mặc định false | order_code/time, provider/time |
 | dispense_commands — lệnh có retry | id; composite FK orders/machine_slots/inventory_items | command_code UNIQUE; status CHECK; SUCCESS cần completed_at; failure_reason có đúng khi FAILED/TIMEOUT (V14); một active/success command/tô | machine/time, order_id, slot_id, status, inventory_item_id, partial UNIQUE live inventory, partial machine in-flight (V14) |
 | inventory_transactions — lịch sử bất biến | id; inventory_item_id → inventory_items; (slot_id, machine_id) → slots; performed_by → users nullable | type CHECK; MATCH FULL snapshot vị trí; append-only trigger | item/time, machine/time, slot_id, created_at, actor partial |
@@ -571,6 +578,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
 | V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V23 | payments: refunded_at, refunded_by, refund_reason, refund_transfer_ref, refund_note (+ CHECK, unique mã chuyển khoản, chỉ mục refunded_at); orders.refunded_at (CHECK REFUNDED ⇔ refunded_at); quyền PAYMENT_REFUND, REFUND_READ → ADMIN (issue #72, [refunds.md](refunds.md)) |
 | V22 | maintenance_plans; work_orders.maintenance_plan_id + scheduled_for (CHECK SCHEDULE ⇔ có kế hoạch và ngày; chỉ MAINTENANCE; unique theo lần và một việc chưa xong mỗi kế hoạch); quyền MAINTENANCE_PLAN_READ → ADMIN, STAFF, MAINTENANCE_PLAN_MANAGE → ADMIN (issue #70, [maintenance-plans.md](maintenance-plans.md)) |
 | V21 | restock_lines, maintenance_commands.work_order_id, index inventory_transactions.reference_id; quyền RESTOCK_PLAN, INVENTORY_LOAD_DIRECT → ADMIN, RESTOCK_EXECUTE → ADMIN, STAFF (issue #68, [restock.md](restock.md)) |
 | V20 | work_orders, work_order_alerts, work_order_events (append-only trigger), notifications.work_order_id; quyền WORK_ORDER_READ_ALL, WORK_ORDER_MANAGE → ADMIN, WORK_ORDER_READ_ASSIGNED, WORK_ORDER_EXECUTE → ADMIN, STAFF (issue #66, [work-orders.md](work-orders.md)) |

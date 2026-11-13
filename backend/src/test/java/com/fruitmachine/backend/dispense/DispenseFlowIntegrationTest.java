@@ -385,8 +385,8 @@ class DispenseFlowIntegrationTest extends AbstractWebhookIntegrationTest {
     void lateCompletionOfARefundedOrderSellsTheBowlKeepsTheRefundAndIsFlagged() throws Exception {
         PlacedOrder order = paidOrder();
         dispense.handleMachineEvent(machineCode(order), DispenseService.EVENT_ABORTED, commandCode(order));
-        // REFUNDED is produced by 5.1; fixture order for the branch.
-        jdbc.update("UPDATE orders SET status='REFUNDED' WHERE id=?", order.orderId());
+        // Fixture order for the branch (RefundIntegrationTest covers the same rule after a recorded refund); refunded_at is required since V23.
+        jdbc.update("UPDATE orders SET status='REFUNDED', refunded_at=GREATEST(now(), paid_at) WHERE id=?", order.orderId());
         assertThat(dispense.handleMachineEvent(machineCode(order), DispenseService.EVENT_COMPLETED, commandCode(order))).isEqualTo(Outcome.APPLIED);
         assertThat(orderStatus(order.orderId())).isEqualTo("REFUNDED");
         assertThat(bowlStatus(bowlOf(order))).isEqualTo("SOLD");

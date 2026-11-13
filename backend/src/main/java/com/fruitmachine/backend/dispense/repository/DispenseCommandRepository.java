@@ -16,6 +16,9 @@ import org.springframework.data.repository.query.Param;
 public interface DispenseCommandRepository extends JpaRepository<DispenseCommand, UUID> {
     boolean existsByOrderId(UUID orderId);
 
+    /** Issue #72: an unfinished dispense command blocks a refund of its order. */
+    boolean existsByOrderIdAndStatusIn(UUID orderId, Collection<DispenseStatus> statuses);
+
     boolean existsByCommandCode(String commandCode);
 
     @Query("""

@@ -205,3 +205,8 @@ Xem [docs/restock.md](docs/restock.md).
 
 Admin lập kế hoạch bảo trì theo máy (mỗi N ngày, báo trước, giờ hạn, người nhận); hệ thống tự tạo work order MAINTENANCE khi tới hạn
 và tính hạn kế tiếp khi hoàn thành. Mọi ngày theo giờ Việt Nam. Xem [docs/maintenance-plans.md](docs/maintenance-plans.md).
+
+## Hoàn tiền thủ công — Issue #72
+
+Admin xem danh sách cần hoàn (nhả lỗi, trả trễ, trả trùng) kèm tài khoản người trả từ webhook đã xác thực, tự chuyển khoản rồi ghi nhận
+mã giao dịch; payment (và order khi phù hợp) thành `REFUNDED`, có audit, danh sách và tổng hợp cho báo cáo. Xem [docs/refunds.md](docs/refunds.md).

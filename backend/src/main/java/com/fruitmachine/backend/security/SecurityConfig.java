@@ -73,7 +73,10 @@ public class SecurityConfig {
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/webhooks/payments/*").permitAll();
                     authorize.requestMatchers("/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/**")
                             .hasAuthority(Permissions.PAYMENT_WEBHOOK_LOG_READ);
+                    // Issue #72: recording a refund is its own permission, before the read-only payments rule.
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/payments/*/refund").hasAuthority(Permissions.PAYMENT_REFUND);
                     authorize.requestMatchers("/api/v1/payments", "/api/v1/payments/**").hasAuthority(Permissions.PAYMENT_READ);
+                    authorize.requestMatchers("/api/v1/refunds", "/api/v1/refunds/**").hasAuthority(Permissions.REFUND_READ);
                     authorize.requestMatchers("/api/v1/audit-logs", "/api/v1/audit-logs/**").hasAuthority(Permissions.AUDIT_LOG_READ);
                     // Issue #66: before the alert rules (creating a work order from an alert is work order management).
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/alerts/*/work-orders").hasAuthority(Permissions.WORK_ORDER_MANAGE);

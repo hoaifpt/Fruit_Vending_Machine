@@ -53,6 +53,18 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID>, JpaSpec
     @EntityGraph(attributePaths = {"order", "order.machine"})
     Page<Payment> findAll(Specification<Payment> specification, Pageable pageable);
 
-    @EntityGraph(attributePaths = {"order", "order.machine"})
+    @EntityGraph(attributePaths = {"order", "order.machine", "refundedBy"})
     Optional<Payment> findWithOrderById(UUID id);
+
+    // ---- refunds (issue #72) ----
+
+    /** The order of a payment, without loading the payment before the Order -> Payment locks. */
+    @Query("select p.order.id from Payment p where p.id = :id")
+    Optional<UUID> findOrderIdById(@Param("id") UUID id);
+
+    boolean existsByRefundTransferRef(String refundTransferRef);
+
+    /** Refunded payments of an order with the refunding administrator (order detail). */
+    @EntityGraph(attributePaths = {"refundedBy"})
+    List<Payment> findByOrderIdAndStatusOrderByRefundedAtAscIdAsc(UUID orderId, PaymentStatus status);
 }

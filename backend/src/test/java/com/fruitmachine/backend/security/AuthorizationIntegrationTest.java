@@ -337,7 +337,8 @@ class AuthorizationIntegrationTest {
                 "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "/api/v1/work-orders/{id}/restock",
                 "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/upcoming", "/api/v1/maintenance-plans/{id}",
                 "/api/v1/maintenance-plans/{id}/work-orders", "/api/v1/maintenance-plans/{id}/activate", "/api/v1/maintenance-plans/{id}/deactivate",
-                "/api/v1/maintenance-plans/{id}/generate-now");
+                "/api/v1/maintenance-plans/{id}/generate-now", "/api/v1/payments/{paymentId}/refund", "/api/v1/refunds",
+                "/api/v1/refunds/candidates", "/api/v1/refunds/summary");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());

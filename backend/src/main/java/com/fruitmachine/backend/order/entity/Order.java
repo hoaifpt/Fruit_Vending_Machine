@@ -63,6 +63,10 @@ public class Order extends CreatedEntity {
     @Column(name = "expires_at", columnDefinition = "timestamptz")
     private Instant expiresAt;
 
+    /** Set only together with status REFUNDED (issue #72, CHECK ck_orders_refunded). */
+    @Column(name = "refunded_at", columnDefinition = "timestamptz")
+    private Instant refundedAt;
+
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)
     private Set<OrderItem> items = new HashSet<>();
