@@ -46,8 +46,9 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | sensor_readings | id, machine_id, temperature, humidity, recorded_at |
 | alerts | id, machine_id, slot_id, type, severity, error_code, dedupe_key, title, message, status, triggered_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, resolution_note, created_at, updated_at |
 | notifications | id, user_id, alert_id, title, message, severity, read_at, created_at |
-| orders | id, order_code, machine_id, status, subtotal, total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
-| order_items | id, order_id, product_id, quantity, unit_price, total_price, created_at |
+| orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
+| order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
+| pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
 | payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
@@ -366,3 +367,17 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   ACTIVE ALERT_NOTIFY user per new alert, inserted AFTER_COMMIT of the alert in its own transaction.
 - Permissions ALERT_READ (…017), ALERT_MANAGE (…018) → ADMIN and STAFF; ALERT_NOTIFY (…019) → ADMIN.
 - Health check (`app.health-check.*`) holds `pg_try_advisory_xact_lock(0x46564D, 4)` for the run; each machine in REQUIRES_NEW.
+
+## 21. Issue #61 — V18 near-expiry discount pricing
+
+- `pricing_settings`: exactly one row (singleton UNIQUE + CHECK), seeded enabled / 50; percent CHECK 1..90; `version` is the
+  optimistic value the Admin sends back (409 when stale; the row is also locked PESSIMISTIC_WRITE while updating); `updated_by` → users.
+  Changes write audit_logs action PRICING_NEAR_EXPIRY_UPDATED, entity_type PRICING_SETTINGS, old/new {enabled, percent}, user, ip.
+- `orders.discount_amount` NUMERIC(12,2) NOT NULL DEFAULT 0, CHECK 0 <= discount_amount <= subtotal AND total_amount = subtotal - discount_amount.
+  Meaning: subtotal = sum of original prices, total_amount = amount charged (payment amount, unchanged).
+- `order_items.original_unit_price` NOT NULL (backfilled = unit_price), `discount_percent` SMALLINT 0..90, `discount_reason` NONE/NEAR_EXPIRY,
+  CHECK unit_price <= original_unit_price and NONE <=> percent 0 and unit = original.
+- V18 stops with a clear error if any existing order has total_amount <> subtotal (never rewrites charged amounts).
+- Price decided in `OrderService.createOrder` from the bowl locked by `selectHead` (NearExpiryPricingService, business day in
+  `app.business-zone`); never recalculated. Catalog SQL applies the same rule with dayStart/dayEnd/percent parameters.
+- Permissions PRICING_READ (…020) → ADMIN, STAFF; PRICING_MANAGE (…021) → ADMIN. Partial index ix_orders_discounted_time.

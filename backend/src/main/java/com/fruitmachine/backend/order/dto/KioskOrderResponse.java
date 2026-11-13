@@ -10,7 +10,10 @@ import java.util.UUID;
 
 @Schema(description = "Order as seen by the owning kiosk. A PENDING_PAYMENT order past expiresAt may be returned until the sweep runs; use expiresAt for the countdown.")
 public record KioskOrderResponse(UUID id, String orderCode, UUID machineId, OrderStatus status,
-        List<KioskOrderItemResponse> items, BigDecimal subtotal, BigDecimal totalAmount, Instant createdAt,
+        List<KioskOrderItemResponse> items,
+        @Schema(description = "Sum of original prices.") BigDecimal subtotal,
+        @Schema(description = "subtotal - totalAmount; 0 without a discount.") BigDecimal discountAmount,
+        @Schema(description = "Amount to pay (the QR amount). Show it before generating the QR: it can differ from the catalog price.") BigDecimal totalAmount, Instant createdAt,
         Instant expiresAt, Instant cancelledAt,
         @Schema(description = "Most recent payment attempt, or null before the first attempt. Poll this endpoint every 2-3 seconds; after the webhook issue it also shows PAID.", nullable = true) KioskPaymentResponse currentPayment) {
 }

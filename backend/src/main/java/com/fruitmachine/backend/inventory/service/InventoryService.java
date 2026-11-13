@@ -1,5 +1,8 @@
 package com.fruitmachine.backend.inventory.service;
 
+import com.fruitmachine.backend.pricing.model.NearExpiryWindow;
+import com.fruitmachine.backend.pricing.service.PricingService;
+import com.fruitmachine.backend.pricing.service.PricingSettingsService;
 import com.fruitmachine.backend.common.exception.*;
 import com.fruitmachine.backend.inventory.dto.*;
 import com.fruitmachine.backend.inventory.entity.*;
@@ -39,6 +42,8 @@ public class InventoryService {
     private final MachineSlotRepository slots;
     private final UserRepository users;
     private final InventoryMapper mapper;
+    private final PricingService pricing;
+    private final PricingSettingsService pricingSettings;
     private final Clock clock;
 
     @Transactional
@@ -69,7 +74,8 @@ public class InventoryService {
         items.saveAllAndFlush(loaded);
         for (var item : loaded) append(item, machineId, slot.getId(), InventoryTransactionType.LOAD, operation, actor, null, null, InventoryStatus.AVAILABLE);
         history.flush();
-        return new InventoryLoadResponse(operation, loaded.size(), loaded.stream().map(item -> mapper.item(item, now)).toList());
+        var window = discountWindow(now);
+        return new InventoryLoadResponse(operation, loaded.size(), loaded.stream().map(item -> mapper.item(item, now, window)).toList());
     }
     @Transactional
     @PreAuthorize(Permissions.HAS_INVENTORY_WRITE)
@@ -87,11 +93,15 @@ public class InventoryService {
         append(item, slot == null ? null : slot.getMachine().getId(), slotId, InventoryTransactionType.REMOVE,
                 UUID.randomUUID(), actor, request.reason(), before, InventoryStatus.REMOVED);
         items.flush(); history.flush();
-        return mapper.item(item, now);
+        return mapper.item(item, now, discountWindow(now));
     }
     private User actor() {
         var principal = (AuthenticatedUser) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         return users.findById(principal.getId()).orElseThrow(() -> missing("Actor"));
+    }
+    /** Issue #61: the near-expiry window with the current setting, read once per request. */
+    private NearExpiryWindow discountWindow(Instant now) {
+        return pricing.window(now, pricingSettings.current());
     }
     private void append(InventoryItem item, UUID machineId, UUID slotId, InventoryTransactionType type, UUID reference,
             User actor, String reason, InventoryStatus before, InventoryStatus after) {
@@ -102,7 +112,8 @@ public class InventoryService {
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryItemResponse getInventoryItem(UUID id) {
-        return mapper.item(items.findById(id).orElseThrow(() -> missing("Inventory item")), clock.instant());
+        Instant now = clock.instant();
+        return mapper.item(items.findById(id).orElseThrow(() -> missing("Inventory item")), now, discountWindow(now));
     }
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_INVENTORY_READ)
@@ -118,7 +129,8 @@ public class InventoryService {
             return cb.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));
         };
         var result = items.findAll(filter, page(page, size, sort, Set.of("id", "status", "loadedAt", "createdAt", "updatedAt")));
-        return new InventoryPageResponse(result.getContent().stream().map(item -> mapper.item(item, now)).toList(), page, size, result.getTotalElements(), result.getTotalPages());
+        var window = discountWindow(now);
+        return new InventoryPageResponse(result.getContent().stream().map(item -> mapper.item(item, now, window)).toList(), page, size, result.getTotalElements(), result.getTotalPages());
     }
     @Transactional(readOnly = true)
     @PreAuthorize(Permissions.HAS_INVENTORY_READ)

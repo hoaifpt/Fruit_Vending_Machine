@@ -20,25 +20,29 @@ public class OrderMapper {
     public KioskOrderResponse kiosk(Order order, KioskPaymentResponse currentPayment) {
         List<KioskOrderItemResponse> lines = order.getItems().stream().sorted(LINE_ORDER)
                 .map(item -> new KioskOrderItemResponse(item.getProduct().getId(), item.getProduct().getSku(), item.getProduct().getName(),
-                        item.getQuantity(), item.getUnitPrice(), item.getTotalPrice()))
+                        item.getQuantity(), item.getOriginalUnitPrice(), item.getUnitPrice(), item.getTotalPrice(), item.getDiscountPercent(),
+                        item.getDiscountReason()))
                 .toList();
         return new KioskOrderResponse(order.getId(), order.getOrderCode(), order.getMachine().getId(), order.getStatus(), lines,
-                order.getSubtotal(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt(), currentPayment);
+                order.getSubtotal(), order.getDiscountAmount(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(),
+                order.getCancelledAt(), currentPayment);
     }
 
     public OrderSummaryResponse summary(Order order, long lines, long bowls) {
         return new OrderSummaryResponse(order.getId(), order.getOrderCode(), order.getMachine().getId(), order.getMachine().getCode(),
-                order.getStatus(), lines, bowls, order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(), order.getCancelledAt());
+                order.getStatus(), lines, bowls, order.getDiscountAmount(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(),
+                order.getCancelledAt());
     }
 
     public OrderDetailResponse detail(Order order, Map<UUID, List<OrderItemAllocation>> allocations, List<PaymentSummaryResponse> payments) {
         List<OrderItemDetailResponse> lines = order.getItems().stream().sorted(LINE_ORDER)
                 .map(item -> new OrderItemDetailResponse(item.getId(), item.getProduct().getId(), item.getProduct().getSku(),
-                        item.getProduct().getName(), item.getQuantity(), item.getUnitPrice(), item.getTotalPrice(),
+                        item.getProduct().getName(), item.getQuantity(), item.getOriginalUnitPrice(), item.getUnitPrice(), item.getTotalPrice(),
+                        item.getDiscountPercent(), item.getDiscountReason(),
                         allocations.getOrDefault(item.getId(), List.of()).stream().map(this::allocation).toList()))
                 .toList();
         return new OrderDetailResponse(order.getId(), order.getOrderCode(), order.getMachine().getId(), order.getMachine().getCode(),
-                order.getStatus(), order.getSubtotal(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(),
+                order.getStatus(), order.getSubtotal(), order.getDiscountAmount(), order.getTotalAmount(), order.getCreatedAt(), order.getExpiresAt(),
                 order.getPaidAt(), order.getCompletedAt(), order.getCancelledAt(), lines, payments);
     }
 

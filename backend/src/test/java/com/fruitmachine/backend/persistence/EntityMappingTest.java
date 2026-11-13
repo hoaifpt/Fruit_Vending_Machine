@@ -107,10 +107,10 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(17);
+                .isEqualTo(18);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
-        assertThat(entities).hasSize(23);
+        assertThat(entities).hasSize(24);
         Set<String> tables = jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -131,7 +131,7 @@ class EntityMappingTest {
                 Map.entry("order_item_allocations", "order"), Map.entry("payments", "payment"),
                 Map.entry("payment_webhook_logs", "payment"), Map.entry("dispense_commands", "dispense"),
                 Map.entry("audit_logs", "audit"), Map.entry("kiosk_credentials", "machine.kiosk"),
-                Map.entry("notifications", "notification"));
+                Map.entry("notifications", "notification"), Map.entry("pricing_settings", "pricing"));
         for (var entity : entities) {
             String table = entity.getJavaType().getAnnotation(Table.class).name();
             assertThat(entity.getJavaType().getPackageName()).as("Feature owner of %s", table)
@@ -233,6 +233,7 @@ class EntityMappingTest {
         line.setOrder(order);
         line.setProduct(product);
         line.setQuantity(2);
+        line.setOriginalUnitPrice(new BigDecimal("35000.00"));
         line.setUnitPrice(new BigDecimal("35000.00"));
         line.setTotalPrice(new BigDecimal("70000.00"));
         entityManager.persist(line);

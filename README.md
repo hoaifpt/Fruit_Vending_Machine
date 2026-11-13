@@ -178,3 +178,9 @@ MQTT_TRUSTSTORE_PASSWORD=
 ```
 
 Local vẫn dùng `tcp://127.0.0.1:1883` không TLS (`docker compose -f infra/docker-compose.yml up -d`).
+
+## Giảm giá hàng sắp hết hạn — Issue #61
+
+Bát thuộc lô hết hạn trong ngày (giờ Việt Nam) được bán giảm giá theo setting Admin (mặc định 50 %), giá chốt khi tạo đơn.
+Mọi "ngày kinh doanh" (mã đơn, giảm giá) dùng `BUSINESS_ZONE` (mặc định `Asia/Ho_Chi_Minh`).
+Xem [docs/near-expiry-pricing.md](docs/near-expiry-pricing.md).

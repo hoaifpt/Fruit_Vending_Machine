@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V17 hiện có (23 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V18 hiện có (24 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -220,8 +220,9 @@ erDiagram
         varchar order_code UK
         uuid machine_id FK
         varchar status "enum E1"
-        numeric subtotal
-        numeric total_amount
+        numeric subtotal "sum of original prices"
+        numeric discount_amount "subtotal - total_amount (V18)"
+        numeric total_amount "amount charged"
         timestamptz expires_at "nullable (V11)"
         timestamptz created_at
         timestamptz paid_at "nullable"
@@ -233,9 +234,21 @@ erDiagram
         uuid order_id FK
         uuid product_id FK
         int quantity "> 0"
-        numeric unit_price "price snapshot"
+        numeric original_unit_price "product price at reservation (V18)"
+        numeric unit_price "price charged"
         numeric total_price "quantity x unit_price"
+        smallint discount_percent "0..90 (V18)"
+        varchar discount_reason "NONE, NEAR_EXPIRY (V18)"
         timestamptz created_at
+    }
+    pricing_settings {
+        uuid id PK "singleton (V18)"
+        boolean near_expiry_enabled
+        smallint near_expiry_percent "1..90"
+        bigint version
+        timestamptz updated_at
+        uuid updated_by FK "nullable"
+        boolean singleton "UNIQUE, CHECK true"
     }
     order_item_allocations {
         uuid id PK
@@ -326,6 +339,7 @@ erDiagram
     users |o--o{ inventory_transactions : "performed_by"
     users |o--o{ alerts : "resolved_by"
     users |o--o{ alerts : "acknowledged_by"
+    users |o--o{ pricing_settings : "updated_by"
     users ||--o{ notifications : "receives"
     alerts |o--o{ notifications : "announced by"
     machine_slots |o--o{ alerts : "slot_id"
@@ -392,8 +406,9 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | inventory_items — từng tô | id; batch_id → batches; slot_id → slots nullable | status CHECK; loaded/reserved/sold/removed timestamps cơ bản; UNIQUE(id, slot_id) cho FK | (slot_id, status), batch_id, status |
 | sensor_readings — chuỗi thời gian | BIGINT identity id; machine_id → machines | ít nhất một reading; giá trị trong miền; finite recorded_at | (machine_id, recorded_at DESC), BRIN(recorded_at) |
 | alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
-| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
-| order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price | order_id, product_id |
+| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
+| order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price; unit_price ≤ original_unit_price, discount_percent 0–90, discount_reason NONE/NEAR_EXPIRY nhất quán (V18) | order_id, product_id |
+| pricing_settings — giảm giá sắp hết hạn (V18) | id; updated_by → users nullable | một dòng (singleton UNIQUE + CHECK); percent 1–90 | updated_by partial |
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
 | payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12) |
 | payment_webhook_logs — callback thô kể cả lỗi | id; không FK order | provider không rỗng; raw_body bắt buộc; JSONB nullable; is_verified mặc định false | order_code/time, provider/time |
@@ -431,6 +446,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
 | V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V18 | pricing_settings (singleton, seed bật / 50 %); orders.discount_amount + CHECK total = subtotal − discount; order_items.original_unit_price (backfill = unit_price), discount_percent, discount_reason + CHECK; dừng nếu có đơn total ≠ subtotal; index đơn có giảm giá; quyền PRICING_READ → ADMIN, STAFF, PRICING_MANAGE → ADMIN (issue #61, [near-expiry-pricing.md](near-expiry-pricing.md)) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)

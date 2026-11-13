@@ -40,6 +40,8 @@ tags:
     description: "Provider-to-server payment notifications. Public endpoint authenticated only by the provider signature; no JWT and no kiosk key. This is the only path that can produce payment SUCCESS and order PAID."
   - name: Payments
     description: "Read-only payment management for ADMIN. There is no write, delete or status endpoint; no client can mark a payment successful."
+  - name: "Pricing"
+    description: "Near-expiry discount managed by Admin: a bowl whose batch expires on the current business day (Asia/Ho_Chi_Minh) is sold at the configured percent, rounded down to whole VND. The price is locked when the order reserves its bowl; changes affect new orders only. PRICING_READ (ADMIN, STAFF) views, PRICING_MANAGE (ADMIN) changes."
   - name: Product Batches
     description: Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.
   - name: Products
@@ -4411,11 +4413,10 @@ paths:
           "kioskKey": []
   "/api/v1/orders":
     "get":
-      "x-required-permission": "ORDER_READ"
       "tags":
         - "Orders"
       "summary": "List and filter orders"
-      "description": "ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode). Approved sorts createdAt (default desc), totalAmount, orderCode, each with a UUID tie-break."
+      "description": "ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode), discounted (issue #61). Approved sorts createdAt (default desc), totalAmount, orderCode, each with a UUID tie-break."
       "operationId": "listOrders"
       "parameters":
         -
@@ -4494,6 +4495,13 @@ paths:
           "schema":
             "type": "string"
             "default": "createdAt,desc"
+        -
+          "name": "discounted"
+          "in": "query"
+          "description": "true: only orders with a discount (discountAmount > 0); false: only full-price orders."
+          "required": false
+          "schema":
+            "type": "boolean"
       "responses":
         "400":
           "description": "Invalid parameters"
@@ -4502,11 +4510,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Bad Request"
+                "path": "/api/v1/orders"
                 "status": 400
                 "message": "Request validation failed"
                 "timestamp": "2026-10-15T04:00:00Z"
-                "error": "Bad Request"
-                "path": "/api/v1/orders"
         "401":
           "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
           "headers":
@@ -4519,11 +4527,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Unauthorized"
+                "path": "/api/v1/orders"
                 "status": 401
                 "message": "Authentication required or access token invalid"
                 "timestamp": "2026-10-15T04:00:00Z"
-                "error": "Unauthorized"
-                "path": "/api/v1/orders"
         "403":
           "description": "Authenticated account lacks ADMIN/STAFF role"
           "content":
@@ -4531,11 +4539,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Forbidden"
+                "path": "/api/v1/orders"
                 "status": 403
                 "message": "Access denied"
                 "timestamp": "2026-10-15T04:00:00Z"
-                "error": "Forbidden"
-                "path": "/api/v1/orders"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -4543,11 +4551,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
+                "error": "Internal Server Error"
+                "path": "/api/v1/orders"
                 "status": 500
                 "message": "An unexpected error occurred"
                 "timestamp": "2026-10-15T04:00:00Z"
-                "error": "Internal Server Error"
-                "path": "/api/v1/orders"
         "200":
           "description": "Database page of order summaries"
           "headers":
@@ -4560,12 +4568,9 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiResponseOrderPageResponse"
               "example":
+                "timestamp": "2026-10-15T04:00:00Z"
                 "message": "Success"
                 "data":
-                  "totalElements": 1
-                  "totalPages": 1
-                  "page": 0
-                  "size": 20
                   "content":
                     -
                       "id": "e0f1a2b3-0000-4000-8000-000000000001"
@@ -4579,10 +4584,14 @@ paths:
                       "createdAt": "2026-10-15T04:00:00Z"
                       "expiresAt": "2026-10-15T04:05:00Z"
                       "cancelledAt": null
-                "timestamp": "2026-10-15T04:00:00Z"
+                  "totalElements": 1
+                  "totalPages": 1
+                  "page": 0
+                  "size": 20
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "ORDER_READ"
   "/api/v1/payments/{id}":
     "get":
       "x-required-permission": "PAYMENT_READ"
@@ -7347,6 +7356,95 @@ paths:
       "security":
         -
           "bearerAuth": []
+  "/api/v1/pricing/near-expiry-discount":
+    "get":
+      "tags":
+        - "Pricing"
+      "summary": "Get the near-expiry discount"
+      "description": "PRICING_READ. Current setting with its version."
+      "operationId": "getNearExpiryDiscount"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks PRICING_READ / PRICING_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Current setting"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseNearExpiryDiscountResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "PRICING_READ"
+    "put":
+      "tags":
+        - "Pricing"
+      "summary": "Change the near-expiry discount"
+      "description": "PRICING_MANAGE. enabled and percent (integer 1 to 90) replace the setting when version matches the stored one; otherwise 409. Same values: 200, version unchanged, no audit row. A change writes one audit_logs row PRICING_NEAR_EXPIRY_UPDATED and applies at once to the catalog and new orders; existing orders never change."
+      "operationId": "updateNearExpiryDiscount"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateNearExpiryDiscountRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Setting after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseNearExpiryDiscountResponse"
+        "400":
+          "description": "Missing field, percent outside 1..90 or not an integer, unknown field, malformed JSON"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Stale version: changed by someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks PRICING_READ / PRICING_MANAGE"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "PRICING_MANAGE"
 
 components:
   securitySchemes:
@@ -7622,6 +7720,9 @@ components:
           "format": "date-time"
         "expired":
           "type": "boolean"
+        "discountEligibleToday":
+          "type": "boolean"
+          "description": "Issue #61: the batch expires on today's business day (Asia/Ho_Chi_Minh), is not expired yet and the near-expiry discount is enabled: this bowl sells at the discount now."
         "loadedAt":
           "type": "string"
           "format": "date-time"
@@ -8725,6 +8826,21 @@ components:
           "type": "string"
         "price":
           "type": "number"
+          "description": "Issue #61: what the customer pays for the next bowl (the FEFO head that would be reserved now), after any near-expiry discount. The order may still differ (midnight, setting change, head change): show the order's totalAmount before the QR."
+        "originalPrice":
+          "type": "number"
+          "description": "Product price before any discount."
+        "discountPercent":
+          "type": "integer"
+          "format": "int32"
+          "description": "0, or the current near-expiry percent when the next bowl expires today. Show the badge and strike-through only when > 0."
+          "maximum": 90
+          "minimum": 0
+        "discountReason":
+          "type": "string"
+          "enum":
+            - "NONE"
+            - "NEAR_EXPIRY"
         "imageUrl":
           "type": "string"
         "availableQuantity":
@@ -8792,6 +8908,9 @@ components:
           "type": "integer"
           "format": "int64"
           "description": "Total number of bowls ordered (sum of line quantities)."
+        "discountAmount":
+          "type": "number"
+          "description": "subtotal - totalAmount; 0 without a discount."
         "totalAmount":
           "type": "number"
         "createdAt":
@@ -8904,8 +9023,13 @@ components:
             "$ref": "#/components/schemas/KioskOrderItemResponse"
         "subtotal":
           "type": "number"
+          "description": "Sum of original prices."
+        "discountAmount":
+          "type": "number"
+          "description": "subtotal - totalAmount; 0 without a discount."
         "totalAmount":
           "type": "number"
+          "description": "Amount to pay (the QR amount). Show it before generating the QR: it can differ from the catalog price."
         "createdAt":
           "type": "string"
           "format": "date-time"
@@ -8932,10 +9056,25 @@ components:
         "quantity":
           "type": "integer"
           "format": "int32"
+        "originalUnitPrice":
+          "type": "number"
+          "description": "Product price when the bowl was reserved."
         "unitPrice":
           "type": "number"
+          "description": "Price charged for one bowl (after the discount)."
         "totalPrice":
           "type": "number"
+        "discountPercent":
+          "type": "integer"
+          "format": "int32"
+          "description": "0 without a discount."
+          "maximum": 90
+          "minimum": 0
+        "discountReason":
+          "type": "string"
+          "enum":
+            - "NONE"
+            - "NEAR_EXPIRY"
     "ApiResponseOrderDetailResponse":
       "type": "object"
       "properties":
@@ -8972,8 +9111,13 @@ components:
             - "REFUNDED"
         "subtotal":
           "type": "number"
+          "description": "Sum of original prices."
+        "discountAmount":
+          "type": "number"
+          "description": "subtotal - totalAmount; 0 without a discount."
         "totalAmount":
           "type": "number"
+          "description": "Amount charged (payment amount)."
         "createdAt":
           "type": "string"
           "format": "date-time"
@@ -9013,10 +9157,25 @@ components:
         "quantity":
           "type": "integer"
           "format": "int32"
+        "originalUnitPrice":
+          "type": "number"
+          "description": "Product price when the bowl was reserved."
         "unitPrice":
           "type": "number"
+          "description": "Price charged for one bowl."
         "totalPrice":
           "type": "number"
+        "discountPercent":
+          "type": "integer"
+          "format": "int32"
+          "description": "0 without a discount."
+          "maximum": 90
+          "minimum": 0
+        "discountReason":
+          "type": "string"
+          "enum":
+            - "NONE"
+            - "NEAR_EXPIRY"
         "allocations":
           "type": "array"
           "items":
@@ -9995,3 +10154,80 @@ components:
           "example": 3
       "required":
         - "marked"
+    "ApiResponseNearExpiryDiscountResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/NearExpiryDiscountResponse"
+    "NearExpiryDiscountResponse":
+      "type": "object"
+      "description": "Near-expiry discount: bowls whose batch expires today (businessZone) cost floor(price x (100 - percent) / 100) VND while enabled."
+      "properties":
+        "enabled":
+          "type": "boolean"
+        "percent":
+          "type": "integer"
+          "format": "int32"
+          "example": 50
+          "maximum": 90
+          "minimum": 1
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "description": "Send it back on PUT; a stale value is 409."
+          "example": 3
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+        "updatedBy":
+          "type": "null"
+          "$ref": "#/components/schemas/PricingActorResponse"
+          "description": "Last Admin who changed it; null for the seeded value."
+        "businessZone":
+          "type": "string"
+          "description": "Zone that decides \"today\"."
+          "example": "Asia/Ho_Chi_Minh"
+      "required":
+        - "businessZone"
+        - "enabled"
+        - "percent"
+        - "updatedAt"
+        - "version"
+    "PricingActorResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "fullName":
+          "type": "string"
+    "UpdateNearExpiryDiscountRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Whole replacement of the setting. version is the value last read; unknown fields are rejected."
+      "properties":
+        "enabled":
+          "type": "boolean"
+          "example": true
+        "percent":
+          "type": "integer"
+          "format": "int32"
+          "description": "Integer 1 to 90."
+          "example": 50
+          "maximum": 90
+          "minimum": 1
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "description": "version from the last GET."
+          "example": 3
+          "minimum": 0
+      "required":
+        - "enabled"
+        - "percent"
+        - "version"

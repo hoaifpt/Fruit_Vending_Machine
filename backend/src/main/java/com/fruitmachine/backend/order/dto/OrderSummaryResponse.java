@@ -9,5 +9,6 @@ import java.util.UUID;
 public record OrderSummaryResponse(UUID id, String orderCode, UUID machineId, String machineCode, OrderStatus status,
         @Schema(description = "Number of order lines (distinct products), not the bowl quantity.") long itemCount,
         @Schema(description = "Total number of bowls ordered (sum of line quantities).") long totalQuantity,
+        @Schema(description = "subtotal - totalAmount; 0 without a discount.") BigDecimal discountAmount,
         BigDecimal totalAmount, Instant createdAt, Instant expiresAt, Instant cancelledAt) {
 }
