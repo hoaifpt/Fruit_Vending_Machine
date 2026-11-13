@@ -184,3 +184,8 @@ Local vẫn dùng `tcp://127.0.0.1:1883` không TLS (`docker compose -f infra/do
 Bát thuộc lô hết hạn trong ngày (giờ Việt Nam) được bán giảm giá theo setting Admin (mặc định 50 %), giá chốt khi tạo đơn.
 Mọi "ngày kinh doanh" (mã đơn, giảm giá) dùng `BUSINESS_ZONE` (mặc định `Asia/Ho_Chi_Minh`).
 Xem [docs/near-expiry-pricing.md](docs/near-expiry-pricing.md).
+
+## Lệnh bảo trì từ xa — Issue #64
+
+Khi máy ở MAINTENANCE, Staff/Admin bỏ hộp đầu cột, xả cột, mở/đóng cổng nạp qua portal; Admin gửi RESET. Tồn kho chỉ đổi khi máy
+báo COMPLETED (hoặc Staff đối soát DONE). Xem [docs/maintenance-commands.md](docs/maintenance-commands.md).

@@ -68,7 +68,7 @@ class MachineSlotManagementDocumentationTest {
         assertThat(actual.at("/components/schemas/UpdateMachineSlotStatusRequest/properties/status/enum")).contains(
                 mapper.getNodeFactory().textNode("ACTIVE"), mapper.getNodeFactory().textNode("INACTIVE"), mapper.getNodeFactory().textNode("ERROR"));
         assertThat(actual.at("/components/schemas/MachineSlotResponse/properties").fieldNames()).toIterable()
-                .containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "createdAt", "updatedAt");
+                .containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "refillGateOpen", "createdAt", "updatedAt");
         validateReferences(expected, expected);
         assertThat(body).doesNotContain(KEY, "passwordHash", "/test-only/");
     }

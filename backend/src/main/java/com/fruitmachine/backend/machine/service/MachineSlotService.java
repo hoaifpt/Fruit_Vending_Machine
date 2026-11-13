@@ -76,6 +76,8 @@ public class MachineSlotService {
     public MachineSlotResponse updateStatus(UUID machineId, UUID slotId, @Valid UpdateMachineSlotStatusRequest request) {
         requireMachine(machineId);
         var slot = slots.findForUpdateByIdAndMachineId(slotId, machineId).orElseThrow(this::slotNotFound);
+        if (request.status() == SlotStatus.ACTIVE && slot.isRefillGateOpen())
+            throw new ConflictException("REFILL_GATE_OPEN: close the refill gate (CLOSE_REFILL) before activating the slot");
         slot.setStatus(request.status());
         slots.flush();
         return mapper.toResponse(slot);

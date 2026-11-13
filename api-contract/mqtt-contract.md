@@ -1,7 +1,7 @@
 # MQTT Contract — Backend ↔ Vending Machines
 
 ```text
-Contract version:        1.5.0
+Contract version:        1.6.0
 Envelope schemaVersion:  1
 Source of truth for:     topics, envelope, commands, events, payloads, timings, error codes, broker security
 Examples (fixtures):     api-contract/mqtt/examples/*.json
@@ -34,6 +34,7 @@ in its firmware; until it is merged into `dev` those items stay pending here.
 | 1.3.0 | 2026-11-11 | Issue #56: every valid `events` and `status` message is stored once per `messageId` in the machine history (`machine_events`, source MACHINE); heartbeat and telemetry are not. No message shape changed. |
 | 1.4.0 | 2026-11-13 | Issue #58: the backend handles `FAULT`, `BOOT` and `FAULT_CLEARED` (HARDWARE_FAULT alerts, MAINTENANCE for the codes in §6.2), raises DISPENSE_FAILED / MULTIPLE_BOWLS_DETECTED alerts and MACHINE_OFFLINE alerts. No message shape changed. |
 | 1.5.0 | 2026-11-13 | Issue #59: connection section (§8.1): staging and production brokers accept MQTT only over TLS 1.2+ on 8883 (`mqtt.<domain>`, hostname-verified); 1883 stays for local development. No message shape changed. |
+| 1.6.0 | 2026-11-13 | Issue #64: the backend sends `MAINTENANCE_*` and `RESET` (command code `MC-<32 hex>`) and handles their events (§3.2, §3.3); RESET command codes are `MC-…` (was `RS-…`). No message shape changed. |
 
 ## Versioning rules
 
@@ -111,11 +112,11 @@ Gate timings (`include/app_config.h`): open 600 ms, close 700 ms; the two gates 
 | Command type | Payload | Status |
 | --- | --- | --- |
 | `DISPENSE` | `{"type":"DISPENSE","commandId":"D-…","columnCode":"B"}` | IMPLEMENTED; `columnCode` FIRMWARE_PENDING (backend sends it since #52; firmware on `dev` reads `column`/`slot`) |
-| `MAINTENANCE_REMOVE_ITEM` | `{"type":"MAINTENANCE_REMOVE_ITEM","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
-| `MAINTENANCE_EMPTY_COLUMN` | `{"type":"MAINTENANCE_EMPTY_COLUMN","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
-| `MAINTENANCE_OPEN_REFILL` | `{"type":"MAINTENANCE_OPEN_REFILL","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
-| `MAINTENANCE_CLOSE_REFILL` | `{"type":"MAINTENANCE_CLOSE_REFILL","commandId":"MC-…","columnCode":"A"}` | PLANNED (backend 4.2; firmware on the unmerged firmware branch) |
-| `RESET` | `{"type":"RESET","commandId":"RS-…"}` | PLANNED (firmware + 4.2) |
+| `MAINTENANCE_REMOVE_ITEM` | `{"type":"MAINTENANCE_REMOVE_ITEM","commandId":"MC-…","columnCode":"A"}` | FIRMWARE_PENDING — backend implemented (#64); firmware on the unmerged firmware branch |
+| `MAINTENANCE_EMPTY_COLUMN` | `{"type":"MAINTENANCE_EMPTY_COLUMN","commandId":"MC-…","columnCode":"A"}` | FIRMWARE_PENDING — backend implemented (#64); firmware on the unmerged firmware branch |
+| `MAINTENANCE_OPEN_REFILL` | `{"type":"MAINTENANCE_OPEN_REFILL","commandId":"MC-…","columnCode":"A"}` | FIRMWARE_PENDING — backend implemented (#64); firmware on the unmerged firmware branch |
+| `MAINTENANCE_CLOSE_REFILL` | `{"type":"MAINTENANCE_CLOSE_REFILL","commandId":"MC-…","columnCode":"A"}` | FIRMWARE_PENDING — backend implemented (#64); firmware on the unmerged firmware branch |
+| `RESET` | `{"type":"RESET","commandId":"MC-…"}` | FIRMWARE_PENDING — backend implemented (#64); firmware RESET handler not written yet |
 
 ### 3.1 DISPENSE
 
@@ -140,19 +141,32 @@ cycle       (dev) upper gate locked 250 ms → lower opens 600 ms → hold 700 m
 | `MAINTENANCE_OPEN_REFILL` | upper opens and **stays open** (staff drops the first bowl into selling position) |
 | `MAINTENANCE_CLOSE_REFILL` | upper closes (staff then fills the rest of the column on top of it) |
 
-Backend rules (recorded here, implemented in 4.2):
+Backend rules (implemented in #64, `docs/maintenance-commands.md`):
 
 ```text
-REMOVE_ITEM releases the BOTTOM bowl of the column → the backend removes the slot head, never a staff-chosen item
+commandId   MC-<32 lowercase hex>, re-sends use the same code (every 5 s while PENDING/SENT)
+REMOVE_ITEM releases the BOTTOM bowl of the column → the backend removes the slot head captured when the command was created,
+            never a staff-chosen item; if the head changed meanwhile nothing is removed (NEEDS_RECONCILIATION)
 EMPTY_COLUMN releases every bowl → AVAILABLE, EXPIRED and DISPENSE_FAILED bowls become REMOVED
-inventory changes only after *_COMPLETED, never after *_ACCEPTED
-maintenance commands only while the machine is MAINTENANCE; one command per machine at a time
+OPEN_REFILL / CLOSE_REFILL set / clear the slot's refill-gate flag; a slot with the gate open never sells
+inventory changes only after *_COMPLETED (or Staff reconciliation DONE), never after *_ACCEPTED, exactly once
+maintenance commands only while the machine is MAINTENANCE and online; one unfinished command per machine; dispense and
+            maintenance never overlap (shared per-machine command lock)
+*_REJECTED  BUSY / any controller state except FAULT → stays SENT, re-sent; CONTROLLER_FAULT / state FAULT → FAILED;
+            INVALID_* / UNSUPPORTED_SCHEMA → FAILED + backend ERROR
+*_ABORTED, no COMPLETED within 90 s of ACCEPTED, ACCEPTED after the 30 s accept timeout → NEEDS_RECONCILIATION (Staff decides)
+late *_COMPLETED (after FAILED / NEEDS_RECONCILIATION) → applied once
 ```
+
+Open question for the firmware owner (to confirm before merge): `EMPTY_COLUMN` keeps the upper gate closed, so bowls resting on
+it may not fall. Until confirmed, Staff runs `OPEN_REFILL` first when the whole column must be emptied.
 
 ### 3.3 RESET
 
-Clears the controller FAULT remotely after an operator checked the gates. ADMIN only, machine MAINTENANCE.
-Today RESET exists only as a Serial command for the technician.
+Clears the controller FAULT remotely after an operator checked the gates. ADMIN only (`MACHINE_RESET`), machine MAINTENANCE and
+online. The machine answers `RESET_ACCEPTED` (the backend marks the command COMPLETED) or `RESET_REJECTED`, then sends
+`FAULT_CLEARED`, which resolves the CONTROLLER_FAULT alert (#58); the machine stays MAINTENANCE until an Admin activates it.
+Today the firmware has RESET only as a Serial command (FIRMWARE_PENDING).
 
 ---
 
@@ -393,7 +407,7 @@ Backend tests parse every example on each build; the firmware team may use them 
 | File | Message | Status |
 | --- | --- | --- |
 | `command-dispense.json` | DISPENSE with `columnCode` | IMPLEMENTED (`columnCode` FIRMWARE_PENDING) |
-| `command-maintenance-remove-item.json` | MAINTENANCE_REMOVE_ITEM | PLANNED |
+| `command-maintenance-remove-item.json` | MAINTENANCE_REMOVE_ITEM | FIRMWARE_PENDING (backend implemented #64) |
 | `event-dispense-accepted.json` | DISPENSE_ACCEPTED | IMPLEMENTED |
 | `event-dispense-completed.json` | DISPENSE_COMPLETED | IMPLEMENTED |
 | `event-dispense-aborted-no-bowl.json` | DISPENSE_ABORTED with reason NO_BOWL_DETECTED | IMPLEMENTED (reason PLANNED) |

@@ -30,6 +30,8 @@ tags:
     description: Machine-scoped slot configuration. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No stock or hardware API.
   - name: Machines
     description: Machine management. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: "Maintenance Commands"
+    description: "Remote column maintenance while a machine is in MAINTENANCE: remove the head bowl, empty a column, open or close the refill gate (Staff/Admin), and RESET of a controller fault (Admin). One unfinished command per machine; dispense and maintenance never overlap. Inventory changes only when the machine reports COMPLETED, or when Staff reconciles an uncertain command as DONE. 409 messages start with a code: MACHINE_NOT_IN_MAINTENANCE, MACHINE_COMMAND_IN_PROGRESS, MACHINE_OFFLINE, SLOT_HAS_RESERVED_ITEM, SLOT_EMPTY, NOT_HEAD_ITEM, HEAD_NOT_REMOVABLE, REFILL_GATE_OPEN, IDEMPOTENCY_KEY_REUSED, NOT_RECONCILABLE, EFFECT_NOT_POSSIBLE."
   - name: "Notifications"
     description: "Portal notifications of the signed-in user: one per new alert for users holding ALERT_NOTIFY (ADMIN by default). Any signed-in user, own notifications only; no extra permission. Poll unread-count every 30 s."
   - name: Orders
@@ -7445,6 +7447,426 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "PRICING_MANAGE"
+  "/api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands":
+    "post":
+      "tags":
+        - "Maintenance Commands"
+      "summary": "Send a maintenance command to one column"
+      "description": "MAINTENANCE_COMMAND_EXECUTE. Machine in MAINTENANCE and online, no unfinished maintenance or running dispense command, no RESERVED bowl in the column. REMOVE_ITEM takes the head bowl (AVAILABLE, EXPIRED or DISPENSE_FAILED) only; REMOVE_ITEM and EMPTY_COLUMN need the refill gate closed and a reason; OPEN_REFILL needs it closed; CLOSE_REFILL is always allowed. Same Idempotency-Key and body: 200 with the existing command; same key, other body: 409 IDEMPOTENCY_KEY_REUSED."
+      "operationId": "createMaintenanceCommand"
+      "parameters":
+        -
+          "name": "Idempotency-Key"
+          "in": "header"
+          "description": "8 to 64 characters of A-Z, a-z, 0-9, _ or -."
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "path"
+          "description": "Slot UUID of that machine."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateMaintenanceCommandRequest"
+        "required": true
+      "responses":
+        "201":
+          "description": "Command created (PENDING)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "200":
+          "description": "Existing command for this Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "404":
+          "description": "Machine or slot not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "A precondition does not hold (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging, body or Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_COMMAND_EXECUTE"
+  "/api/v1/machines/{machineId}/reset":
+    "post":
+      "tags":
+        - "Maintenance Commands"
+      "summary": "Clear a controller fault (RESET)"
+      "description": "MACHINE_RESET (Admin). Same preconditions as other maintenance commands, no column. The machine answers RESET_ACCEPTED (command COMPLETED) or RESET_REJECTED; FAULT_CLEARED then resolves the CONTROLLER_FAULT alert. The machine stays MAINTENANCE."
+      "operationId": "resetMachine"
+      "parameters":
+        -
+          "name": "Idempotency-Key"
+          "in": "header"
+          "description": "8 to 64 characters of A-Z, a-z, 0-9, _ or -."
+          "required": true
+          "schema":
+            "type": "string"
+            "pattern": "^[A-Za-z0-9_-]{8,64}$"
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ResetMachineRequest"
+      "responses":
+        "201":
+          "description": "RESET command created (PENDING)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "200":
+          "description": "Existing command for this Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "A precondition does not hold (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging, body or Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MACHINE_RESET"
+  "/api/v1/maintenance-commands":
+    "get":
+      "tags":
+        - "Maintenance Commands"
+      "summary": "List maintenance commands"
+      "description": "MAINTENANCE_COMMAND_READ. Optional machineId, slotId, operation, status and createdAt range (from inclusive, to exclusive); newest first; paged in the database (page >= 0, size 1 to 100, default 20)."
+      "operationId": "listMaintenanceCommands"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Optional machine UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "slotId"
+          "in": "query"
+          "description": "Optional slot UUID."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "operation"
+          "in": "query"
+          "description": "Optional operation."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "REMOVE_ITEM"
+              - "EMPTY_COLUMN"
+              - "OPEN_REFILL"
+              - "CLOSE_REFILL"
+              - "RESET"
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional status."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "PENDING"
+              - "SENT"
+              - "ACCEPTED"
+              - "COMPLETED"
+              - "FAILED"
+              - "NEEDS_RECONCILIATION"
+              - "RECONCILED"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "Optional start of createdAt, inclusive, ISO-8601."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Optional end of createdAt, exclusive, ISO-8601; after from."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date-time"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size, 1 to 100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+      "responses":
+        "400":
+          "description": "Malformed UUID, invalid filter, paging, body or Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of commands"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_COMMAND_READ"
+  "/api/v1/maintenance-commands/{id}":
+    "get":
+      "tags":
+        - "Maintenance Commands"
+      "summary": "Get one maintenance command"
+      "description": "MAINTENANCE_COMMAND_READ."
+      "operationId": "getMaintenanceCommand"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Command UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Command"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "404":
+          "description": "Command not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging, body or Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_COMMAND_READ"
+  "/api/v1/maintenance-commands/{id}/reconcile":
+    "post":
+      "tags":
+        - "Maintenance Commands"
+      "summary": "Reconcile an uncertain maintenance command"
+      "description": "MAINTENANCE_COMMAND_EXECUTE. Only NEEDS_RECONCILIATION (aborted, no result in time, head changed). DONE applies the effect (409 EFFECT_NOT_POSSIBLE when the head bowl is no longer the target); NOT_DONE changes nothing. Both end RECONCILED with an audit_logs row; a second reconcile is 409 NOT_RECONCILABLE."
+      "operationId": "reconcileMaintenanceCommand"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Command UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReconcileMaintenanceCommandRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Reconciled command"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMaintenanceCommandResponse"
+        "404":
+          "description": "Command not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Not reconcilable or effect no longer possible"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID, invalid filter, paging, body or Idempotency-Key"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MAINTENANCE_COMMAND_EXECUTE"
 
 components:
   securitySchemes:
@@ -7929,6 +8351,9 @@ components:
             - "ACTIVE"
             - "INACTIVE"
             - "ERROR"
+        "refillGateOpen":
+          "type": "boolean"
+          "description": "Issue #64: the refill (upper) gate is open; the slot does not sell and cannot be set ACTIVE until CLOSE_REFILL completes."
         "createdAt":
           "type": "string"
           "format": "date-time"
@@ -7942,6 +8367,7 @@ components:
         - "createdAt"
         - "id"
         - "machineId"
+        - "refillGateOpen"
         - "slotCode"
         - "status"
         - "updatedAt"
@@ -10231,3 +10657,253 @@ components:
         - "enabled"
         - "percent"
         - "version"
+    "CreateMaintenanceCommandRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "A maintenance command for one column. RESET is not accepted here (POST /api/v1/machines/{machineId}/reset). Unknown fields are rejected."
+      "properties":
+        "operation":
+          "type": "string"
+          "enum":
+            - "REMOVE_ITEM"
+            - "EMPTY_COLUMN"
+            - "OPEN_REFILL"
+            - "CLOSE_REFILL"
+          "example": "REMOVE_ITEM"
+        "reason":
+          "type":
+            - "string"
+            - "null"
+          "description": "Required for REMOVE_ITEM and EMPTY_COLUMN, not allowed otherwise."
+          "enum":
+            - "EXPIRED"
+            - "DAMAGED"
+            - "DISPENSE_FAILED"
+            - "RESTOCK"
+            - "INSPECTION"
+            - "OTHER"
+          "example": "DAMAGED"
+        "note":
+          "type":
+            - "string"
+            - "null"
+          "description": "Optional, at most 500 characters; required when reason is OTHER. Blank means none."
+          "maxLength": 500
+          "minLength": 0
+        "inventoryItemId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "REMOVE_ITEM only, optional: must be the current head bowl of the column (409 NOT_HEAD_ITEM otherwise)."
+      "required":
+        - "operation"
+    "ApiResponseMaintenanceCommandResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MaintenanceCommandResponse"
+    "MaintenanceCommandResponse":
+      "type": "object"
+      "description": "A maintenance command and where it stands. Inventory changed only if status is COMPLETED, or RECONCILED with outcome DONE."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "commandCode":
+          "type": "string"
+          "description": "MQTT commandId, MC- and 32 hex characters."
+          "example": "MC-3f2a9c1b7d4e4f0a8b6c5d4e3f2a1b0c"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "slotId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+        "slotCode":
+          "type":
+            - "string"
+            - "null"
+          "description": "A or B; null for RESET."
+        "operation":
+          "type": "string"
+          "enum":
+            - "REMOVE_ITEM"
+            - "EMPTY_COLUMN"
+            - "OPEN_REFILL"
+            - "CLOSE_REFILL"
+            - "RESET"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING"
+            - "SENT"
+            - "ACCEPTED"
+            - "COMPLETED"
+            - "FAILED"
+            - "NEEDS_RECONCILIATION"
+            - "RECONCILED"
+        "reason":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "EXPIRED"
+            - "DAMAGED"
+            - "DISPENSE_FAILED"
+            - "RESTOCK"
+            - "INSPECTION"
+            - "OTHER"
+        "note":
+          "type":
+            - "string"
+            - "null"
+        "targetItem":
+          "type": "null"
+          "$ref": "#/components/schemas/MaintenanceTargetItem"
+          "description": "REMOVE_ITEM: the head bowl when the command was created."
+        "requestedBy":
+          "$ref": "#/components/schemas/MaintenanceActor"
+        "attemptCount":
+          "type": "integer"
+          "format": "int32"
+          "description": "Deliveries to the broker (re-sends use the same commandCode)."
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "sentAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "acceptedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "finishedAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+        "failureReason":
+          "type":
+            - "string"
+            - "null"
+          "description": "ACCEPT_TIMEOUT, COMPLETE_TIMEOUT, HEAD_CHANGED, ACCEPTED_AFTER_TIMEOUT, CONTROLLER_FAULT, ABORTED[_<reason>] or a contract reason."
+        "removedCount":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+          "description": "Bowls taken out of inventory by this command."
+        "reconciliationOutcome":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "DONE"
+            - "NOT_DONE"
+        "reconciledBy":
+          "type": "null"
+          "$ref": "#/components/schemas/MaintenanceActor"
+        "reconciledAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+    "MaintenanceTargetItem":
+      "type": "object"
+      "properties":
+        "inventoryItemId":
+          "type": "string"
+          "format": "uuid"
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "productName":
+          "type": "string"
+        "batchId":
+          "type": "string"
+          "format": "uuid"
+        "batchCode":
+          "type": "string"
+    "MaintenanceActor":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "fullName":
+          "type": "string"
+    "ResetMachineRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Optional body of a RESET: a note on what was checked. Unknown fields are rejected."
+      "properties":
+        "note":
+          "type":
+            - "string"
+            - "null"
+          "description": "At most 500 characters; blank means none."
+          "example": "Gates checked, jam cleared"
+          "maxLength": 500
+          "minLength": 0
+    "ApiResponseMaintenanceCommandPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MaintenanceCommandPageResponse"
+    "MaintenanceCommandPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MaintenanceCommandResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "ReconcileMaintenanceCommandRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "What Staff found at the machine. DONE applies the command's effect as if it had completed; NOT_DONE changes nothing."
+      "properties":
+        "outcome":
+          "type": "string"
+          "enum":
+            - "DONE"
+            - "NOT_DONE"
+          "example": "DONE"
+        "note":
+          "type":
+            - "string"
+            - "null"
+          "description": "Optional, at most 500 characters."
+          "maxLength": 500
+          "minLength": 0
+      "required":
+        - "outcome"

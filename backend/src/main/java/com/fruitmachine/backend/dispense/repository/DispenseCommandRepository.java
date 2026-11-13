@@ -37,6 +37,9 @@ public interface DispenseCommandRepository extends JpaRepository<DispenseCommand
     @Query("select c from DispenseCommand c where c.id = :id")
     Optional<DispenseCommand> findForUpdateById(@Param("id") UUID id);
 
+    /** Issue #64: a dispense command of the machine in one of these states (maintenance waits for running dispenses). */
+    boolean existsByMachineIdAndStatusIn(UUID machineId, Collection<DispenseStatus> statuses);
+
     @Query("select c.id from DispenseCommand c where c.status in :statuses order by c.createdAt, c.id")
     List<UUID> findIdsByStatusIn(@Param("statuses") Collection<DispenseStatus> statuses, Pageable limit);
 }

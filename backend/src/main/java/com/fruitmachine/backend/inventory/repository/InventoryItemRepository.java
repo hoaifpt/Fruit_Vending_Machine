@@ -45,7 +45,7 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
         ), sellable as (
             select h.slot_id, hb.product_id, hb.expires_at as head_expires_at, h.loaded_at, s.slot_code
             from heads h join product_batches hb on hb.id = h.batch_id join machine_slots s on s.id = h.slot_id
-            where h.status = 'AVAILABLE' and hb.expires_at > :holdDeadline and s.status = 'ACTIVE'
+            where h.status = 'AVAILABLE' and hb.expires_at > :holdDeadline and s.status = 'ACTIVE' and not s.refill_gate_open
         ), next_bowl as (
             select distinct on (x.product_id) x.product_id,
                    (cast(:enabled as boolean) and x.head_expires_at >= :dayStart and x.head_expires_at < :dayEnd) as eligible
@@ -101,7 +101,7 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
         join product_batches b on b.id = h.batch_id
         join machine_slots s on s.id = h.slot_id
         where h.status = 'AVAILABLE' and b.product_id = :productId and b.expires_at > :holdDeadline
-          and s.status = 'ACTIVE' and s.machine_id = :machineId
+          and s.status = 'ACTIVE' and not s.refill_gate_open and s.machine_id = :machineId
         order by b.expires_at, h.loaded_at, s.slot_code, s.id
         limit 1
         """, nativeQuery = true)
@@ -115,6 +115,11 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
         order by i.loadedAt, i.id
         """)
     List<InventoryItem> findHeadCandidates(@Param("slotId") UUID slotId, @Param("physical") Collection<InventoryStatus> physical, Pageable pageable);
+
+    /** Issue #64: bowls of a slot in the given states, locked in id order (EMPTY_COLUMN). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from InventoryItem i where i.slotId = :slotId and i.status in :statuses order by i.id")
+    List<InventoryItem> findForUpdateBySlotIdAndStatusInOrderById(@Param("slotId") UUID slotId, @Param("statuses") Collection<InventoryStatus> statuses);
 
     long countByBatchId(UUID batchId);
     long countBySlotIdAndStatusIn(UUID slotId, Collection<InventoryStatus> statuses);

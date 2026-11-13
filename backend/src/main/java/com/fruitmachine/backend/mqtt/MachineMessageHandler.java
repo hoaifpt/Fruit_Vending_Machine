@@ -1,5 +1,7 @@
 package com.fruitmachine.backend.mqtt;
 
+import com.fruitmachine.backend.maintenance.service.MaintenanceCommandService;
+import com.fruitmachine.backend.maintenance.service.MaintenanceReport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fruitmachine.backend.alert.service.AlertService;
@@ -33,6 +35,8 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class MachineMessageHandler {
     static final String STATE_FIELD = "state";
+    static final String MAINTENANCE_PREFIX = "MAINTENANCE_";
+    static final String RESET_PREFIX = com.fruitmachine.backend.mqtt.contract.MachineCommandType.RESET + "_";
     static final String ONLINE = "ONLINE";
     static final String OFFLINE = "OFFLINE";
     static final int FIRMWARE_VERSION_MAX = 32;
@@ -44,6 +48,7 @@ public class MachineMessageHandler {
     private final TelemetryService telemetry;
     private final MachineEventRecorder history;
     private final AlertService alerts;
+    private final MaintenanceCommandService maintenance;
     private final Clock clock;
 
     /** @param topicMachineCode the machine segment of the topic; the broker ACL ties it to the machine's account. */
@@ -96,6 +101,16 @@ public class MachineMessageHandler {
                     bowlCount.isIntegralNumber() && bowlCount.canConvertToInt() ? bowlCount.asInt() : null);
             var outcome = dispense.handleMachineEvent(envelope.machineCode(), report);
             log.info("Machine {} reported {} for {}: {}", envelope.machineCode(), eventType, commandId, outcome);
+        } else if (eventType.startsWith(MAINTENANCE_PREFIX) || eventType.startsWith(RESET_PREFIX)) {
+            // Maintenance commands (issue #64): own transaction; a failure is logged and never reaches the MQTT callback.
+            try {
+                JsonNode reason = details.path(MachineEventType.REASON_FIELD), state = details.path(STATE_FIELD);
+                var outcome = maintenance.handleMachineEvent(envelope.machineCode(), new MaintenanceReport(eventType, commandId,
+                        reason.isTextual() ? reason.asText() : null, state.isTextual() ? state.asText() : null));
+                log.info("Machine {} reported {} for {}: {}", envelope.machineCode(), eventType, commandId, outcome);
+            } catch (RuntimeException ex) {
+                log.error("Machine {} {} for maintenance command {} could not be applied", envelope.machineCode(), eventType, commandId, ex);
+            }
         } else if (MachineEventType.FAULT.equals(eventType) || MachineEventType.BOOT.equals(eventType) || MachineEventType.FAULT_CLEARED.equals(eventType)) {
             // Alerts (issue #58): own transaction; a failure is logged and never reaches the MQTT callback.
             try {

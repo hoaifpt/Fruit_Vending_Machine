@@ -32,7 +32,8 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
      * near-expiry discount change (#61, PRICING_MANAGE).
      */
     static final Set<String> NEW_OPERATIONS = Set.of("GET /api/v1/permissions", "GET /api/v1/roles", "GET /api/v1/roles/{id}",
-            "PUT /api/v1/roles/{id}/permissions", "GET /api/v1/audit-logs", "GET /api/v1/audit-logs/{id}", "PUT /api/v1/pricing/near-expiry-discount");
+            "PUT /api/v1/roles/{id}/permissions", "GET /api/v1/audit-logs", "GET /api/v1/audit-logs/{id}", "PUT /api/v1/pricing/near-expiry-discount",
+            "POST /api/v1/machines/{machineId}/reset");
     /**
      * Added by #53, #56, #58 and #61: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, PRICING_READ, or any
      * signed-in user for the own notifications); anonymous and kiosk keys are unauthenticated here.
@@ -40,7 +41,9 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
     static final Set<String> NEW_READ_OPERATIONS = Set.of("GET /api/v1/machines/{machineId}/telemetry", "GET /api/v1/machines/{machineId}/telemetry/latest",
             "GET /api/v1/machines/{machineId}/events", "GET /api/v1/alerts", "GET /api/v1/alerts/{id}", "POST /api/v1/alerts/{id}/acknowledge",
             "POST /api/v1/alerts/{id}/resolve", "GET /api/v1/notifications/me", "GET /api/v1/notifications/me/unread-count",
-            "POST /api/v1/notifications/{id}/read", "POST /api/v1/notifications/me/read-all", "GET /api/v1/pricing/near-expiry-discount");
+            "POST /api/v1/notifications/{id}/read", "POST /api/v1/notifications/me/read-all", "GET /api/v1/pricing/near-expiry-discount",
+            "POST /api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands", "GET /api/v1/maintenance-commands",
+            "GET /api/v1/maintenance-commands/{id}", "POST /api/v1/maintenance-commands/{id}/reconcile");
     static final List<String> IDENTITIES = List.of("ANONYMOUS", "STAFF", "ADMIN", "KIOSK");
 
     record Operation(String method, String path) {

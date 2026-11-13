@@ -111,7 +111,7 @@ class MachineSlotManagementIntegrationTest {
                 .andExpect(jsonPath("$.data.status").value("ACTIVE")).andExpect(jsonPath("$.data.machineId").value(parent.getId().toString()))
                 .andReturn().getResponse();
         var data = mapper.readTree(response.getContentAsString()).path("data");
-        assertThat(data.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "createdAt", "updatedAt");
+        assertThat(data.fieldNames()).toIterable().containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "refillGateOpen", "createdAt", "updatedAt");
         UUID id = UUID.fromString(data.path("id").asText());
         assertThat(response.getHeader("Location")).isEqualTo(path() + "/" + id);
         var saved = slots.findById(id).orElseThrow();
@@ -262,7 +262,7 @@ class MachineSlotManagementIntegrationTest {
             var read = mvc.perform(get(detail()).header("Authorization", "Bearer " + token)).andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
             assertThat(mapper.readTree(read).path("data").fieldNames()).toIterable()
-                    .containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "createdAt", "updatedAt");
+                    .containsExactlyInAnyOrder("id", "machineId", "slotCode", "capacity", "status", "refillGateOpen", "createdAt", "updatedAt");
             var first = mvc.perform(get(path()).header("Authorization", "Bearer " + token).param("size", "1"))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(2)).andExpect(jsonPath("$.data.totalPages").value(2))
                     .andExpect(jsonPath("$.data.content", hasSize(1))).andExpect(jsonPath("$.data.content[0].slotCode").value("A"))
