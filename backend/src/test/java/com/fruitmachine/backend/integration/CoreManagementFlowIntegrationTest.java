@@ -19,7 +19,9 @@ class CoreManagementFlowIntegrationTest extends AbstractCoreIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_items WHERE batch_id=?", Long.class, stock.batchId())).isZero();
         assertThat(jdbc.queryForObject("SELECT created_by FROM product_batches WHERE id=?", UUID.class, stock.batchId())).isEqualTo(staff.id());
 
-        var loaded = fixtures.load(stock, 3, actor.token());
+        // Issue #68: direct loading is ADMIN only; Staff loads through restock work orders.
+        if (!useAdmin) fixtures.response("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 3), staff.token(), 403);
+        var loaded = fixtures.load(stock, 3, admin.token());
         assertThat(loaded.path("items")).hasSize(3);
         UUID operation = UUID.fromString(loaded.path("operationId").asText());
         var records = jdbc.queryForList("""
@@ -32,7 +34,7 @@ class CoreManagementFlowIntegrationTest extends AbstractCoreIntegrationTest {
             assertThat(row.get("batch_id")).isEqualTo(stock.batchId());
             assertThat(row.get("slot_id")).isEqualTo(stock.slotId());
             assertThat(row.get("machine_id")).isEqualTo(stock.machineId());
-            assertThat(row.get("performed_by")).isEqualTo(actor.id());
+            assertThat(row.get("performed_by")).isEqualTo(admin.id());
             assertThat(row.get("type")).isEqualTo("LOAD");
             assertThat(row.get("status_after")).isEqualTo("AVAILABLE");
             assertThat(row.get("reference_id")).isEqualTo(operation);
@@ -63,13 +65,13 @@ class CoreManagementFlowIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void deactivationAndElapsedExpiryAffectSellabilityWithoutDeletingTraceability() throws Exception {
         var stock = fixtures.stock(4, 4, admin.token(), staff.token());
-        fixtures.load(stock, 2, staff.token());
+        fixtures.load(stock, 2, admin.token());
         fixtures.api("PATCH", "/api/v1/products/"+stock.productId()+"/status", Map.of("status", "INACTIVE"), admin.token(), 200);
         var summary = fixtures.api("GET", stock.slotInventory()+"/summary", null, staff.token(), 200);
         assertThat(summary.path("availableCount").asInt()).isEqualTo(2);
         assertThat(summary.path("sellableCount").asInt()).isZero();
         fixtures.api("GET", "/api/v1/product-batches/"+stock.batchId(), null, staff.token(), 200);
-        fixtures.response("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 1), staff.token(), 409);
+        fixtures.response("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 1), admin.token(), 409);
         fixtures.api("PATCH", "/api/v1/products/"+stock.productId()+"/status", Map.of("status", "ACTIVE"), admin.token(), 200);
         jdbc.update("UPDATE product_batches SET expires_at=CURRENT_TIMESTAMP - interval '1 minute' WHERE id=?", stock.batchId());
         summary = fixtures.api("GET", stock.slotInventory()+"/summary", null, staff.token(), 200);
@@ -98,7 +100,7 @@ class CoreManagementFlowIntegrationTest extends AbstractCoreIntegrationTest {
         }
         fixtures.response("GET", "/api/v1/users", null, staff.token(), 403);
         fixtures.response("GET", "/api/v1/inventory", null, "invalid.jwt", 401);
-        fixtures.response("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 0), staff.token(), 400);
+        fixtures.response("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 0), admin.token(), 400);
         var missing = fixtures.response("GET", "/api/v1/inventory/"+UUID.randomUUID(), null, staff.token(), 404);
         assertThat(missing.toString()).doesNotContain("passwordHash", "org.springframework", "SELECT", "stackTrace");
         String hash = jdbc.queryForObject("SELECT password_hash FROM users WHERE id=?", String.class, staff.id());

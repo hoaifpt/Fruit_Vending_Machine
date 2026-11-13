@@ -48,6 +48,8 @@ tags:
     description: Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.
   - name: Products
     description: Management catalog. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: "Restock"
+    description: "Restock workflow on RESTOCK work orders: Admin (RESTOCK_PLAN) gets per-slot suggestions and plans lines; the assignee (RESTOCK_EXECUTE) loads bowls against a line of the IN_PROGRESS work order (history references the line); completion compares planned and loaded. Direct POST /api/v1/inventory/load is ADMIN only. 409 messages start with a code: RESTOCK_WITHOUT_LINES, LINE_ALREADY_LOADED, DUPLICATE_LINE, SLOT_INACTIVE, PRODUCT_INACTIVE, NOTHING_TO_RESTOCK, WORK_ORDER_NOT_IN_PROGRESS, BATCH_PRODUCT_MISMATCH, BATCH_EXPIRED, EXPIRY_INVERSION, SLOT_CAPACITY_EXCEEDED, BATCH_QUANTITY_EXCEEDED, RESTOCK_VARIANCE_REASON_REQUIRED, REFILL_GATE_OPEN."
   - name: Roles & Permissions
     description: "Roles are sets of permissions; every protected endpoint checks a permission. An account with PERMISSION_MANAGE views roles and the catalog and replaces a role's permission set; changes apply on each member's next request. Roles and permissions cannot be created, renamed or deleted here."
   - name: Users
@@ -971,11 +973,10 @@ paths:
           "bearerAuth": []
   "/api/v1/inventory/load":
     "post":
-      "x-required-permission": "INVENTORY_WRITE"
       "tags":
         - "Inventory"
       "summary": "Record physically confirmed stock loading"
-      "description": "ADMIN or STAFF. Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. Physical occupancy includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED. Total registered batch items include all statuses. Lock order Product/Batch/Machine/Slot serializes state and count checks. Quantity 1..1000 per bounded bulk request, strict JSON integer. Actor is current principal. Operation UUID groups per-item history using reference_id; not an idempotency key. Retries may register more boxes if limits permit. No hardware action."
+      "description": "INVENTORY_LOAD_DIRECT (ADMIN only since issue #68: Staff loads through a RESTOCK work order, POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads). Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. Physical occupancy includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED. Total registered batch items include all statuses. Lock order Product/Batch/Machine/Slot serializes state and count checks. Quantity 1..1000 per bounded bulk request, strict JSON integer. Actor is current principal. Operation UUID groups per-item history using reference_id; not an idempotency key. Retries may register more boxes if limits permit. No hardware action."
       "operationId": "loadInventory"
       "requestBody":
         "content":
@@ -983,9 +984,9 @@ paths:
             "schema":
               "$ref": "#/components/schemas/LoadInventoryRequest"
             "example":
-              "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
-              "quantity": 1
               "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+              "quantity": 1
+              "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
         "required": true
       "responses":
         "201":
@@ -1000,27 +1001,27 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiResponseInventoryLoadResponse"
               "example":
+                "message": "Inventory loaded"
+                "timestamp": "2026-10-10T02:00:00Z"
                 "data":
-                  "operationId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07"
-                  "quantity": 1
                   "items":
                     -
-                      "expiresAt": "2026-10-12T01:00:00Z"
-                      "productName": "Mango Fruit Box"
-                      "updatedAt": "2026-10-10T02:00:00Z"
-                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
-                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
-                      "createdAt": "2026-10-10T02:00:00Z"
-                      "status": "AVAILABLE"
-                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
-                      "slotCode": "A"
-                      "loadedAt": "2026-10-10T02:00:00Z"
-                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
-                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
-                      "batchCode": "MANGO-20261010-01"
                       "expired": false
-                "timestamp": "2026-10-10T02:00:00Z"
-                "message": "Inventory loaded"
+                      "batchCode": "MANGO-20261010-01"
+                      "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03"
+                      "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
+                      "loadedAt": "2026-10-10T02:00:00Z"
+                      "slotCode": "A"
+                      "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                      "status": "AVAILABLE"
+                      "createdAt": "2026-10-10T02:00:00Z"
+                      "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06"
+                      "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"
+                      "updatedAt": "2026-10-10T02:00:00Z"
+                      "productName": "Mango Fruit Box"
+                      "expiresAt": "2026-10-12T01:00:00Z"
+                  "quantity": 1
+                  "operationId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07"
         "409":
           "description": "Ineligible product/batch/machine/slot, capacity/batch quantity exceeded or database conflict"
           "content":
@@ -1028,11 +1029,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "message": "Slot capacity exceeded"
-                "timestamp": "2026-10-10T02:00:00Z"
-                "error": "Conflict"
-                "path": "/api/v1/inventory/load"
                 "status": 409
+                "path": "/api/v1/inventory/load"
+                "error": "Conflict"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Slot capacity exceeded"
         "400":
           "description": "Invalid parameters, malformed/unknown JSON or validation failure"
           "content":
@@ -1040,11 +1041,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "message": "Request body is missing or malformed"
-                "timestamp": "2026-10-10T02:00:00Z"
-                "error": "Bad Request"
-                "path": "/api/v1/inventory/load"
                 "status": 400
+                "path": "/api/v1/inventory/load"
+                "error": "Bad Request"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Request body is missing or malformed"
         "401":
           "description": "Missing/invalid/expired Bearer token or unavailable account"
           "headers":
@@ -1057,11 +1058,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "message": "Authentication required or access token invalid"
-                "timestamp": "2026-10-10T02:00:00Z"
-                "error": "Unauthorized"
-                "path": "/api/v1/inventory/load"
                 "status": 401
+                "path": "/api/v1/inventory/load"
+                "error": "Unauthorized"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Authentication required or access token invalid"
         "403":
           "description": "Authenticated account lacks ADMIN/STAFF role"
           "content":
@@ -1069,11 +1070,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "message": "Access denied"
-                "timestamp": "2026-10-10T02:00:00Z"
-                "error": "Forbidden"
-                "path": "/api/v1/inventory/load"
                 "status": 403
+                "path": "/api/v1/inventory/load"
+                "error": "Forbidden"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Access denied"
         "404":
           "description": "Requested item, batch, machine or scoped slot not found"
           "content":
@@ -1081,11 +1082,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "message": "Inventory item not found"
-                "timestamp": "2026-10-10T02:00:00Z"
-                "error": "Not Found"
-                "path": "/api/v1/inventory/load"
                 "status": 404
+                "path": "/api/v1/inventory/load"
+                "error": "Not Found"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "Inventory item not found"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -1093,14 +1094,15 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "message": "An unexpected error occurred"
-                "timestamp": "2026-10-10T02:00:00Z"
-                "error": "Internal Server Error"
-                "path": "/api/v1/inventory/load"
                 "status": 500
+                "path": "/api/v1/inventory/load"
+                "error": "Internal Server Error"
+                "timestamp": "2026-10-10T02:00:00Z"
+                "message": "An unexpected error occurred"
       "security":
         -
           "bearerAuth": []
+      "x-required-permission": "INVENTORY_LOAD_DIRECT"
   "/api/v1/inventory/{id}/remove":
     "post":
       "x-required-permission": "INVENTORY_WRITE"
@@ -8966,6 +8968,482 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "WORK_ORDER_MANAGE"
+  "/api/v1/machines/{machineId}/restock-suggestions":
+    "get":
+      "tags":
+        - "Restock"
+      "summary": "Restock suggestions of a machine"
+      "description": "RESTOCK_PLAN. Per slot: counts, head status, current product, open alerts and NONE / LOAD / EMPTY_THEN_LOAD with a load quantity. One aggregate query; nothing is locked."
+      "operationId": "getRestockSuggestions"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Suggestions"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRestockSuggestionResponse"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "RESTOCK_PLAN"
+  "/api/v1/machines/{machineId}/restock-work-orders":
+    "post":
+      "tags":
+        - "Restock"
+      "summary": "Create a RESTOCK work order from suggestions"
+      "description": "RESTOCK_PLAN (with WORK_ORDER_MANAGE). Lines for every slot whose suggestion is not NONE and whose product is known; open stock alerts of those slots linked. Nothing to restock: 409 NOTHING_TO_RESTOCK."
+      "operationId": "createRestockWorkOrderFromSuggestions"
+      "parameters":
+        -
+          "name": "machineId"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateRestockWorkOrderRequest"
+        "required": true
+      "responses":
+        "201":
+          "description": "Work order created"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseWorkOrderResponse"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Nothing to restock or machine inactive"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "RESTOCK_PLAN"
+  "/api/v1/work-orders/{id}/restock-lines":
+    "post":
+      "tags":
+        - "Restock"
+      "summary": "Add a restock line"
+      "description": "RESTOCK_PLAN. RESTOCK work order not DONE / CANCELLED."
+      "operationId": "addRestockLine"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/RestockLineInput"
+        "required": true
+      "responses":
+        "200":
+          "description": "Line after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRestockLineResponse"
+        "404":
+          "description": "Work order, line, slot or product not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Finished work order, line already loaded, duplicate line, inactive slot or product"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "RESTOCK_PLAN"
+  "/api/v1/work-orders/{id}/restock-lines/{lineId}":
+    "delete":
+      "tags":
+        - "Restock"
+      "summary": "Delete a restock line"
+      "description": "RESTOCK_PLAN. Only while nothing was loaded against it."
+      "operationId": "deleteRestockLine"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "lineId"
+          "in": "path"
+          "description": "Line UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Line after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseVoid"
+        "404":
+          "description": "Work order, line, slot or product not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Finished work order, line already loaded, duplicate line, inactive slot or product"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "RESTOCK_PLAN"
+    "patch":
+      "tags":
+        - "Restock"
+      "summary": "Change a restock line"
+      "description": "RESTOCK_PLAN. Only while nothing was loaded against it (409 LINE_ALREADY_LOADED)."
+      "operationId": "updateRestockLine"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "lineId"
+          "in": "path"
+          "description": "Line UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/UpdateRestockLineRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Line after the change"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRestockLineResponse"
+        "404":
+          "description": "Work order, line, slot or product not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "Finished work order, line already loaded, duplicate line, inactive slot or product"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "RESTOCK_PLAN"
+  "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads":
+    "post":
+      "tags":
+        - "Restock"
+      "summary": "Load bowls against a restock line"
+      "description": "RESTOCK_EXECUTE, assignee (or Admin) of the IN_PROGRESS RESTOCK work order. Batch of the line's product, valid beyond the reservation hold; slot ACTIVE or ERROR; capacity and the batch's declared quantity; a batch expiring earlier than bowls already in the column is 409 EXPIRY_INVERSION unless acknowledged. Creates AVAILABLE bowls with strictly increasing loaded_at and LOAD history referencing the line."
+      "operationId": "loadRestockLine"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "lineId"
+          "in": "path"
+          "description": "Line UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/RestockLoadRequest"
+        "required": true
+      "responses":
+        "201":
+          "description": "Bowls loaded"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRestockLoadResponse"
+        "404":
+          "description": "Work order, line or batch not found, or work order of someone else"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "A loading rule does not hold (code at the start of the message)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "RESTOCK_EXECUTE"
+  "/api/v1/work-orders/{id}/restock":
+    "get":
+      "tags":
+        - "Restock"
+      "summary": "Restock view of a work order"
+      "description": "WORK_ORDER_READ_ASSIGNED, same visibility as the work order. Lines with loads, linked maintenance commands and removed bowls by reason."
+      "operationId": "getRestock"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Work order UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Restock view"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseRestockViewResponse"
+        "404":
+          "description": "Work order not found or not RESTOCK"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "WORK_ORDER_READ_ASSIGNED"
 
 components:
   securitySchemes:
@@ -11812,6 +12290,12 @@ components:
             - "null"
           "format": "uuid"
           "description": "REMOVE_ITEM only, optional: must be the current head bowl of the column (409 NOT_HEAD_ITEM otherwise)."
+        "workOrderId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Issue #68, optional: the IN_PROGRESS work order of this machine the command serves; the caller must be allowed to execute it."
       "required":
         - "operation"
     "ApiResponseMaintenanceCommandResponse":
@@ -11889,6 +12373,12 @@ components:
           "description": "REMOVE_ITEM: the head bowl when the command was created."
         "requestedBy":
           "$ref": "#/components/schemas/MaintenanceActor"
+        "workOrderId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+          "description": "Issue #68: work order the command serves."
         "attemptCount":
           "type": "integer"
           "format": "int32"
@@ -12151,6 +12641,10 @@ components:
           "type": "array"
           "items":
             "$ref": "#/components/schemas/WorkOrderLinkedAlert"
+        "restockSummary":
+          "type": "null"
+          "$ref": "#/components/schemas/WorkOrderRestockSummary"
+          "description": "Issue #68: RESTOCK work orders only."
         "version":
           "type": "integer"
           "format": "int64"
@@ -12249,6 +12743,11 @@ components:
             - "null"
           "format": "date-time"
           "description": "Optional; not in the past."
+        "restockLines":
+          "type": "array"
+          "description": "Issue #68, RESTOCK only (needs RESTOCK_PLAN): planned lines; other types must leave it out."
+          "items":
+            "$ref": "#/components/schemas/RestockLineInput"
       "required":
         - "machineId"
         - "title"
@@ -12427,6 +12926,11 @@ components:
             - "boolean"
             - "null"
           "description": "Resolve the linked OPEN/ACKNOWLEDGED alerts. Default true."
+        "lineVariances":
+          "type": "array"
+          "description": "Issue #68, RESTOCK: a reason for each line whose loaded quantity differs from the planned one."
+          "items":
+            "$ref": "#/components/schemas/LineVariance"
       "required":
         - "resultNote"
     "CancelWorkOrderRequest":
@@ -12496,3 +13000,394 @@ components:
             - "string"
             - "null"
           "format": "date-time"
+    "ApiResponseRestockSuggestionResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/RestockSuggestionResponse"
+    "RestockSuggestionResponse":
+      "type": "object"
+      "description": "Restock suggestions of a machine: one entry per slot. Read-only, nothing is locked."
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "lowStockThreshold":
+          "type": "integer"
+          "format": "int32"
+          "description": "LOW_STOCK threshold used: sellable at most this many is low."
+        "slots":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/SlotSuggestion"
+    "SlotSuggestion":
+      "type": "object"
+      "properties":
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "slotCode":
+          "type": "string"
+        "capacity":
+          "type": "integer"
+          "format": "int32"
+        "slotStatus":
+          "type": "string"
+        "refillGateOpen":
+          "type": "boolean"
+        "physicalCount":
+          "type": "integer"
+          "format": "int64"
+          "description": "Bowls in the column (AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED)."
+        "sellableCount":
+          "type": "integer"
+          "format": "int64"
+          "description": "Bowls a customer can buy now (0 when the head blocks the column)."
+        "expiredCount":
+          "type": "integer"
+          "format": "int64"
+        "expiringTodayCount":
+          "type": "integer"
+          "format": "int64"
+        "dispenseFailedCount":
+          "type": "integer"
+          "format": "int64"
+        "headStatus":
+          "type":
+            - "string"
+            - "null"
+          "description": "Status of the head bowl (EXPIRED when its batch expired); null for an empty column."
+        "currentProduct":
+          "type": "null"
+          "$ref": "#/components/schemas/CurrentProduct"
+          "description": "Product of the most recently loaded bowl still in the column; null when empty."
+        "suggestedAction":
+          "type": "string"
+          "enum":
+            - "NONE"
+            - "LOAD"
+            - "EMPTY_THEN_LOAD"
+        "suggestedLoadQuantity":
+          "type": "integer"
+          "format": "int32"
+          "description": "Capacity minus the bowls left after the suggested action."
+        "openAlerts":
+          "type": "array"
+          "items":
+            "type": "string"
+    "CurrentProduct":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "name":
+          "type": "string"
+    "CreateRestockWorkOrderRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "A RESTOCK work order from the machine's suggestions: one line per slot whose suggested action is not NONE (slots without a product skipped); open LOW_STOCK / PRODUCT_* alerts of those slots are linked."
+      "properties":
+        "fromSuggestions":
+          "type": "boolean"
+          "example": true
+        "title":
+          "type":
+            - "string"
+            - "null"
+          "description": "Default: \"Nạp hàng máy <code>\"."
+          "maxLength": 200
+          "minLength": 0
+        "priority":
+          "type":
+            - "string"
+            - "null"
+          "enum":
+            - "LOW"
+            - "NORMAL"
+            - "HIGH"
+            - "URGENT"
+        "assigneeId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+        "dueAt":
+          "type":
+            - "string"
+            - "null"
+          "format": "date-time"
+      "required":
+        - "fromSuggestions"
+    "WorkOrderRestockSummary":
+      "type": "object"
+      "description": "Issue #68: totals of a RESTOCK work order's lines."
+      "properties":
+        "lines":
+          "type": "integer"
+          "format": "int32"
+        "plannedTotal":
+          "type": "integer"
+          "format": "int32"
+        "loadedTotal":
+          "type": "integer"
+          "format": "int32"
+        "varianceLines":
+          "type": "integer"
+          "format": "int32"
+          "description": "Lines whose loaded quantity differs from the planned one."
+    "RestockLineInput":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Issue #68: one planned restock line: a slot of the work order's machine, an ACTIVE product, at most the slot capacity."
+      "properties":
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "plannedQuantity":
+          "type": "integer"
+          "format": "int32"
+          "example": 6
+          "maximum": 1000
+          "minimum": 0
+      "required":
+        - "plannedQuantity"
+        - "productId"
+        - "slotId"
+    "ApiResponseRestockLineResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/RestockLineResponse"
+    "RestockLineResponse":
+      "type": "object"
+      "description": "One restock line with what was loaded against it."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "workOrderId":
+          "type": "string"
+          "format": "uuid"
+        "slotId":
+          "type": "string"
+          "format": "uuid"
+        "slotCode":
+          "type": "string"
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "productName":
+          "type": "string"
+        "plannedQuantity":
+          "type": "integer"
+          "format": "int32"
+        "loadedQuantity":
+          "type": "integer"
+          "format": "int32"
+        "varianceReason":
+          "type":
+            - "string"
+            - "null"
+        "loads":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/RestockLoad"
+    "RestockLoad":
+      "type": "object"
+      "properties":
+        "batchId":
+          "type": "string"
+          "format": "uuid"
+        "batchCode":
+          "type": "string"
+        "quantity":
+          "type": "integer"
+          "format": "int64"
+        "loadedAt":
+          "type": "string"
+          "format": "date-time"
+        "actorId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+        "actorName":
+          "type":
+            - "string"
+            - "null"
+    "ApiResponseVoid":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data": {}
+    "UpdateRestockLineRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Partial change of a line that nothing was loaded against yet; a field left out is unchanged."
+      "properties":
+        "plannedQuantity":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+          "maximum": 1000
+          "minimum": 0
+        "productId":
+          "type":
+            - "string"
+            - "null"
+          "format": "uuid"
+    "RestockLoadRequest":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Bowls physically loaded into the line's column from one batch."
+      "properties":
+        "batchId":
+          "type": "string"
+          "format": "uuid"
+        "quantity":
+          "type": "integer"
+          "format": "int32"
+          "example": 4
+          "maximum": 1000
+          "minimum": 1
+        "acknowledgeExpiryInversion":
+          "type":
+            - "boolean"
+            - "null"
+          "description": "Load anyway although the batch expires earlier than bowls already in the column (it will be sold after them). Default false: 409 EXPIRY_INVERSION."
+      "required":
+        - "batchId"
+        - "quantity"
+    "ApiResponseRestockLoadResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/RestockLoadResponse"
+    "RestockLoadResponse":
+      "type": "object"
+      "properties":
+        "line":
+          "$ref": "#/components/schemas/RestockLineResponse"
+        "loaded":
+          "type": "integer"
+          "format": "int32"
+        "inventoryItemIds":
+          "type": "array"
+          "items":
+            "type": "string"
+            "format": "uuid"
+    "ApiResponseRestockViewResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/RestockViewResponse"
+    "RestockViewResponse":
+      "type": "object"
+      "description": "A RESTOCK work order: lines with loads, linked maintenance commands and the bowls they removed."
+      "properties":
+        "workOrderId":
+          "type": "string"
+          "format": "uuid"
+        "workOrderCode":
+          "type": "string"
+        "status":
+          "type": "string"
+        "lines":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/RestockLineResponse"
+        "plannedTotal":
+          "type": "integer"
+          "format": "int32"
+        "loadedTotal":
+          "type": "integer"
+          "format": "int32"
+        "maintenanceCommands":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/LinkedMaintenanceCommand"
+        "removedByReason":
+          "type": "object"
+          "additionalProperties":
+            "type": "integer"
+            "format": "int32"
+          "description": "Bowls removed by completed (or reconciled DONE) linked maintenance commands, by reason."
+    "LinkedMaintenanceCommand":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "commandCode":
+          "type": "string"
+        "operation":
+          "type": "string"
+        "status":
+          "type": "string"
+        "reason":
+          "type":
+            - "string"
+            - "null"
+        "slotCode":
+          "type":
+            - "string"
+            - "null"
+        "removedCount":
+          "type":
+            - "integer"
+            - "null"
+          "format": "int32"
+        "reconciliationOutcome":
+          "type":
+            - "string"
+            - "null"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+    "LineVariance":
+      "type": "object"
+      "additionalProperties": false
+      "description": "Issue #68: why a restock line was loaded with another quantity than planned."
+      "properties":
+        "lineId":
+          "type": "string"
+          "format": "uuid"
+        "reason":
+          "type": "string"
+          "example": "Lô mới chỉ có 4 tô"
+          "maxLength": 500
+          "minLength": 0
+      "required":
+        - "lineId"
+        - "reason"

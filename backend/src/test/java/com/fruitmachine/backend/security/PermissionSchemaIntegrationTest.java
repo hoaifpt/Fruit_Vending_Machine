@@ -15,7 +15,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     static final UUID STAFF = UUID.fromString("10000000-0000-0000-0000-000000000002");
     static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "INVENTORY_READ", "INVENTORY_WRITE",
             "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ",
-            "WORK_ORDER_EXECUTE", "WORK_ORDER_READ_ASSIGNED");
+            "RESTOCK_EXECUTE", "WORK_ORDER_EXECUTE", "WORK_ORDER_READ_ASSIGNED");
 
     List<String> codesOf(UUID role) {
         return jdbc.queryForList("SELECT p.code FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ? ORDER BY p.code",
@@ -25,7 +25,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void v13AppliesAndSeedsExactlyTheCatalogWithFixedIds() {
         assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
         var rows = jdbc.queryForList("SELECT id, code, description FROM permissions ORDER BY id");
         assertThat(rows).extracting(r -> r.get("code")).containsExactlyElementsOf(Permissions.ALL);
         for (int n = 0; n < rows.size(); n++) {
@@ -40,7 +40,7 @@ class PermissionSchemaIntegrationTest extends AbstractCoreIntegrationTest {
     void seededMappingReproducesTheFormerAdminAndStaffAccess() {
         assertThat(codesOf(ADMIN)).containsExactlyElementsOf(Permissions.ALL.stream().sorted().toList());
         assertThat(codesOf(STAFF)).containsExactlyElementsOf(STAFF_CODES);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM role_permissions", Long.class)).isEqualTo(28 + 14);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM role_permissions", Long.class)).isEqualTo(31 + 15);
     }
 
     @Test

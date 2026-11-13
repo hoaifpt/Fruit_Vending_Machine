@@ -106,6 +106,6 @@ public abstract class AbstractOrderIntegrationTest extends AbstractCoreIntegrati
     }
 
     protected void load(UUID batchId, UUID slotId, int quantity) throws Exception {
-        fixtures.api("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(batchId, slotId, quantity), staff.token(), 201);
+        fixtures.api("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(batchId, slotId, quantity), admin.token(), 201);
     }
 }

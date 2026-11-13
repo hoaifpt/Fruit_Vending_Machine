@@ -35,7 +35,10 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "PUT /api/v1/roles/{id}/permissions", "GET /api/v1/audit-logs", "GET /api/v1/audit-logs/{id}", "PUT /api/v1/pricing/near-expiry-discount",
             "POST /api/v1/machines/{machineId}/reset", "POST /api/v1/work-orders", "GET /api/v1/work-orders", "PATCH /api/v1/work-orders/{id}",
             "POST /api/v1/work-orders/{id}/assign", "POST /api/v1/work-orders/{id}/unassign", "POST /api/v1/work-orders/{id}/cancel",
-            "POST /api/v1/work-orders/{id}/alerts", "DELETE /api/v1/work-orders/{id}/alerts/{alertId}", "POST /api/v1/alerts/{alertId}/work-orders");
+            "POST /api/v1/work-orders/{id}/alerts", "DELETE /api/v1/work-orders/{id}/alerts/{alertId}", "POST /api/v1/alerts/{alertId}/work-orders",
+            "GET /api/v1/machines/{machineId}/restock-suggestions", "POST /api/v1/machines/{machineId}/restock-work-orders",
+            "POST /api/v1/work-orders/{id}/restock-lines", "PATCH /api/v1/work-orders/{id}/restock-lines/{lineId}",
+            "DELETE /api/v1/work-orders/{id}/restock-lines/{lineId}");
     /**
      * Added by #53, #56, #58 and #61: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, PRICING_READ, or any
      * signed-in user for the own notifications); anonymous and kiosk keys are unauthenticated here.
@@ -47,7 +50,8 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "POST /api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands", "GET /api/v1/maintenance-commands",
             "GET /api/v1/maintenance-commands/{id}", "POST /api/v1/maintenance-commands/{id}/reconcile", "GET /api/v1/work-orders/me",
             "GET /api/v1/work-orders/{id}", "GET /api/v1/work-orders/{id}/events", "POST /api/v1/work-orders/{id}/start",
-            "POST /api/v1/work-orders/{id}/notes", "POST /api/v1/work-orders/{id}/complete");
+            "POST /api/v1/work-orders/{id}/notes", "POST /api/v1/work-orders/{id}/complete",
+            "POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "GET /api/v1/work-orders/{id}/restock");
     static final List<String> IDENTITIES = List.of("ANONYMOUS", "STAFF", "ADMIN", "KIOSK");
 
     record Operation(String method, String path) {

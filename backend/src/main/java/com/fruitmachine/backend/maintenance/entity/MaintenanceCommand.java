@@ -77,6 +77,10 @@ public class MaintenanceCommand extends UpdatedEntity {
     @JoinColumn(name = "requested_by", nullable = false)
     private User requestedBy;
 
+    /** Issue #68: the work order this command serves (e.g. removing old bowls during a restock). */
+    @Column(name = "work_order_id")
+    private UUID workOrderId;
+
     @Column(name = "idempotency_key", length = 64, nullable = false)
     private String idempotencyKey;
 

@@ -77,6 +77,11 @@ public class SecurityConfig {
                     authorize.requestMatchers("/api/v1/audit-logs", "/api/v1/audit-logs/**").hasAuthority(Permissions.AUDIT_LOG_READ);
                     // Issue #66: before the alert rules (creating a work order from an alert is work order management).
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/alerts/*/work-orders").hasAuthority(Permissions.WORK_ORDER_MANAGE);
+                    // Issue #68: restock planning and loading, before the generic work order and machine rules.
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/machines/*/restock-suggestions").hasAuthority(Permissions.RESTOCK_PLAN);
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/restock-work-orders").hasAuthority(Permissions.RESTOCK_PLAN);
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/work-orders/*/restock-lines/*/loads").hasAuthority(Permissions.RESTOCK_EXECUTE);
+                    authorize.requestMatchers("/api/v1/work-orders/*/restock-lines", "/api/v1/work-orders/*/restock-lines/*").hasAuthority(Permissions.RESTOCK_PLAN);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/work-orders").hasAuthority(Permissions.WORK_ORDER_READ_ALL);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/work-orders/**").hasAuthority(Permissions.WORK_ORDER_READ_ASSIGNED);
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/work-orders/*/start", "/api/v1/work-orders/*/notes", "/api/v1/work-orders/*/complete")
@@ -103,6 +108,8 @@ public class SecurityConfig {
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/product-batches", "/api/v1/product-batches/**").hasAuthority(Permissions.BATCH_READ);
                     authorize.requestMatchers("/api/v1/product-batches", "/api/v1/product-batches/**").hasAuthority(Permissions.BATCH_CREATE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/inventory", "/api/v1/inventory/**").hasAuthority(Permissions.INVENTORY_READ);
+                    // Issue #68: direct loading is ADMIN only; Staff loads through restock work orders.
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/inventory/load").hasAuthority(Permissions.INVENTORY_LOAD_DIRECT);
                     authorize.requestMatchers("/api/v1/inventory", "/api/v1/inventory/**").hasAuthority(Permissions.INVENTORY_WRITE);
                     authorize.anyRequest().authenticated();
                 })

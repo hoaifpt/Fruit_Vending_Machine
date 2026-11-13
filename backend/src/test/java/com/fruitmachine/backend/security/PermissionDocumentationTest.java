@@ -77,10 +77,10 @@ class PermissionDocumentationTest {
         // Every bearer operation states its permission, from the endpoint's own @PreAuthorize, identically in Swagger and the contract.
         Map<String, String> served = requiredPermissions(actual);
         assertThat(served).isEqualTo(requiredPermissions(expected));
-        assertThat(served).hasSize(75);
+        assertThat(served).hasSize(82);
         assertThat(served.values()).allMatch(Permissions.ALL::contains);
         assertThat(served).containsEntry("POST /api/v1/products", "PRODUCT_WRITE").containsEntry("GET /api/v1/products", "PRODUCT_READ")
-                .containsEntry("POST /api/v1/inventory/load", "INVENTORY_WRITE").containsEntry("GET /api/v1/machines/{machineId}/inventory", "INVENTORY_READ")
+                .containsEntry("POST /api/v1/inventory/load", "INVENTORY_LOAD_DIRECT").containsEntry("GET /api/v1/machines/{machineId}/inventory", "INVENTORY_READ")
                 .containsEntry("PUT /api/v1/roles/{id}/permissions", "PERMISSION_MANAGE");
         actual.path("paths").fields().forEachRemaining(path -> path.getValue().fields().forEachRemaining(op -> {
             // Own notifications (#58) need a signed-in user only, so they carry no permission.

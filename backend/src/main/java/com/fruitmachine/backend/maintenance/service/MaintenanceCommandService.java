@@ -92,6 +92,8 @@ public class MaintenanceCommandService {
     public static final String NOT_RECONCILABLE = "NOT_RECONCILABLE";
     public static final String EFFECT_NOT_POSSIBLE = "EFFECT_NOT_POSSIBLE";
     public static final String AUDIT_RECONCILED = "MAINTENANCE_COMMAND_RECONCILED";
+    public static final String WORK_ORDER_OTHER_MACHINE = "WORK_ORDER_OTHER_MACHINE";
+    public static final String WORK_ORDER_NOT_IN_PROGRESS = "WORK_ORDER_NOT_IN_PROGRESS";
 
     public static final String ACCEPT_TIMEOUT = "ACCEPT_TIMEOUT";
     public static final String COMPLETE_TIMEOUT = "COMPLETE_TIMEOUT";
@@ -127,6 +129,7 @@ public class MaintenanceCommandService {
     private final MaintenanceCommandProperties properties;
     private final Clock clock;
     private final jakarta.persistence.EntityManager entityManager;
+    private final com.fruitmachine.backend.workorder.repository.WorkOrderRepository workOrders;
     /** Last delivery attempt per unfinished command, so the dispatcher re-sends only after resend-interval (single instance). */
     private final Map<UUID, Instant> lastAttempt = new ConcurrentHashMap<>();
 
@@ -141,17 +144,17 @@ public class MaintenanceCommandService {
         if (request.operation() != MaintenanceOperation.REMOVE_ITEM && request.inventoryItemId() != null)
             throw new BadRequestException("inventoryItemId is only used with REMOVE_ITEM");
         if (request.reason() == MaintenanceReason.OTHER && request.note() == null) throw new BadRequestException("note is required when reason is OTHER");
-        return createCommand(machineId, slotId, idempotencyKey, request.operation(), request.reason(), request.note(), request.inventoryItemId());
+        return createCommand(machineId, slotId, idempotencyKey, request.operation(), request.reason(), request.note(), request.inventoryItemId(), request.workOrderId());
     }
 
     @Transactional
     @PreAuthorize(Permissions.HAS_MACHINE_RESET)
     public Created reset(UUID machineId, String idempotencyKey, @Valid ResetMachineRequest request) {
-        return createCommand(machineId, null, idempotencyKey, MaintenanceOperation.RESET, null, request == null ? null : request.note(), null);
+        return createCommand(machineId, null, idempotencyKey, MaintenanceOperation.RESET, null, request == null ? null : request.note(), null, null);
     }
 
     private Created createCommand(UUID machineId, UUID slotId, String idempotencyKey, MaintenanceOperation operation, MaintenanceReason reason,
-            String note, UUID inventoryItemId) {
+            String note, UUID inventoryItemId, UUID workOrderId) {
         if (idempotencyKey == null || !IDEMPOTENCY_KEY.matcher(idempotencyKey).matches())
             throw new BadRequestException("Idempotency-Key header is required: 8 to 64 characters of A-Z, a-z, 0-9, _ or -");
         User actor = actor();
@@ -161,7 +164,8 @@ public class MaintenanceCommandService {
             MaintenanceCommand command = existing.get();
             boolean same = command.getMachineId().equals(machineId) && Objects.equals(command.getSlotId(), slotId) && command.getOperation() == operation
                     && command.getReason() == reason && Objects.equals(command.getNote(), note)
-                    && (inventoryItemId == null || inventoryItemId.equals(command.getTargetInventoryItemId()));
+                    && (inventoryItemId == null || inventoryItemId.equals(command.getTargetInventoryItemId()))
+                    && Objects.equals(command.getWorkOrderId(), workOrderId);
             if (!same) throw conflict(IDEMPOTENCY_KEY_REUSED, "this Idempotency-Key was already used for a different command");
             return new Created(response(commands.findDetailsById(command.getId()).orElseThrow()), false);
         }
@@ -170,6 +174,7 @@ public class MaintenanceCommandService {
                 : slots.findForUpdateByIdAndMachineId(slotId, machineId).orElseThrow(() -> new ResourceNotFoundException("Slot not found in specified machine"));
         if (machine.getStatus() != MachineStatus.MAINTENANCE)
             throw conflict(MACHINE_NOT_IN_MAINTENANCE, "maintenance commands need the machine in MAINTENANCE (sales stopped)");
+        if (workOrderId != null) requireWorkOrder(workOrderId, machineId, actor);
         if (commands.existsByMachineIdAndStatusIn(machineId, UNFINISHED))
             throw conflict(MACHINE_COMMAND_IN_PROGRESS, "another maintenance command of this machine is not finished");
         if (dispenseCommands.existsByMachineIdAndStatusIn(machineId, DISPENSE_IN_FLIGHT))
@@ -214,12 +219,28 @@ public class MaintenanceCommandService {
         command.setTargetInventoryItemId(target == null ? null : target.getId());
         command.setRequestedBy(actor);
         command.setIdempotencyKey(idempotencyKey);
+        command.setWorkOrderId(workOrderId);
         commands.saveAndFlush(command);
         // The read-only machine/slot/target associations of a new entity are only populated by a reload.
         entityManager.refresh(command);
         events.publishEvent(new MaintenanceCommandRequestedEvent(command.getId()));
         log.info("Maintenance command {} {} created for machine {} by {}", command.getCommandCode(), operation, machine.getCode(), actor.getEmail());
         return new Created(response(commands.findDetailsById(command.getId()).orElseThrow()), true);
+    }
+
+    /** Issue #68: the command may serve an IN_PROGRESS work order of the same machine that the caller executes (others are 404). */
+    private void requireWorkOrder(UUID workOrderId, UUID machineId, User actor) {
+        var order = workOrders.findById(workOrderId).orElseThrow(() -> new ResourceNotFoundException("Work order not found"));
+        boolean assignee = order.getAssignee() != null && order.getAssignee().getId().equals(actor.getId());
+        if (!assignee && !has(Permissions.WORK_ORDER_MANAGE)) throw new ResourceNotFoundException("Work order not found");
+        if (!order.getMachineId().equals(machineId)) throw conflict(WORK_ORDER_OTHER_MACHINE, "the work order belongs to another machine");
+        if (order.getStatus() != com.fruitmachine.backend.workorder.enums.WorkOrderStatus.IN_PROGRESS)
+            throw conflict(WORK_ORDER_NOT_IN_PROGRESS, "the work order is " + order.getStatus() + "; start it first");
+    }
+
+    private static boolean has(String authority) {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getAuthorities().stream().anyMatch(a -> authority.equals(a.getAuthority()));
     }
 
     private static void requireGateClosed(MachineSlot slot) {
@@ -470,7 +491,7 @@ public class MaintenanceCommandService {
                 item.getBatch().getProduct().getName(), item.getBatch().getId(), item.getBatch().getBatchCode());
         return new MaintenanceCommandResponse(c.getId(), c.getCommandCode(), c.getMachineId(), c.getMachine().getCode(), c.getSlotId(),
                 c.getSlot() == null ? null : c.getSlot().getSlotCode(), c.getOperation(), c.getStatus(), c.getReason(), c.getNote(), target,
-                actor(c.getRequestedBy()), c.getAttemptCount(), c.getCreatedAt(), c.getSentAt(), c.getAcceptedAt(), c.getFinishedAt(),
+                actor(c.getRequestedBy()), c.getWorkOrderId(), c.getAttemptCount(), c.getCreatedAt(), c.getSentAt(), c.getAcceptedAt(), c.getFinishedAt(),
                 c.getFailureReason(), c.getRemovedCount(), c.getReconciliationOutcome(), actor(c.getReconciledBy()), c.getReconciledAt());
     }
 

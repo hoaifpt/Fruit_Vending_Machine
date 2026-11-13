@@ -1,15 +1,17 @@
-# Chat handoff - Issue #66, 2026-11-13
+# Chat handoff - Issue #68, 2026-11-13
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/66, [BE] Implement Work Order Management.
-Branch feature/66-work-orders from origin/dev e977894 (includes #64).
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/68, [BE] Implement Restock Workflow.
+Branch feature/68-restock from origin/dev 2d1043b (includes #66).
 Git delivery: see the final report; do not assume commit/push/PR/merge happened.
 
-Delivered: V20 (work_orders, work_order_alerts, work_order_events + append-only trigger, notifications.work_order_id, WORK_ORDER_READ_ALL /
-READ_ASSIGNED / MANAGE / EXECUTE), workorder package (WorkOrderService lifecycle, WorkOrderNotifier AFTER_COMMIT, WorkOrderOverdueJob,
-WorkOrderCompletionCheck extension point, createBySystem), WorkOrderController (/api/v1/work-orders/**, POST /api/v1/alerts/{id}/work-orders),
-AlertResponse workOrderId/workOrderCode, NotificationResponse workOrderId, machine reactivation refused while a work order is IN_PROGRESS.
-Docs: docs/work-orders.md, api.yaml, database-migration.md, permission-authorization.md, alerts.md, .ai/DATABASE.md §23, README.
+Delivered: V21 (restock_lines, maintenance_commands.work_order_id, 3 permissions), restock package (RestockSuggestionService,
+RestockPlanningService, RestockExecutionService, RestockCompletionCheck, RestockViewService, RestockAfterCompletion, RestockController),
+InventoryLoader shared by direct and restock loading, work order extension points (WorkOrderCreationExtension, WorkOrderStartCheck,
+WorkOrderCompletionCheck(check with request, summarize), WorkOrderSummaryProvider, WorkOrderCompletedEvent), maintenance commands with
+workOrderId, POST /api/v1/inventory/load ADMIN only. Docs: docs/restock.md, api.yaml, database-migration.md, permission-authorization.md,
+maintenance-commands.md, work-orders.md, inventory-management.md, .ai/DATABASE.md §24, README.
 
-Verification: `mvn clean verify` 799 tests, 0 failures. Next issues plug in: 4.4 restock (completion check), 4.5 schedules and 5.2 reports (createBySystem).
+Verification: `mvn clean verify` 806 tests, 0 failures. Frontend: the Staff loading screen moves into the work order.
+Open: confirm the loading procedure (refill gate open or closed while loading) with the hardware owner.
 Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...`.

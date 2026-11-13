@@ -126,7 +126,7 @@ POST /api/v1/auth/login	STAFF	400
 POST /api/v1/inventory/load	ADMIN	400
 POST /api/v1/inventory/load	ANONYMOUS	401
 POST /api/v1/inventory/load	KIOSK	401
-POST /api/v1/inventory/load	STAFF	400
+POST /api/v1/inventory/load	STAFF	403
 POST /api/v1/inventory/{id}/remove	ADMIN	400
 POST /api/v1/inventory/{id}/remove	ANONYMOUS	401
 POST /api/v1/inventory/{id}/remove	KIOSK	401

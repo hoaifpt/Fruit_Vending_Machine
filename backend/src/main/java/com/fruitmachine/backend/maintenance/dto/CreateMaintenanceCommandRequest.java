@@ -17,7 +17,9 @@ public record CreateMaintenanceCommandRequest(
         @Size(max = 500) @Schema(description = "Optional, at most 500 characters; required when reason is OTHER. Blank means none.", types = {"string", "null"},
                 maxLength = 500) String note,
         @Schema(description = "REMOVE_ITEM only, optional: must be the current head bowl of the column (409 NOT_HEAD_ITEM otherwise).",
-                types = {"string", "null"}, format = "uuid") UUID inventoryItemId) {
+                types = {"string", "null"}, format = "uuid") UUID inventoryItemId,
+        @Schema(description = "Issue #68, optional: the IN_PROGRESS work order of this machine the command serves; the caller must be allowed to execute it.",
+                types = {"string", "null"}, format = "uuid") UUID workOrderId) {
     public CreateMaintenanceCommandRequest {
         note = note == null || note.isBlank() ? null : note.strip();
     }

@@ -194,3 +194,9 @@ báo COMPLETED (hoặc Staff đối soát DONE). Xem [docs/maintenance-commands.
 
 Việc nạp hàng, bảo trì, sự cố tại máy: Admin tạo/giao (hoặc tạo từ cảnh báo), Staff bắt đầu (máy dừng bán) và hoàn thành với kết quả,
 cảnh báo liên kết được đóng, lịch sử đầy đủ và thông báo trên portal. Xem [docs/work-orders.md](docs/work-orders.md).
+
+## Nạp hàng — Issue #68
+
+Admin xem gợi ý nạp từng cột và lập work order RESTOCK có dòng; Staff xả tô cũ bằng lệnh bảo trì, nạp tô theo dòng (giữ đúng FIFO và
+hạn dùng) rồi hoàn thành với đối soát planned/loaded; cảnh báo tồn kho đóng ngay. Nạp trực tiếp chỉ còn cho ADMIN.
+Xem [docs/restock.md](docs/restock.md).

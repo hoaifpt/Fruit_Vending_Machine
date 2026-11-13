@@ -103,3 +103,9 @@ Response 201 trả lệnh ở `PENDING`; lệnh được gửi ngay sau commit (
 
 `MaintenanceCommandIntegrationTest` (transport ghi lại lệnh, clock điều khiển được, PostgreSQL thật: schema, điều kiện tạo,
 idempotency, quyền, vòng đời, hết giờ, hiệu ứng, dispense chờ, đối soát, RESET) và `MaintenanceCommandDocumentationTest`.
+
+## Gắn với work order (issue #68)
+
+Lệnh bảo trì có thể gửi kèm `"workOrderId"`: work order IN_PROGRESS của cùng máy mà người gọi được phép thực hiện (khác máy → 409
+`WORK_ORDER_OTHER_MACHINE`, chưa bắt đầu → 409 `WORK_ORDER_NOT_IN_PROGRESS`, của người khác → 404). Dùng khi xả tô cũ trong lúc nạp hàng;
+số tô đã bỏ hiện trong `GET /api/v1/work-orders/{id}/restock` ([restock.md](restock.md)).

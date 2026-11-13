@@ -49,6 +49,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
 | order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
 | pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
+| restock_lines | id, work_order_id, machine_id, slot_id, product_id, planned_quantity, loaded_quantity, variance_reason, created_at, updated_at |
 | work_orders | id, code, type, source, machine_id, title, description, priority, status, assignee_id, due_at, created_by, started_at, completed_at, completed_by, result_note, cancelled_at, cancelled_by, cancel_reason, overdue_notified_at, version, created_at, updated_at |
 | work_order_alerts | work_order_id, alert_id, created_at |
 | work_order_events | id, work_order_id, type, status_before, status_after, actor_id, note, details, created_at |
@@ -417,3 +418,15 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   MachineService.enterMaintenanceBySystem with reason `WORK_ORDER <code>`. Machine reactivation is refused while a work order is IN_PROGRESS.
 - Permissions WORK_ORDER_READ_ALL (…025) → ADMIN, WORK_ORDER_READ_ASSIGNED (…026) → ADMIN, STAFF, WORK_ORDER_MANAGE (…027) → ADMIN,
   WORK_ORDER_EXECUTE (…028) → ADMIN, STAFF.
+
+## 24. Issue #68 — V21 restock workflow
+
+- `restock_lines`: one per (work order, slot, product) (UNIQUE), composite FK (slot_id, machine_id) → machine_slots (machine_id must equal the
+  work order's machine: service), planned/loaded 0..1000, variance_reason non-blank when set. `loaded_quantity` is a cached counter equal to
+  the LOAD inventory_transactions with reference_id = line id; it is never decreased.
+- `maintenance_commands.work_order_id` (nullable FK): the IN_PROGRESS work order a command serves; REMOVE history keeps reference_id = command id.
+- Partial index `ix_inventory_transactions_reference (reference_id)`.
+- Loading core `InventoryLoader` (shared by direct loading and restock): caller holds Product -> Batch -> Machine -> Slot; capacity and batch
+  declared quantity checked under those locks; restock bowls get loaded_at = now + i µs (strict FIFO).
+- Permissions RESTOCK_PLAN (…029) → ADMIN, RESTOCK_EXECUTE (…030) → ADMIN, STAFF, INVENTORY_LOAD_DIRECT (…031) → ADMIN; POST
+  /api/v1/inventory/load now needs INVENTORY_LOAD_DIRECT (STAFF keeps INVENTORY_WRITE for removals).
