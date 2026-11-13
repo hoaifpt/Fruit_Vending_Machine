@@ -109,7 +109,9 @@ class InventoryManagementIntegrationTest {
         return id;
     }
     @Test void bothRolesLoadExactlyNItemsAndPerItemActorStatusLocationHistoryWithoutChangingBatch() throws Exception {
-        for(String token:List.of(adminToken,staffToken)) {
+        // Issue #68: direct loading is ADMIN only (INVENTORY_LOAD_DIRECT); Staff loads through restock work orders.
+        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(2).toString())).andExpect(status().isForbidden());
+        for(String token:List.of(adminToken)) {
             var result=load(2,token); UUID operation=UUID.fromString(result.path("operationId").asText());
             assertThat(result.path("items")).hasSize(2);
             var events=jdbc.queryForList("SELECT * FROM inventory_transactions WHERE reference_id=?",operation);
@@ -125,13 +127,13 @@ class InventoryManagementIntegrationTest {
                 assertThat(item.fieldNames()).toIterable().doesNotContain("batch","slot","passwordHash","allocations");
             }
         }
-        assertThat(countItems()).isEqualTo(4); assertThat(countHistory()).isEqualTo(4);
+        assertThat(countItems()).isEqualTo(2); assertThat(countHistory()).isEqualTo(2);
         assertThat(batches.findById(batch.getId()).orElseThrow().getQuantity()).isEqualTo(12);
     }
     @ParameterizedTest @ValueSource(strings={"0","-1","1.5","6.0","\"2\"","true","1001","2147483648","null"})
     void invalidQuantityIs400WithoutPartialWrites(String value) throws Exception {
         var request=body(1); request.set("quantity",json.readTree(value));
-        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(request.toString())).andExpect(status().isBadRequest());
+        mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(request.toString())).andExpect(status().isBadRequest());
         assertThat(countItems()).isZero(); assertThat(countHistory()).isZero();
     }
     @ParameterizedTest @ValueSource(strings={"batchId","slotId","quantity"})
@@ -143,27 +145,27 @@ class InventoryManagementIntegrationTest {
     @ParameterizedTest @ValueSource(strings={"performedBy","userId","status","machineId","operationId"})
     void actorAndSystemFieldsCannotBeSpoofed(String field) throws Exception {
         var request=body(1).put(field,adminId.toString());
-        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(request.toString())).andExpect(status().isBadRequest());
+        mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(request.toString())).andExpect(status().isBadRequest());
     }
     @Test void missingBatchSlotAndInactiveExpiredStatesRejectWithoutWrites() throws Exception {
         for(String field:List.of("batchId","slotId")) mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).put(field,UUID.randomUUID().toString()).toString())).andExpect(status().isNotFound());
         jdbc.update("UPDATE products SET status='INACTIVE' WHERE id=?",product.getId());
-        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict());
+        mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict());
         jdbc.update("UPDATE products SET status='ACTIVE' WHERE id=?",product.getId());
         jdbc.update("UPDATE product_batches SET expires_at=? WHERE id=?",java.sql.Timestamp.from(NOW),batch.getId());
-        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict());
+        mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict());
         assertThat(countItems()).isZero(); assertThat(countHistory()).isZero();
     }
     @Test void machineAndSlotLoadingPolicyDoesNotAutomaticallyActivateAnything() throws Exception {
         jdbc.update("UPDATE machines SET status='INACTIVE' WHERE id=?",machine.getId());
         mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict());
-        jdbc.update("UPDATE machines SET status='MAINTENANCE' WHERE id=?",machine.getId()); load(1,staffToken);
+        jdbc.update("UPDATE machines SET status='MAINTENANCE' WHERE id=?",machine.getId()); load(1,adminToken);
         assertThat(summary().path("sellableCount").asLong()).isZero();
         assertThat(machines.findById(machine.getId()).orElseThrow().getStatus()).isEqualTo(MachineStatus.MAINTENANCE);
-        for(String state:List.of("INACTIVE","ERROR")) { jdbc.update("UPDATE machine_slots SET status=? WHERE id=?",state,slot.getId()); mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict()); }
+        for(String state:List.of("INACTIVE","ERROR")) { jdbc.update("UPDATE machine_slots SET status=? WHERE id=?",state,slot.getId()); mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict()); }
     }
     @Test void queryPagesFiltersDetailsScopesAndExpiredAwarenessAvoidNPlusOne() throws Exception {
-        var loaded=load(3,staffToken); String id=loaded.path("items").get(0).path("id").asText();
+        var loaded=load(3,adminToken); String id=loaded.path("items").get(0).path("id").asText();
         var otherBatch=batch(product,3); fixture(InventoryStatus.AVAILABLE,otherBatch,otherSlot);
         for(String token:List.of(adminToken,staffToken)) {
             SqlCapture.QUERIES.clear();
@@ -188,7 +190,7 @@ class InventoryManagementIntegrationTest {
         var counts=summary(); assertThat(counts.path("occupiedCount").asLong()).isEqualTo(3); assertThat(counts.path("availableCount").asLong()).isZero(); assertThat(counts.path("sellableCount").asLong()).isZero(); assertThat(counts.path("expiredCount").asLong()).isEqualTo(3);
     }
     @Test void summarySeparatesAvailableSellableOccupancyExpiryAndEligibility() throws Exception {
-        load(2,staffToken); fixture(InventoryStatus.RESERVED,batch,slot); fixture(InventoryStatus.DISPENSE_FAILED,batch,slot);
+        load(2,adminToken); fixture(InventoryStatus.RESERVED,batch,slot); fixture(InventoryStatus.DISPENSE_FAILED,batch,slot);
         var old=batch(product,4); jdbc.update("UPDATE product_batches SET expires_at=? WHERE id=?",java.sql.Timestamp.from(NOW),old.getId());
         fixture(InventoryStatus.AVAILABLE,old,slot); fixture(InventoryStatus.EXPIRED,old,slot); fixture(InventoryStatus.REMOVED,batch,slot); fixture(InventoryStatus.SOLD,batch,slot);
         var counts=summary(); assertThat(counts.path("occupiedCount").asLong()).isEqualTo(6); assertThat(counts.path("availableCount").asLong()).isEqualTo(2);
@@ -225,7 +227,7 @@ class InventoryManagementIntegrationTest {
     }
     @Test void failedHistoryWriteRollsBackItemsAndRemovalInSameTransaction() throws Exception {
         doThrow(new com.fruitmachine.backend.common.exception.ConflictException("Test-only history failure")).when(history).save(any(InventoryTransaction.class));
-        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(3).toString())).andExpect(status().isConflict());
+        mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(3).toString())).andExpect(status().isConflict());
         assertThat(countItems()).isZero(); assertThat(countHistory()).isZero();
         UUID id=fixture(InventoryStatus.AVAILABLE,batch,slot);
         mvc.perform(auth(post(PATH+"/"+id+"/remove"),staffToken).contentType("application/json").content("{\"reason\":\"test\"}")).andExpect(status().isConflict());
@@ -235,7 +237,7 @@ class InventoryManagementIntegrationTest {
         var start=new CyclicBarrier(2);
         try(var executor=Executors.newFixedThreadPool(2)) {
             var a=executor.submit(()->{start.await();return mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(first.toString())).andReturn().getResponse().getStatus();});
-            var b=executor.submit(()->{start.await();return mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(second.toString())).andReturn().getResponse().getStatus();});
+            var b=executor.submit(()->{start.await();return mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(second.toString())).andReturn().getResponse().getStatus();});
             assertThat(List.of(a.get(20,TimeUnit.SECONDS),b.get(20,TimeUnit.SECONDS))).containsExactlyInAnyOrder(201,409);
         }
         assertThat(countItems()).isEqualTo(expectedItems); assertThat(countHistory()).isEqualTo(expectedItems);
@@ -245,7 +247,7 @@ class InventoryManagementIntegrationTest {
         var start=new CyclicBarrier(2);
         try(var executor=Executors.newFixedThreadPool(2)) {
             var a=executor.submit(()->{start.await();return mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(2).toString())).andReturn().getResponse().getStatus();});
-            var b=executor.submit(()->{start.await();return mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(2).put("batchId",other.getId().toString()).toString())).andReturn().getResponse().getStatus();});
+            var b=executor.submit(()->{start.await();return mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(2).put("batchId",other.getId().toString()).toString())).andReturn().getResponse().getStatus();});
             assertThat(List.of(a.get(20,TimeUnit.SECONDS),b.get(20,TimeUnit.SECONDS))).containsExactlyInAnyOrder(201,409);
         }
         assertThat(summary().path("occupiedCount").asLong()).isEqualTo(2);
@@ -263,10 +265,10 @@ class InventoryManagementIntegrationTest {
         assertThat(countHistory()).isEqualTo(1); assertThat(countItems()).isEqualTo(1);
     }
     @Test void historyPagesReferenceItemTypeLocationFiltersAndAppendOnlyProtection() throws Exception {
-        var result=load(3,staffToken); String reference=result.path("operationId").asText(); String id=result.path("items").get(0).path("id").asText();
+        var result=load(3,adminToken); String reference=result.path("operationId").asText(); String id=result.path("items").get(0).path("id").asText();
         for(String token:List.of(adminToken,staffToken)) {
             var response=mvc.perform(auth(get(PATH+"/transactions"),token).param("referenceId",reference).param("machineId",machine.getId().toString()).param("slotId",slot.getId().toString()).param("type","LOAD").param("size","1"))
-                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(3)).andExpect(jsonPath("$.data.content.length()").value(1)).andExpect(jsonPath("$.data.content[0].performedBy").value(staffId.toString())).andReturn().getResponse().getContentAsString();
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(3)).andExpect(jsonPath("$.data.content.length()").value(1)).andExpect(jsonPath("$.data.content[0].performedBy").value(adminId.toString())).andReturn().getResponse().getContentAsString();
             assertThat(response).doesNotContain("passwordHash","userRoles","inventoryItem\"",KEY,PASSWORD);
             mvc.perform(auth(get(PATH+"/transactions"),token).param("inventoryItemId",id)).andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1));
         }
@@ -275,7 +277,7 @@ class InventoryManagementIntegrationTest {
         assertThat(countHistory()).isEqualTo(3);
     }
     @Test void currentJwtRolesAndAccountStatusGuardAllOperationsBeforeValidation() throws Exception {
-        var result=load(1,staffToken); String id=result.path("items").get(0).path("id").asText();
+        var result=load(1,adminToken); String id=result.path("items").get(0).path("id").asText();
         for(String path:List.of(PATH,PATH+"/"+id,PATH+"/transactions","/api/v1/machines/"+machine.getId()+"/inventory",scoped(machine,slot),scoped(machine,slot)+"/summary")) {
             mvc.perform(get(path)).andExpect(status().isUnauthorized()); mvc.perform(auth(get(path),"invalid")).andExpect(status().isUnauthorized()); mvc.perform(auth(get(path),rolelessToken)).andExpect(status().isForbidden());
         }
@@ -312,17 +314,18 @@ class InventoryManagementIntegrationTest {
             assertThatThrownBy(()->service.getInventorySummary(machine.getId(),slot.getId())).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
             var principal=new AuthenticatedUser(staffId,"test@example.invalid","",com.fruitmachine.backend.user.enums.UserStatus.ACTIVE,com.fruitmachine.backend.support.SeededAuthorities.of("STAFF"));
             context.setAuthentication(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(principal,null,principal.getAuthorities()));
-            assertThatThrownBy(()->service.loadInventory(new LoadInventoryRequest(batch.getId(),slot.getId(),0))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
+            // Issue #68: STAFF no longer loads directly (INVENTORY_LOAD_DIRECT is ADMIN only).
+            assertThatThrownBy(()->service.loadInventory(new LoadInventoryRequest(batch.getId(),slot.getId(),0))).isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
             assertThatThrownBy(()->service.removeInventoryItem(UUID.randomUUID(),new RemoveInventoryRequest(" "))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
         } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
     }
     @Test void capacityIncludesAllPhysicalStatesButNotSoldOrRemovedAndBatchCountsAllRegistrations() throws Exception {
         for(var state:InventoryStatus.values()) fixture(state,batch,slot);
         assertThat(summary().path("occupiedCount").asLong()).isEqualTo(4);
-        load(2,staffToken);
+        load(2,adminToken);
         mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).toString())).andExpect(status().isConflict());
         jdbc.update("UPDATE product_batches SET quantity=8 WHERE id=?",batch.getId());
-        mvc.perform(auth(post(PATH+"/load"),staffToken).contentType("application/json").content(body(1).put("slotId",otherSlot.getId().toString()).toString())).andExpect(status().isConflict());
+        mvc.perform(auth(post(PATH+"/load"),adminToken).contentType("application/json").content(body(1).put("slotId",otherSlot.getId().toString()).toString())).andExpect(status().isConflict());
         assertThat(countItems()).isEqualTo(8); assertThat(countHistory()).isEqualTo(2);
     }
 }

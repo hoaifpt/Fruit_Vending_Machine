@@ -42,12 +42,14 @@ public class InventoryService {
     private final MachineSlotRepository slots;
     private final UserRepository users;
     private final InventoryMapper mapper;
+    private final InventoryLoader loader;
     private final PricingService pricing;
     private final PricingSettingsService pricingSettings;
     private final Clock clock;
 
     @Transactional
-    @PreAuthorize(Permissions.HAS_INVENTORY_WRITE)
+    // Issue #68: direct loading (outside a restock work order) is ADMIN only.
+    @PreAuthorize(Permissions.HAS_INVENTORY_LOAD_DIRECT)
     public InventoryLoadResponse loadInventory(@Valid LoadInventoryRequest request) {
         // Scalar lookup avoids managed stale snapshots before acquiring locks.
         UUID productId = batches.findProductIdById(request.batchId()).orElseThrow(() -> missing("Product batch"));
@@ -62,18 +64,8 @@ public class InventoryService {
         if (!batch.getExpiresAt().isAfter(now)) throw new ConflictException("Batch is expired");
         if (machine.getStatus() == MachineStatus.INACTIVE) throw new ConflictException("Machine must be ACTIVE or MAINTENANCE for loading");
         if (slot.getStatus() != SlotStatus.ACTIVE) throw new ConflictException("Slot must be ACTIVE for loading");
-        long occupied = items.countBySlotIdAndStatusIn(slot.getId(), PHYSICAL);
-        if (occupied + request.quantity() > slot.getCapacity()) throw new ConflictException("Slot capacity exceeded");
-        if (items.countByBatchId(batch.getId()) + request.quantity() > batch.getQuantity()) throw new ConflictException("Batch declared quantity exceeded");
         User actor = actor(); UUID operation = UUID.randomUUID();
-        var loaded = new ArrayList<InventoryItem>();
-        for (int n = 0; n < request.quantity(); n++) {
-            var item = new InventoryItem(); item.setBatch(batch); item.setSlot(slot);
-            item.setStatus(InventoryStatus.AVAILABLE); item.setLoadedAt(now); loaded.add(item);
-        }
-        items.saveAllAndFlush(loaded);
-        for (var item : loaded) append(item, machineId, slot.getId(), InventoryTransactionType.LOAD, operation, actor, null, null, InventoryStatus.AVAILABLE);
-        history.flush();
+        var loaded = loader.load(batch, slot, machineId, request.quantity(), actor, operation, null, now, false);
         var window = discountWindow(now);
         return new InventoryLoadResponse(operation, loaded.size(), loaded.stream().map(item -> mapper.item(item, now, window)).toList());
     }

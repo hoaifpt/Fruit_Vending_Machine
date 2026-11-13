@@ -31,6 +31,9 @@ public final class Permissions {
     public static final String WORK_ORDER_READ_ASSIGNED = "WORK_ORDER_READ_ASSIGNED";
     public static final String WORK_ORDER_MANAGE = "WORK_ORDER_MANAGE";
     public static final String WORK_ORDER_EXECUTE = "WORK_ORDER_EXECUTE";
+    public static final String RESTOCK_PLAN = "RESTOCK_PLAN";
+    public static final String RESTOCK_EXECUTE = "RESTOCK_EXECUTE";
+    public static final String INVENTORY_LOAD_DIRECT = "INVENTORY_LOAD_DIRECT";
     public static final String PAYMENT_READ = "PAYMENT_READ";
     public static final String PAYMENT_WEBHOOK_LOG_READ = "PAYMENT_WEBHOOK_LOG_READ";
     public static final String AUDIT_LOG_READ = "AUDIT_LOG_READ";
@@ -61,6 +64,9 @@ public final class Permissions {
     public static final String HAS_WORK_ORDER_READ_ASSIGNED = "hasAuthority('" + WORK_ORDER_READ_ASSIGNED + "')";
     public static final String HAS_WORK_ORDER_MANAGE = "hasAuthority('" + WORK_ORDER_MANAGE + "')";
     public static final String HAS_WORK_ORDER_EXECUTE = "hasAuthority('" + WORK_ORDER_EXECUTE + "')";
+    public static final String HAS_RESTOCK_PLAN = "hasAuthority('" + RESTOCK_PLAN + "')";
+    public static final String HAS_RESTOCK_EXECUTE = "hasAuthority('" + RESTOCK_EXECUTE + "')";
+    public static final String HAS_INVENTORY_LOAD_DIRECT = "hasAuthority('" + INVENTORY_LOAD_DIRECT + "')";
     public static final String HAS_PAYMENT_READ = "hasAuthority('" + PAYMENT_READ + "')";
     public static final String HAS_PAYMENT_WEBHOOK_LOG_READ = "hasAuthority('" + PAYMENT_WEBHOOK_LOG_READ + "')";
     public static final String HAS_AUDIT_LOG_READ = "hasAuthority('" + AUDIT_LOG_READ + "')";
@@ -74,7 +80,7 @@ public final class Permissions {
             MACHINE_WRITE, KIOSK_CREDENTIAL_MANAGE, BATCH_READ, BATCH_CREATE, INVENTORY_READ, INVENTORY_WRITE, ORDER_READ, PAYMENT_READ,
             PAYMENT_WEBHOOK_LOG_READ, AUDIT_LOG_READ, ALERT_READ, ALERT_MANAGE, ALERT_NOTIFY, PRICING_READ, PRICING_MANAGE, MAINTENANCE_COMMAND_READ,
             MAINTENANCE_COMMAND_EXECUTE, MACHINE_RESET, WORK_ORDER_READ_ALL, WORK_ORDER_READ_ASSIGNED, WORK_ORDER_MANAGE,
-            WORK_ORDER_EXECUTE);
+            WORK_ORDER_EXECUTE, RESTOCK_PLAN, RESTOCK_EXECUTE, INVENTORY_LOAD_DIRECT);
 
     /** The ADMIN role must always keep these, otherwise nobody could manage users or permissions any more. */
     public static final List<String> ADMIN_REQUIRED = List.of(PERMISSION_MANAGE, USER_WRITE);

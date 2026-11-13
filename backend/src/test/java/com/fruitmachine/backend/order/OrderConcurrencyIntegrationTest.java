@@ -50,7 +50,7 @@ class OrderConcurrencyIntegrationTest extends AbstractOrderIntegrationTest {
 
     private Callable<Integer> loadTask(UUID batchId, UUID slotId, int quantity) {
         return () -> mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/inventory/load")
-                .header("Authorization", "Bearer " + staff.token()).contentType("application/json")
+                .header("Authorization", "Bearer " + admin.token()).contentType("application/json")
                 .content(json.writeValueAsString(com.fruitmachine.backend.support.TestDataFactory.loadBody(batchId, slotId, quantity))))
                 .andReturn().getResponse().getStatus();
     }

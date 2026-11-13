@@ -33,6 +33,7 @@ public record WorkOrderResponse(
         @Schema(nullable = true) WorkOrderUser cancelledBy,
         @Schema(nullable = true) String cancelReason,
         List<WorkOrderLinkedAlert> linkedAlerts,
+        @Schema(nullable = true, description = "Issue #68: RESTOCK work orders only.") WorkOrderRestockSummary restockSummary,
         long version, Instant createdAt, Instant updatedAt) {
 
     public record WorkOrderUser(UUID id, String fullName) { }

@@ -86,7 +86,11 @@ public class WorkOrderService {
     private final WorkOrderEventRepository history;
     private final WorkOrderAlertRepository links;
     private final WorkOrderCodeGenerator codes;
-    private final List<WorkOrderCompletionCheck> completionChecks;
+    // Providers, not lists: the typed workflows (restock) use this service themselves, so they are resolved on use.
+    private final org.springframework.beans.factory.ObjectProvider<WorkOrderCompletionCheck> completionChecks;
+    private final org.springframework.beans.factory.ObjectProvider<WorkOrderStartCheck> startChecks;
+    private final org.springframework.beans.factory.ObjectProvider<WorkOrderCreationExtension> creationExtensions;
+    private final org.springframework.beans.factory.ObjectProvider<WorkOrderSummaryProvider> summaryProviders;
     private final MachineRepository machines;
     private final MachineCommandLockRepository machineLock;
     private final MachineService machineService;
@@ -111,8 +115,11 @@ public class WorkOrderService {
         Instant now = now();
         requireFuture(request.dueAt(), now);
         User assignee = request.assigneeId() == null ? null : assignee(request.assigneeId());
+        if (request.restockLines() != null && !request.restockLines().isEmpty() && request.type() != WorkOrderType.RESTOCK)
+            throw new BadRequestException("restockLines are only for RESTOCK work orders");
         WorkOrder order = newWorkOrder(request.type(), WorkOrderSource.MANUAL, machine.getId(), request.title(), request.description(),
                 request.priority(), request.dueAt(), actor, assignee);
+        creationExtensions.orderedStream().forEach(extension -> extension.afterCreate(order, request));
         return response(order.getId());
     }
 
@@ -332,6 +339,7 @@ public class WorkOrderService {
         requireExecutor(order, actor);
         if (order.getStatus() == WorkOrderStatus.IN_PROGRESS) return response(id);
         if (order.getStatus() != WorkOrderStatus.ASSIGNED) throw transition(order, "start");
+        startChecks.orderedStream().filter(check -> check.supports(order.getType())).forEach(check -> check.check(order));
         if (machine.getStatus() == MachineStatus.INACTIVE) throw conflict(MACHINE_INACTIVE, "the machine is INACTIVE");
         boolean stop = order.getType() != WorkOrderType.INCIDENT || (request != null && Boolean.TRUE.equals(request.stopMachine()));
         boolean stopped = false;
@@ -371,7 +379,7 @@ public class WorkOrderService {
         if (order.getStatus() != WorkOrderStatus.IN_PROGRESS) throw transition(order, "complete");
         if (maintenanceCommands.existsByMachineIdAndStatusIn(order.getMachineId(), MaintenanceCommandStatus.UNFINISHED))
             throw conflict(MACHINE_COMMAND_IN_PROGRESS, "a maintenance command of this machine is not finished");
-        for (WorkOrderCompletionCheck check : completionChecks) if (check.supports(order.getType())) check.check(order);
+        completionChecks.orderedStream().filter(check -> check.supports(order.getType())).forEach(check -> check.check(order, request));
         Instant now = now();
         List<String> resolved = new ArrayList<>();
         if (request.resolveLinkedAlerts() == null || request.resolveLinkedAlerts()) {
@@ -393,9 +401,59 @@ public class WorkOrderService {
         workOrders.flush();
         ObjectNode details = JsonNodeFactory.instance.objectNode();
         details.set("resolvedAlertIds", json.valueToTree(resolved));
+        completionChecks.orderedStream().filter(check -> check.supports(order.getType())).forEach(check -> check.summarize(order, details));
         record(order, WorkOrderEventType.COMPLETED, WorkOrderStatus.IN_PROGRESS, WorkOrderStatus.DONE, actor, request.resultNote(), details);
         notice(order, WorkOrderNotice.Kind.COMPLETED, actor);
+        events.publishEvent(new com.fruitmachine.backend.workorder.event.WorkOrderCompletedEvent(order.getId(), order.getMachineId(), order.getType()));
         return response(id);
+    }
+
+    // ---- internal API for typed work (issue #68) ----
+
+    /**
+     * Locks a work order for an action by the current user (visibility and executor rules of the lifecycle) and returns it. Callers
+     * that also lock Machine / Slot rows take those first.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public WorkOrder lockForExecution(UUID id) {
+        WorkOrder order = lock(id);
+        requireExecutor(order, actor());
+        return order;
+    }
+
+    /** Locks a work order for planning by a manager; finished work orders are 409. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public WorkOrder lockForPlanning(UUID id) {
+        WorkOrder order = workOrders.findForUpdateById(id).orElseThrow(WorkOrderService::missing);
+        requireUnfinished(order, "plan");
+        return order;
+    }
+
+    /** A history row written by a typed workflow (e.g. a restock load), with the current user as actor. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordNote(WorkOrder order, String note, JsonNode details) {
+        record(order, WorkOrderEventType.NOTE, order.getStatus(), order.getStatus(), actor(), note, details);
+    }
+
+    /** Links alerts on behalf of the current user; alerts already handled by another unfinished work order or resolved are skipped. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int linkAlertsQuietly(UUID id, Collection<UUID> alertIds) {
+        int linked = 0;
+        for (UUID alertId : alertIds.stream().sorted().toList()) {
+            Alert alert = alerts.findForUpdateById(alertId).orElse(null);
+            if (alert == null || alert.getStatus() == AlertStatus.RESOLVED || !links.findActiveLinks(List.of(alertId)).isEmpty()) continue;
+            WorkOrder order = workOrders.findById(id).orElseThrow(WorkOrderService::missing);
+            if (!alert.getMachine().getId().equals(order.getMachineId())) continue;
+            link(order, alert);
+            if (alert.getStatus() == AlertStatus.OPEN) {
+                alert.setStatus(AlertStatus.ACKNOWLEDGED);
+                alert.setAcknowledgedAt(notBefore(now(), alert.getTriggeredAt()));
+                alert.setAcknowledgedBy(actor());
+            }
+            linked++;
+        }
+        alerts.flush();
+        return linked;
     }
 
     // ---- overdue ----
@@ -473,12 +531,17 @@ public class WorkOrderService {
                 .collect(Collectors.groupingBy(WorkOrderAlertRepository.LinkedAlert::getWorkOrderId, LinkedHashMap::new,
                         Collectors.mapping(l -> new WorkOrderResponse.WorkOrderLinkedAlert(l.getAlertId(), AlertType.valueOf(l.getType()),
                                 AlertSeverity.valueOf(l.getSeverity()), AlertStatus.valueOf(l.getStatus()), l.getTitle()), Collectors.toList())));
+        Map<UUID, WorkOrderRestockSummary> restock = new HashMap<>();
+        List<UUID> restockIds = page.stream().filter(w -> w.getType() == WorkOrderType.RESTOCK).map(WorkOrder::getId).toList();
+        if (!restockIds.isEmpty()) summaryProviders.orderedStream().forEach(provider -> restock.putAll(provider.restockSummaries(restockIds)));
         Instant now = now();
         return page.stream().map(w -> new WorkOrderResponse(w.getId(), w.getCode(), w.getType(), w.getSource(), w.getMachineId(), w.getMachine().getCode(),
                 w.getMachine().getName(), w.getTitle(), w.getDescription(), w.getPriority(), w.getStatus(), user(w.getAssignee()), user(w.getCreatedBy()),
                 w.getDueAt(), w.getDueAt() != null && !w.getStatus().finished() && w.getDueAt().isBefore(now), w.getStartedAt(), w.getCompletedAt(),
                 user(w.getCompletedBy()), w.getResultNote(), w.getCancelledAt(), user(w.getCancelledBy()), w.getCancelReason(),
-                linked.getOrDefault(w.getId(), List.of()), w.getVersion(), w.getCreatedAt(), w.getUpdatedAt())).toList();
+                linked.getOrDefault(w.getId(), List.of()),
+                w.getType() == WorkOrderType.RESTOCK ? restock.getOrDefault(w.getId(), new WorkOrderRestockSummary(0, 0, 0, 0)) : null,
+                w.getVersion(), w.getCreatedAt(), w.getUpdatedAt())).toList();
     }
 
     private static WorkOrderResponse.WorkOrderUser user(User user) {

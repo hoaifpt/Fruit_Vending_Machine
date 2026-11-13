@@ -11,11 +11,11 @@ class CoreDatabaseIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void flywayIsValidAndReapplyingMigrationsDoesNotChangeTheSchema() throws SQLException {
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(flyway.migrate().migrationsExecuted).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Long.class)).isEqualTo(20);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'", Long.class)).isEqualTo(29);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Long.class)).isEqualTo(21);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'", Long.class)).isEqualTo(30);
         try (var connection = dataSource.getConnection()) {
             assertThat(connection.getMetaData().getURL()).isEqualTo(POSTGRES.getJdbcUrl());
         }
@@ -39,7 +39,7 @@ class CoreDatabaseIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void immutableHistoryAndReferencedInventorySurviveRejectedMutations() throws Exception {
         var stock = fixtures.stock(4, 4, admin.token(), staff.token());
-        fixtures.load(stock, 1, staff.token());
+        fixtures.load(stock, 1, admin.token());
         for (String statement : new String[]{"UPDATE inventory_transactions SET reason='changed'",
                 "DELETE FROM inventory_transactions", "TRUNCATE inventory_transactions"}) reject("55000", statement);
         reject("23001", "DELETE FROM inventory_items WHERE batch_id='"+stock.batchId()+"'");

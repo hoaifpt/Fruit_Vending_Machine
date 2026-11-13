@@ -98,3 +98,9 @@ CANCELLED cần cancelled_at và cancel_reason; mã `WO-yyyyMMdd-XXXX` theo ngà
 ## Kiểm thử
 
 `WorkOrderIntegrationTest` (schema, vòng đời, dừng máy, cảnh báo, thông báo, quá hạn, quyền) và `WorkOrderDocumentationTest`.
+
+## Nạp hàng (issue #68)
+
+RESTOCK dùng các điểm mở rộng: dòng nạp gửi khi tạo (`WorkOrderCreationExtension`), không bắt đầu khi chưa có dòng (`WorkOrderStartCheck`),
+hoàn thành cần planned = loaded hoặc lý do và cổng nạp đóng (`WorkOrderCompletionCheck`, request thêm `lineVariances`), chi tiết có
+`restockSummary` (`WorkOrderSummaryProvider`). Xem [restock.md](restock.md).

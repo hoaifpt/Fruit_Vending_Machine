@@ -43,7 +43,7 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
         load(sellableBatch, slot, 3); load(shortBatch, slot, 2); load(inactiveBatch, slot, 1);
         load(inactiveSlotBatch, inactiveSlot, 2); load(otherBatch, otherSlot, 2);
         load(fixtures.batch(sellable, 5, staff.token()), otherSlot, 4);
-        var removed = fixtures.api("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(removedBatch, slot, 1), staff.token(), 201);
+        var removed = fixtures.api("POST", "/api/v1/inventory/load", TestDataFactory.loadBody(removedBatch, slot, 1), admin.token(), 201);
         UUID removedItem = TestDataFactory.id(removed.path("items").get(0));
         fixtures.api("POST", "/api/v1/inventory/" + removedItem + "/remove", Map.of("reason", "Catalog removal test"), staff.token(), 200);
         fixtures.api("PATCH", "/api/v1/products/" + inactiveProduct + "/status", Map.of("status", "INACTIVE"), admin.token(), 200);
@@ -75,7 +75,7 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void reservedHeadBlocksItsColumnAndReleasingItRestoresTheProduct() throws Exception {
         var stock = fixtures.stock(5, 5, admin.token(), staff.token());
-        fixtures.load(stock, 4, staff.token());
+        fixtures.load(stock, 4, admin.token());
         String key = issueKey(stock.machineId());
         assertThat(product(catalog(key), stock.productId()).path("availableQuantity").asInt()).isEqualTo(4);
         var order = kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(stock.productId()), 201);
@@ -151,7 +151,7 @@ class KioskCatalogIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void machineThatIsNotActiveIsNotAcceptingOrders() throws Exception {
         var stock = fixtures.stock(3, 3, admin.token(), staff.token());
-        fixtures.load(stock, 2, staff.token());
+        fixtures.load(stock, 2, admin.token());
         String key = issueKey(stock.machineId());
         for (String status : new String[]{"INACTIVE", "MAINTENANCE"}) {
             fixtures.api("PATCH", "/api/v1/machines/" + stock.machineId() + "/status", Map.of("status", status), admin.token(), 200);

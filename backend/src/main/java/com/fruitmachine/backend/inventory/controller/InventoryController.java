@@ -32,10 +32,10 @@ import org.springframework.web.bind.annotation.*;
 })
 public class InventoryController {
     private final InventoryService inventory;
-    @PreAuthorize(Permissions.HAS_INVENTORY_WRITE)
+    @PreAuthorize(Permissions.HAS_INVENTORY_LOAD_DIRECT)
     @PostMapping(value = "/api/v1/inventory/load", consumes = "application/json")
     @Operation(operationId = "loadInventory", summary = "Record physically confirmed stock loading",
-            description = "ADMIN or STAFF. Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. "
+            description = "INVENTORY_LOAD_DIRECT (ADMIN only since issue #68: Staff loads through a RESTOCK work order, POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads). Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. "
                     + "Physical occupancy includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED. Total registered batch items include all statuses. "
                     + "Lock order Product/Batch/Machine/Slot serializes state and count checks. Quantity 1..1000 per bounded bulk request, strict JSON integer. "
                     + "Actor is current principal. Operation UUID groups per-item history using reference_id; not an idempotency key. Retries may register more boxes if limits permit. No hardware action.")

@@ -27,7 +27,7 @@ class InventoryConcurrentRequestsIntegrationTest extends AbstractCoreIntegration
     @Test
     void twoOverlappingLoadsFromEighteenRegisteredItemsCannotExceedBatchTwenty() throws Exception {
         var stock = fixtures.stock(20, 20, admin.token(), staff.token());
-        fixtures.load(stock, 18, staff.token());
+        fixtures.load(stock, 18, admin.token());
         UUID otherMachine = fixtures.machine(admin.token());
         UUID otherSlot = fixtures.slot(otherMachine, 20, admin.token());
         assertThat(race(stock, stock.slotId(), otherSlot)).containsExactlyInAnyOrder(201, 409);
@@ -47,7 +47,7 @@ class InventoryConcurrentRequestsIntegrationTest extends AbstractCoreIntegration
                 try (var result = lock.executeQuery()) { assertThat(result.next()).isTrue(); }
             }
             var first = executor.submit(() -> loadRequest(stock.batchId(), firstSlot, admin.token(), start));
-            var second = executor.submit(() -> loadRequest(stock.batchId(), secondSlot, staff.token(), start));
+            var second = executor.submit(() -> loadRequest(stock.batchId(), secondSlot, admin.token(), start));
             start.countDown();
             try {
                 awaitTwoWaitingTransactions();

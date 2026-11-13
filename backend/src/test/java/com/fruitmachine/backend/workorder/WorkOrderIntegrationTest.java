@@ -93,6 +93,11 @@ class WorkOrderIntegrationTest extends AbstractWebhookIntegrationTest {
         return jdbc.queryForObject("SELECT id FROM alerts WHERE dedupe_key = ?", UUID.class, key);
     }
 
+    /** Issue #68: a RESTOCK work order needs a restock line before it can start. */
+    void addRestockLine(JsonNode order, UUID slot, UUID product) throws Exception {
+        fixtures.api("POST", path(order, "restock-lines"), Map.of("slotId", slot, "productId", product, "plannedQuantity", 0), admin.token(), 201);
+    }
+
     String conflictCode(JsonNode error) {
         return error.path("message").asText().split(":")[0];
     }
@@ -192,6 +197,7 @@ class WorkOrderIntegrationTest extends AbstractWebhookIntegrationTest {
     void startingStopsTheMachineAndOnlyAnAdminReactivatesItAfterwards() throws Exception {
         var shop = shop(3);
         var order = create("RESTOCK", shop.machineId(), staff.id());
+        addRestockLine(order, shop.slotId(), shop.productId());
         // A customer order is open: wait for it.
         var placed = placeOrder(shop);
         assertThat(conflictCode(fixtures.response("POST", path(order, "start"), null, staff.token(), 409))).isEqualTo("MACHINE_HAS_ACTIVE_ORDERS");
@@ -262,6 +268,7 @@ class WorkOrderIntegrationTest extends AbstractWebhookIntegrationTest {
         fixtures.response("POST", path(fromAlert, "alerts"), Map.of("alertId", elsewhere), admin.token(), 400);
         assertThat(fixtures.api("POST", "/api/v1/alerts/" + elsewhere + "/work-orders", null, admin.token(), 201).path("priority").asText()).isEqualTo("URGENT");
 
+        addRestockLine(fromAlert, createSlot(machine, "A", 6), createProduct("Restock bowl", "35000"));
         fixtures.api("POST", path(fromAlert, "start"), null, staff.token(), 200);
         fixtures.api("POST", path(fromAlert, "complete"), Map.of("resultNote", "Đã nạp 5 tô"), staff.token(), 200);
         var resolved = jdbc.queryForMap("SELECT status, resolved_by, resolution_note FROM alerts WHERE id = ?", lowStock);

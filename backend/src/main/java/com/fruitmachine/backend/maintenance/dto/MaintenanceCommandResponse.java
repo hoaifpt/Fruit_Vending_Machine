@@ -20,6 +20,7 @@ public record MaintenanceCommandResponse(
         @Schema(nullable = true) String note,
         @Schema(nullable = true, description = "REMOVE_ITEM: the head bowl when the command was created.") MaintenanceTargetItem targetItem,
         MaintenanceActor requestedBy,
+        @Schema(nullable = true, description = "Issue #68: work order the command serves.") UUID workOrderId,
         @Schema(description = "Deliveries to the broker (re-sends use the same commandCode).") int attemptCount,
         Instant createdAt,
         @Schema(nullable = true) Instant sentAt,
