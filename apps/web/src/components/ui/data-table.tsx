@@ -22,7 +22,8 @@ export interface DataTableColumn<T> {
   secondary?: boolean
 }
 
-const SECONDARY = '@min-[681px]:@max-[1023px]:hidden'
+// Printed pages (A4 falls in the tablet range) keep every column: `print:table-cell!` beats the container rule.
+const SECONDARY = '@min-[681px]:@max-[1023px]:hidden print:table-cell!'
 /** Tablet-width tables: slightly tighter cell padding so a row stays on one line. */
 const TIGHT = '@min-[681px]:@max-[1023px]:px-2'
 

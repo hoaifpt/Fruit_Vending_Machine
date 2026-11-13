@@ -220,7 +220,11 @@ test('In / Lưu PDF: khi in chỉ còn nội dung báo cáo (không thanh bên, 
   await expect(page.getByRole('button', { name: 'Xuất CSV' })).toBeHidden()
   await expect(page.locator('[data-scope]')).toBeVisible()
   await expect(page.locator('[data-total="netAmount"]')).toBeVisible()
+  // A4 width falls in the tablet range where detail columns hide on screen: the printout keeps them all.
+  await page.setViewportSize({ width: 794, height: 1123 })
+  await expect(page.getByRole('columnheader', { name: 'Giá gốc' }).first()).toBeVisible()
   await page.emulateMedia({ media: 'screen' })
+  await expect(page.getByRole('columnheader', { name: 'Giá gốc' }).first()).toBeHidden()
   await expect(page.getByRole('button', { name: 'Xuất CSV' })).toBeVisible()
 })
 
