@@ -44,6 +44,9 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `MAINTENANCE_PLAN_MANAGE` (V22, #70) | tạo, sửa, kích hoạt / vô hiệu hóa kế hoạch, `generate-now` |
 | `PAYMENT_REFUND` (V23, #72) | `POST /api/v1/payments/{paymentId}/refund` |
 | `REFUND_READ` (V23, #72) | `GET /api/v1/refunds`, `/candidates`, `/summary`; khối `refunds` trong chi tiết order |
+| `CUSTOMER_REPORT_READ` (V24, #74) | `GET /api/v1/customer-reports`, `/{id}`, `/{id}/photos/{photoId}` (STAFF: chỉ phản ánh của work order được giao) |
+| `CUSTOMER_REPORT_MANAGE` (V24, #74) | `POST /api/v1/customer-reports/{id}/review`, `/resolve`, `/reject`; xem liên hệ đầy đủ |
+| `MACHINE_REPORT_LINK_MANAGE` (V24, #74) | `POST /api/v1/machines/{id}/report-token/rotate` |
 | `RESTOCK_PLAN` (V21, #68) | gợi ý nạp hàng, tạo RESTOCK từ gợi ý, thêm/sửa/xóa dòng nạp |
 | `RESTOCK_EXECUTE` (V21, #68) | `POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads` (STAFF chỉ việc của mình) |
 | `INVENTORY_LOAD_DIRECT` (V21, #68) | `POST /api/v1/inventory/load` (chỉ ADMIN; STAFF nạp qua work order) |
@@ -76,6 +79,8 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `MAINTENANCE_PLAN_READ` | ✓ | ✓ |
 | `MAINTENANCE_PLAN_MANAGE` | ✓ | |
 | `PAYMENT_REFUND`, `REFUND_READ` | ✓ | |
+| `CUSTOMER_REPORT_READ` | ✓ | ✓ |
+| `CUSTOMER_REPORT_MANAGE`, `MACHINE_REPORT_LINK_MANAGE` | ✓ | |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.
@@ -140,3 +145,8 @@ kiosk key trên API quản trị → `401`; JWT người dùng trên API kiosk �
 `/api/v1/notifications/**` (#58) chỉ cần đăng nhập (`isAuthenticated()`), không cần permission: mỗi user chỉ thấy thông báo của mình.
 
 Swagger tự gắn `x-required-permission` cho mỗi operation, đọc từ `@PreAuthorize` của handler. Nhớ cập nhật cả `api-contract/api.yaml`.
+
+## Endpoint công khai (issue #74)
+
+`/api/v1/public/**` (form phản ánh của khách) là đường dẫn duy nhất dưới `/api/v1` không cần xác thực; JWT filter bỏ qua nó, có giới hạn
+tốc độ và CORS riêng. Xem [customer-reports.md](customer-reports.md).

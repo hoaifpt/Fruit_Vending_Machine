@@ -20,6 +20,9 @@ import org.springframework.data.repository.query.Param;
 public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecificationExecutor<Order> {
     boolean existsByOrderCode(String orderCode);
 
+    /** Issue #74: an order of one machine by its code (kiosk report link). */
+    Optional<Order> findByOrderCodeAndMachineId(String orderCode, UUID machineId);
+
     /** Issue #66: a customer order of the machine in one of these states (work orders wait for it). */
     boolean existsByMachineIdAndStatusIn(UUID machineId, java.util.Collection<com.fruitmachine.backend.order.enums.OrderStatus> statuses);
 

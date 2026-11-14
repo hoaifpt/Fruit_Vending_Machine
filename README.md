@@ -210,3 +210,9 @@ và tính hạn kế tiếp khi hoàn thành. Mọi ngày theo giờ Việt Nam.
 
 Admin xem danh sách cần hoàn (nhả lỗi, trả trễ, trả trùng) kèm tài khoản người trả từ webhook đã xác thực, tự chuyển khoản rồi ghi nhận
 mã giao dịch; payment (và order khi phù hợp) thành `REFUNDED`, có audit, danh sách và tổng hợp cho báo cáo. Xem [docs/refunds.md](docs/refunds.md).
+
+## Phản ánh sự cố của khách — Issue #74
+
+Kiosk hiển thị QR "Báo sự cố" (theo máy, có thể kèm mã đơn); khách gửi form công khai không cần tài khoản (giới hạn 5 lần / phút,
+honeypot, ảnh được kiểm tra và xóa metadata). Backend đối chiếu đơn, tạo hoặc gắn work order INCIDENT, báo Admin và đưa ca cần hoàn tiền
+vào danh sách hoàn tiền; hoàn tiền xong thì phản ánh tự đóng. Xem [docs/customer-reports.md](docs/customer-reports.md).

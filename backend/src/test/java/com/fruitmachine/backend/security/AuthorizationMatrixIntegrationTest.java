@@ -40,7 +40,9 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "POST /api/v1/work-orders/{id}/restock-lines", "PATCH /api/v1/work-orders/{id}/restock-lines/{lineId}",
             "DELETE /api/v1/work-orders/{id}/restock-lines/{lineId}", "POST /api/v1/maintenance-plans", "PATCH /api/v1/maintenance-plans/{id}",
             "POST /api/v1/maintenance-plans/{id}/activate", "POST /api/v1/maintenance-plans/{id}/deactivate", "POST /api/v1/maintenance-plans/{id}/generate-now",
-            "POST /api/v1/payments/{paymentId}/refund", "GET /api/v1/refunds", "GET /api/v1/refunds/candidates", "GET /api/v1/refunds/summary");
+            "POST /api/v1/payments/{paymentId}/refund", "GET /api/v1/refunds", "GET /api/v1/refunds/candidates", "GET /api/v1/refunds/summary",
+            "POST /api/v1/customer-reports/{id}/review", "POST /api/v1/customer-reports/{id}/resolve", "POST /api/v1/customer-reports/{id}/reject",
+            "POST /api/v1/machines/{id}/report-token/rotate");
     /**
      * Added by #53, #56, #58 and #61: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, PRICING_READ, or any
      * signed-in user for the own notifications); anonymous and kiosk keys are unauthenticated here.
@@ -54,7 +56,13 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "GET /api/v1/work-orders/{id}", "GET /api/v1/work-orders/{id}/events", "POST /api/v1/work-orders/{id}/start",
             "POST /api/v1/work-orders/{id}/notes", "POST /api/v1/work-orders/{id}/complete",
             "POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "GET /api/v1/work-orders/{id}/restock", "GET /api/v1/maintenance-plans",
-            "GET /api/v1/maintenance-plans/upcoming", "GET /api/v1/maintenance-plans/{id}", "GET /api/v1/maintenance-plans/{id}/work-orders");
+            "GET /api/v1/maintenance-plans/upcoming", "GET /api/v1/maintenance-plans/{id}", "GET /api/v1/maintenance-plans/{id}/work-orders",
+            "GET /api/v1/customer-reports", "GET /api/v1/customer-reports/{id}", "GET /api/v1/customer-reports/{id}/photos/{photoId}");
+    /** Issue #74: the public customer report form, the only anonymous operations under /api/v1 (any identity, never 401/403). */
+    static final Set<String> PUBLIC_OPERATIONS = Set.of("GET /api/v1/public/report-forms/{reportToken}",
+            "POST /api/v1/public/report-forms/{reportToken}/reports");
+    /** Issue #74: kiosk-only operations added after the baseline (KIOSK allowed; anonymous 401; users 403). */
+    static final Set<String> NEW_KIOSK_OPERATIONS = Set.of("GET /api/v1/kiosk/incident-report-link");
     static final List<String> IDENTITIES = List.of("ANONYMOUS", "STAFF", "ADMIN", "KIOSK");
 
     record Operation(String method, String path) {
@@ -102,7 +110,7 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
         if (Boolean.getBoolean("matrix.record")) {
             var lines = new ArrayList<String>();
             lines.add("# operation\tidentity\tstatus  (recorded by AuthorizationMatrixIntegrationTest; see its javadoc)");
-            actual.forEach((key, code) -> { if (!NEW_OPERATIONS.contains(key.split("\t")[0]) && !NEW_READ_OPERATIONS.contains(key.split("\t")[0])) lines.add(key + "\t" + code); });
+            actual.forEach((key, code) -> { if (!added(key)) lines.add(key + "\t" + code); });
             Files.createDirectories(BASELINE.getParent());
             Files.write(BASELINE, lines, StandardCharsets.UTF_8);
             return;
@@ -114,7 +122,7 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             expected.put(cells[0] + "\t" + cells[1], Integer.parseInt(cells[2]));
         }
         Map<String, Integer> existing = new TreeMap<>(actual);
-        existing.keySet().removeIf(key -> NEW_OPERATIONS.contains(key.split("\t")[0]) || NEW_READ_OPERATIONS.contains(key.split("\t")[0]));
+        existing.keySet().removeIf(AuthorizationMatrixIntegrationTest::added);
         assertThat(existing).as("access behaviour of every pre-#48 operation").isEqualTo(expected);
 
         // Role & permission APIs: ADMIN only (PERMISSION_MANAGE); anonymous and kiosk keys are unauthenticated here.
@@ -122,10 +130,24 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             assertThat(actual).as(operation).containsEntry(operation + "\tANONYMOUS", 401).containsEntry(operation + "\tKIOSK", 401);
             for (String role : List.of("STAFF", "ADMIN")) assertThat(actual.get(operation + "\t" + role)).as(operation + " " + role).isNotIn(401, 403);
         }
+        for (String operation : PUBLIC_OPERATIONS) {
+            for (String identity : IDENTITIES) assertThat(actual.get(operation + "\t" + identity)).as(operation + " " + identity).isNotIn(401, 403);
+        }
+        for (String operation : NEW_KIOSK_OPERATIONS) {
+            assertThat(actual).as(operation).containsEntry(operation + "\tANONYMOUS", 401).containsEntry(operation + "\tSTAFF", 403)
+                    .containsEntry(operation + "\tADMIN", 403);
+            assertThat(actual.get(operation + "\tKIOSK")).as(operation + " KIOSK").isNotIn(401, 403);
+        }
         for (String operation : NEW_OPERATIONS) {
             assertThat(actual).as(operation).containsEntry(operation + "\tANONYMOUS", 401).containsEntry(operation + "\tKIOSK", 401)
                     .containsEntry(operation + "\tSTAFF", 403);
             assertThat(actual.get(operation + "\tADMIN")).as(operation + " ADMIN").isNotIn(401, 403);
         }
+    }
+
+    private static boolean added(String key) {
+        String operation = key.split("\t")[0];
+        return NEW_OPERATIONS.contains(operation) || NEW_READ_OPERATIONS.contains(operation) || PUBLIC_OPERATIONS.contains(operation)
+                || NEW_KIOSK_OPERATIONS.contains(operation);
     }
 }

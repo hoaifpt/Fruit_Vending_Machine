@@ -780,6 +780,7 @@ public class OpenApiConfig {
         candidate.put("paymentId", "5d6e0000-0000-4000-8000-000000000001"); candidate.put("type", "DISPENSE_FAILED"); candidate.put("amount", 17500.00);
         candidate.put("paidAt", "2026-10-15T04:01:00Z"); candidate.put("order", order); candidate.put("payer", payer);
         candidate.put("waitingSince", "2026-10-15T04:01:00Z"); candidate.put("relatedWorkOrder", null);
+        candidate.put("customerReport", null);
         var refundedOrder = new java.util.LinkedHashMap<String, Object>(order);
         refundedOrder.put("status", "REFUNDED");
         var refund = new java.util.LinkedHashMap<String, Object>();

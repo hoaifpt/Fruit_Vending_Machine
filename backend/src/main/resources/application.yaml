@@ -24,6 +24,11 @@ spring:
   sql:
     init:
       mode: never
+  # Issue #74: public report form uploads (3 photos x 2 MB + JSON); larger requests are 413.
+  servlet:
+    multipart:
+      max-file-size: 7MB
+      max-request-size: 7MB
 
 server:
   port: ${SERVER_PORT:8080}
@@ -96,6 +101,18 @@ app:
     # Only for a private CA: PKCS12 truststore; empty = JVM trust store (Let's Encrypt). Never log the password.
     truststore-path: ${MQTT_TRUSTSTORE_PATH:}
     truststore-password: ${MQTT_TRUSTSTORE_PASSWORD:}
+  # Issue #74: public customer report form (kiosk QR -> web form). base-url is the web route, e.g. https://staging.freshvend.vn/report.
+  public-report:
+    base-url: ${PUBLIC_REPORT_BASE_URL:}
+    # Comma-separated web origins allowed to call /api/v1/public/** from a browser (CORS); empty = none.
+    allowed-origins: ${PUBLIC_REPORT_ALLOWED_ORIGINS:}
+    rate-limit-per-minute: ${REPORT_RATE_LIMIT_PER_MINUTE:5}
+    rate-limit-per-machine-per-hour: ${REPORT_RATE_LIMIT_PER_MACHINE_HOUR:60}
+    form-rate-limit-per-minute: ${REPORT_FORM_RATE_LIMIT_PER_MINUTE:30}
+    # X-Forwarded-For is honoured only when the remote address is one of these (comma-separated exact addresses).
+    trusted-proxies: ${REPORT_TRUSTED_PROXIES:}
+    # HMAC secret for customer_reports.source_ip_hash; never logged. Unset = a random secret per start (warning).
+    ip-hash-secret: ${REPORT_IP_HASH_SECRET:}
   # Issue #70: due maintenance plans become work orders (checked every hour and shortly after startup).
   maintenance-schedule:
     enabled: ${MAINTENANCE_SCHEDULE_ENABLED:true}

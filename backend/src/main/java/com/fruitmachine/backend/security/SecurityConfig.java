@@ -1,5 +1,6 @@
 package com.fruitmachine.backend.security;
 
+import com.fruitmachine.backend.customerreport.config.PublicReportProperties;
 import com.fruitmachine.backend.machine.kiosk.service.KioskCredentialService;
 import com.fruitmachine.backend.security.jwt.JwtAuthenticationFilter;
 import com.fruitmachine.backend.security.jwt.JwtProperties;
@@ -43,8 +44,10 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService tokens,
             CustomUserDetailsService users, KioskCredentialService kioskCredentials, SecurityErrorHandler errors,
-            @Value("${springdoc.api-docs.enabled:false}") boolean docsEnabled) throws Exception {
+            @Value("${springdoc.api-docs.enabled:false}") boolean docsEnabled, PublicReportProperties publicReports) throws Exception {
         http.csrf(csrf -> csrf.disable()) // Header-only bearer authentication; no cookie/session credentials.
+                // Issue #74: only the public report form may be called from the configured web origin(s).
+                .cors(cors -> cors.configurationSource(publicCors(publicReports)))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .requestCache(cache -> cache.disable())
                 .formLogin(form -> form.disable()).httpBasic(basic -> basic.disable()).logout(logout -> logout.disable())
@@ -54,6 +57,8 @@ public class SecurityConfig {
                     authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll();
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll();
                     authorize.requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**").permitAll();
+                    // Issue #74: the public customer report form; nothing else under /api/v1 is anonymous.
+                    authorize.requestMatchers("/api/v1/public/**").permitAll();
                     if (docsEnabled) {
                         authorize.requestMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml").permitAll();
@@ -78,6 +83,8 @@ public class SecurityConfig {
                     authorize.requestMatchers("/api/v1/payments", "/api/v1/payments/**").hasAuthority(Permissions.PAYMENT_READ);
                     authorize.requestMatchers("/api/v1/refunds", "/api/v1/refunds/**").hasAuthority(Permissions.REFUND_READ);
                     authorize.requestMatchers("/api/v1/audit-logs", "/api/v1/audit-logs/**").hasAuthority(Permissions.AUDIT_LOG_READ);
+                    authorize.requestMatchers(HttpMethod.GET, "/api/v1/customer-reports", "/api/v1/customer-reports/**").hasAuthority(Permissions.CUSTOMER_REPORT_READ);
+                    authorize.requestMatchers("/api/v1/customer-reports", "/api/v1/customer-reports/**").hasAuthority(Permissions.CUSTOMER_REPORT_MANAGE);
                     // Issue #66: before the alert rules (creating a work order from an alert is work order management).
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/alerts/*/work-orders").hasAuthority(Permissions.WORK_ORDER_MANAGE);
                     // Issue #68: restock planning and loading, before the generic work order and machine rules.
@@ -104,6 +111,7 @@ public class SecurityConfig {
                     // Issue #64: before the generic machine rules (STAFF runs maintenance commands without MACHINE_WRITE).
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/slots/*/maintenance-commands").hasAuthority(Permissions.MAINTENANCE_COMMAND_EXECUTE);
                     authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/reset").hasAuthority(Permissions.MACHINE_RESET);
+                    authorize.requestMatchers(HttpMethod.POST, "/api/v1/machines/*/report-token/rotate").hasAuthority(Permissions.MACHINE_REPORT_LINK_MANAGE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/**").hasAuthority(Permissions.MAINTENANCE_PLAN_READ);
                     authorize.requestMatchers("/api/v1/maintenance-plans", "/api/v1/maintenance-plans/**").hasAuthority(Permissions.MAINTENANCE_PLAN_MANAGE);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/**").hasAuthority(Permissions.MAINTENANCE_COMMAND_READ);
@@ -121,5 +129,19 @@ public class SecurityConfig {
                 .addFilterBefore(new JwtAuthenticationFilter(tokens, users, errors), UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new KioskAuthenticationFilter(kioskCredentials, errors), JwtAuthenticationFilter.class);
         return http.build();
+    }
+
+    private static org.springframework.web.cors.CorsConfigurationSource publicCors(PublicReportProperties properties) {
+        var source = new org.springframework.web.cors.UrlBasedCorsConfigurationSource();
+        if (properties.allowedOriginList().isEmpty()) return source;
+        var config = new org.springframework.web.cors.CorsConfiguration();
+        config.setAllowedOrigins(properties.allowedOriginList());
+        config.setAllowedMethods(java.util.List.of("GET", "POST"));
+        config.setAllowedHeaders(java.util.List.of("Content-Type"));
+        config.setExposedHeaders(java.util.List.of("Retry-After"));
+        config.setAllowCredentials(false);
+        config.setMaxAge(3600L);
+        source.registerCorsConfiguration("/api/v1/public/**", config);
+        return source;
     }
 }

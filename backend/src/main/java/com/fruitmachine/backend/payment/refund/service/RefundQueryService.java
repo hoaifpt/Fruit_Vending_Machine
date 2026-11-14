@@ -35,6 +35,9 @@ public class RefundQueryService {
     /** An earlier money arrival for the same order: this payment is a duplicate. */
     private static final String EARLIER_PAYMENT = "exists (select 1 from Payment e where e.order = o and e.id <> p.id"
             + " and e.status in (:paidStatuses) and (e.paidAt < p.paidAt or (e.paidAt = p.paidAt and e.id < p.id)))";
+    /** Issue #74: an open customer report of the order that may lead to a refund. */
+    private static final String REPORTED = "exists (select 1 from CustomerReport r where r.orderId = o.id and r.status in (:openReports)"
+            + " and r.verdict in (:reportVerdicts))";
     private static final List<PaymentStatus> PAID_STATUSES = List.of(PaymentStatus.SUCCESS, PaymentStatus.REFUNDED);
     private static final List<OrderStatus> UNRESOLVED = List.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID, OrderStatus.DISPENSING);
 
@@ -46,14 +49,13 @@ public class RefundQueryService {
     @PreAuthorize(Permissions.HAS_REFUND_READ)
     public RefundCandidatePageResponse candidates(RefundCandidateType type, UUID machineId, LocalDate from, LocalDate to, int page, int size) {
         requireRange(from, to);
-        if (type == RefundCandidateType.CUSTOMER_REPORT) return new RefundCandidatePageResponse(List.of(), page, size, 0, 0);
         StringBuilder where = new StringBuilder(" where p.status = :success and o.status not in (:unresolved)");
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("success", PaymentStatus.SUCCESS);
         params.put("unresolved", UNRESOLVED);
         params.put("paidStatuses", PAID_STATUSES);
         if (type == null) {
-            where.append(" and (o.status = :cancelled or o.status = :failed or ").append(EARLIER_PAYMENT).append(")");
+            where.append(" and (o.status = :cancelled or o.status = :failed or ").append(EARLIER_PAYMENT).append(" or ").append(REPORTED).append(")");
             params.put("cancelled", OrderStatus.CANCELLED);
             params.put("failed", OrderStatus.DISPENSE_FAILED);
         } else {
@@ -70,10 +72,15 @@ public class RefundQueryService {
                     where.append(" and o.status = :failed and not ").append(EARLIER_PAYMENT);
                     params.put("failed", OrderStatus.DISPENSE_FAILED);
                 }
-                default -> throw new IllegalStateException();
+                case CUSTOMER_REPORT -> where.append(" and ").append(REPORTED);
             }
         }
         if (!where.toString().contains(":paidStatuses")) params.remove("paidStatuses");
+        if (where.toString().contains(":openReports")) {
+            params.put("openReports", com.fruitmachine.backend.customerreport.enums.ReportStatus.OPEN);
+            params.put("reportVerdicts", List.of(com.fruitmachine.backend.customerreport.enums.ReportVerdict.REFUND_ELIGIBLE,
+                    com.fruitmachine.backend.customerreport.enums.ReportVerdict.DELIVERED_PER_MACHINE));
+        }
         filters(where, params, "p.paidAt", machineId, from, to);
 
         long total = count("select count(p) from Payment p join p.order o" + where, params);
@@ -83,14 +90,19 @@ public class RefundQueryService {
         List<Payment> rows = query.setFirstResult(page * size).setMaxResults(size).getResultList();
         List<Boolean> duplicates = duplicates(rows);
         var payerByPayment = payers.resolve(rows);
+        Map<UUID, Object[]> reportByOrder = openReports(rows.stream().map(p -> p.getOrder().getId()).distinct().toList());
         List<RefundCandidateResponse> content = new ArrayList<>();
         for (int i = 0; i < rows.size(); i++) {
             Payment payment = rows.get(i);
             Order order = payment.getOrder();
-            RefundCandidateType kind = order.getStatus() == OrderStatus.CANCELLED ? RefundCandidateType.LATE_PAYMENT
-                    : duplicates.get(i) ? RefundCandidateType.DUPLICATE_PAYMENT : RefundCandidateType.DISPENSE_FAILED;
+            Object[] report = reportByOrder.get(order.getId());
+            RefundCandidateType kind = type == RefundCandidateType.CUSTOMER_REPORT ? RefundCandidateType.CUSTOMER_REPORT
+                    : order.getStatus() == OrderStatus.CANCELLED ? RefundCandidateType.LATE_PAYMENT
+                    : duplicates.get(i) ? RefundCandidateType.DUPLICATE_PAYMENT
+                    : order.getStatus() == OrderStatus.DISPENSE_FAILED ? RefundCandidateType.DISPENSE_FAILED : RefundCandidateType.CUSTOMER_REPORT;
             content.add(new RefundCandidateResponse(payment.getId(), kind, payment.getAmount(), payment.getPaidAt(), order(order),
-                    payerByPayment.get(payment.getId()), payment.getPaidAt(), null));
+                    payerByPayment.get(payment.getId()), payment.getPaidAt(), report == null || report[7] == null ? null
+                            : new RefundWorkOrderResponse((UUID) report[7], (String) report[8]), report == null ? null : reportResponse(report)));
         }
         return new RefundCandidatePageResponse(content, page, size, total, pages(total, size));
     }
@@ -171,6 +183,25 @@ public class RefundQueryService {
         List<UUID> duplicated = entityManager.createQuery("select p.id from Payment p join p.order o where p.id in (:ids) and " + EARLIER_PAYMENT,
                 UUID.class).setParameter("ids", ids).setParameter("paidStatuses", PAID_STATUSES).getResultList();
         return rows.stream().map(p -> duplicated.contains(p.getId())).toList();
+    }
+
+    /** The oldest open customer report of each order (with its work order), one query per page; contact masked. */
+    private Map<UUID, Object[]> openReports(List<UUID> orderIds) {
+        Map<UUID, Object[]> result = new java.util.HashMap<>();
+        if (orderIds.isEmpty()) return result;
+        entityManager.createQuery("select r.orderId, r.id, r.code, r.verdict, r.contactName, r.contactPhone, r.contactEmail, w.id, w.code"
+                + " from CustomerReport r left join r.workOrder w where r.orderId in (:orders) and r.status in (:open) order by r.createdAt, r.id", Object[].class)
+                .setParameter("orders", orderIds).setParameter("open", com.fruitmachine.backend.customerreport.enums.ReportStatus.OPEN)
+                .getResultList().forEach(row -> result.putIfAbsent((UUID) row[0], row));
+        return result;
+    }
+
+    private static RefundCandidateReportResponse reportResponse(Object[] row) {
+        String name = (String) row[4];
+        return new RefundCandidateReportResponse((UUID) row[1], (String) row[2], row[3].toString(),
+                name == null || name.isEmpty() ? name : name.charAt(0) + "***",
+                com.fruitmachine.backend.customerreport.service.ReportSupport.maskPhone((String) row[5]),
+                com.fruitmachine.backend.customerreport.service.ReportSupport.maskEmail((String) row[6]));
     }
 
     private long count(String jpql, Map<String, Object> params) {

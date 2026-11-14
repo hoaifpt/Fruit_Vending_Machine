@@ -460,7 +460,8 @@ class RefundIntegrationTest extends AbstractWebhookIntegrationTest {
         assertThat(statistics.getPrepareStatementCount()).isEqualTo(listOne).isLessThanOrEqualTo(2);
         statistics.clear();
         queries.candidates(RefundCandidateType.DISPENSE_FAILED, null, null, null, 0, 10);
-        assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(4);
+        // count + page + duplicates + webhook payers + open customer reports (issue #74), whatever the page size
+        assertThat(statistics.getPrepareStatementCount()).isLessThanOrEqualTo(5);
     }
 
     // ---- 11. security ----

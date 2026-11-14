@@ -12,6 +12,8 @@ tags:
     description: "Read-only audit log (who changed what, and when) for AUDIT_LOG_READ, held by ADMIN. Entries are written by the services that make the changes; there is no create, update or delete endpoint."
   - name: Auth
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
+  - name: "Customer Reports"
+    description: "Review of customer incident reports (issue #74). ADMIN sees everything with full contact data; STAFF only reports of work orders assigned to them, contact masked."
   - name: Inventory
     description: Management of individual physical boxes. ACTIVE ADMIN/STAFF read/load/remove confirmed stock. No order/payment/reservation/dispense workflows.
   - name: Kiosk
@@ -50,6 +52,8 @@ tags:
     description: Management batch traceability. ACTIVE ADMIN and STAFF can create/read. Immutable after creation; no inventory workflows.
   - name: Products
     description: Management catalog. ACTIVE ADMIN/STAFF can read; ADMIN only can write. No public kiosk API.
+  - name: "Public Reports"
+    description: "Customer incident reports from the public web form (issue #74, WF-02). No authentication: the machine is identified by the report token in its kiosk QR. Rate limited per client address (429 + Retry-After)."
   - name: "Refunds"
     description: "Manual refunds (issue #72): the administrator transfers the money in the banking app and records it here; no provider refund API is called. ADMIN only (PAYMENT_REFUND, REFUND_READ); STAFF has no access to payments."
   - name: "Restock"
@@ -10406,11 +10410,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "path": "/api/v1/refunds/candidates"
                 "status": 400
-                "message": "Request validation failed"
-                "timestamp": "2026-10-15T07:00:00Z"
+                "path": "/api/v1/refunds/candidates"
                 "error": "Bad Request"
+                "timestamp": "2026-10-15T07:00:00Z"
+                "message": "Request validation failed"
         "401":
           "description": "Missing/invalid/expired Bearer token (a kiosk key is not accepted here)"
           "headers":
@@ -10423,11 +10427,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "path": "/api/v1/refunds/candidates"
                 "status": 401
-                "message": "Authentication required or access token invalid"
-                "timestamp": "2026-10-15T07:00:00Z"
+                "path": "/api/v1/refunds/candidates"
                 "error": "Unauthorized"
+                "timestamp": "2026-10-15T07:00:00Z"
+                "message": "Authentication required or access token invalid"
         "403":
           "description": "Missing the refund permission"
           "content":
@@ -10435,11 +10439,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "path": "/api/v1/refunds/candidates"
                 "status": 403
-                "message": "Access denied"
-                "timestamp": "2026-10-15T07:00:00Z"
+                "path": "/api/v1/refunds/candidates"
                 "error": "Forbidden"
+                "timestamp": "2026-10-15T07:00:00Z"
+                "message": "Access denied"
         "500":
           "description": "Unexpected server error; no internal details"
           "content":
@@ -10447,11 +10451,11 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiErrorResponse"
               "example":
-                "path": "/api/v1/refunds/candidates"
                 "status": 500
-                "message": "An unexpected error occurred"
-                "timestamp": "2026-10-15T07:00:00Z"
+                "path": "/api/v1/refunds/candidates"
                 "error": "Internal Server Error"
+                "timestamp": "2026-10-15T07:00:00Z"
+                "message": "An unexpected error occurred"
         "200":
           "description": "Page of refund candidates"
           "headers":
@@ -10464,8 +10468,9 @@ paths:
               "schema":
                 "$ref": "#/components/schemas/ApiResponseRefundCandidatePageResponse"
               "example":
-                "message": "Success"
+                "timestamp": "2026-10-15T07:00:00Z"
                 "data":
+                  "totalElements": 1
                   "content":
                     -
                       "paymentId": "5d6e0000-0000-4000-8000-000000000001"
@@ -10484,11 +10489,11 @@ paths:
                         "bankName": "Vietcombank"
                       "waitingSince": "2026-10-15T04:01:00Z"
                       "relatedWorkOrder": null
-                  "totalElements": 1
-                  "totalPages": 1
-                  "page": 0
+                      "customerReport": null
                   "size": 20
-                "timestamp": "2026-10-15T07:00:00Z"
+                  "page": 0
+                  "totalPages": 1
+                "message": "Success"
       "security":
         -
           "bearerAuth": []
@@ -10624,6 +10629,793 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "REFUND_READ"
+  "/api/v1/public/report-forms/{reportToken}":
+    "get":
+      "tags":
+        - "Public Reports"
+      "summary": "Form information for a machine's report QR"
+      "description": "Public. Machine name and code, report types and photo limits. 30 requests / minute / source."
+      "operationId": "getReportForm"
+      "parameters":
+        -
+          "name": "reportToken"
+          "in": "path"
+          "description": "Report token from the QR."
+          "required": true
+          "schema":
+            "type": "string"
+      "responses":
+        "404":
+          "description": "Unknown or rotated report token, or INACTIVE machine (same body)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "429":
+          "description": "Too many requests from this source or for this machine; see Retry-After"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Form information"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseReportFormResponse"
+      "security": []
+  "/api/v1/public/report-forms/{reportToken}/reports":
+    "post":
+      "tags":
+        - "Public Reports"
+      "summary": "Submit a customer incident report"
+      "description": "Public, multipart/form-data: part `report` (application/json) and 0..3 `photos` (JPEG or PNG by content, at most 2 MB and 4000 x 4000 px each; re-encoded without metadata). PAID_NOT_RECEIVED needs orderCode; other types need a description; PAID_NOT_RECEIVED and PRODUCT_QUALITY need a phone or e-mail; consent must be true; unknown fields are 400. Every accepted submission gets the same 201 body, whatever the order state; a filled honeypot (website) is accepted and not stored. 5 submissions / minute / source and 60 / hour / machine, counted before validation."
+      "operationId": "submitCustomerReport"
+      "parameters":
+        -
+          "name": "reportToken"
+          "in": "path"
+          "description": "Report token from the QR."
+          "required": true
+          "schema":
+            "type": "string"
+      "requestBody":
+        "content":
+          "multipart/form-data":
+            "schema":
+              "type": "object"
+              "properties":
+                "report":
+                  "$ref": "#/components/schemas/PublicReportRequest"
+                "photos":
+                  "type": "array"
+                  "description": "0..3 photos."
+                  "items":
+                    "type": "string"
+                    "format": "binary"
+              "required":
+                - "report"
+      "responses":
+        "201":
+          "description": "Report accepted"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseReportSubmittedResponse"
+        "400":
+          "description": "Validation failed"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "413":
+          "description": "Request larger than 7 MB"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "404":
+          "description": "Unknown or rotated report token, or INACTIVE machine (same body)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "429":
+          "description": "Too many requests from this source or for this machine; see Retry-After"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security": []
+  "/api/v1/kiosk/incident-report-link":
+    "get":
+      "tags":
+        - "Kiosk"
+      "summary": "Public report URL for the kiosk's \"Báo sự cố\" QR"
+      "description": "KIOSK only (issue #74). The URL of the public report form of this kiosk's machine. orderCode is added as ?order= only when it is an order of this machine; otherwise it is ignored. 409 REPORT_LINK_NOT_CONFIGURED when PUBLIC_REPORT_BASE_URL is not set."
+      "operationId": "getKioskIncidentReportLink"
+      "parameters":
+        -
+          "name": "orderCode"
+          "in": "query"
+          "description": "Optional order code to prefill (ignored unless it is an order of this machine)."
+          "required": false
+          "schema":
+            "type": "string"
+      "responses":
+        "200":
+          "description": "Report URL"
+          "headers":
+            "Cache-Control":
+              "schema":
+                "type": "string"
+                "const": "no-store"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseReportLinkResponse"
+              "example":
+                "timestamp": "2026-10-15T04:00:00Z"
+                "data":
+                  "id": "e0f1a2b3-0000-4000-8000-000000000001"
+                  "orderCode": "ORD-20261015-7K3QF9XA"
+                  "machineId": "9b1e0000-0000-4000-8000-000000000001"
+                  "machineCode": "FV-HCM-001"
+                  "status": "CANCELLED"
+                  "subtotal": 35000.0
+                  "totalAmount": 35000.0
+                  "createdAt": "2026-10-15T04:00:00Z"
+                  "expiresAt": "2026-10-15T04:05:00Z"
+                  "paidAt": null
+                  "completedAt": null
+                  "cancelledAt": "2026-10-15T04:01:00Z"
+                  "refundedAt": null
+                  "items":
+                    -
+                      "quantity": 1
+                      "sku": "BOWL-MIX"
+                      "totalPrice": 35000.0
+                      "productName": "Mixed Fruit Bowl"
+                      "productId": "1c2d3e4f-0000-4000-8000-000000000001"
+                      "unitPrice": 35000.0
+                      "id": "01100000-0000-4000-8000-000000000001"
+                      "allocations":
+                        -
+                          "id": "a110c000-0000-4000-8000-000000000001"
+                          "inventoryItemId": "1e000000-0000-4000-8000-000000000001"
+                          "slotCode": "A"
+                          "batchCode": "B20261014-01"
+                          "batchExpiresAt": "2026-10-17T00:00:00Z"
+                          "status": "RELEASED"
+                          "releasedAt": "2026-10-15T04:01:00Z"
+                  "payments":
+                    -
+                      "id": "5d6e0000-0000-4000-8000-000000000001"
+                      "provider": "MOCK"
+                      "status": "EXPIRED"
+                      "amount": 35000.0
+                      "createdAt": "2026-10-15T04:00:05Z"
+                      "paidAt": null
+                      "expiredAt": "2026-10-15T04:05:00Z"
+                  "refunds": []
+                "message": "Success"
+        "409":
+          "description": "REPORT_LINK_NOT_CONFIGURED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 409
+                "path": "/api/v1/kiosk/incident-report-link"
+                "error": "Conflict"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Requested product is not available on this machine"
+        "401":
+          "description": "Missing, malformed, unknown, revoked or wrong X-Kiosk-Key"
+          "headers":
+            "WWW-Authenticate":
+              "schema":
+                "type": "string"
+                "const": "Bearer"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 401
+                "path": "/api/v1/kiosk/incident-report-link"
+                "error": "Unauthorized"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Authentication required or access token invalid"
+        "403":
+          "description": "Authenticated as a user, not a kiosk"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 403
+                "path": "/api/v1/kiosk/incident-report-link"
+                "error": "Forbidden"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "Access denied"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+              "example":
+                "status": 500
+                "path": "/api/v1/kiosk/incident-report-link"
+                "error": "Internal Server Error"
+                "timestamp": "2026-10-15T04:00:00Z"
+                "message": "An unexpected error occurred"
+      "security":
+        -
+          "kioskKey": []
+  "/api/v1/customer-reports":
+    "get":
+      "tags":
+        - "Customer Reports"
+      "summary": "List customer reports"
+      "description": "CUSTOMER_REPORT_READ. Newest first, database paging; from/to are business-zone dates of createdAt (inclusive). Contact data is always masked here. Without CUSTOMER_REPORT_MANAGE only reports of work orders assigned to the caller are listed."
+      "operationId": "listCustomerReports"
+      "parameters":
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Status filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "NEW"
+              - "IN_REVIEW"
+              - "RESOLVED"
+              - "REJECTED"
+        -
+          "name": "type"
+          "in": "query"
+          "description": "Type filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "PAID_NOT_RECEIVED"
+              - "PRODUCT_QUALITY"
+              - "MACHINE_FAULT"
+              - "OTHER"
+        -
+          "name": "verdict"
+          "in": "query"
+          "description": "Verdict filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "enum":
+              - "NOT_APPLICABLE"
+              - "ORDER_NOT_FOUND"
+              - "REFUND_ELIGIBLE"
+              - "DISPENSE_PENDING"
+              - "DELIVERED_PER_MACHINE"
+              - "ALREADY_REFUNDED"
+              - "NOT_PAID"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine UUID filter."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First business-zone day (inclusive)."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last business-zone day (inclusive)."
+          "required": false
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "hasOrder"
+          "in": "query"
+          "description": "true: only reports with a verified order; false: only without."
+          "required": false
+          "schema":
+            "type": "boolean"
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 0
+            "minimum": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Page size 1..100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 20
+            "maximum": 100
+            "minimum": 1
+      "responses":
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Page of reports"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseCustomerReportPageResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "CUSTOMER_REPORT_READ"
+  "/api/v1/customer-reports/{id}":
+    "get":
+      "tags":
+        - "Customer Reports"
+      "summary": "Get a customer report"
+      "description": "CUSTOMER_REPORT_READ. Full contact data only for CUSTOMER_REPORT_MANAGE; reports the caller may not see are 404."
+      "operationId": "getCustomerReport"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Report UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Report detail"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseCustomerReportDetailResponse"
+        "404":
+          "description": "Report not found or not visible"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "CUSTOMER_REPORT_READ"
+  "/api/v1/customer-reports/{id}/photos/{photoId}":
+    "get":
+      "tags":
+        - "Customer Reports"
+      "summary": "Get a report photo"
+      "description": "CUSTOMER_REPORT_READ, same visibility as the report. The re-encoded image with its stored Content-Type, inline, nosniff, private no-store."
+      "operationId": "getCustomerReportPhoto"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Report UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+        -
+          "name": "photoId"
+          "in": "path"
+          "description": "Photo UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "The image"
+          "content":
+            "image/jpeg":
+              "schema":
+                "type": "string"
+                "format": "binary"
+            "image/png":
+              "schema":
+                "type": "string"
+                "format": "binary"
+        "404":
+          "description": "Report or photo not found or not visible"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "image/jpeg":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "image/png":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "image/jpeg":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "image/png":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "image/jpeg":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "image/png":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "image/jpeg":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "image/png":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "CUSTOMER_REPORT_READ"
+  "/api/v1/customer-reports/{id}/review":
+    "post":
+      "tags":
+        - "Customer Reports"
+      "summary": "Take a report into review"
+      "description": "CUSTOMER_REPORT_MANAGE (ADMIN). NEW -> IN_REVIEW, audited. 409 REPORT_NOT_NEW or REPORT_ALREADY_CLOSED."
+      "operationId": "reviewCustomerReport"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Report UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Report detail"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseCustomerReportDetailResponse"
+        "404":
+          "description": "Report not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "REPORT_NOT_NEW or REPORT_ALREADY_CLOSED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "CUSTOMER_REPORT_MANAGE"
+  "/api/v1/customer-reports/{id}/resolve":
+    "post":
+      "tags":
+        - "Customer Reports"
+      "summary": "Resolve a report"
+      "description": "CUSTOMER_REPORT_MANAGE (ADMIN). resolution FIXED, NO_ACTION_NEEDED or REFUNDED; RESOLVED is final (409 REPORT_ALREADY_CLOSED). Audited. Recording a refund for the order (POST /payments/{id}/refund) resolves its open reports as REFUNDED automatically."
+      "operationId": "resolveCustomerReport"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Report UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReportDecisionRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Report detail"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseCustomerReportDetailResponse"
+        "404":
+          "description": "Report not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "REPORT_ALREADY_CLOSED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "CUSTOMER_REPORT_MANAGE"
+  "/api/v1/customer-reports/{id}/reject":
+    "post":
+      "tags":
+        - "Customer Reports"
+      "summary": "Reject a report"
+      "description": "CUSTOMER_REPORT_MANAGE (ADMIN). resolution SPAM or DUPLICATE; REJECTED is final (409 REPORT_ALREADY_CLOSED). Audited."
+      "operationId": "rejectCustomerReport"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Report UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "requestBody":
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReportDecisionRequest"
+        "required": true
+      "responses":
+        "200":
+          "description": "Report detail"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseCustomerReportDetailResponse"
+        "404":
+          "description": "Report not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "REPORT_ALREADY_CLOSED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "CUSTOMER_REPORT_MANAGE"
+  "/api/v1/machines/{id}/report-token/rotate":
+    "post":
+      "tags":
+        - "Customer Reports"
+      "summary": "Rotate the public report QR of a machine"
+      "description": "MACHINE_REPORT_LINK_MANAGE (ADMIN). A new report token; the old QR stops working at once (404). Returns the new URL. Audited. 409 REPORT_LINK_NOT_CONFIGURED when PUBLIC_REPORT_BASE_URL is not set."
+      "operationId": "rotateMachineReportToken"
+      "parameters":
+        -
+          "name": "id"
+          "in": "path"
+          "description": "Machine UUID."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "New report URL"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseReportLinkResponse"
+        "404":
+          "description": "Machine not found"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "409":
+          "description": "REPORT_LINK_NOT_CONFIGURED"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "400":
+          "description": "Invalid parameters or body"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the permission"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "MACHINE_REPORT_LINK_MANAGE"
 
 components:
   securitySchemes:
@@ -13832,6 +14624,11 @@ components:
           "type": "array"
           "items":
             "$ref": "#/components/schemas/WorkOrderLinkedAlert"
+        "linkedReports":
+          "type": "array"
+          "description": "Issue #74: customer reports attached to this work order (oldest first)."
+          "items":
+            "$ref": "#/components/schemas/WorkOrderLinkedReport"
         "restockSummary":
           "type": "null"
           "$ref": "#/components/schemas/WorkOrderRestockSummary"
@@ -15118,7 +15915,10 @@ components:
           "description": "When the money arrived (paidAt); the list is oldest first."
         "relatedWorkOrder":
           "$ref": "#/components/schemas/RefundWorkOrderResponse"
-          "description": "Reserved for the customer report issue; always null for now."
+          "description": "The INCIDENT work order of the customer report, when there is one (issue #74)."
+        "customerReport":
+          "$ref": "#/components/schemas/RefundCandidateReportResponse"
+          "description": "Open customer report of the order (issue #74); null when none."
     "PayerAccountResponse":
       "type": "object"
       "description": "Payer bank account from the VERIFIED webhook of the payment (payOS counterAccount* fields); fields payOS did not send are null. Never logged."
@@ -15212,4 +16012,431 @@ components:
         "transferReference":
           "type": "string"
         "note":
+          "type": "string"
+    "ApiResponseReportFormResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/ReportFormResponse"
+    "ReportFormResponse":
+      "type": "object"
+      "properties":
+        "machineName":
+          "type": "string"
+        "machineCode":
+          "type": "string"
+        "types":
+          "type": "array"
+          "items":
+            "type": "string"
+            "enum":
+              - "PAID_NOT_RECEIVED"
+              - "PRODUCT_QUALITY"
+              - "MACHINE_FAULT"
+              - "OTHER"
+        "maxPhotos":
+          "type": "integer"
+          "format": "int32"
+        "maxPhotoBytes":
+          "type": "integer"
+          "format": "int32"
+    "PublicReportRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "type":
+          "type": "string"
+          "enum":
+            - "PAID_NOT_RECEIVED"
+            - "PRODUCT_QUALITY"
+            - "MACHINE_FAULT"
+            - "OTHER"
+        "orderCode":
+          "type":
+            - "string"
+            - "null"
+          "description": "ORD-yyyyMMdd-XXXXXXXX (case-insensitive); required for PAID_NOT_RECEIVED."
+          "example": "ORD-20261114-K7QF2M9A"
+        "description":
+          "type":
+            - "string"
+            - "null"
+          "description": "Required except for PAID_NOT_RECEIVED; control characters are removed."
+          "maxLength": 1000
+        "contactName":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 100
+        "contactPhone":
+          "type":
+            - "string"
+            - "null"
+          "description": "^(0|\\+84)[0-9]{9,10}$; phone or email is required for PAID_NOT_RECEIVED and PRODUCT_QUALITY."
+          "example": "0901234567"
+        "contactEmail":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 254
+        "consent":
+          "type": "boolean"
+          "description": "Must be true: the customer accepted the privacy notice."
+        "website":
+          "type":
+            - "string"
+            - "null"
+          "description": "Honeypot: leave empty. A filled value is accepted silently and nothing is stored."
+      "required":
+        - "consent"
+        - "type"
+    "ApiResponseReportSubmittedResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/ReportSubmittedResponse"
+    "ReportSubmittedResponse":
+      "type": "object"
+      "properties":
+        "reportCode":
+          "type": "string"
+          "example": "RPT-20261114-7KQ2"
+        "message":
+          "type": "string"
+    "ApiResponseReportLinkResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/ReportLinkResponse"
+    "ReportLinkResponse":
+      "type": "object"
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "url":
+          "type": "string"
+          "example": "https://staging.freshvend.vn/report/Q2x9…?order=ORD-20261114-K7QF2M9A"
+    "ApiResponseCustomerReportPageResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/CustomerReportPageResponse"
+    "CustomerReportPageResponse":
+      "type": "object"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/CustomerReportSummaryResponse"
+        "page":
+          "type": "integer"
+          "format": "int32"
+        "size":
+          "type": "integer"
+          "format": "int32"
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+        "totalPages":
+          "type": "integer"
+          "format": "int32"
+    "CustomerReportSummaryResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "type":
+          "type": "string"
+          "enum":
+            - "PAID_NOT_RECEIVED"
+            - "PRODUCT_QUALITY"
+            - "MACHINE_FAULT"
+            - "OTHER"
+        "status":
+          "type": "string"
+          "enum":
+            - "NEW"
+            - "IN_REVIEW"
+            - "RESOLVED"
+            - "REJECTED"
+        "verdict":
+          "type": "string"
+          "enum":
+            - "NOT_APPLICABLE"
+            - "ORDER_NOT_FOUND"
+            - "REFUND_ELIGIBLE"
+            - "DISPENSE_PENDING"
+            - "DELIVERED_PER_MACHINE"
+            - "ALREADY_REFUNDED"
+            - "NOT_PAID"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "orderCode":
+          "type": "string"
+        "orderId":
+          "type": "string"
+          "format": "uuid"
+        "contact":
+          "$ref": "#/components/schemas/ReportContactResponse"
+        "workOrder":
+          "$ref": "#/components/schemas/ReportWorkOrderResponse"
+        "resolution":
+          "type": "string"
+          "enum":
+            - "REFUNDED"
+            - "FIXED"
+            - "NO_ACTION_NEEDED"
+            - "SPAM"
+            - "DUPLICATE"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "resolvedAt":
+          "type": "string"
+          "format": "date-time"
+    "ReportContactResponse":
+      "type": "object"
+      "description": "Customer contact. Masked (090****567, a***@example.com) in lists and for callers without CUSTOMER_REPORT_MANAGE."
+      "properties":
+        "name":
+          "type": "string"
+        "phone":
+          "type": "string"
+        "email":
+          "type": "string"
+        "masked":
+          "type": "boolean"
+    "ReportWorkOrderResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "OPEN"
+            - "ASSIGNED"
+            - "IN_PROGRESS"
+            - "DONE"
+            - "CANCELLED"
+    "ApiResponseCustomerReportDetailResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/CustomerReportDetailResponse"
+    "CustomerReportDetailResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "type":
+          "type": "string"
+          "enum":
+            - "PAID_NOT_RECEIVED"
+            - "PRODUCT_QUALITY"
+            - "MACHINE_FAULT"
+            - "OTHER"
+        "status":
+          "type": "string"
+          "enum":
+            - "NEW"
+            - "IN_REVIEW"
+            - "RESOLVED"
+            - "REJECTED"
+        "verdict":
+          "type": "string"
+          "enum":
+            - "NOT_APPLICABLE"
+            - "ORDER_NOT_FOUND"
+            - "REFUND_ELIGIBLE"
+            - "DISPENSE_PENDING"
+            - "DELIVERED_PER_MACHINE"
+            - "ALREADY_REFUNDED"
+            - "NOT_PAID"
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "machineCode":
+          "type": "string"
+        "machineName":
+          "type": "string"
+        "description":
+          "type": "string"
+        "orderCodeInput":
+          "type": "string"
+          "description": "The order code as typed (normalised)."
+        "order":
+          "$ref": "#/components/schemas/ReportOrderResponse"
+          "description": "The verified order; null when not found or not checked."
+        "batch":
+          "$ref": "#/components/schemas/ReportBatchResponse"
+          "description": "PRODUCT_QUALITY with a COMPLETED order: the batch of the sold bowl."
+        "contact":
+          "$ref": "#/components/schemas/ReportContactResponse"
+        "photos":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ReportPhotoResponse"
+        "workOrder":
+          "$ref": "#/components/schemas/ReportWorkOrderResponse"
+        "resolution":
+          "type": "string"
+          "enum":
+            - "REFUNDED"
+            - "FIXED"
+            - "NO_ACTION_NEEDED"
+            - "SPAM"
+            - "DUPLICATE"
+        "resolutionNote":
+          "type": "string"
+        "resolvedBy":
+          "$ref": "#/components/schemas/ReportActorResponse"
+        "resolvedAt":
+          "type": "string"
+          "format": "date-time"
+        "createdAt":
+          "type": "string"
+          "format": "date-time"
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+    "ReportOrderResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "orderCode":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "PENDING_PAYMENT"
+            - "PAID"
+            - "DISPENSING"
+            - "COMPLETED"
+            - "CANCELLED"
+            - "PAYMENT_FAILED"
+            - "DISPENSE_FAILED"
+            - "REFUNDED"
+    "ReportBatchResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "batchCode":
+          "type": "string"
+        "productName":
+          "type": "string"
+        "expiresAt":
+          "type": "string"
+          "format": "date-time"
+    "ReportPhotoResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "contentType":
+          "type": "string"
+        "sizeBytes":
+          "type": "integer"
+          "format": "int32"
+    "ReportActorResponse":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "fullName":
+          "type": "string"
+    "ReportDecisionRequest":
+      "type": "object"
+      "additionalProperties": false
+      "properties":
+        "resolution":
+          "type": "string"
+          "enum":
+            - "REFUNDED"
+            - "FIXED"
+            - "NO_ACTION_NEEDED"
+            - "SPAM"
+            - "DUPLICATE"
+        "note":
+          "type":
+            - "string"
+            - "null"
+          "maxLength": 1000
+          "minLength": 0
+      "required":
+        - "resolution"
+    "RefundCandidateReportResponse":
+      "type": "object"
+      "description": "Issue #74: the open customer report of the order (oldest), contact masked; the full contact is in the report detail."
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "reportCode":
+          "type": "string"
+        "verdict":
+          "type": "string"
+        "contactName":
+          "type": "string"
+        "contactPhone":
+          "type": "string"
+        "contactEmail":
+          "type": "string"
+    "WorkOrderLinkedReport":
+      "type": "object"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "type":
+          "type": "string"
+        "verdict":
+          "type": "string"
+        "status":
           "type": "string"
