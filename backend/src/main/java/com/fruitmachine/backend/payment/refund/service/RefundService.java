@@ -84,6 +84,7 @@ public class RefundService {
     private final PaymentMapper mapper;
     private final EntityManager entityManager;
     private final Clock clock;
+    private final org.springframework.context.ApplicationEventPublisher events;
 
     @Transactional
     @PreAuthorize(Permissions.HAS_PAYMENT_REFUND)
@@ -128,6 +129,8 @@ public class RefundService {
         }
 
         audit(actor, payment, order, paymentBefore, orderBefore);
+        // Issue #74: open customer reports of this order are closed as REFUNDED (synchronous listener, same transaction).
+        events.publishEvent(new com.fruitmachine.backend.payment.refund.event.PaymentRefundedEvent(payment.getId(), orderId, actor.getId(), request.reason()));
         if (workOrder != null) {
             var details = JsonNodeFactory.instance.objectNode().put("paymentId", payment.getId().toString())
                     .put("orderCode", order.getOrderCode()).put("reason", request.reason().name());

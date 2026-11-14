@@ -8,6 +8,6 @@ public enum RefundCandidateType {
     LATE_PAYMENT,
     /** Another, earlier SUCCESS (or already refunded) payment exists for the order. */
     DUPLICATE_PAYMENT,
-    /** Reserved for customer reports (a later issue); returns nothing yet. */
+    /** Issue #74: the order has an open customer report with verdict REFUND_ELIGIBLE or DELIVERED_PER_MACHINE (Admin judges quality cases). */
     CUSTOMER_REPORT
 }

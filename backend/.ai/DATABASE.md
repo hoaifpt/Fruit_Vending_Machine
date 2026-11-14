@@ -38,7 +38,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | users | id, email, password_hash, full_name, phone, status, created_at, updated_at |
 | roles | id, name, description, created_at |
 | user_roles | user_id, role_id |
-| machines | id, code, name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes, created_at, updated_at |
+| machines | id, code, report_token (V24), name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes, created_at, updated_at |
 | machine_slots | id, machine_id, slot_code, capacity, status, created_at, updated_at |
 | products | id, sku, name, description, price, image_url, status, created_at, updated_at |
 | product_batches | id, batch_code, product_id, manufactured_at, expires_at, quantity, created_by, created_at |
@@ -49,6 +49,8 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline), refunded_at (V23) |
 | order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
 | pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
+| customer_reports | id, code, machine_id, type, description, order_code_input, order_id, batch_id, verdict, contact_name, contact_phone, contact_email, status, work_order_id, resolution, resolution_note, resolved_by, resolved_at, source_ip_hash, created_at, updated_at |
+| customer_report_photos | id, report_id, content_type, size_bytes, data, created_at |
 | maintenance_plans | id, machine_id, title, instructions, interval_days, lead_days, due_time, priority, default_assignee_id, next_due_date, active, last_completed_at, created_by, version, created_at, updated_at |
 | restock_lines | id, work_order_id, machine_id, slot_id, product_id, planned_quantity, loaded_quantity, variance_reason, created_at, updated_at |
 | work_orders | id, code, type, source, machine_id, title, description, priority, status, assignee_id, due_at, created_by, started_at, completed_at, completed_by, result_note, cancelled_at, cancelled_by, cancel_reason, overdue_notified_at, version, created_at, updated_at |
@@ -455,3 +457,16 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   One audit_logs row PAYMENT_REFUNDED (user, ip, old/new). Transfer ref / payer never logged.
 - Candidates and refund views are dynamic JPQL with fetch joins; payer from verified payment_webhook_logs (order_code = payment_reference).
 - Permissions PAYMENT_REFUND (…034), REFUND_READ (…035) -> ADMIN.
+
+## 27. Issue #74 — V24 customer incident reports
+
+- `machines.report_token`: DB default replace(gen_random_uuid()::text,'-','') (32 hex, no pgcrypto), backfilled, UNIQUE, CHECK
+  ^[A-Za-z0-9_-]{22,32}$; mapped insertable/updatable=false, rotation is a JPQL update with a 22-char base64url token.
+- `customer_reports`: CHECKs on type / status / verdict / resolution values; PAID_NOT_RECEIVED needs order_code_input; other types need a
+  non-blank description; (status RESOLVED/REJECTED) = (resolution and resolved_at set). source_ip_hash = HMAC-SHA256(ip, REPORT_IP_HASH_SECRET).
+  Contact columns are personal data: masked in lists, full only for CUSTOMER_REPORT_MANAGE, never in work orders / notifications / logs.
+- `customer_report_photos`: bytea, JPEG/PNG only, 1..2 MB, re-encoded on upload (no EXIF/GPS), CASCADE with the report.
+- Public submit: one transaction (report, photos, work order create or join with a system NOTE); rate limits in memory (interceptor).
+- Refund link: RefundService publishes PaymentRefundedEvent; CustomerReportLinks closes open reports of the order (RESOLVED/REFUNDED) in the
+  same transaction. Refund candidates type CUSTOMER_REPORT = open report with verdict REFUND_ELIGIBLE or DELIVERED_PER_MACHINE.
+- Permissions CUSTOMER_REPORT_READ (…036) -> ADMIN, STAFF; CUSTOMER_REPORT_MANAGE (…037), MACHINE_REPORT_LINK_MANAGE (…038) -> ADMIN.

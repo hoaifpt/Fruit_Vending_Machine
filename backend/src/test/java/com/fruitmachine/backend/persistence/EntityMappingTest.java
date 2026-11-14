@@ -107,10 +107,10 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(23);
+                .isEqualTo(24);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
-        assertThat(entities).hasSize(30);
+        assertThat(entities).hasSize(32);
         Set<String> tables = jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -134,7 +134,8 @@ class EntityMappingTest {
                 Map.entry("notifications", "notification"), Map.entry("pricing_settings", "pricing"),
                 Map.entry("maintenance_commands", "maintenance"), Map.entry("work_orders", "workorder"),
                 Map.entry("work_order_alerts", "workorder"), Map.entry("work_order_events", "workorder"),
-                Map.entry("restock_lines", "restock"), Map.entry("maintenance_plans", "maintenanceplan"));
+                Map.entry("restock_lines", "restock"), Map.entry("maintenance_plans", "maintenanceplan"),
+                Map.entry("customer_reports", "customerreport"), Map.entry("customer_report_photos", "customerreport"));
         for (var entity : entities) {
             String table = entity.getJavaType().getAnnotation(Table.class).name();
             assertThat(entity.getJavaType().getPackageName()).as("Feature owner of %s", table)

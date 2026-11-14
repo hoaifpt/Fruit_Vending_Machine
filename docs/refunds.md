@@ -118,3 +118,9 @@ Chi tiết: [database-migration.md](database-migration.md).
 `RefundIntegrationTest` (schema, các trường hợp hoàn, từ chối, đồng thời, work order INCIDENT, webhook / nhả muộn sau hoàn, danh sách
 cần hoàn + payer, danh sách / tổng hợp khớp DB và theo ngày VN, số truy vấn cố định, quyền, không lộ mã trong log),
 `RefundDocumentationTest` (Swagger ↔ `api-contract/api.yaml`).
+
+## Phản ánh của khách (issue #74)
+
+Loại ứng viên `CUSTOMER_REPORT` đã có dữ liệu: payment SUCCESS của đơn có phản ánh đang mở với verdict `REFUND_ELIGIBLE` hoặc
+`DELIVERED_PER_MACHINE`; mỗi ứng viên có `customerReport` (liên hệ đã che) và `relatedWorkOrder`. Ghi nhận hoàn tiền tự đóng các phản
+ánh đang mở của đơn (`RESOLVED` / `REFUNDED`). Xem [customer-reports.md](customer-reports.md).

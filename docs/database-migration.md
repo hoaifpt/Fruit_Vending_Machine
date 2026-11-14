@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V23 hiện có (30 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V24 hiện có (32 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -105,6 +105,7 @@ erDiagram
     machines {
         uuid id PK
         varchar code UK
+        varchar report_token UK "public report QR token (V24)"
         varchar name
         varchar location "nullable"
         varchar status "ACTIVE, INACTIVE, MAINTENANCE"
@@ -241,6 +242,37 @@ erDiagram
         numeric total_price "quantity x unit_price"
         smallint discount_percent "0..90 (V18)"
         varchar discount_reason "NONE, NEAR_EXPIRY (V18)"
+        timestamptz created_at
+    }
+    customer_reports {
+        uuid id PK "V24"
+        varchar code UK "RPT-yyyyMMdd-XXXX"
+        uuid machine_id FK
+        varchar type "PAID_NOT_RECEIVED, PRODUCT_QUALITY, MACHINE_FAULT, OTHER"
+        varchar description "nullable; required except PAID_NOT_RECEIVED"
+        varchar order_code_input "nullable; required for PAID_NOT_RECEIVED"
+        uuid order_id FK "nullable (verified order)"
+        uuid batch_id FK "nullable (PRODUCT_QUALITY)"
+        varchar verdict "7 values"
+        varchar contact_name "nullable, personal data"
+        varchar contact_phone "nullable, personal data"
+        varchar contact_email "nullable, personal data"
+        varchar status "NEW, IN_REVIEW, RESOLVED, REJECTED"
+        uuid work_order_id FK "nullable"
+        varchar resolution "nullable; set iff RESOLVED/REJECTED"
+        varchar resolution_note "nullable"
+        uuid resolved_by FK "nullable"
+        timestamptz resolved_at "nullable"
+        varchar source_ip_hash "HMAC-SHA256, never the raw IP"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    customer_report_photos {
+        uuid id PK "V24"
+        uuid report_id FK "ON DELETE CASCADE"
+        varchar content_type "image/jpeg, image/png"
+        int size_bytes "1..2097152"
+        bytea data "re-encoded, no metadata"
         timestamptz created_at
     }
     maintenance_plans {
@@ -452,6 +484,12 @@ erDiagram
     machines ||--o{ maintenance_plans : "maintained by"
     users |o--o{ maintenance_plans : "default_assignee, created_by"
     maintenance_plans |o--o{ work_orders : "maintenance_plan_id (V22)"
+    machines ||--o{ customer_reports : "reported at (V24)"
+    orders |o--o{ customer_reports : "order_id (V24)"
+    product_batches |o--o{ customer_reports : "batch_id (V24)"
+    work_orders |o--o{ customer_reports : "work_order_id (V24)"
+    users |o--o{ customer_reports : "resolved_by (V24)"
+    customer_reports ||--o{ customer_report_photos : "photos (V24)"
     users |o--o{ payments : "refunded_by (V23)"
     machine_slots ||--o{ restock_lines : "slot"
     products ||--o{ restock_lines : "product"
@@ -534,6 +572,8 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
 | orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18); REFUNDED ⇔ refunded_at (V23) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
 | order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price; unit_price ≤ original_unit_price, discount_percent 0–90, discount_reason NONE/NEAR_EXPIRY nhất quán (V18) | order_id, product_id |
+| customer_reports — phản ánh của khách (V24) | id; machine_id → machines; order_id → orders; batch_id → product_batches; work_order_id → work_orders; resolved_by → users | code UNIQUE; type, status, verdict, resolution CHECK; PAID_NOT_RECEIVED cần order_code_input; loại khác cần description không rỗng; RESOLVED/REJECTED ⇔ resolution + resolved_at | (status, created_at), (machine, created_at), partial order_id, work_order_id |
+| customer_report_photos — ảnh phản ánh (V24) | id; report_id → customer_reports (CASCADE) | content_type JPEG/PNG; size 1..2 MB | report_id |
 | maintenance_plans — kế hoạch bảo trì (V22) | id; machine_id → machines; default_assignee_id, created_by → users | title không rỗng; interval 1–365; lead 0–30 < interval; priority CHECK | next_due_date partial khi active, machine, assignee partial, created_by |
 | restock_lines — dòng nạp hàng (V21) | id; work_order_id → work_orders; (slot_id, machine_id) → machine_slots; product_id → products | UNIQUE (work_order, slot, product); planned/loaded 0–1000; variance_reason không rỗng | work_order, slot, product |
 | work_orders — việc tại máy (V20) | id; machine_id → machines; assignee/created_by/completed_by/cancelled_by → users | type/source/priority/status CHECK; OPEN không người nhận, các trạng thái khác (trừ CANCELLED) có; DONE cần completed_at/by + result_note; CANCELLED cần cancelled_at + cancel_reason; mã WO-… | assignee/status/due, machine/time, partial status/due khi chưa xong, created_by, completed_by, cancelled_by |
@@ -578,6 +618,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
 | V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V24 | machines.report_token (backfill ngẫu nhiên, UNIQUE, CHECK); customer_reports; customer_report_photos; quyền CUSTOMER_REPORT_READ → ADMIN, STAFF, CUSTOMER_REPORT_MANAGE, MACHINE_REPORT_LINK_MANAGE → ADMIN (issue #74, [customer-reports.md](customer-reports.md)) |
 | V23 | payments: refunded_at, refunded_by, refund_reason, refund_transfer_ref, refund_note (+ CHECK, unique mã chuyển khoản, chỉ mục refunded_at); orders.refunded_at (CHECK REFUNDED ⇔ refunded_at); quyền PAYMENT_REFUND, REFUND_READ → ADMIN (issue #72, [refunds.md](refunds.md)) |
 | V22 | maintenance_plans; work_orders.maintenance_plan_id + scheduled_for (CHECK SCHEDULE ⇔ có kế hoạch và ngày; chỉ MAINTENANCE; unique theo lần và một việc chưa xong mỗi kế hoạch); quyền MAINTENANCE_PLAN_READ → ADMIN, STAFF, MAINTENANCE_PLAN_MANAGE → ADMIN (issue #70, [maintenance-plans.md](maintenance-plans.md)) |
 | V21 | restock_lines, maintenance_commands.work_order_id, index inventory_transactions.reference_id; quyền RESTOCK_PLAN, INVENTORY_LOAD_DIRECT → ADMIN, RESTOCK_EXECUTE → ADMIN, STAFF (issue #68, [restock.md](restock.md)) |

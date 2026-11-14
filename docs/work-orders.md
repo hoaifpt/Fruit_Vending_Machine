@@ -110,3 +110,9 @@ hoàn thành cần planned = loaded hoặc lý do và cổng nạp đóng (`Work
 Work order nguồn `SCHEDULE` chỉ được tạo từ kế hoạch bảo trì (`createScheduled`, có `maintenancePlan` và `scheduledFor`); `createBySystem`
 dùng cho `ALERT` / `CUSTOMER_REPORT`. Hoàn thành / hủy phát `WorkOrderCompletedEvent` / `WorkOrderCancelledEvent` để kế hoạch tính hạn kế.
 Xem [maintenance-plans.md](maintenance-plans.md).
+
+## Phản ánh của khách (issue #74)
+
+Work order INCIDENT nguồn `CUSTOMER_REPORT` được tạo từ phản ánh công khai (`createBySystem`), hoặc nhận thêm phản ánh qua sự kiện NOTE
+hệ thống (`recordSystemNote`, actor null). Response có `linkedReports` (mã, loại, verdict, trạng thái; không có liên hệ).
+Xem [customer-reports.md](customer-reports.md).

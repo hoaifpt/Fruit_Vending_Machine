@@ -38,6 +38,9 @@ public final class Permissions {
     public static final String MAINTENANCE_PLAN_MANAGE = "MAINTENANCE_PLAN_MANAGE";
     public static final String PAYMENT_REFUND = "PAYMENT_REFUND";
     public static final String REFUND_READ = "REFUND_READ";
+    public static final String CUSTOMER_REPORT_READ = "CUSTOMER_REPORT_READ";
+    public static final String CUSTOMER_REPORT_MANAGE = "CUSTOMER_REPORT_MANAGE";
+    public static final String MACHINE_REPORT_LINK_MANAGE = "MACHINE_REPORT_LINK_MANAGE";
     public static final String PAYMENT_READ = "PAYMENT_READ";
     public static final String PAYMENT_WEBHOOK_LOG_READ = "PAYMENT_WEBHOOK_LOG_READ";
     public static final String AUDIT_LOG_READ = "AUDIT_LOG_READ";
@@ -75,6 +78,9 @@ public final class Permissions {
     public static final String HAS_MAINTENANCE_PLAN_MANAGE = "hasAuthority('" + MAINTENANCE_PLAN_MANAGE + "')";
     public static final String HAS_PAYMENT_REFUND = "hasAuthority('" + PAYMENT_REFUND + "')";
     public static final String HAS_REFUND_READ = "hasAuthority('" + REFUND_READ + "')";
+    public static final String HAS_CUSTOMER_REPORT_READ = "hasAuthority('" + CUSTOMER_REPORT_READ + "')";
+    public static final String HAS_CUSTOMER_REPORT_MANAGE = "hasAuthority('" + CUSTOMER_REPORT_MANAGE + "')";
+    public static final String HAS_MACHINE_REPORT_LINK_MANAGE = "hasAuthority('" + MACHINE_REPORT_LINK_MANAGE + "')";
     public static final String HAS_PAYMENT_READ = "hasAuthority('" + PAYMENT_READ + "')";
     public static final String HAS_PAYMENT_WEBHOOK_LOG_READ = "hasAuthority('" + PAYMENT_WEBHOOK_LOG_READ + "')";
     public static final String HAS_AUDIT_LOG_READ = "hasAuthority('" + AUDIT_LOG_READ + "')";
@@ -89,7 +95,8 @@ public final class Permissions {
             PAYMENT_WEBHOOK_LOG_READ, AUDIT_LOG_READ, ALERT_READ, ALERT_MANAGE, ALERT_NOTIFY, PRICING_READ, PRICING_MANAGE, MAINTENANCE_COMMAND_READ,
             MAINTENANCE_COMMAND_EXECUTE, MACHINE_RESET, WORK_ORDER_READ_ALL, WORK_ORDER_READ_ASSIGNED, WORK_ORDER_MANAGE,
             WORK_ORDER_EXECUTE, RESTOCK_PLAN, RESTOCK_EXECUTE, INVENTORY_LOAD_DIRECT,
-            MAINTENANCE_PLAN_READ, MAINTENANCE_PLAN_MANAGE, PAYMENT_REFUND, REFUND_READ);
+            MAINTENANCE_PLAN_READ, MAINTENANCE_PLAN_MANAGE, PAYMENT_REFUND, REFUND_READ,
+            CUSTOMER_REPORT_READ, CUSTOMER_REPORT_MANAGE, MACHINE_REPORT_LINK_MANAGE);
 
     /** The ADMIN role must always keep these, otherwise nobody could manage users or permissions any more. */
     public static final List<String> ADMIN_REQUIRED = List.of(PERMISSION_MANAGE, USER_WRITE);

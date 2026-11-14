@@ -21,6 +21,15 @@ import org.hibernate.type.SqlTypes;
 @Setter
 @NoArgsConstructor
 public class Machine extends UpdatedEntity {
+    /**
+     * Issue #74: token of the public report QR; set by the database default on insert (32 characters) and replaced by a direct update
+     * in MachineReportLinkService on rotation (22-character base64url). Never part of machine responses.
+     */
+    @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
+    @Column(name = "report_token", length = 32, nullable = false, insertable = false, updatable = false)
+    @Setter(AccessLevel.NONE)
+    private String reportToken;
+
     @Column(name = "code", length = 64, nullable = false, unique = true)
     private String code;
 

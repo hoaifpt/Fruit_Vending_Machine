@@ -11,11 +11,11 @@ class CoreDatabaseIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void flywayIsValidAndReapplyingMigrationsDoesNotChangeTheSchema() throws SQLException {
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("24");
         assertThat(flyway.info().pending()).isEmpty();
         assertThat(flyway.migrate().migrationsExecuted).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Long.class)).isEqualTo(23);
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'", Long.class)).isEqualTo(31);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Long.class)).isEqualTo(24);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'", Long.class)).isEqualTo(33);
         try (var connection = dataSource.getConnection()) {
             assertThat(connection.getMetaData().getURL()).isEqualTo(POSTGRES.getJdbcUrl());
         }

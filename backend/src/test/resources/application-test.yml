@@ -18,6 +18,12 @@ springdoc:
     enabled: false
 
 app:
+  # Issue #74: tests build report links and hash client addresses with fixed test-only values.
+  public-report:
+    base-url: https://report.test.invalid/report
+    allowed-origins: https://report.test.invalid
+    ip-hash-secret: test-only-report-ip-hash-secret
+    trusted-proxies: 10.9.9.9
   order:
     expiry-sweep:
       # The sweep is invoked directly by tests with a controlled clock.

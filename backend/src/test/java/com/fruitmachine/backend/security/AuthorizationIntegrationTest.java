@@ -338,7 +338,10 @@ class AuthorizationIntegrationTest {
                 "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/upcoming", "/api/v1/maintenance-plans/{id}",
                 "/api/v1/maintenance-plans/{id}/work-orders", "/api/v1/maintenance-plans/{id}/activate", "/api/v1/maintenance-plans/{id}/deactivate",
                 "/api/v1/maintenance-plans/{id}/generate-now", "/api/v1/payments/{paymentId}/refund", "/api/v1/refunds",
-                "/api/v1/refunds/candidates", "/api/v1/refunds/summary");
+                "/api/v1/refunds/candidates", "/api/v1/refunds/summary", "/api/v1/kiosk/incident-report-link",
+                "/api/v1/public/report-forms/{reportToken}", "/api/v1/public/report-forms/{reportToken}/reports", "/api/v1/customer-reports",
+                "/api/v1/customer-reports/{id}", "/api/v1/customer-reports/{id}/photos/{photoId}", "/api/v1/customer-reports/{id}/review",
+                "/api/v1/customer-reports/{id}/resolve", "/api/v1/customer-reports/{id}/reject", "/api/v1/machines/{id}/report-token/rotate");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
@@ -359,7 +362,7 @@ class AuthorizationIntegrationTest {
                     : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ",
                             "ALERT_READ", "ALERT_MANAGE", "PRICING_READ", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_COMMAND_EXECUTE",
                             "WORK_ORDER_READ_ASSIGNED", "WORK_ORDER_EXECUTE", "RESTOCK_EXECUTE",
-                            "MAINTENANCE_PLAN_READ"));
+                            "MAINTENANCE_PLAN_READ", "CUSTOMER_REPORT_READ"));
         }
         return permissions.toArray(String[]::new);
     }

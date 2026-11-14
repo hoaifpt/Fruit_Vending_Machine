@@ -458,6 +458,12 @@ public class WorkOrderService {
         record(order, WorkOrderEventType.NOTE, order.getStatus(), order.getStatus(), actor(), note, details);
     }
 
+    /** Issue #74: a history row written by the system (no actor), e.g. a customer report joining this work order. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordSystemNote(WorkOrder order, String note, JsonNode details) {
+        record(order, WorkOrderEventType.NOTE, order.getStatus(), order.getStatus(), null, note, details);
+    }
+
     /** Links alerts on behalf of the current user; alerts already handled by another unfinished work order or resolved are skipped. */
     @Transactional(propagation = Propagation.MANDATORY)
     public int linkAlertsQuietly(UUID id, Collection<UUID> alertIds) {
@@ -557,12 +563,16 @@ public class WorkOrderService {
         Map<UUID, WorkOrderRestockSummary> restock = new HashMap<>();
         List<UUID> restockIds = page.stream().filter(w -> w.getType() == WorkOrderType.RESTOCK).map(WorkOrder::getId).toList();
         if (!restockIds.isEmpty()) summaryProviders.orderedStream().forEach(provider -> restock.putAll(provider.restockSummaries(restockIds)));
+        Map<UUID, List<WorkOrderResponse.WorkOrderLinkedReport>> reports = new HashMap<>();
+        List<UUID> ids = page.stream().map(WorkOrder::getId).toList();
+        summaryProviders.orderedStream().forEach(provider -> reports.putAll(provider.customerReports(ids)));
         Instant now = now();
         return page.stream().map(w -> new WorkOrderResponse(w.getId(), w.getCode(), w.getType(), w.getSource(), w.getMachineId(), w.getMachine().getCode(),
                 w.getMachine().getName(), w.getTitle(), w.getDescription(), w.getPriority(), w.getStatus(), user(w.getAssignee()), user(w.getCreatedBy()),
                 w.getDueAt(), w.getDueAt() != null && !w.getStatus().finished() && w.getDueAt().isBefore(now), w.getStartedAt(), w.getCompletedAt(),
                 user(w.getCompletedBy()), w.getResultNote(), w.getCancelledAt(), user(w.getCancelledBy()), w.getCancelReason(),
                 linked.getOrDefault(w.getId(), List.of()),
+                reports.getOrDefault(w.getId(), List.of()),
                 w.getType() == WorkOrderType.RESTOCK ? restock.getOrDefault(w.getId(), new WorkOrderRestockSummary(0, 0, 0, 0)) : null,
                 w.getMaintenancePlan() == null ? null : new WorkOrderResponse.WorkOrderPlan(w.getMaintenancePlan().getId(), w.getMaintenancePlan().getTitle()),
                 w.getScheduledFor(),
