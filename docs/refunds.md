@@ -124,3 +124,8 @@ cần hoàn + payer, danh sách / tổng hợp khớp DB và theo ngày VN, số
 Loại ứng viên `CUSTOMER_REPORT` đã có dữ liệu: payment SUCCESS của đơn có phản ánh đang mở với verdict `REFUND_ELIGIBLE` hoặc
 `DELIVERED_PER_MACHINE`; mỗi ứng viên có `customerReport` (liên hệ đã che) và `relatedWorkOrder`. Ghi nhận hoàn tiền tự đóng các phản
 ánh đang mở của đơn (`RESOLVED` / `REFUNDED`). Xem [customer-reports.md](customer-reports.md).
+
+## Báo cáo (issue #76)
+
+`GET /api/v1/reports/sales/summary` tách `deliveredRefunds` (hoàn tiền đơn đã giao, theo `refunded_at`) khỏi doanh số và liệt kê mọi tiền
+hoàn theo lý do (`moneyRefunded`); `pendingRefunds` dùng cùng quy tắc ứng viên. Xem [reports.md](reports.md).

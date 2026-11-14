@@ -470,3 +470,13 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
 - Refund link: RefundService publishes PaymentRefundedEvent; CustomerReportLinks closes open reports of the order (RESOLVED/REFUNDED) in the
   same transaction. Refund candidates type CUSTOMER_REPORT = open report with verdict REFUND_ELIGIBLE or DELIVERED_PER_MACHINE.
 - Permissions CUSTOMER_REPORT_READ (…036) -> ADMIN, STAFF; CUSTOMER_REPORT_MANAGE (…037), MACHINE_REPORT_LINK_MANAGE (…038) -> ADMIN.
+
+## 28. Issue #76 — V25 report indexes
+
+- Indexes only: ix_orders_completed_at, ix_orders_machine_completed (partial completed_at IS NOT NULL), ix_payments_paid_at (partial
+  SUCCESS/REFUNDED). No new tables.
+- Sales = orders by completed_at; delivered refunds = REFUNDED payments of completed orders with reason PRODUCT_QUALITY / OTHER by
+  refunded_at; buckets via date_trunc(unit, ts AT TIME ZONE business zone). All sums in SQL (SalesReportQueries, NamedParameterJdbcTemplate).
+- Dashboard reuses HealthCheckQueries slot SQL (slotsOfOperatingMachines) and RefundQueryService.pendingTotals.
+- Refund candidate predicates use uncorrelated IN sets (REPORTED, SEVERAL_PAID) for performance on 100k payments.
+- Permissions DASHBOARD_READ (…039) -> ADMIN, STAFF; REPORT_SALES_READ (…040), REPORT_EXPORT (…041) -> ADMIN.

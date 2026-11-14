@@ -26,11 +26,30 @@ public class HealthCheckQueries {
     public record SlotCondition(UUID slotId, String slotCode, String slotStatus, long sellable, long expiring, long expired) { }
 
     public List<SlotCondition> slots(UUID machineId, Instant now, Instant holdDeadline, Instant expiringBy) {
-        return jdbc.query("""
+        return jdbc.query(slotSql("s.machine_id = ?"),
+                (rs, row) -> new SlotCondition(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getLong(4), rs.getLong(5), rs.getLong(6)),
+                machineId, ts(holdDeadline), ts(holdDeadline), ts(now), ts(expiringBy), ts(now), machineId);
+    }
+
+    /** Issue #76: the same slot conditions for every machine that is not INACTIVE, in one statement (dashboard), plus the head bowl status. */
+    public record MachineSlotCondition(UUID machineId, UUID slotId, String slotStatus, String headStatus, long sellable, long expiring, long expired) { }
+
+    public List<MachineSlotCondition> slotsOfOperatingMachines(Instant now, Instant holdDeadline, Instant expiringBy) {
+        return jdbc.query(slotSql("s.machine_id IN (SELECT id FROM machines WHERE status <> 'INACTIVE')")
+                        .replace("SELECT s.id, s.slot_code, s.status,", "SELECT s.id, s.slot_code, s.status, s.machine_id, (SELECT h.status FROM heads h WHERE h.slot_id = s.id),")
+                        .replace("ORDER BY s.slot_code", "ORDER BY s.machine_id, s.slot_code"),
+                (rs, row) -> new MachineSlotCondition(rs.getObject(4, UUID.class), rs.getObject(1, UUID.class), rs.getString(3), rs.getString(5),
+                        rs.getLong(6), rs.getLong(7), rs.getLong(8)),
+                ts(holdDeadline), ts(holdDeadline), ts(now), ts(expiringBy), ts(now));
+    }
+
+    /** One text for both: {@code machines} selects the machines (with or without a parameter). */
+    private static String slotSql(String machines) {
+        return """
                 WITH phys AS (
                     SELECT i.id, i.slot_id, i.status, i.loaded_at, b.expires_at, b.product_id
                     FROM inventory_items i JOIN product_batches b ON b.id = i.batch_id JOIN machine_slots s ON s.id = i.slot_id
-                    WHERE s.machine_id = ? AND i.status IN ('AVAILABLE', 'RESERVED', 'EXPIRED', 'DISPENSE_FAILED')
+                    WHERE %s AND i.status IN ('AVAILABLE', 'RESERVED', 'EXPIRED', 'DISPENSE_FAILED')
                 ), heads AS (
                     SELECT DISTINCT ON (slot_id) slot_id, status, expires_at, product_id FROM phys ORDER BY slot_id, loaded_at, id
                 )
@@ -40,9 +59,7 @@ public class HealthCheckQueries {
                           AND x.status = 'AVAILABLE' AND x.product_id = h.product_id AND x.expires_at > ?) AS sellable,
                        (SELECT count(*) FROM phys x WHERE x.slot_id = s.id AND x.status <> 'EXPIRED' AND x.expires_at > ? AND x.expires_at <= ?) AS expiring,
                        (SELECT count(*) FROM phys x WHERE x.slot_id = s.id AND (x.status = 'EXPIRED' OR x.expires_at <= ?)) AS expired
-                FROM machine_slots s WHERE s.machine_id = ? ORDER BY s.slot_code""",
-                (rs, row) -> new SlotCondition(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getLong(4), rs.getLong(5), rs.getLong(6)),
-                machineId, ts(holdDeadline), ts(holdDeadline), ts(now), ts(expiringBy), ts(now), machineId);
+                FROM machine_slots s WHERE %s ORDER BY s.slot_code""".formatted(machines, machines);
     }
 
     /**

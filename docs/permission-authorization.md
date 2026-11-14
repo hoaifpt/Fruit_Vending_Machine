@@ -47,6 +47,9 @@ Bằng chứng là test ma trận `AuthorizationMatrixIntegrationTest`: mọi op
 | `CUSTOMER_REPORT_READ` (V24, #74) | `GET /api/v1/customer-reports`, `/{id}`, `/{id}/photos/{photoId}` (STAFF: chỉ phản ánh của work order được giao) |
 | `CUSTOMER_REPORT_MANAGE` (V24, #74) | `POST /api/v1/customer-reports/{id}/review`, `/resolve`, `/reject`; xem liên hệ đầy đủ |
 | `MACHINE_REPORT_LINK_MANAGE` (V24, #74) | `POST /api/v1/machines/{id}/report-token/rotate` |
+| `DASHBOARD_READ` (V25, #76) | `GET /api/v1/dashboard/overview` |
+| `REPORT_SALES_READ` (V25, #76) | `GET /api/v1/reports/sales/summary`, `/timeseries`, `/peak-hours`, `/products`, `/machines`; khối tiền của dashboard |
+| `REPORT_EXPORT` (V25, #76) | `GET /api/v1/reports/sales/export` |
 | `RESTOCK_PLAN` (V21, #68) | gợi ý nạp hàng, tạo RESTOCK từ gợi ý, thêm/sửa/xóa dòng nạp |
 | `RESTOCK_EXECUTE` (V21, #68) | `POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads` (STAFF chỉ việc của mình) |
 | `INVENTORY_LOAD_DIRECT` (V21, #68) | `POST /api/v1/inventory/load` (chỉ ADMIN; STAFF nạp qua work order) |
@@ -81,6 +84,8 @@ UUID cố định `20000000-0000-0000-0000-0000000000NN`, giống V8, để mọ
 | `PAYMENT_REFUND`, `REFUND_READ` | ✓ | |
 | `CUSTOMER_REPORT_READ` | ✓ | ✓ |
 | `CUSTOMER_REPORT_MANAGE`, `MACHINE_REPORT_LINK_MANAGE` | ✓ | |
+| `DASHBOARD_READ` | ✓ | ✓ |
+| `REPORT_SALES_READ`, `REPORT_EXPORT` | ✓ | |
 
 Mapping này đã được đối chiếu với từng `@PreAuthorize` và URL rule cũ (29 `hasRole('ADMIN')`, 21 `hasAnyRole('ADMIN','STAFF')`),
 không có khác biệt. Các annotation trước đây đặt ở mức class mà lẫn đọc/ghi (User, Inventory, ProductBatch) đã được tách theo từng method.

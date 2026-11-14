@@ -83,6 +83,10 @@ public class SecurityConfig {
                     authorize.requestMatchers("/api/v1/payments", "/api/v1/payments/**").hasAuthority(Permissions.PAYMENT_READ);
                     authorize.requestMatchers("/api/v1/refunds", "/api/v1/refunds/**").hasAuthority(Permissions.REFUND_READ);
                     authorize.requestMatchers("/api/v1/audit-logs", "/api/v1/audit-logs/**").hasAuthority(Permissions.AUDIT_LOG_READ);
+                    // Issue #76: export before the general report rule (its own permission).
+                    authorize.requestMatchers("/api/v1/reports/sales/export", "/api/v1/reports/sales/export/**").hasAuthority(Permissions.REPORT_EXPORT);
+                    authorize.requestMatchers("/api/v1/reports", "/api/v1/reports/**").hasAuthority(Permissions.REPORT_SALES_READ);
+                    authorize.requestMatchers("/api/v1/dashboard", "/api/v1/dashboard/**").hasAuthority(Permissions.DASHBOARD_READ);
                     authorize.requestMatchers(HttpMethod.GET, "/api/v1/customer-reports", "/api/v1/customer-reports/**").hasAuthority(Permissions.CUSTOMER_REPORT_READ);
                     authorize.requestMatchers("/api/v1/customer-reports", "/api/v1/customer-reports/**").hasAuthority(Permissions.CUSTOMER_REPORT_MANAGE);
                     // Issue #66: before the alert rules (creating a work order from an alert is work order management).

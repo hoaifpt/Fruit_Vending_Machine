@@ -42,7 +42,9 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "POST /api/v1/maintenance-plans/{id}/activate", "POST /api/v1/maintenance-plans/{id}/deactivate", "POST /api/v1/maintenance-plans/{id}/generate-now",
             "POST /api/v1/payments/{paymentId}/refund", "GET /api/v1/refunds", "GET /api/v1/refunds/candidates", "GET /api/v1/refunds/summary",
             "POST /api/v1/customer-reports/{id}/review", "POST /api/v1/customer-reports/{id}/resolve", "POST /api/v1/customer-reports/{id}/reject",
-            "POST /api/v1/machines/{id}/report-token/rotate");
+            "POST /api/v1/machines/{id}/report-token/rotate", "GET /api/v1/reports/sales/summary", "GET /api/v1/reports/sales/timeseries",
+            "GET /api/v1/reports/sales/peak-hours", "GET /api/v1/reports/sales/products", "GET /api/v1/reports/sales/machines",
+            "GET /api/v1/reports/sales/export");
     /**
      * Added by #53, #56, #58 and #61: ADMIN and STAFF are allowed (MACHINE_READ, ALERT_READ, ALERT_MANAGE, PRICING_READ, or any
      * signed-in user for the own notifications); anonymous and kiosk keys are unauthenticated here.
@@ -57,7 +59,8 @@ class AuthorizationMatrixIntegrationTest extends AbstractCoreIntegrationTest {
             "POST /api/v1/work-orders/{id}/notes", "POST /api/v1/work-orders/{id}/complete",
             "POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "GET /api/v1/work-orders/{id}/restock", "GET /api/v1/maintenance-plans",
             "GET /api/v1/maintenance-plans/upcoming", "GET /api/v1/maintenance-plans/{id}", "GET /api/v1/maintenance-plans/{id}/work-orders",
-            "GET /api/v1/customer-reports", "GET /api/v1/customer-reports/{id}", "GET /api/v1/customer-reports/{id}/photos/{photoId}");
+            "GET /api/v1/customer-reports", "GET /api/v1/customer-reports/{id}", "GET /api/v1/customer-reports/{id}/photos/{photoId}",
+            "GET /api/v1/dashboard/overview");
     /** Issue #74: the public customer report form, the only anonymous operations under /api/v1 (any identity, never 401/403). */
     static final Set<String> PUBLIC_OPERATIONS = Set.of("GET /api/v1/public/report-forms/{reportToken}",
             "POST /api/v1/public/report-forms/{reportToken}/reports");
