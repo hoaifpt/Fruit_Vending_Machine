@@ -30,3 +30,8 @@ export function describeFormFailure(error: unknown): FormFailure {
   }
   return { message: error instanceof Error ? error.message : 'Đã xảy ra lỗi. Vui lòng thử lại.' }
 }
+
+/** Code of a business 409 of the backend (`CODE: message`, e.g. STALE_VERSION), or undefined. */
+export function errorCode(error: unknown): string | undefined {
+  return error instanceof ApiError ? /^([A-Z][A-Z0-9_]{2,}):/.exec(error.message)?.[1] : undefined
+}

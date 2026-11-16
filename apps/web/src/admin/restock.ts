@@ -1,113 +1,82 @@
 // Rules of screen O4 "Thực hiện phiếu nạp hàng" (FE 7.2) that do not need React, unit-tested in tests/restock.test.mjs.
-// Contract: api-contract/drafts/work-tickets.yaml (restock lines, POST .../restock-lines/{lineId}/load and /remove,
-// POST /complete with the reconciliation, waiting for BE 4.4) and drafts/machine-maintenance.yaml (OPEN_REFILL /
-// CLOSE_REFILL, BE 4.2). The step shown is always derived from server data (the ticket, its lines, the machine's
-// maintenance command history and the bowls of the lines' slots), so a reload resumes at the right step.
-// Quantities follow the load rules of FE 4.3 (inventory-load.ts): free places of the slot, bowls left in the batch,
-// 1..1000 per request. Nothing is ever deleted: a bowl taken out becomes REMOVED with its history row.
+// API: api-contract/api.yaml, backend #68 (docs/restock.md): GET /work-orders/{id}/restock (lines with their loads,
+// linked maintenance commands, bowls removed by reason), POST .../restock-lines/{lineId}/loads (RESTOCK_EXECUTE, work
+// order IN_PROGRESS), old bowls taken out by maintenance commands carrying workOrderId (REMOVE_ITEM / EMPTY_COLUMN, refill
+// gate closed), refill gates opened and closed per column (OPEN_REFILL / CLOSE_REFILL), then POST /complete with a
+// result note and a reason for every line loaded ≠ planned (all gates closed). The step shown is always derived from server
+// data (work order, lines, slots' refillGateOpen, the machine's running command), so a reload resumes at the right step.
+// Quantities follow the load rules of FE 4.3 (inventory-load.ts). Nothing is ever deleted.
 import { ApiError } from '../api/client.ts'
-import type { InventoryItem, MaintenanceCommand, RestockLine, WorkTicket } from '../api/resources.ts'
-import { formatDateTime } from '../lib/format.ts'
-import { ValidationError } from './form-error.ts'
+import type { CompleteWorkOrderBody, InventorySummary, LineVariance, MaintenanceOperation, RestockLine, SlotSuggestion, WorkOrder } from '../api/resources.ts'
+import { ValidationError, errorCode } from './form-error.ts'
 import type { LoadRoom } from './inventory-load.ts'
-import { LOAD_MAX_PER_REQUEST, QUANTITY_INVALID, describeLoadError, describeRemoveFailure, loadMax, parseBoxCount, quantityProblem, reasonProblem } from './inventory-load.ts'
-import { compareDispenseOrder, isExpiredBox, isPresent } from './inventory-map.ts'
-import { runningCommand } from './maintenance-commands.ts'
-import { TICKETS_PATH, hasRestockLines } from './tickets.ts'
+import { LOAD_MAX_PER_REQUEST, QUANTITY_INVALID, fitConflictText, loadMax, parseBoxCount, quantityProblem } from './inventory-load.ts'
+import type { FitConflict } from './inventory-load.ts'
+import { REASON_LABELS } from './maintenance-commands.ts'
+import { TICKETS_PATH, TICKET_LIMITS, hasRestockLines } from './tickets.ts'
 
 const count = new Intl.NumberFormat('vi-VN')
 const n = (value: number) => count.format(value)
+/** Plain-language count of bowls: "3 hộp". */
+export const bowls = (value: number) => `${n(value)} hộp`
 
 // ---- steps
 
-export const RESTOCK_STEPS = ['open', 'remove', 'load', 'close', 'reconcile'] as const
+export const RESTOCK_STEPS = ['start', 'remove', 'load', 'close', 'reconcile'] as const
 export type RestockStepKey = typeof RESTOCK_STEPS[number]
-/** `done`: the ticket is COMPLETED or CANCELLED, only the summary is shown. */
+/** `done`: the work order is DONE or CANCELLED, only the summary is shown. */
 export type RestockStep = RestockStepKey | 'done'
 
 export const STEP_LABELS: Readonly<Record<RestockStepKey, string>> = {
-  open: 'Mở cửa nạp', remove: 'Rút hộp hỏng', load: 'Nạp theo dòng', close: 'Đóng cửa nạp', reconcile: 'Đối chiếu',
+  start: 'Bắt đầu', remove: 'Rút hộp cũ', load: 'Nạp theo dòng', close: 'Đóng cổng nạp', reconcile: 'Đối chiếu',
 }
-/** Steps done with the refill door open: the person may move between them freely. */
-export const DOOR_OPEN_STEPS: readonly RestockStepKey[] = ['remove', 'load', 'close']
+/** Steps the person may move between freely while the work order is IN_PROGRESS. */
+export const WORK_STEPS: readonly RestockStepKey[] = ['remove', 'load', 'close', 'reconcile']
 
 export function restockPath(ticketId: string): string {
   return `${TICKETS_PATH}/${encodeURIComponent(ticketId)}/restock`
 }
-
-/** RESTOCK ticket that has lines (rule kept in tickets.ts, which decides the next-step buttons too). */
 export { hasRestockLines }
 
-export type RefillSince = { state: 'none' } | { state: 'open'; at: string } | { state: 'closed'; at: string }
-
-/**
- * Refill door as left by this ticket: the newest successful OPEN_REFILL / CLOSE_REFILL sent at or after `since` (the
- * ticket's start) in the newest-first history. `closed` only counts after an OPEN_REFILL of this ticket: a CLOSE alone
- * (door closed by someone else before the restock opened it) is `none`.
- */
-export function refillSince(commands: readonly MaintenanceCommand[] | undefined, since: string | null | undefined): RefillSince {
-  const start = Date.parse(since ?? '')
-  if (!commands || Number.isNaN(start)) return { state: 'none' }
-  const ours = commands.filter(command => command.status === 'SUCCESS' && (command.type === 'OPEN_REFILL' || command.type === 'CLOSE_REFILL') && Date.parse(command.createdAt) >= start)
-  const last = ours[0]
-  if (!last) return { state: 'none' }
-  const at = last.completedAt ?? last.updatedAt
-  if (last.type === 'OPEN_REFILL') return { state: 'open', at }
-  return ours.some(command => command.type === 'OPEN_REFILL') ? { state: 'closed', at } : { state: 'none' }
-}
-
 export interface StepInput {
-  status: WorkTicket['status']
-  startedAt?: string | null
-  lines: readonly RestockLine[]
-  /** Newest-first maintenance commands of the machine (the first page is enough: the newest decides). */
-  commands: readonly MaintenanceCommand[] | undefined
-  /** Expired bowls still in the lines' slots; undefined while unknown. */
-  expiredLeft: number | undefined
-  /** The backend has no maintenance commands yet (BE 4.2 missing): the door is opened and closed by hand at the machine. */
-  doorByHand?: boolean
+  status: WorkOrder['status']
+  lines: readonly Pick<RestockLine, 'plannedQuantity' | 'loadedQuantity'>[]
+  /** Columns of the lines whose refill gate is open (slot.refillGateOpen). */
+  gatesOpen: number
+  /** The machine's unfinished maintenance command, if any (only its operation matters). */
+  running?: { operation?: MaintenanceOperation | string }
 }
+
+const loadedOf = (line: Pick<RestockLine, 'loadedQuantity'>) => line.loadedQuantity ?? 0
+const plannedOf = (line: Pick<RestockLine, 'plannedQuantity'>) => line.plannedQuantity ?? 0
 
 /**
  * Step to resume at, from server data only:
- * ASSIGNED (not started) or no OPEN_REFILL succeeded since the start → open (also while OPEN_REFILL runs);
- * CLOSE_REFILL running → close; door closed after this ticket opened it → reconcile;
- * door open: nothing loaded yet and expired bowls left (or not known yet) → remove; every line loaded in full → close;
- * otherwise → load. COMPLETED / CANCELLED → done.
+ * DONE / CANCELLED → done; not IN_PROGRESS → start;
+ * a running REMOVE_ITEM / EMPTY_COLUMN → remove, OPEN_REFILL → load, CLOSE_REFILL → close;
+ * a gate of the lines open → load, or close once every line is loaded in full;
+ * all gates closed: something loaded → reconcile, nothing loaded yet → remove (old bowls come out first).
  */
 export function restockStep(input: StepInput): RestockStep {
-  if (input.status === 'COMPLETED' || input.status === 'CANCELLED') return 'done'
-  if (input.status !== 'IN_PROGRESS') return 'open'
-  const running = runningCommand(input.commands)
-  if (running?.type === 'OPEN_REFILL') return 'open'
-  if (running?.type === 'CLOSE_REFILL') return 'close'
-  const refill: RefillSince = input.doorByHand ? { state: 'open', at: input.startedAt ?? '' } : refillSince(input.commands, input.startedAt)
-  if (refill.state === 'none') return 'open'
-  if (refill.state === 'closed') return 'reconcile'
-  const loaded = input.lines.some(line => line.loadedQuantity > 0)
-  if (!loaded && (input.expiredLeft === undefined || input.expiredLeft > 0)) return 'remove'
-  if (input.lines.length && input.lines.every(line => line.loadedQuantity >= line.plannedQuantity)) return 'close'
-  return 'load'
+  if (input.status === 'DONE' || input.status === 'CANCELLED') return 'done'
+  if (input.status !== 'IN_PROGRESS') return 'start'
+  const operation = input.running?.operation
+  if (operation === 'REMOVE_ITEM' || operation === 'EMPTY_COLUMN') return 'remove'
+  if (operation === 'OPEN_REFILL') return 'load'
+  if (operation === 'CLOSE_REFILL') return 'close'
+  const full = input.lines.length > 0 && input.lines.every(line => loadedOf(line) >= plannedOf(line))
+  if (input.gatesOpen > 0) return full ? 'close' : 'load'
+  return input.lines.some(line => loadedOf(line) > 0) ? 'reconcile' : 'remove'
 }
 
 /**
- * Whether the step can be decided from the machine's maintenance command history. Only an IN_PROGRESS ticket needs it
- * (before, the step is always "open"; after, "done"). `failed`: the history could not be read (401, 403, 500, network;
- * a 404 means the backend has no maintenance commands, handled by hand as `missing`), so the screen shows the error
- * with a retry instead of guessing a step (it would claim the door was never opened).
+ * What is shown: the person's choice among the work steps while the work order is IN_PROGRESS, otherwise the derived
+ * step. "Đối chiếu" is never shown while a gate is open (completing would be refused with REFILL_GATE_OPEN).
  */
-export function commandHistoryState(input: { status: WorkTicket['status']; loaded: boolean; error: unknown; missing: boolean }): 'ready' | 'loading' | 'failed' {
-  if (input.status !== 'IN_PROGRESS' || input.loaded || input.missing) return 'ready'
-  return input.error ? 'failed' : 'loading'
-}
-
-/**
- * What is shown: the person's choice among the door-open steps while the door is open, otherwise the derived step.
- * With the door handled by hand (no maintenance commands on the server) the reconciliation is reached by choice too.
- */
-export function shownStep(derived: RestockStep, chosen: RestockStepKey | null, doorByHand = false): RestockStep {
-  if (!chosen || derived === 'done' || !DOOR_OPEN_STEPS.includes(derived as RestockStepKey)) return derived
-  return DOOR_OPEN_STEPS.includes(chosen) || (doorByHand && chosen === 'reconcile') ? chosen : derived
+export function shownStep(derived: RestockStep, chosen: RestockStepKey | null, gatesOpen = 0): RestockStep {
+  if (!chosen || derived === 'done' || derived === 'start' || !WORK_STEPS.includes(chosen)) return derived
+  if (chosen === 'reconcile' && gatesOpen > 0) return derived
+  return chosen
 }
 
 /** Position for the progress bar: 1-based, and how many steps are behind. `done` counts as after the last step. */
@@ -124,43 +93,60 @@ export function stepState(step: RestockStepKey, shown: RestockStep): 'done' | 'c
   return index < at ? 'done' : index === at ? 'current' : 'todo'
 }
 
-// ---- bowls to take out
+// ---- old bowls of a column (from its inventory summary)
 
-export interface RemovalPlan {
-  /** Expired bowls (stored EXPIRED, or past their expiry): must come out before selling again. */
-  expired: InventoryItem[]
-  /** Sellable bowls the person may take out if damaged. */
-  others: InventoryItem[]
-  /** Bowls held for an order or after a failed dispense: not removable here. */
-  locked: number
+export interface ColumnState {
+  /** Bowls physically there. */
+  present: number
+  /** Expired (status or date) or failed to dispense: must come out before selling again. */
+  toRemove: number
+  /** Held for an order: the column cannot be emptied now. */
+  reserved: number
+  headBlocked: boolean
+}
+export function columnState(summary: Pick<InventorySummary, 'occupiedCount' | 'availableCount' | 'expiredCount' | 'reservedCount' | 'headStatus' | 'headExpired'> | undefined): ColumnState | undefined {
+  if (!summary) return undefined
+  const present = summary.occupiedCount ?? 0
+  const reserved = summary.reservedCount ?? 0
+  const failed = Math.max(0, present - (summary.availableCount ?? 0) - (summary.expiredCount ?? 0) - reserved)
+  const headBlocked = summary.headStatus === 'EXPIRED' || summary.headStatus === 'DISPENSE_FAILED' || !!summary.headExpired
+  return { present, toRemove: (summary.expiredCount ?? 0) + failed, reserved, headBlocked }
+}
+/** One sentence about the old bowls of a column for step 2. */
+export function columnText(state: ColumnState | undefined): string {
+  if (!state) return 'Đang đọc số hộp trong ngăn…'
+  if (!state.present) return 'Ngăn đang trống, không có hộp cũ cần rút.'
+  const parts = [`Đang có ${bowls(state.present)}`]
+  parts.push(state.toRemove ? `${bowls(state.toRemove)} hết hạn hoặc nhả lỗi cần rút` : 'không có hộp hết hạn')
+  if (state.headBlocked) parts.push('hộp ở đáy ngăn đang chặn bán')
+  if (state.reserved) parts.push(`${bowls(state.reserved)} đang giữ cho đơn (chờ đơn xong mới rút được)`)
+  return `${parts.join(', ')}.`
 }
 
-/** Present bowls of one slot split for step 2, each list in dispense order (head first). */
-export function removalPlan(items: readonly InventoryItem[], now: number): RemovalPlan {
-  const present = items.filter(isPresent).sort(compareDispenseOrder)
-  const expiredNow = (item: InventoryItem) => isExpiredBox(item) || Date.parse(item.expiresAt ?? '') <= now
-  const removable = (item: InventoryItem) => item.status === 'AVAILABLE' || item.status === 'EXPIRED'
-  return {
-    expired: present.filter(item => removable(item) && expiredNow(item)),
-    others: present.filter(item => removable(item) && !expiredNow(item)),
-    locked: present.filter(item => !removable(item)).length,
+/** Bowls removed by the linked maintenance commands, in words: "Đã rút 3 hộp (Hộp hết hạn: 2, Hộp dập, hỏng: 1)". */
+export function removedText(removedByReason: Record<string, number> | undefined): string {
+  const entries = Object.entries(removedByReason ?? {}).filter(([, value]) => value > 0)
+  if (!entries.length) return 'Chưa rút hộp nào trong phiếu này.'
+  const total = entries.reduce((sum, [, value]) => sum + value, 0)
+  return `Đã rút ${bowls(total)} trong phiếu này (${entries.map(([reason, value]) => `${REASON_LABELS[reason as keyof typeof REASON_LABELS] ?? reason}: ${n(value)}`).join(', ')}).`
+}
+
+/** A suggestion of GET /machines/{id}/restock-suggestions in words, for planning. */
+export function suggestionText(slot: Pick<SlotSuggestion, 'slotCode' | 'currentProduct' | 'suggestedAction' | 'suggestedLoadQuantity' | 'expiredCount' | 'dispenseFailedCount' | 'expiringTodayCount'>): string {
+  const what = `Ngăn ${slot.slotCode} · ${slot.currentProduct?.name ?? 'chưa rõ sản phẩm'}`
+  const quantity = bowls(slot.suggestedLoadQuantity ?? 0)
+  if (slot.suggestedAction === 'EMPTY_THEN_LOAD') {
+    const old = (slot.expiredCount ?? 0) + (slot.dispenseFailedCount ?? 0) + (slot.expiringTodayCount ?? 0)
+    return `${what}: xả ngăn${old ? ` (${bowls(old)} hết hạn, sắp hết hạn hoặc nhả lỗi)` : ''} rồi nạp ${quantity}`
   }
-}
-
-export const REMOVE_REASONS = { expired: 'Hộp hết hạn', damaged: 'Hộp dập, hỏng' } as const
-
-/** Body of POST .../restock-lines/{lineId}/remove: exactly { inventoryItemId, reason }, reason trimmed (1..500). */
-export function lineRemoveBody(inventoryItemId: string, reason: string) {
-  const problem = reasonProblem(reason)
-  if (problem) throw new ValidationError({ reason: problem })
-  if (!inventoryItemId) throw new ValidationError({ inventoryItemId: 'Chọn hộp cần rút.' })
-  return { inventoryItemId, reason: reason.trim() }
+  if (slot.suggestedAction === 'LOAD') return `${what}: nạp thêm ${quantity}`
+  return `${what}: không cần nạp`
 }
 
 // ---- loading per line
 
 /** Bowls still to load for the plan (never negative). */
-export const leftToLoad = (line: Pick<RestockLine, 'plannedQuantity' | 'loadedQuantity'>) => Math.max(line.plannedQuantity - line.loadedQuantity, 0)
+export const leftToLoad = (line: Pick<RestockLine, 'plannedQuantity' | 'loadedQuantity'>) => Math.max(plannedOf(line) - loadedOf(line), 0)
 
 /**
  * Count pre-filled for a line: what is left of the plan, capped by what fits now (slot free places, batch left,
@@ -176,8 +162,11 @@ export function lineQuantityProblem(raw: string, room: LoadRoom, required = fals
   return quantityProblem(raw, room, required)
 }
 
-/** Body of POST .../restock-lines/{lineId}/load: exactly { batchId, quantity } (an integer 1..1000). */
-export function lineLoadBody(batchId: string, raw: string, room: LoadRoom = {}) {
+/**
+ * Body of POST .../restock-lines/{lineId}/loads: { batchId, quantity } and acknowledgeExpiryInversion only when the
+ * person confirmed loading a batch that expires before bowls already in the column.
+ */
+export function lineLoadBody(batchId: string, raw: string, room: LoadRoom = {}, acknowledge = false) {
   const errors: Record<string, string> = {}
   if (!batchId) errors.batchId = 'Chọn lô hàng để nạp.'
   const problem = quantityProblem(raw, room, true)
@@ -185,13 +174,17 @@ export function lineLoadBody(batchId: string, raw: string, room: LoadRoom = {}) 
   const quantity = parseBoxCount(raw)
   if (quantity === undefined || quantity < 1 || quantity > LOAD_MAX_PER_REQUEST) errors.quantity ||= QUANTITY_INVALID
   if (Object.keys(errors).length) throw new ValidationError(errors)
-  return { batchId, quantity: quantity! }
+  return acknowledge ? { batchId, quantity: quantity!, acknowledgeExpiryInversion: true } : { batchId, quantity: quantity! }
 }
 
-// ---- reconciliation
+// ---- reconciliation and completion
 
-export interface ReconcileRow { lineId: string; slotCode: string; productName: string; planned: number; loaded: number; removed: number; difference: number; text: string }
-export interface Reconciliation { rows: ReconcileRow[]; planned: number; loaded: number; removed: number; difference: number; noteRequired: boolean }
+export interface ReconcileRow {
+  lineId: string; slotCode: string; productName: string; planned: number; loaded: number; difference: number; text: string
+  /** Reason already stored on the line (varianceReason), if any. */
+  savedReason: string | null
+}
+export interface Reconciliation { rows: ReconcileRow[]; planned: number; loaded: number; difference: number; varianceLines: number }
 
 /** "Khớp", "Thiếu 2 hộp" or "Thừa 1 hộp": the difference in words (not by colour only). */
 export function differenceText(difference: number): string {
@@ -199,79 +192,86 @@ export function differenceText(difference: number): string {
   return difference < 0 ? `Thiếu ${n(-difference)} hộp` : `Thừa ${n(difference)} hộp`
 }
 
-/** Plan against result per line and in total; a note is required when any line differs (rule of POST /complete). */
+/** Plan against result per line and in total; a line whose loaded ≠ planned needs a reason (rule of POST /complete). */
 export function reconcile(lines: readonly RestockLine[]): Reconciliation {
   const rows = lines.map(line => {
-    const difference = line.loadedQuantity - line.plannedQuantity
-    return { lineId: line.id, slotCode: line.slotCode, productName: line.productName, planned: line.plannedQuantity, loaded: line.loadedQuantity, removed: line.removedQuantity, difference, text: differenceText(difference) }
+    const planned = plannedOf(line), loaded = loadedOf(line), difference = loaded - planned
+    return { lineId: line.id ?? '', slotCode: line.slotCode ?? '', productName: line.productName ?? '', planned, loaded, difference, text: differenceText(difference), savedReason: line.varianceReason?.trim() || null }
   })
   const sum = (pick: (row: ReconcileRow) => number) => rows.reduce((total, row) => total + pick(row), 0)
-  return { rows, planned: sum(row => row.planned), loaded: sum(row => row.loaded), removed: sum(row => row.removed), difference: sum(row => row.difference), noteRequired: rows.some(row => row.difference !== 0) }
+  return { rows, planned: sum(row => row.planned), loaded: sum(row => row.loaded), difference: sum(row => row.difference), varianceLines: rows.filter(row => row.difference !== 0).length }
 }
 
-export const NOTE_MAX = 500
-export const NOTE_REQUIRED = 'Số hộp đã nạp khác kế hoạch: ghi lý do (ví dụ “Lô chỉ còn 2 hộp”, “Ngăn A2 có hộp dập”) để quản trị viên đối chiếu.'
+export const VARIANCE_REQUIRED = 'Dòng này nạp khác kế hoạch: ghi lý do (ví dụ “Lô mới chỉ còn 4 hộp”).'
+export const RESULT_REQUIRED = 'Ghi kết quả nạp hàng (bắt buộc), ví dụ “Đã xả B, nạp đủ A”.'
+export const varianceField = (lineId: string) => `variance-${lineId}`
 
-/** Body of POST /complete for a restock: the note when there is one; required when the result differs from the plan. */
-export function restockCompleteBody(note: string, noteRequired: boolean): { body?: { note?: string }; error?: string } {
+/**
+ * Body of POST /complete for a restock: resultNote (required) and lineVariances for every line loaded ≠ planned whose
+ * reason was typed now; a differing line without a typed or stored reason is a field error. Typed reasons of matching
+ * lines are not sent.
+ */
+export function restockCompleteBody(note: string, rows: readonly ReconcileRow[], reasons: Readonly<Record<string, string>>): { body?: CompleteWorkOrderBody; errors?: Record<string, string> } {
+  const errors: Record<string, string> = {}
   const text = note.trim()
-  if (!text && noteRequired) return { error: NOTE_REQUIRED }
-  if (text.length > NOTE_MAX) return { error: `Tối đa ${NOTE_MAX} ký tự.` }
-  return { body: text ? { note: text } : {} }
-}
-
-/** Line after completion: how many LOW_STOCK alerts the server closed. */
-export function resolvedText(count: number): string {
-  return count > 0
-    ? `Đã tự đóng ${n(count)} cảnh báo Ngăn sắp hết hàng của máy này.`
-    : 'Không có cảnh báo Ngăn sắp hết hàng nào được tự đóng: chỉ ngăn đã nạp đủ kế hoạch mới được đóng. Cảnh báo còn lại xử lý ở màn Cảnh báo.'
-}
-
-/** One sentence about the refill door for step 1 and 4 (from the history). */
-export function refillText(refill: RefillSince): string {
-  if (refill.state === 'open') return `Cửa nạp đang mở (máy báo lúc ${formatDateTime(refill.at)}).`
-  if (refill.state === 'closed') return `Cửa nạp đã đóng (máy báo lúc ${formatDateTime(refill.at)}).`
-  return 'Cửa nạp chưa được mở cho phiếu này.'
+  if (!text) errors.resultNote = RESULT_REQUIRED
+  else if (text.length > TICKET_LIMITS.note) errors.resultNote = `Tối đa ${TICKET_LIMITS.note} ký tự.`
+  const lineVariances: LineVariance[] = []
+  for (const row of rows) {
+    if (row.difference === 0) continue
+    const reason = (reasons[row.lineId] ?? '').trim()
+    if (reason.length > 500) errors[varianceField(row.lineId)] = 'Tối đa 500 ký tự.'
+    else if (reason) lineVariances.push({ lineId: row.lineId, reason })
+    else if (!row.savedReason) errors[varianceField(row.lineId)] = VARIANCE_REQUIRED
+  }
+  if (Object.keys(errors).length) return { errors }
+  return { body: lineVariances.length ? { resultNote: text, lineVariances } : { resultNote: text } }
 }
 
 // ---- errors
 
 export const RESTOCK_STALE = 'Phiếu không còn ở trạng thái đang thực hiện (có thể đã hoàn tất hoặc bị hủy ở nơi khác). Trang đã tải lại; xem trạng thái mới nhất.'
-export const RESTOCK_NOT_ASSIGNEE = 'Phiếu này không còn giao cho bạn (hoặc tài khoản thiếu quyền nạp/rút hộp) nên bạn không thực hiện bước này được. Hãy hỏi quản trị viên.'
-const BATCH_MISMATCH = 'Lô đã chọn không phải sản phẩm của dòng này. Chọn lô đúng sản phẩm.'
+export const RESTOCK_NOT_ASSIGNEE = 'Phiếu này không còn giao cho bạn (hoặc tài khoản thiếu quyền nạp hàng) nên bạn không thực hiện bước này được. Hãy hỏi quản trị viên.'
 
 /**
- * A failed load of a line: the FE 4.3 wording (describeLoadError: capacity, batch, expiry… under the field, with
- * `refresh` when the figures must be read again), plus the ticket's own refusals (not IN_PROGRESS, not the assignee,
- * batch of another product).
+ * A failed load of a line: field errors for the batch and the count (capacity, batch quantity with the FE 4.3 wording;
+ * `refresh` when the figures must be read again), `inversion` when the batch expires before bowls already in the column
+ * (the person may confirm and load anyway), `stale` when the work order is no longer IN_PROGRESS or no longer theirs.
  */
-export function describeLineLoadError(error: unknown, quantity: number | undefined, room: LoadRoom): ReturnType<typeof describeLoadError> & { stale?: boolean } {
-  if (error instanceof ApiError) {
-    if (error.status === 409 && /not in_progress|IN_PROGRESS/i.test(error.message)) return { error: new ApiError(409, RESTOCK_STALE), refresh: true, stale: true }
-    if (error.status === 409 && /does not match/i.test(error.message)) return { error: new ValidationError({ batchId: BATCH_MISMATCH }), refresh: false }
-    if (error.status === 403) return { error: new ApiError(403, RESTOCK_NOT_ASSIGNEE), refresh: false, stale: true }
+export function describeLineLoadError(error: unknown, quantity: number | undefined, room: LoadRoom): { error: unknown; refresh: boolean; stale?: boolean; inversion?: string; conflict?: FitConflict } {
+  if (!(error instanceof ApiError)) return { error, refresh: false }
+  const code = errorCode(error)
+  const batch = room.batchCode ? `Lô ${room.batchCode}` : 'Lô đã chọn'
+  if (error.status === 409) {
+    if (code === 'SLOT_CAPACITY_EXCEEDED' || code === 'BATCH_QUANTITY_EXCEEDED') {
+      const conflict: FitConflict = { kind: code === 'SLOT_CAPACITY_EXCEEDED' ? 'slot' : 'batch', quantity: quantity ?? 0 }
+      return { error: new ValidationError({ quantity: fitConflictText(conflict, room, 'pending') }), refresh: true, conflict }
+    }
+    if (code === 'EXPIRY_INVERSION') return { error: error, refresh: false, inversion: `${batch} hết hạn sớm hơn các hộp đang có trong ngăn: hộp mới sẽ nằm trên và bán sau chúng, có thể hết hạn trong ngăn. Chọn lô khác, hoặc xác nhận vẫn nạp.` }
+    if (code === 'BATCH_PRODUCT_MISMATCH') return { error: new ValidationError({ batchId: 'Lô đã chọn không phải sản phẩm của dòng này. Chọn lô đúng sản phẩm.' }), refresh: false }
+    if (code === 'BATCH_EXPIRED') return { error: new ValidationError({ batchId: `${batch} đã hoặc sắp hết hạn (trong 5 phút) nên không nạp được. Chọn lô khác còn hạn.` }), refresh: true }
+    if (code === 'SLOT_INACTIVE') return { error: new ApiError(409, `Ngăn ${room.slotCode ?? ''} đang ngừng hoạt động nên không nạp được. Nhờ quản trị viên bật ngăn rồi thử lại.`), refresh: true }
+    if (code === 'WORK_ORDER_NOT_IN_PROGRESS' || code === 'INVALID_WORK_ORDER_TRANSITION') return { error: new ApiError(409, RESTOCK_STALE), refresh: true, stale: true }
+    return { error: new ApiError(409, 'Máy chủ từ chối lần nạp này vì dữ liệu vừa thay đổi. Số liệu đã được tải lại; kiểm tra rồi nạp lại.'), refresh: true }
   }
-  return describeLoadError(error, quantity, room)
-}
-
-/** A failed removal of a bowl: the FE 4.3 wording (describeRemoveFailure) plus the ticket's own refusals. */
-export function describeLineRemoveError(error: unknown): { error: unknown; stale: boolean } {
-  if (error instanceof ApiError) {
-    if (error.status === 409 && /not in_progress|IN_PROGRESS/i.test(error.message)) return { error: new ApiError(409, RESTOCK_STALE), stale: true }
-    if (error.status === 403) return { error: new ApiError(403, RESTOCK_NOT_ASSIGNEE), stale: true }
-    if (error.status === 400 && error.fieldErrors.inventoryItemId) return { error: new ApiError(409, 'Hộp này không còn ở ngăn của dòng nạp. Danh sách hộp đã được tải lại.'), stale: true }
+  if (error.status === 404 || error.status === 403) return { error: new ApiError(error.status, RESTOCK_NOT_ASSIGNEE), refresh: false, stale: true }
+  if (error.status === 400 && (error.fieldErrors.quantity || error.fieldErrors.batchId)) {
+    return { error: new ValidationError({ ...(error.fieldErrors.quantity ? { quantity: QUANTITY_INVALID } : {}), ...(error.fieldErrors.batchId ? { batchId: 'Lô đã chọn không hợp lệ. Chọn lại lô.' } : {}) }), refresh: false }
   }
-  return describeRemoveFailure(error)
+  return { error, refresh: false }
 }
 
-/** A failed completion: 400 on the note goes under the note; 409/403 explained (the screen reloads). */
-export function describeCompleteError(error: unknown): unknown {
-  if (!(error instanceof ApiError)) return error
-  if (error.status === 400 && error.fieldErrors.note) return new ValidationError({ note: /blank|required|differs/i.test(error.fieldErrors.note) ? NOTE_REQUIRED : error.fieldErrors.note })
-  if (error.status === 409) return new ApiError(409, RESTOCK_STALE)
-  if (error.status === 403) return new ApiError(403, RESTOCK_NOT_ASSIGNEE)
-  return error
+/** A failed completion: field errors on the result or the lines, known blockers explained, 409/404 reload the screen. */
+export function describeCompleteError(error: unknown, rows: readonly ReconcileRow[]): { error: unknown; stale: boolean } {
+  if (!(error instanceof ApiError)) return { error, stale: false }
+  const code = errorCode(error)
+  if (error.status === 400 && error.fieldErrors.resultNote) return { error: new ValidationError({ resultNote: RESULT_REQUIRED }), stale: false }
+  if (code === 'RESTOCK_VARIANCE_REASON_REQUIRED') {
+    return { error: new ValidationError(Object.fromEntries(rows.filter(row => row.difference !== 0 && !row.savedReason).map(row => [varianceField(row.lineId), VARIANCE_REQUIRED]))), stale: false }
+  }
+  if (code === 'REFILL_GATE_OPEN') return { error: new ApiError(409, 'Còn ngăn đang mở cổng nạp. Quay lại bước “Đóng cổng nạp” rồi hoàn tất.'), stale: true }
+  if (code === 'MACHINE_COMMAND_IN_PROGRESS') return { error: new ApiError(409, 'Còn lệnh bảo trì chưa xong hoặc chờ đối soát. Chờ lệnh xong (hoặc đối soát ở thẻ Bảo trì của máy) rồi hoàn tất.'), stale: true }
+  if (error.status === 409) return { error: new ApiError(409, RESTOCK_STALE), stale: true }
+  if (error.status === 404 || error.status === 403) return { error: new ApiError(error.status, RESTOCK_NOT_ASSIGNEE), stale: true }
+  return { error, stale: false }
 }
-
-/** Plain-language count of bowls: "3 hộp". */
-export const bowls = (value: number) => `${n(value)} hộp`

@@ -12,7 +12,9 @@ export class ApiError extends Error {
   }
 }
 
-type QueryValue = string | number | boolean | null | undefined
+type QueryScalar = string | number | boolean | null | undefined
+/** An array repeats the parameter (`status=OPEN&status=ASSIGNED`), as Spring binds a List. */
+type QueryValue = QueryScalar | readonly QueryScalar[]
 export interface RequestOptions {
   query?: Record<string, QueryValue>
   body?: unknown
@@ -57,8 +59,10 @@ export function configureClient(patch: Partial<ClientConfig>) {
 export function buildUrl(path: string, query?: Record<string, QueryValue>, baseUrl = config.baseUrl): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query ?? {})) {
-    if (value === undefined || value === null || value === '') continue
-    params.set(key, String(value))
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (item === undefined || item === null || item === '') continue
+      params.append(key, String(item))
+    }
   }
   const search = params.toString()
   return `${baseUrl}${API_PREFIX}${path}${search ? `?${search}` : ''}`
@@ -151,7 +155,8 @@ export function noteServerTime(serverTime: number | undefined, receivedAt = Date
 
 export const api = {
   get: <T>(path: string, query?: RequestOptions['query'], signal?: AbortSignal) => request<T>('GET', path, { query, signal }),
-  post: <T>(path: string, body?: unknown) => request<T>('POST', path, { body }),
+  /** `headers`: extra headers of an authenticated call, e.g. the Idempotency-Key of a maintenance command. */
+  post: <T>(path: string, body?: unknown, headers?: Record<string, string>) => request<T>('POST', path, { body, headers }),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, { body }),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, { body }),
 }

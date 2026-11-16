@@ -1,58 +1,40 @@
-// O3 Chi tiết phiếu công việc (FE 7.1): what to do and where (machine, alert: one click each), who is on it, what happens
-// next, and who did each step with the note or cancel reason. The header only offers the valid next step for this
-// account and status. API: GET /work-tickets/{id} of the draft contract api-contract/drafts/work-tickets.yaml
-// (waiting for BE 4.3). A staff account asking for someone else's ticket gets 404 from the server, shown as "not found".
-// FE 8.3: an INCIDENT ticket also shows the customer's report (code, type, order, description, photo; the phone number
-// only reaches admins, the server leaves it null for staff). Customer text is rendered as text, never as HTML.
-import { ApiError } from '../../api/client.ts'
-import { ticketsApi } from '../../api/resources.ts'
-import type { WorkTicket } from '../../api/resources.ts'
+// O3 Chi tiết phiếu công việc (FE 7.1): what to do and where (machine, linked alerts, plan: one click each), who is on it,
+// what happens next, and the append-only history (GET /work-orders/{id}/events) with notes, result or cancel reason.
+// The header only offers the valid next steps for this account and status, plus "Sửa phiếu" (WORK_ORDER_MANAGE) and
+// "Thêm ghi chú" (assignee or manager) while unfinished. API: GET /work-orders/{id} of api.yaml (backend #66); someone
+// else's work order without WORK_ORDER_READ_ALL is a 404, shown as "not found". An INCIDENT work order lists the
+// customer reports attached to it (linkedReports: code, type, verdict, status; never the reporter's contact).
+import { workOrdersApi } from '../../api/resources.ts'
+import type { WorkOrder } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
-import { formatDateTime } from '../../lib/format.ts'
-import { alertPath, machinePath } from '../alerts.ts'
+import { formatDate, formatDateTime } from '../../lib/format.ts'
+import { alertPath, alertTypeLabel, machinePath } from '../alerts.ts'
 import { Badge, ErrorState, Link, Loading, PageHead, useDialog } from '../kit.tsx'
 import { HEADING, HINT, LINK, PANEL } from '../payment-parts.tsx'
-import { DueText, TicketActionButtons, TicketActionDialog, TicketHistory } from '../ticket-parts.tsx'
+import { DueText, PriorityText, TicketActionButtons, TicketActionDialog, TicketHistory } from '../ticket-parts.tsx'
 import type { TicketActionState } from '../ticket-parts.tsx'
-import { hasRestockLines, restockPath } from '../restock.ts'
-import { refundPathFor } from '../refunds.ts'
+import { restockPath } from '../restock.ts'
+import { SCHEDULES_PATH } from '../maintenance-schedules.ts'
 import {
-  TICKETS_MISSING, TICKETS_PATH, TICKET_NOT_FOUND, assigneeText, incidentTypeLabel, isClosed, isMine, isOverdue, nextActions, nextStepText, safePhotoUrl,
-  ticketTypeLabel, ticketsAvailability,
+  TICKETS_PATH, actionLabel, assigneeText, creatorText, incidentTypeLabel, isClosed, isOverdue, isRestock, mayExecute,
+  nextActions, nextStepText, sourceLabel, ticketTypeLabel,
 } from '../tickets.ts'
-import type { TicketIncident } from '../tickets.ts'
+import type { TicketViewer } from '../tickets.ts'
 import { useApi } from '../useApi.ts'
+import { TicketUnavailable, loadTicket } from '../work-order-load.ts'
 import { useSession } from '../useSession.ts'
 import { useTicketViewer } from '../useTicketViewer.ts'
 
 const BACK = { to: TICKETS_PATH, label: 'Danh sách phiếu công việc' }
 
-/** The ticket could not be shown: unknown (or not theirs) id, or no tickets endpoint at all. */
-class TicketUnavailable extends Error {
-  readonly kind: 'missing' | 'not-found'
-  constructor(kind: 'missing' | 'not-found') { super(kind === 'missing' ? TICKETS_MISSING : TICKET_NOT_FOUND); this.kind = kind }
-}
-
-/** GET /work-tickets/{id}; on 404 one GET /work-tickets?size=1 tells an unknown id from a backend without BE 4.3. */
-async function loadTicket(ticketId: string, signal: AbortSignal) {
-  try { return await ticketsApi.get(ticketId, signal) } catch (error) {
-    const code = error instanceof ApiError ? error.status : undefined
-    if (code === 405 || code === 501) throw new TicketUnavailable('missing')
-    if (code === 400) throw new TicketUnavailable('not-found')
-    if (code !== 404) throw error
-    let probe: unknown
-    try { await ticketsApi.list({ page: 0, size: 1 }, signal) } catch (listError) { probe = listError }
-    throw new TicketUnavailable(probe !== undefined && ticketsAvailability(probe) === 'missing' ? 'missing' : 'not-found')
-  }
-}
-
 function TicketDetailPage({ ticketId }: { ticketId: string }) {
   const viewer = useTicketViewer()
   const { can } = useSession()
-  const canMachines = can('MACHINE_READ'), canAlerts = can('ALERT_READ')
+  const canMachines = can('MACHINE_READ'), canAlerts = can('ALERT_READ'), canPlans = can('MAINTENANCE_PLAN_READ')
   const state = useApi(signal => loadTicket(ticketId, signal), ticketId)
-  const action = useDialog<TicketActionState>()
   const ticket = state.data
+  const events = useApi(signal => ticket ? workOrdersApi.events(ticketId, signal) : Promise.resolve(undefined), `${ticketId}|events|${ticket?.version ?? ''}|${ticket?.updatedAt ?? ''}`)
+  const action = useDialog<TicketActionState>()
 
   if (state.error && !ticket) {
     if (state.error instanceof TicketUnavailable) return <>
@@ -67,83 +49,84 @@ function TicketDetailPage({ ticketId }: { ticketId: string }) {
   if (!ticket) return <><PageHead title="Phiếu công việc" back={BACK} /><Loading label="Đang tải phiếu…" rows={6} /></>
 
   const machine = machinePath(ticket.machineId)
+  const changed = () => { state.reload(); events.reload() }
+  const open = !isClosed(ticket)
+  const extra = <>
+    {viewer.canWrite && open && <Button type="button" variant="outline" className="max-sm:h-11" data-focus-key={`ticket-edit-${ticket.id}`} onClick={() => action.open({ action: 'edit', ticket })}>{actionLabel('edit', ticket)}</Button>}
+    {mayExecute(ticket, viewer) && open && <Button type="button" variant="outline" className="max-sm:h-11" data-focus-key={`ticket-note-${ticket.id}`} onClick={() => action.open({ action: 'note', ticket })}>{actionLabel('note', ticket)}</Button>}
+  </>
+  const hasActions = nextActions(ticket, viewer).length > 0 || (open && (viewer.canWrite || mayExecute(ticket, viewer)))
   return <>
-    <PageHead title={ticket.title} back={BACK} subtitle={`${ticketTypeLabel(ticket.type)} · máy ${ticket.machineCode}`}
-      actions={nextActions(ticket, viewer).length ? <TicketActionButtons ticket={ticket} viewer={viewer} open={action.open} where="detail" /> : undefined} />
+    <PageHead title={ticket.title ?? 'Phiếu công việc'} back={BACK} subtitle={`${ticket.code ?? ''} · ${ticketTypeLabel(ticket.type)} · máy ${ticket.machineCode}`}
+      actions={hasActions ? <span className="flex flex-wrap gap-1.5"><TicketActionButtons ticket={ticket} viewer={viewer} open={action.open} where="detail" />{extra}</span> : undefined} />
     <div className="grid gap-x-5 lg:grid-cols-2">
       <section className={PANEL} aria-labelledby="ticket-info">
         <h2 id="ticket-info" className={HEADING}>Thông tin phiếu</h2>
         <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-[14px] [&_dt]:text-muted-foreground">
+          <dt>Mã phiếu</dt><dd className="font-mono">{ticket.code ?? '—'}</dd>
           <dt>Trạng thái</dt><dd><Badge domain="ticket" explain value={ticket.status} /></dd>
           <dt>Loại</dt><dd>{ticketTypeLabel(ticket.type)}</dd>
+          <dt>Ưu tiên</dt><dd><PriorityText priority={ticket.priority} /></dd>
+          <dt>Nguồn</dt><dd>{sourceLabel(ticket.source)}</dd>
           <dt>Người phụ trách</dt><dd>{assigneeText(ticket, viewer)}</dd>
           <dt>Máy</dt><dd>{canMachines && machine
             ? <Link to={machine} className={LINK}><span className="font-mono">{ticket.machineCode}</span>{ticket.machineName ? ` · ${ticket.machineName}` : ''}</Link>
             : <><span className="font-mono">{ticket.machineCode}</span>{ticket.machineName ? ` · ${ticket.machineName}` : ''}</>}</dd>
-          <dt>Hạn</dt><dd><DueText ticket={ticket} overdue={isOverdue(ticket, state.updatedAt ?? 0)} /></dd>
-          {ticket.alertId && <><dt>Cảnh báo</dt><dd>{canAlerts
-            ? <Link to={alertPath(ticket.alertId)} className={LINK}>Mở cảnh báo gốc</Link>
-            : 'Phiếu mở từ một cảnh báo'}</dd></>}
+          <dt>Hạn</dt><dd><DueText ticket={ticket} overdue={isOverdue(ticket)} /></dd>
+          {ticket.maintenancePlan?.id && <><dt>Lịch bảo trì</dt><dd>{canPlans
+            ? <Link to={SCHEDULES_PATH} className={LINK}>{ticket.maintenancePlan.title}</Link>
+            : ticket.maintenancePlan.title}{ticket.scheduledFor ? ` · lần ${formatDate(ticket.scheduledFor)}` : ''}</dd></>}
+          <dt>Tạo bởi</dt><dd>{creatorText(ticket)} · {formatDateTime(ticket.createdAt)}</dd>
           <dt>Mô tả</dt><dd className="whitespace-pre-wrap break-words">{ticket.description || '—'}</dd>
+          {ticket.status === 'DONE' && <><dt>Kết quả</dt><dd className="whitespace-pre-wrap break-words">{ticket.resultNote || '—'}<span className="block text-xs text-muted-foreground">{ticket.completedBy?.fullName ?? ''} · {formatDateTime(ticket.completedAt)}</span></dd></>}
+          {ticket.status === 'CANCELLED' && <><dt>Lý do hủy</dt><dd className="whitespace-pre-wrap break-words">{ticket.cancelReason || '—'}<span className="block text-xs text-muted-foreground">{ticket.cancelledBy?.fullName ?? ''} · {formatDateTime(ticket.cancelledAt)}</span></dd></>}
           <dt>Cập nhật lúc</dt><dd>{formatDateTime(ticket.updatedAt)}</dd>
         </dl>
       </section>
       <section className={PANEL} aria-labelledby="ticket-progress">
         <h2 id="ticket-progress" className={HEADING}>Tiến trình</h2>
         <p className={HINT}><strong className="font-medium text-foreground">Bước tiếp theo: </strong>{nextStepText(ticket, viewer)}</p>
-        {hasRestockLines(ticket) && <RestockEntry ticket={ticket} mine={isMine(ticket, viewer)} />}
-        <TicketHistory ticket={ticket} />
+        {isRestock(ticket) && <RestockEntry ticket={ticket} viewer={viewer} />}
+        {events.error && !events.data ? <ErrorState error={events.error} retry={events.reload} />
+          : !events.data ? <Loading label="Đang tải lịch sử phiếu…" rows={3} />
+          : <TicketHistory events={events.data} />}
       </section>
-      {ticket.type === 'INCIDENT' && <IncidentReportPanel report={ticket.incidentReport ?? null} canOrders={can('ORDER_READ')} canRefund={can('PAYMENT_REFUND')} />}
+      {(ticket.linkedAlerts?.length ?? 0) > 0 && <section className={PANEL} aria-labelledby="ticket-alerts">
+        <h2 id="ticket-alerts" className={HEADING}>Cảnh báo gắn với phiếu</h2>
+        <ul className="grid gap-2 text-[14px]">
+          {ticket.linkedAlerts!.map(alert => <li key={alert.id} className="flex flex-wrap items-center gap-2">
+            <Badge domain="alert" value={alert.status} />
+            {canAlerts && alert.id ? <Link to={alertPath(alert.id)} className={LINK}>{alert.title || alertTypeLabel(alert.type)}</Link> : <span>{alert.title || alertTypeLabel(alert.type)}</span>}
+          </li>)}
+        </ul>
+        {open && <p className={`${HINT} mt-3!`}>Hoàn tất phiếu sẽ đóng các cảnh báo còn mở ở đây (có thể bỏ chọn khi hoàn tất).</p>}
+      </section>}
+      {(ticket.linkedReports?.length ?? 0) > 0 && <section className={PANEL} aria-labelledby="ticket-reports">
+        <h2 id="ticket-reports" className={HEADING}>Phản ánh của khách</h2>
+        <ul className="grid gap-2 text-[14px]">
+          {ticket.linkedReports!.map(report => <li key={report.id ?? report.code}>
+            <span className="font-mono">{report.code}</span> · {incidentTypeLabel(report.type)}{report.status ? ` · ${report.status}` : ''}{report.verdict ? ` · ${report.verdict}` : ''}
+          </li>)}
+        </ul>
+        <p className={`${HINT} mt-3!`}>Hoàn tất phiếu không tự hoàn tiền và không đổi trạng thái đơn; hoàn tiền ghi ở màn Hoàn tiền.</p>
+      </section>}
     </div>
-    <TicketActionDialog state={action.value} close={action.close} changed={state.reload} screen="detail" />
+    <TicketActionDialog state={action.value} close={action.close} changed={changed} screen="detail" />
   </>
 }
 
-/** FE 8.3: the customer report behind an INCIDENT ticket. */
-function IncidentReportPanel({ report, canOrders, canRefund }: { report: TicketIncident | null; canOrders: boolean; canRefund: boolean }) {
-  if (!report) return <section className={`${PANEL} lg:col-span-2`} aria-labelledby="ticket-incident">
-    <h2 id="ticket-incident" className={HEADING}>Báo cáo của khách</h2>
-    <p className={HINT}>Không đọc được báo cáo gốc của phiếu này. Tải lại trang; nếu vẫn vậy, báo bộ phận kỹ thuật kèm đường dẫn phiếu.</p>
-  </section>
-  const photo = safePhotoUrl(report.photoUrl)
-  const paidNotReceived = report.type === 'PAID_NOT_RECEIVED'
-  return <section className={`${PANEL} lg:col-span-2`} aria-labelledby="ticket-incident">
-    <h2 id="ticket-incident" className={HEADING}>Báo cáo của khách</h2>
-    <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-[14px] [&_dt]:text-muted-foreground">
-      <dt>Mã báo cáo</dt><dd className="font-mono">{report.reportCode}</dd>
-      <dt>Loại sự cố</dt><dd>{incidentTypeLabel(report.type)}</dd>
-      <dt>Gửi lúc</dt><dd>{formatDateTime(report.createdAt)}</dd>
-      <dt>Mã đơn</dt><dd>{report.orderCode
-        ? <span className="grid gap-1">
-          {canOrders && report.orderId
-            ? <Link to={`/admin/orders/${report.orderId}`} className={LINK} label={`Mở đơn ${report.orderCode}`}><span className="font-mono">{report.orderCode}</span></Link>
-            : <span className="font-mono">{report.orderCode}</span>}
-          {canRefund && report.orderFlagged && report.orderId && <span className="text-[13px] text-muted-foreground">Đơn đã được đưa vào “Cần hoàn tiền” để kiểm tra. <Link to={refundPathFor(report.orderId)} className={LINK}>Mở hoàn tiền của đơn</Link></span>}
-        </span>
-        : paidNotReceived ? 'Khách chưa ghi mã đơn' : 'Không có'}</dd>
-      <dt>Mô tả</dt><dd className="whitespace-pre-wrap break-words">{report.description?.trim() || 'Khách không ghi mô tả.'}</dd>
-      {report.contactPhone && <><dt>Số điện thoại</dt><dd><a href={`tel:${report.contactPhone}`} className={LINK}>{report.contactPhone}</a>
-        <span className="block text-xs text-muted-foreground">Chỉ quản trị viên thấy số này; chỉ dùng để gọi lại về sự cố.</span></dd></>}
-      <dt>Ảnh</dt><dd>{photo
-        ? <a href={photo} target="_blank" rel="noopener noreferrer" className="inline-block rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
-          <img src={photo} alt={`Ảnh khách gửi kèm báo cáo ${report.reportCode} (mở ảnh lớn trong thẻ mới)`} className="max-h-60 max-w-full rounded-md border object-contain" />
-        </a>
-        : report.hasPhoto ? 'Khách có gửi ảnh nhưng chưa xem được ở đây: máy chủ chưa cấp đường dẫn xem ảnh. Tải lại trang sau ít phút.' : 'Không có ảnh'}</dd>
-    </dl>
-    {paidNotReceived && <p className={`${HINT} mt-3!`}>Hoàn tất phiếu không tự hoàn tiền và không đổi trạng thái đơn. Kiểm tra máy trước; quản trị viên ghi nhận hoàn tiền ở màn Hoàn tiền khi đơn đã ở trạng thái nhả hàng thất bại.</p>}
-  </section>
-}
-
-/** FE 7.2: a RESTOCK ticket with lines is carried out step by step on its own screen (made for a phone). */
-function RestockEntry({ ticket, mine }: { ticket: WorkTicket; mine: boolean }) {
-  const lines = ticket.restockLines ?? []
-  const planned = lines.reduce((total, line) => total + line.plannedQuantity, 0)
+/** FE 7.2: a RESTOCK work order is carried out step by step on its own screen (made for a phone). */
+function RestockEntry({ ticket, viewer }: { ticket: WorkOrder; viewer: TicketViewer }) {
+  const summary = ticket.restockSummary
   const closed = isClosed(ticket)
-  const label = closed ? 'Xem đối chiếu nạp hàng' : mine ? 'Thực hiện nạp hàng từng bước' : 'Xem tiến độ nạp hàng'
+  const executes = mayExecute(ticket, viewer) && !!ticket.assignee
+  const label = closed ? 'Xem đối chiếu nạp hàng' : executes ? 'Thực hiện nạp hàng từng bước' : 'Xem tiến độ nạp hàng'
   return <div className="mb-4 grid gap-2 rounded-lg border bg-muted/40 px-3.5 py-3 text-[13px]">
-    <p>Phiếu nạp {lines.length} ngăn ({lines.map(line => line.slotCode).join(', ')}), tổng {planned} hộp theo kế hoạch.{mine && !closed ? ' Màn nạp hàng dẫn bạn qua từng bước: mở cửa nạp, rút hộp hỏng, nạp theo dòng, đóng cửa nạp, đối chiếu.' : ''}</p>
-    <p><Button asChild variant={mine && !closed ? 'default' : 'outline'} className="h-11 max-sm:w-full"><Link to={restockPath(ticket.id)}>{label}</Link></Button></p>
+    <p>{summary?.lines
+      ? `Phiếu nạp ${summary.lines} dòng, kế hoạch ${summary.plannedTotal ?? 0} hộp, đã nạp ${summary.loadedTotal ?? 0} hộp${summary.varianceLines ? `, ${summary.varianceLines} dòng lệch kế hoạch` : ''}.`
+      : 'Phiếu chưa có dòng nạp (ngăn, sản phẩm, số hộp): chưa bắt đầu được cho tới khi quản trị viên lập kế hoạch.'}
+      {executes && !closed ? ' Màn nạp hàng dẫn bạn qua từng bước: bắt đầu, rút hộp cũ, nạp theo dòng, đóng cổng nạp, đối chiếu.' : ''}</p>
+    <p><Button asChild variant={executes && !closed ? 'default' : 'outline'} className="h-11 max-sm:w-full"><Link to={restockPath(ticket.id!)}>{label}</Link></Button></p>
   </div>
 }
 

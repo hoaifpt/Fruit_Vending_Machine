@@ -102,12 +102,23 @@ export const STATUS_CATALOG = {
     RETURN: { label: 'Trả lại ngăn', tone: 'info', icon: 'refund', description: 'Hộp đang giữ chỗ được trả lại ngăn để bán tiếp.' },
     ADJUSTMENT: { label: 'Điều chỉnh', tone: 'neutral', icon: 'wrench', description: 'Trạng thái hộp được điều chỉnh.' },
   },
+  // WorkOrderStatus (docs/work-orders.md): DONE and CANCELLED are final.
   ticket: {
     OPEN: { label: 'Chưa phân công', tone: 'warning', icon: 'dashed', description: 'Phiếu chưa có người phụ trách. Quản trị viên cần phân công.' },
     ASSIGNED: { label: 'Đã phân công', tone: 'info', icon: 'received', description: 'Phiếu đã giao cho một nhân viên và chờ bắt đầu.' },
-    IN_PROGRESS: { label: 'Đang thực hiện', tone: 'info', icon: 'wrench', description: 'Nhân viên đang thực hiện công việc tại máy.' },
-    COMPLETED: { label: 'Hoàn tất', tone: 'success', icon: 'active', description: 'Công việc của phiếu đã hoàn tất.' },
-    CANCELLED: { label: 'Đã hủy', tone: 'neutral', icon: 'ban', description: 'Phiếu đã bị quản trị viên hủy.' },
+    IN_PROGRESS: { label: 'Đang thực hiện', tone: 'info', icon: 'wrench', description: 'Nhân viên đang thực hiện công việc tại máy; máy được chuyển sang Bảo trì khi bắt đầu.' },
+    DONE: { label: 'Hoàn tất', tone: 'success', icon: 'active', description: 'Công việc của phiếu đã hoàn tất kèm kết quả.' },
+    CANCELLED: { label: 'Đã hủy', tone: 'neutral', icon: 'ban', description: 'Phiếu đã bị quản trị viên hủy kèm lý do.' },
+  },
+  // MaintenanceCommandStatus (docs/maintenance-commands.md): stock only changes on COMPLETED or RECONCILED with DONE.
+  maintenanceCommand: {
+    PENDING: { label: 'Đang chờ gửi', tone: 'warning', icon: 'pending', description: 'Lệnh đã tạo và chờ gửi xuống máy.' },
+    SENT: { label: 'Đã gửi', tone: 'info', icon: 'sent', description: 'Lệnh đã gửi xuống máy, đang chờ máy nhận.' },
+    ACCEPTED: { label: 'Máy đang làm', tone: 'info', icon: 'signal', description: 'Máy đã nhận lệnh và đang thực hiện.' },
+    COMPLETED: { label: 'Đã xong', tone: 'success', icon: 'active', description: 'Máy báo đã làm xong; tồn kho hoặc cổng nạp đã được cập nhật.' },
+    FAILED: { label: 'Thất bại', tone: 'danger', icon: 'failed', description: 'Máy không nhận hoặc từ chối lệnh; không có gì thay đổi. Kiểm tra máy rồi gửi lại nếu cần.' },
+    NEEDS_RECONCILIATION: { label: 'Cần đối soát', tone: 'danger', icon: 'hourglass', description: 'Máy đã nhận lệnh nhưng không báo kết quả. Kiểm tra tại máy rồi bấm Đối soát để ghi lại đã làm hay chưa.' },
+    RECONCILED: { label: 'Đã đối soát', tone: 'neutral', icon: 'received', description: 'Nhân viên đã xác nhận kết quả của lệnh tại máy.' },
   },
 } as const satisfies Record<string, Record<string, StatusMeta>>
 

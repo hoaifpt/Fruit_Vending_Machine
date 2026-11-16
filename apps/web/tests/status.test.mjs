@@ -29,6 +29,7 @@ const JAVA_SOURCES = {
   kioskCredential: ['machine/kiosk/enums/KioskCredentialStatus.java', 'KioskCredentialStatus'],
   allocation: ['order/enums/AllocationStatus.java', 'AllocationStatus'],
   inventoryTransactionType: ['inventory/enums/InventoryTransactionType.java', 'InventoryTransactionType'],
+  maintenanceCommand: ['maintenance/enums/MaintenanceCommandStatus.java', 'MaintenanceCommandStatus'],
 }
 const keys = domain => Object.keys(STATUS_CATALOG[domain])
 
@@ -51,7 +52,7 @@ test('ticket badges match WorkOrderStatus, or the SRS vocabulary until that enum
   const found = globSync('**/WorkOrderStatus.java', { cwd: root + enumsRoot })
   const expected = found.length
     ? javaEnum(enumsRoot + found[0].replaceAll('\\', '/'), 'WorkOrderStatus')
-    : ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED']
+    : ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'DONE', 'CANCELLED']
   assert.deepEqual([...keys('ticket')].sort(), [...expected].sort())
 })
 

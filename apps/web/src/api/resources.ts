@@ -4,10 +4,6 @@ import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
 import type { components as RefundsDraft, operations as RefundOperations } from './drafts/refunds'
 import type { components as IncidentDraft, operations as IncidentOperations } from './drafts/incident-reports'
-import type { components as TicketsDraft, operations as TicketOperations } from './drafts/work-tickets'
-import type { components as SchedulesDraft, operations as ScheduleOperations } from './drafts/maintenance-schedules'
-import type { components as MaintenanceDraft, operations as MaintenanceOperations } from './drafts/machine-maintenance'
-import type { components as PricingDraft } from './drafts/pricing-discount'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -15,17 +11,16 @@ export type Machine = S['MachineResponse']
 export type Slot = S['MachineSlotResponse']
 export type User = S['UserResponse']
 export type Batch = S['ProductBatchResponse']
-// Near-expiry discount fields (FE 7.5): DRAFT api-contract/drafts/pricing-discount.yaml, backend 4.1. Optional, so the
-// real API without them still type-checks and shows plain prices; drop the intersections once they reach api.yaml.
-type P = PricingDraft['schemas']
-export type InventoryItem = S['InventoryItemResponse'] & P['InventoryItemPricing']
+// Near-expiry discount (FE 7.5, backend #61): a bowl only carries `discountEligibleToday`; prices and the discount live
+// on order lines (originalUnitPrice, unitPrice, discountPercent, discountReason) and orders (discountAmount).
+export type InventoryItem = S['InventoryItemResponse']
 export type InventorySummary = S['InventorySummaryResponse']
 export type InventoryTransaction = S['InventoryTransactionResponse']
 export type KioskCredential = S['KioskCredentialResponse']
 export type IssuedKioskCredential = S['IssuedKioskCredentialResponse']
-export type OrderSummary = S['OrderSummaryResponse'] & P['OrderPricing']
-export type OrderLine = S['OrderItemDetailResponse'] & P['OrderItemPricing']
-export type OrderDetail = Omit<S['OrderDetailResponse'], 'items'> & P['OrderPricing'] & { items?: OrderLine[] }
+export type OrderSummary = S['OrderSummaryResponse']
+export type OrderLine = S['OrderItemDetailResponse']
+export type OrderDetail = S['OrderDetailResponse']
 export type Payment = S['PaymentResponse']
 export type PaymentDetail = S['PaymentDetailResponse']
 export type WebhookLogSummary = S['PaymentWebhookLogSummaryResponse']
@@ -33,7 +28,7 @@ export type WebhookLogDetail = S['PaymentWebhookLogDetailResponse']
 
 export interface Page<T> { content: T[]; page: number; size: number; totalElements: number; totalPages: number }
 type Query<K extends keyof operations> = operations[K] extends { parameters: { query?: infer Q } } ? NonNullable<Q> : never
-type Q = Record<string, string | number | boolean | undefined>
+type Q = Record<string, string | number | boolean | undefined | readonly string[]>
 
 const id = encodeURIComponent
 const list = <T>(path: string, query: Q, signal?: AbortSignal) => api.get<Page<T>>(path, query, signal)
@@ -123,7 +118,7 @@ export const rolesApi = {
 // Alerts (screen O2 and the alert bell, FE 6.3): GET/POST /alerts of api-contract/api.yaml (backend #58). ALERT_READ to
 // read, ALERT_MANAGE to acknowledge/resolve. The list has no `sort` (CRITICAL, WARNING, INFO, then newest first) and,
 // without `status`, only returns alerts that are not RESOLVED. POST /alerts/{alertId}/work-orders (WORK_ORDER_MANAGE)
-// opens a work order for the alert; the rest of the work orders stay on the tickets API until FM7 moves them.
+// opens a work order for the alert (workOrdersApi below for the rest).
 export type Alert = S['AlertResponse']
 export type AlertListQuery = Query<'listAlerts'>
 export type ResolveAlertBody = S['ResolveAlertRequest']
@@ -173,80 +168,140 @@ export const refundsApi = {
   record: (orderId: string, body: RefundBody) => api.post<Refund>(`/orders/${id(orderId)}/refund`, body),
 }
 
-// Work tickets (screen O3, FE 7.1): draft contract api-contract/drafts/work-tickets.yaml, waiting for backend issue 4.3.
-// Until it ships the real backend answers 404 here; the screens then say "chưa có dữ liệu" (ticketsAvailability in
-// src/admin/tickets.ts). A caller without WORK_ORDER_MANAGE only receives its own tickets (server-side). When 4.3 lands: move
-// the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
-type T = TicketsDraft['schemas']
-export type WorkTicket = T['WorkTicketResponse']
-export type WorkTicketListQuery = NonNullable<TicketOperations['listWorkTickets']['parameters']['query']>
-export type CreateWorkTicketBody = T['CreateWorkTicketRequest']
-export type AssignWorkTicketBody = T['AssignWorkTicketRequest']
-export type CompleteWorkTicketBody = T['CompleteWorkTicketRequest']
-export type CancelWorkTicketBody = T['CancelWorkTicketRequest']
-// Restock lines of a RESTOCK ticket (FE 7.2, screen O4): same draft, waiting for backend issue 4.4.
-export type RestockLine = T['RestockLineResponse']
-export type RestockReconciliation = T['RestockReconciliation']
-export type LoadRestockLineBody = T['LoadRestockLineRequest']
-export type RemoveRestockItemBody = T['RemoveRestockItemRequest']
+// Work orders (screens O3/O4, FE 7.1/7.2): /work-orders of api-contract/api.yaml (backend #66, #68, #70, #74).
+// WORK_ORDER_READ_ALL lists everyone's (GET /work-orders), WORK_ORDER_READ_ASSIGNED the caller's own (GET /me), the detail
+// and its history; someone else's work order is 404 without READ_ALL. WORK_ORDER_MANAGE creates, edits, assigns,
+// unassigns, cancels and links alerts; WORK_ORDER_EXECUTE starts, adds notes and completes (STAFF only their own,
+// ADMIN any). Edit, assign, unassign and cancel send the `version` last read (stale → 409 STALE_VERSION).
+export type WorkOrderStatus = NonNullable<WorkOrder['status']>
+export type WorkOrderType = NonNullable<WorkOrder['type']>
+export type WorkOrderPriority = NonNullable<WorkOrder['priority']>
+export type WorkOrderSource = NonNullable<WorkOrder['source']>
+export type WorkOrderListQuery = Query<'listWorkOrders'>
+export type MyWorkOrderQuery = Query<'listMyWorkOrders'>
+export type WorkOrderEvent = S['WorkOrderEventResponse']
+export type CreateWorkOrderBody = S['CreateWorkOrderRequest']
+export type UpdateWorkOrderBody = S['UpdateWorkOrderRequest']
+export type AssignWorkOrderBody = S['AssignWorkOrderRequest']
+export type StartWorkOrderBody = S['StartWorkOrderRequest']
+export type CompleteWorkOrderBody = S['CompleteWorkOrderRequest']
+export type CancelWorkOrderBody = S['CancelWorkOrderRequest']
+export type LineVariance = S['LineVariance']
 
-export const ticketsApi = {
-  list: (query: WorkTicketListQuery, signal?: AbortSignal) => list<WorkTicket>('/work-tickets', query, signal),
-  get: (ticketId: string, signal?: AbortSignal) => api.get<WorkTicket>(`/work-tickets/${id(ticketId)}`, undefined, signal),
-  /** OPEN, or ASSIGNED when assigneeId is sent. Only fields of CreateWorkTicketRequest. */
-  create: (body: CreateWorkTicketBody) => api.post<WorkTicket>('/work-tickets', body),
-  /** OPEN/ASSIGNED → ASSIGNED (also a reassignment). */
-  assign: (ticketId: string, body: AssignWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/assign`, body),
-  /** ASSIGNED → IN_PROGRESS, assignee only, no body. */
-  start: (ticketId: string) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/start`),
-  /** IN_PROGRESS → COMPLETED, assignee only; the note only when there is one. */
-  complete: (ticketId: string, body: CompleteWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/complete`, body),
-  /** Any state before COMPLETED → CANCELLED, with a mandatory reason. */
-  cancel: (ticketId: string, body: CancelWorkTicketBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/cancel`, body),
-  /** RESTOCK, IN_PROGRESS, assignee: bowls placed in the line's slot (rules of POST /inventory/load). Answers the ticket. */
-  loadLine: (ticketId: string, lineId: string, body: LoadRestockLineBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/restock-lines/${id(lineId)}/load`, body),
-  /** RESTOCK, IN_PROGRESS, assignee: a bowl of the line's slot taken out by hand (rules of POST /inventory/{id}/remove). */
-  removeItem: (ticketId: string, lineId: string, body: RemoveRestockItemBody) => api.post<WorkTicket>(`/work-tickets/${id(ticketId)}/restock-lines/${id(lineId)}/remove`, body),
+export const workOrdersApi = {
+  /** WORK_ORDER_READ_ALL. URGENT first, then due time (none last), then oldest; `status` may repeat. */
+  list: (query: WorkOrderListQuery, signal?: AbortSignal) => list<WorkOrder>('/work-orders', query, signal),
+  /** WORK_ORDER_READ_ASSIGNED: the caller's own work orders, same order and paging. */
+  mine: (query: MyWorkOrderQuery, signal?: AbortSignal) => list<WorkOrder>('/work-orders/me', query, signal),
+  get: (workOrderId: string, signal?: AbortSignal) => api.get<WorkOrder>(`/work-orders/${id(workOrderId)}`, undefined, signal),
+  /** Append-only history, oldest first. */
+  events: (workOrderId: string, signal?: AbortSignal) => api.get<WorkOrderEvent[]>(`/work-orders/${id(workOrderId)}/events`, undefined, signal),
+  /** Source MANUAL; OPEN, or ASSIGNED with an assignee. RESTOCK lines need RESTOCK_PLAN too. */
+  create: (body: CreateWorkOrderBody) => api.post<WorkOrder>('/work-orders', body),
+  /** Partial edit of an unfinished work order (title, description, priority, dueAt) with its version. */
+  update: (workOrderId: string, body: UpdateWorkOrderBody) => api.patch<WorkOrder>(`/work-orders/${id(workOrderId)}`, body),
+  /** OPEN/ASSIGNED → ASSIGNED, IN_PROGRESS stays (reassignment). */
+  assign: (workOrderId: string, body: AssignWorkOrderBody) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/assign`, body),
+  /** ASSIGNED → OPEN. */
+  unassign: (workOrderId: string, version: number) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/unassign`, { version }),
+  /** ASSIGNED → IN_PROGRESS (the machine goes MAINTENANCE for RESTOCK/MAINTENANCE, INCIDENT only with stopMachine). */
+  start: (workOrderId: string, body?: StartWorkOrderBody) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/start`, body),
+  note: (workOrderId: string, note: string) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/notes`, { note }),
+  /** IN_PROGRESS → DONE with a mandatory resultNote (RESTOCK: lineVariances for lines loaded ≠ planned). */
+  complete: (workOrderId: string, body: CompleteWorkOrderBody) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/complete`, body),
+  /** Any unfinished state → CANCELLED, with a reason and the version. */
+  cancel: (workOrderId: string, body: CancelWorkOrderBody) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/cancel`, body),
+  linkAlert: (workOrderId: string, alertId: string) => api.post<WorkOrder>(`/work-orders/${id(workOrderId)}/alerts`, { alertId }),
 }
 
-// Maintenance schedules (screen O5, FE 7.3): draft contract api-contract/drafts/maintenance-schedules.yaml, waiting for
-// backend issue 4.5. Until it ships the real backend answers 404 here; the screen then says "chưa có dữ liệu"
-// (schedulesAvailability in src/admin/maintenance-schedules.ts). nextDueAt is always the server's. When 4.5 lands: move
-// the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
-type MS = SchedulesDraft['schemas']
-export type MaintenanceSchedule = MS['MaintenanceScheduleResponse']
-export type MaintenanceScheduleListQuery = NonNullable<ScheduleOperations['listMaintenanceSchedules']['parameters']['query']>
-export type CreateMaintenanceScheduleBody = MS['CreateMaintenanceScheduleRequest']
-export type UpdateMaintenanceScheduleBody = MS['UpdateMaintenanceScheduleRequest']
+// Restock of a RESTOCK work order (FE 7.2, backend #68). RESTOCK_PLAN (ADMIN): suggestions, work order from suggestions,
+// planned lines (only while nothing was loaded against them). RESTOCK_EXECUTE: bowls loaded per line from one batch,
+// while the work order is IN_PROGRESS. Old bowls are taken out with maintenance commands carrying workOrderId.
+export type RestockView = S['RestockViewResponse']
+export type RestockLine = S['RestockLineResponse']
+export type RestockLoad = S['RestockLoad']
+export type LinkedMaintenanceCommand = S['LinkedMaintenanceCommand']
+export type RestockSuggestions = S['RestockSuggestionResponse']
+export type SlotSuggestion = S['SlotSuggestion']
+export type RestockLineInput = S['RestockLineInput']
+export type UpdateRestockLineBody = S['UpdateRestockLineRequest']
+export type RestockLoadBody = S['RestockLoadRequest']
+export type RestockLoadResult = S['RestockLoadResponse']
+export type CreateRestockWorkOrderBody = S['CreateRestockWorkOrderRequest']
 
-export const maintenanceSchedulesApi = {
-  list: (query: MaintenanceScheduleListQuery, signal?: AbortSignal) => list<MaintenanceSchedule>('/maintenance-schedules', query, signal),
-  get: (scheduleId: string, signal?: AbortSignal) => api.get<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}`, undefined, signal),
-  /** Only fields of CreateMaintenanceScheduleRequest; the answer carries the server's nextDueAt. */
-  create: (body: CreateMaintenanceScheduleBody) => api.post<MaintenanceSchedule>('/maintenance-schedules', body),
-  /** Partial update: only the changed fields. */
-  update: (scheduleId: string, body: UpdateMaintenanceScheduleBody) => api.patch<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}`, body),
-  /** active → paused, no body; 409 when already paused. Schedules are never deleted. */
-  deactivate: (scheduleId: string) => api.post<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}/deactivate`),
-  /** paused → active, no body; nextDueAt recomputed. 409 when already active. */
-  activate: (scheduleId: string) => api.post<MaintenanceSchedule>(`/maintenance-schedules/${id(scheduleId)}/activate`),
+export const restockApi = {
+  /** Lines with their loads, linked maintenance commands and bowls removed by reason (same visibility as the work order). */
+  view: (workOrderId: string, signal?: AbortSignal) => api.get<RestockView>(`/work-orders/${id(workOrderId)}/restock`, undefined, signal),
+  suggestions: (machineId: string, signal?: AbortSignal) => api.get<RestockSuggestions>(`/machines/${id(machineId)}/restock-suggestions`, undefined, signal),
+  /** One line per slot whose suggestion is not NONE; 409 NOTHING_TO_RESTOCK when nothing needs it. */
+  createFromSuggestions: (machineId: string, body: CreateRestockWorkOrderBody) => api.post<WorkOrder>(`/machines/${id(machineId)}/restock-work-orders`, body),
+  addLine: (workOrderId: string, body: RestockLineInput) => api.post<RestockLine>(`/work-orders/${id(workOrderId)}/restock-lines`, body),
+  /** Only while nothing was loaded against the line (409 LINE_ALREADY_LOADED). */
+  updateLine: (workOrderId: string, lineId: string, body: UpdateRestockLineBody) => api.patch<RestockLine>(`/work-orders/${id(workOrderId)}/restock-lines/${id(lineId)}`, body),
+  /** Bowls physically placed in the line's column from one batch; never retried automatically. */
+  load: (workOrderId: string, lineId: string, body: RestockLoadBody) => api.post<RestockLoadResult>(`/work-orders/${id(workOrderId)}/restock-lines/${id(lineId)}/loads`, body),
 }
 
-// Maintenance commands of a machine (tab "Bảo trì" of C3, FE 7.4; reused by the restock ticket of FE 7.2): draft contract
-// api-contract/drafts/machine-maintenance.yaml, waiting for backend issue 4.2. Until it ships the real backend answers 404
-// here; the tab then says "chưa có" (maintenanceAvailability in src/admin/maintenance-commands.ts, which also builds the
-// bodies and words the errors). When 4.2 lands: move the paths into api.yaml, run gen:api, switch these types to
-// schema.d.ts and delete the draft.
-export type MaintenanceCommand = MaintenanceDraft['schemas']['MaintenanceCommandResponse']
-export type MaintenanceCommandType = MaintenanceDraft['schemas']['MaintenanceCommandType']
-export type CreateMaintenanceCommandBody = MaintenanceDraft['schemas']['CreateMaintenanceCommandRequest']
-export type MaintenanceCommandQuery = NonNullable<MaintenanceOperations['listMachineMaintenanceCommands']['parameters']['query']>
+// Maintenance plans (screen O5, FE 7.3): /maintenance-plans of api.yaml (backend #70). MAINTENANCE_PLAN_READ reads,
+// MAINTENANCE_PLAN_MANAGE (ADMIN) changes. Dates are Vietnam calendar days; never deleted, only deactivated.
+export type MaintenancePlan = S['MaintenancePlanResponse']
+export type MaintenancePlanListQuery = Query<'listMaintenancePlans'>
+export type UpcomingPlanQuery = Query<'listUpcomingMaintenance'>
+export type CreateMaintenancePlanBody = S['CreateMaintenancePlanRequest']
+export type UpdateMaintenancePlanBody = S['UpdateMaintenancePlanRequest']
+export type PlanWorkOrder = S['PlanWorkOrderResponse']
+
+export const maintenancePlansApi = {
+  /** By next due date (no sort parameter). */
+  list: (query: MaintenancePlanListQuery, signal?: AbortSignal) => list<MaintenancePlan>('/maintenance-plans', query, signal),
+  get: (planId: string, signal?: AbortSignal) => api.get<MaintenancePlan>(`/maintenance-plans/${id(planId)}`, undefined, signal),
+  /** Active plans due within `days` (1..90), overdue ones included. */
+  upcoming: (query: UpcomingPlanQuery, signal?: AbortSignal) => api.get<MaintenancePlan[]>('/maintenance-plans/upcoming', query, signal),
+  create: (body: CreateMaintenancePlanBody) => api.post<MaintenancePlan>('/maintenance-plans', body),
+  /** Partial change with the version last read. */
+  update: (planId: string, body: UpdateMaintenancePlanBody) => api.patch<MaintenancePlan>(`/maintenance-plans/${id(planId)}`, body),
+  activate: (planId: string) => api.post<MaintenancePlan>(`/maintenance-plans/${id(planId)}/activate`),
+  deactivate: (planId: string) => api.post<MaintenancePlan>(`/maintenance-plans/${id(planId)}/deactivate`),
+  /** The work order of the current occurrence now, regardless of lead days. */
+  generateNow: (planId: string) => api.post<WorkOrder>(`/maintenance-plans/${id(planId)}/generate-now`),
+  /** Work orders generated by the plan, newest occurrence first. */
+  workOrders: (planId: string, signal?: AbortSignal) => api.get<PlanWorkOrder[]>(`/maintenance-plans/${id(planId)}/work-orders`, undefined, signal),
+}
+
+// Maintenance commands (tab "Bảo trì" of C3, FE 7.4; also the restock of FE 7.2): api.yaml (backend #64, #68).
+// MAINTENANCE_COMMAND_EXECUTE sends a column command and reconciles; MACHINE_RESET (ADMIN) resets the controller;
+// MAINTENANCE_COMMAND_READ lists. POSTs need an Idempotency-Key: one per click, the same one when retrying that click.
+export type MaintenanceCommand = S['MaintenanceCommandResponse']
+export type MaintenanceOperation = NonNullable<MaintenanceCommand['operation']>
+export type MaintenanceCommandStatus = NonNullable<MaintenanceCommand['status']>
+export type MaintenanceReason = NonNullable<S['CreateMaintenanceCommandRequest']['reason']>
+export type CreateMaintenanceCommandBody = S['CreateMaintenanceCommandRequest']
+export type ResetMachineBody = S['ResetMachineRequest']
+export type ReconcileMaintenanceCommandBody = S['ReconcileMaintenanceCommandRequest']
+export type MaintenanceCommandQuery = Query<'listMaintenanceCommands'>
+const idempotent = (key: string) => ({ 'Idempotency-Key': key })
 
 export const maintenanceCommandsApi = {
-  /** Newest first (fixed order), unfinished commands included. MACHINE_READ. */
-  list: (machineId: string, query: MaintenanceCommandQuery, signal?: AbortSignal) => list<MaintenanceCommand>(`/machines/${id(machineId)}/maintenance-commands`, query, signal),
-  /** Creates the command PENDING (MAINTENANCE_COMMAND_EXECUTE). Build the body with maintenanceCommandBody. */
-  create: (machineId: string, body: CreateMaintenanceCommandBody) => api.post<MaintenanceCommand>(`/machines/${id(machineId)}/maintenance-commands`, body),
+  /** Newest first. */
+  list: (query: MaintenanceCommandQuery, signal?: AbortSignal) => list<MaintenanceCommand>('/maintenance-commands', query, signal),
+  get: (commandId: string, signal?: AbortSignal) => api.get<MaintenanceCommand>(`/maintenance-commands/${id(commandId)}`, undefined, signal),
+  /** PENDING command for one column; the same key and body answer the existing command (200). */
+  create: (machineId: string, slotId: string, body: CreateMaintenanceCommandBody, idempotencyKey: string) =>
+    api.post<MaintenanceCommand>(`/machines/${id(machineId)}/slots/${id(slotId)}/maintenance-commands`, body, idempotent(idempotencyKey)),
+  /** RESET of the controller (MACHINE_RESET). */
+  reset: (machineId: string, body: ResetMachineBody, idempotencyKey: string) =>
+    api.post<MaintenanceCommand>(`/machines/${id(machineId)}/reset`, body, idempotent(idempotencyKey)),
+  /** NEEDS_RECONCILIATION → RECONCILED with what Staff found at the machine. */
+  reconcile: (commandId: string, body: ReconcileMaintenanceCommandBody) => api.post<MaintenanceCommand>(`/maintenance-commands/${id(commandId)}/reconcile`, body),
+}
+
+// Near-expiry discount setting (FE 7.5, backend #61): PRICING_READ reads, PRICING_MANAGE (ADMIN) replaces it with the
+// version last read (stale → 409).
+export type NearExpiryDiscount = S['NearExpiryDiscountResponse']
+export type UpdateNearExpiryDiscountBody = S['UpdateNearExpiryDiscountRequest']
+export const pricingApi = {
+  get: (signal?: AbortSignal) => api.get<NearExpiryDiscount>('/pricing/near-expiry-discount', undefined, signal),
+  update: (body: UpdateNearExpiryDiscountBody) => api.put<NearExpiryDiscount>('/pricing/near-expiry-discount', body),
 }
 
 export type { Q as QueryParams }
