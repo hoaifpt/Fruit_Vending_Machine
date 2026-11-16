@@ -1,30 +1,30 @@
-# Issue #74 — [BE] Implement Customer Incident Reporting
+# Issue #76 — [BE] Implement Dashboard & Reports API
 
-Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/74
-Branch: feature/74-customer-reports (from origin/dev f582fc3, includes #72 via PR #73)
+Source: https://github.com/hoaifpt/Fruit_Vending_Machine/issues/76
+Branch: feature/76-reports (from origin/dev d6e8d11, includes #74 via PR #75)
 Authorized: implementation and local verification. Commit/push only on request; no PR/merge. Ticking verified GitHub checkboxes allowed.
+Downloads approved by the user (2026-11-14): Apache PDFBox 3.0.4 (Maven Central) and Noto Sans Regular/Bold + OFL.txt (notofonts GitHub).
 
 ## Scope
-V24 (machines.report_token, customer_reports, customer_report_photos, 3 permissions), customerreport package (public form + submit with
-validation, honeypot, photo sanitizer, order verifier, work order create/join, in-memory rate limits via interceptor, client IP resolver,
-admin list/detail/photo/review/resolve/reject, token rotation, kiosk report link), refund candidates CUSTOMER_REPORT + auto-close on refund
-(PaymentRefundedEvent), work order linkedReports, /api/v1/public/** permitAll + CORS + JWT filter skip, 429 handler, multipart 7 MB,
-docs / api.yaml / .env.example.
+V25 (report indexes, DASHBOARD_READ / REPORT_SALES_READ / REPORT_EXPORT), report package (SalesReportQueries aggregate SQL, SalesReportService
+with filter validation and zero-fill, CSV and PDF writers, ReportExportService with audit, SalesReportController), dashboard package
+(DashboardService, DashboardController), HealthCheckQueries shared slot SQL, RefundQueryService.pendingTotals + IN-set predicates,
+docs/reports.md, api.yaml, fonts under src/main/resources/fonts.
 
 ## Non-goals
-Form UI and kiosk QR screen (frontend), customer accounts / status page / replies, bank account collection, CAPTCHA, distributed rate
-limits, object storage, retention job, automatic refunds.
+Charts / UI, scheduled or emailed reports, waste / batch / inventory reports, cost and profit, Excel export, caching / materialized views.
 
 ## Status and verification
-Done locally, not committed. See HANDOFF.md for the `mvn clean verify` result.
-New: CustomerReportIntegrationTest (22), CustomerReportDocumentationTest (1). Updated: V24 counts (tables 33, entities 32), permissions 38,
-STAFF lists (+CUSTOMER_REPORT_READ), matrix (public and kiosk sets), path lists, served operations 102, refund query bound (+1 fixed query).
+Done locally, not committed. `mvn clean verify` (JDK 21.0.10, PostgreSQL 18 Testcontainers): 870 tests, 0 failures, BUILD SUCCESS.
+New: SalesReportIntegrationTest (10), DashboardIntegrationTest (3), SalesReportPerformanceTest (1), ReportDocumentationTest (1).
+Updated: V25 counts, permissions 41, STAFF lists (+DASHBOARD_READ), matrix, path lists, served operations 109.
+
+Performance (100k orders, best of 3, whole request): summary 184 ms, summary with filters 302 ms, series 78-88 ms, peak 116 ms,
+products 93 ms, machines 30 ms, refund candidates 417 ms, export CSV 567 ms, PDF 1250 ms (target/report-performance.txt).
 
 Decisions / notes:
-- report_token default is 32 hex from gen_random_uuid (pgcrypto not installed); rotation writes 22-char base64url via a JPQL update.
-- REPORT_IP_HASH_SECRET blank -> random per-start secret with a WARN; staging/production must set it.
-- PUBLIC_REPORT_BASE_URL blank -> 409 REPORT_LINK_NOT_CONFIGURED on kiosk link / rotation.
-- Order lookback: created on or after the start of the business day 7 days ago.
-- Duplicate report of the same order joins the work order with a system NOTE; status IN_REVIEW; no new notification.
-- Visibility: without CUSTOMER_REPORT_MANAGE only reports whose work order is assigned to the caller.
-- The rate-limit interceptor is created by PublicReportWebConfig (not a bean) so @WebMvcTest slices still start.
+- failedDispenses = paid in range and (DISPENSE_FAILED, or REFUNDED never completed nor cancelled, or a FAILED/TIMEOUT dispense command).
+- pendingRefunds ignores range and filters (point in time).
+- Product ties sort by name in the database collation, then id.
+- blockedSlots = slot ERROR or head bowl DISPENSE_FAILED; bowlsExpiringToday uses the health-check expiring predicate up to the end of the day.
+- Refund candidate SQL rewritten with uncorrelated IN sets (same results) to meet the targets; also speeds up GET /refunds/candidates.

@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = "spring.jpa.properties.hibernate.generate_statistics=true")
 @Import(PermissionAuthoritiesIntegrationTest.KioskProbe.class)
 class PermissionAuthoritiesIntegrationTest extends AbstractCoreIntegrationTest {
-    static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "CUSTOMER_REPORT_READ", "INVENTORY_READ", "INVENTORY_WRITE",
+    static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "CUSTOMER_REPORT_READ", "DASHBOARD_READ", "INVENTORY_READ", "INVENTORY_WRITE",
             "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_PLAN_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ",
             "RESTOCK_EXECUTE", "WORK_ORDER_EXECUTE", "WORK_ORDER_READ_ASSIGNED");
     static final UUID ADMIN_ROLE = UUID.fromString("10000000-0000-0000-0000-000000000001");

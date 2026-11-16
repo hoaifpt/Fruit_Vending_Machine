@@ -95,6 +95,12 @@
             <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Issue #76: PDF export of sales reports (Apache-2.0); Vietnamese text uses the embedded Noto Sans font (resources/fonts, OFL). -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.4</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

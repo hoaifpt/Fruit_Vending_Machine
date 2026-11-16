@@ -36,8 +36,15 @@ public class RefundQueryService {
     private static final String EARLIER_PAYMENT = "exists (select 1 from Payment e where e.order = o and e.id <> p.id"
             + " and e.status in (:paidStatuses) and (e.paidAt < p.paidAt or (e.paidAt = p.paidAt and e.id < p.id)))";
     /** Issue #74: an open customer report of the order that may lead to a refund. */
-    private static final String REPORTED = "exists (select 1 from CustomerReport r where r.orderId = o.id and r.status in (:openReports)"
+    /**
+     * Issue #74: an open customer report of the order that may lead to a refund. Written as IN (uncorrelated) so PostgreSQL evaluates it
+     * once as a hashed set instead of once per payment (issue #76 performance).
+     */
+    private static final String REPORTED = "o.id in (select r.orderId from CustomerReport r where r.status in (:openReports)"
             + " and r.verdict in (:reportVerdicts))";
+    /** Orders with more than one money arrival: the only orders a duplicate can belong to (hashed once, then EARLIER_PAYMENT per row). */
+    private static final String SEVERAL_PAID = "o.id in (select m.order.id from Payment m where m.status in (:paidStatuses) group by m.order.id having count(m) > 1)";
+    private static final String DUPLICATE = "(" + SEVERAL_PAID + " and " + EARLIER_PAYMENT + ")";
     private static final List<PaymentStatus> PAID_STATUSES = List.of(PaymentStatus.SUCCESS, PaymentStatus.REFUNDED);
     private static final List<OrderStatus> UNRESOLVED = List.of(OrderStatus.PENDING_PAYMENT, OrderStatus.PAID, OrderStatus.DISPENSING);
 
@@ -49,39 +56,9 @@ public class RefundQueryService {
     @PreAuthorize(Permissions.HAS_REFUND_READ)
     public RefundCandidatePageResponse candidates(RefundCandidateType type, UUID machineId, LocalDate from, LocalDate to, int page, int size) {
         requireRange(from, to);
-        StringBuilder where = new StringBuilder(" where p.status = :success and o.status not in (:unresolved)");
+        StringBuilder where = new StringBuilder();
         Map<String, Object> params = new LinkedHashMap<>();
-        params.put("success", PaymentStatus.SUCCESS);
-        params.put("unresolved", UNRESOLVED);
-        params.put("paidStatuses", PAID_STATUSES);
-        if (type == null) {
-            where.append(" and (o.status = :cancelled or o.status = :failed or ").append(EARLIER_PAYMENT).append(" or ").append(REPORTED).append(")");
-            params.put("cancelled", OrderStatus.CANCELLED);
-            params.put("failed", OrderStatus.DISPENSE_FAILED);
-        } else {
-            switch (type) {
-                case LATE_PAYMENT -> {
-                    where.append(" and o.status = :cancelled");
-                    params.put("cancelled", OrderStatus.CANCELLED);
-                }
-                case DUPLICATE_PAYMENT -> {
-                    where.append(" and o.status <> :cancelled and ").append(EARLIER_PAYMENT);
-                    params.put("cancelled", OrderStatus.CANCELLED);
-                }
-                case DISPENSE_FAILED -> {
-                    where.append(" and o.status = :failed and not ").append(EARLIER_PAYMENT);
-                    params.put("failed", OrderStatus.DISPENSE_FAILED);
-                }
-                case CUSTOMER_REPORT -> where.append(" and ").append(REPORTED);
-            }
-        }
-        if (!where.toString().contains(":paidStatuses")) params.remove("paidStatuses");
-        if (where.toString().contains(":openReports")) {
-            params.put("openReports", com.fruitmachine.backend.customerreport.enums.ReportStatus.OPEN);
-            params.put("reportVerdicts", List.of(com.fruitmachine.backend.customerreport.enums.ReportVerdict.REFUND_ELIGIBLE,
-                    com.fruitmachine.backend.customerreport.enums.ReportVerdict.DELIVERED_PER_MACHINE));
-        }
-        filters(where, params, "p.paidAt", machineId, from, to);
+        candidateWhere(type, machineId, from, to, where, params);
 
         long total = count("select count(p) from Payment p join p.order o" + where, params);
         TypedQuery<Payment> query = entityManager.createQuery("select p from Payment p join fetch p.order o join fetch o.machine m" + where
@@ -105,6 +82,56 @@ public class RefundQueryService {
                             : new RefundWorkOrderResponse((UUID) report[7], (String) report[8]), report == null ? null : reportResponse(report)));
         }
         return new RefundCandidatePageResponse(content, page, size, total, pages(total, size));
+    }
+
+    /** Issue #76: the number and amount of all current refund candidates (the same rules as the list), one statement. */
+    @Transactional(readOnly = true)
+    public PendingTotals pendingTotals() {
+        StringBuilder where = new StringBuilder();
+        Map<String, Object> params = new LinkedHashMap<>();
+        candidateWhere(null, null, null, null, where, params);
+        TypedQuery<Object[]> query = entityManager.createQuery("select count(p), coalesce(sum(p.amount), 0) from Payment p join p.order o" + where, Object[].class);
+        params.forEach(query::setParameter);
+        Object[] row = query.getSingleResult();
+        return new PendingTotals(((Number) row[0]).longValue(), toDecimal(row[1]).setScale(0, java.math.RoundingMode.HALF_UP).longValueExact());
+    }
+
+    public record PendingTotals(long count, long amount) {
+    }
+
+    private void candidateWhere(RefundCandidateType type, UUID machineId, LocalDate from, LocalDate to, StringBuilder where, Map<String, Object> params) {
+        where.append(" where p.status = :success and o.status not in (:unresolved)");
+        params.put("success", PaymentStatus.SUCCESS);
+        params.put("unresolved", UNRESOLVED);
+        params.put("paidStatuses", PAID_STATUSES);
+        if (type == null) {
+            where.append(" and (o.status = :cancelled or o.status = :failed or ").append(DUPLICATE).append(" or ").append(REPORTED).append(")");
+            params.put("cancelled", OrderStatus.CANCELLED);
+            params.put("failed", OrderStatus.DISPENSE_FAILED);
+        } else {
+            switch (type) {
+                case LATE_PAYMENT -> {
+                    where.append(" and o.status = :cancelled");
+                    params.put("cancelled", OrderStatus.CANCELLED);
+                }
+                case DUPLICATE_PAYMENT -> {
+                    where.append(" and o.status <> :cancelled and ").append(DUPLICATE);
+                    params.put("cancelled", OrderStatus.CANCELLED);
+                }
+                case DISPENSE_FAILED -> {
+                    where.append(" and o.status = :failed and not ").append(DUPLICATE);
+                    params.put("failed", OrderStatus.DISPENSE_FAILED);
+                }
+                case CUSTOMER_REPORT -> where.append(" and ").append(REPORTED);
+            }
+        }
+        if (!where.toString().contains(":paidStatuses")) params.remove("paidStatuses");
+        if (where.toString().contains(":openReports")) {
+            params.put("openReports", com.fruitmachine.backend.customerreport.enums.ReportStatus.OPEN);
+            params.put("reportVerdicts", List.of(com.fruitmachine.backend.customerreport.enums.ReportVerdict.REFUND_ELIGIBLE,
+                    com.fruitmachine.backend.customerreport.enums.ReportVerdict.DELIVERED_PER_MACHINE));
+        }
+        filters(where, params, "p.paidAt", machineId, from, to);
     }
 
     @Transactional(readOnly = true)

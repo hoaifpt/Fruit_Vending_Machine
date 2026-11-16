@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 class RolePermissionApiIntegrationTest extends AbstractCoreIntegrationTest {
     static final UUID ADMIN = UUID.fromString("10000000-0000-0000-0000-000000000001");
     static final UUID STAFF = UUID.fromString("10000000-0000-0000-0000-000000000002");
-    static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "CUSTOMER_REPORT_READ", "INVENTORY_READ", "INVENTORY_WRITE",
+    static final List<String> STAFF_CODES = List.of("ALERT_MANAGE", "ALERT_READ", "BATCH_CREATE", "BATCH_READ", "CUSTOMER_REPORT_READ", "DASHBOARD_READ", "INVENTORY_READ", "INVENTORY_WRITE",
             "MACHINE_READ", "MAINTENANCE_COMMAND_EXECUTE", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_PLAN_READ", "ORDER_READ", "PRICING_READ", "PRODUCT_READ",
             "RESTOCK_EXECUTE", "WORK_ORDER_EXECUTE", "WORK_ORDER_READ_ASSIGNED");
 
@@ -48,7 +48,7 @@ class RolePermissionApiIntegrationTest extends AbstractCoreIntegrationTest {
     @Test
     void adminListsPermissionsAndRoles() throws Exception {
         var permissions = fixtures.api("GET", "/api/v1/permissions", null, admin.token(), 200);
-        assertThat(permissions).hasSize(38);
+        assertThat(permissions).hasSize(41);
         List<String> listed = new ArrayList<>();
         permissions.forEach(p -> { listed.add(p.path("code").asText()); assertThat(p.path("description").asText()).isNotBlank(); });
         assertThat(listed).isSorted().containsExactlyInAnyOrderElementsOf(Permissions.ALL);
