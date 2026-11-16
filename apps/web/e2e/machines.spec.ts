@@ -49,7 +49,7 @@ test.describe('màn Máy bán hàng (Quản trị viên)', () => {
     await expect(row(page, 'DEV-MACHINE-01').locator('[data-connection]')).toHaveAttribute('data-connection', 'ONLINE')
     await expect(row(page, 'DEV-MACHINE-01')).toContainText('Trực tuyến')
     await expect(row(page, 'DEV-MACHINE-02')).toContainText('Mất kết nối (OFFLINE)')
-    await expect(row(page, 'DEV-MACHINE-03')).toContainText('Mất kết nối (OFFLINE)')
+    await expect(row(page, 'DEV-MACHINE-03').locator('[data-connection]')).toHaveAttribute('data-connection', 'NEVER_SEEN')
     await expect(deleteControls(page)).toHaveCount(0)
   })
 

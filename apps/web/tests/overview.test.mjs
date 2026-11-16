@@ -172,7 +172,7 @@ test('mock: requests are bounded and only send contract parameters', async () =>
   assert.equal(boxes.searchParams.get('expired'), 'false')
   const slots = urls.find(url => url.pathname.endsWith('/slots'))
   assert.equal(slots.searchParams.get('status'), 'ACTIVE')
-  assert.deepEqual(CRITICAL_QUERY, { status: 'OPEN', severity: 'CRITICAL', page: 0, size: OVERVIEW_ROWS, sort: 'triggeredAt,desc' })
+  assert.deepEqual(CRITICAL_QUERY, { status: 'OPEN', severity: 'CRITICAL', page: 0, size: OVERVIEW_ROWS }, 'GET /alerts has no sort parameter')
 })
 
 test('mock: a 403 on inventory fails the low-stock block instead of reporting an empty list', async () => {

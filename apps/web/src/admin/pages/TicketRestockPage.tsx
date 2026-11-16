@@ -152,7 +152,7 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
   const missing = isMaintenanceMissing(commands.error) && !commands.data
 
   const machine = useApi(signal => machinesApi.get(machineId, signal), `restock-machine|${machineId}`, { pollMs: Math.min(MACHINE_POLL_MS, CONNECTION_POLL_MS) })
-  const shown = useConnection(machine.data?.lastSeenAt, machine)
+  const shown = useConnection(machine.data?.lastSeenAt, machine, machine.data?.connectivity)
   const stock = useApi(signal => loadStock(machineId, lines, signal), `restock-stock|${ticket.id}|${lineKey}`)
   const [batchNow] = useState(() => Date.now())
   const batches = useApi(signal => loadBatches(lines, batchNow, signal), `restock-batches|${ticket.id}|${lineKey}`)

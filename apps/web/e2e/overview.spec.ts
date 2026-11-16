@@ -51,7 +51,7 @@ for (const role of ['ADMIN', 'STAFF'] as const) {
     // CRITICAL → alert detail.
     await page.goBack()
     await ready(page)
-    await block(page, 'Cảnh báo nghiêm trọng').getByRole('link', { name: /Machine offline/ }).click()
+    await block(page, 'Cảnh báo nghiêm trọng').getByRole('link', { name: /^Máy mất kết nối: Máy mất kết nối/ }).click()
     await expect(page).toHaveURL(`/admin/alerts/${OFFLINE_ALERT}`)
   })
 }

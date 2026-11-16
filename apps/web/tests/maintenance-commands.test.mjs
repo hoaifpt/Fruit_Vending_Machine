@@ -244,7 +244,10 @@ test('mock: RESET is refused by a controller not in FAULT; an offline machine ge
   await maintenanceCommandsApi.create(MACHINE_2, { type: 'RESET' })
   state.clock += 4_000
   assert.equal((await latest(MACHINE_2)).status, 'SUCCESS')
-  assert.equal((await telemetryApi.heartbeat(MACHINE_2)).dispenseState, 'IDLE')
+  // The firmware answers the RESET with FAULT_CLEARED, which ends the active fault shown on the sensors tab.
+  const [cleared] = (await telemetryApi.events(MACHINE_2, { type: 'FAULT_CLEARED', page: 0, size: 1 })).content
+  assert.equal(cleared.createdAt, new Date(state.clock).toISOString())
+  assert.equal(cleared.source, 'MACHINE')
 })
 
 test('mock: a machine that stops answering → TIMEOUT after 60 s; scenario dispense-failed → FAILED (ABORTED); nothing removed', async () => {

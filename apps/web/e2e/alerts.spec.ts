@@ -1,8 +1,10 @@
-// O2 Cảnh báo + chuông thông báo (issue FE 6.3) on the mock API (draft of BE 3.6). Done criterion: a new alert shows on
+// O2 Cảnh báo + chuông thông báo (issue FE 6.3) on the mock of the real API (api.yaml, backend #58). Done criterion: a new alert shows on
 // the bell within one poll (Playwright's fake clock jumps one 30 s interval; the mock control window.__fvMock.raiseAlert
 // makes a machine raise it in between), and acknowledging / closing records who did it and when. Also: STAFF and ADMIN
 // by permission, 409 and 400 in the dialogs, missing endpoint (bell hidden, screen explains), 403, keyboard on the bell,
-// screenshots + axe at 1440/768/390 light and dark.
+// "Mở phiếu" (POST /alerts/{id}/work-orders), screenshots + axe at 1440/768/390 light and dark. Without a status filter
+// the list shows the alerts not closed yet (backend default OPEN + ACKNOWLEDGED: 5 in the seed); closed ones with
+// status=RESOLVED. People are shown by email, as the API sends them.
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { auditScreen, loginAs, THEMES, useThemeChoice, VIEWPORTS } from './support.ts'
@@ -71,9 +73,9 @@ test('Tiêu chí xong: cảnh báo mới hiện trên chuông sau đúng một l
   await expect(page).toHaveURL(`/admin/alerts/${newId}`)
   await expect(panel).toBeHidden()
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Máy mất kết nối · máy DEV-MACHINE-01')
-  // Backend text is labelled as such.
-  await expect(page.getByText('Tiêu đề từ máy: Machine offline')).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Thông tin cảnh báo' }).getByRole('term').filter({ hasText: 'Nội dung từ máy' })).toBeVisible()
+  // The backend's title under the heading, its message under "Chi tiết".
+  await expect(page.getByText('Machine offline', { exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Thông tin cảnh báo' }).getByRole('term').filter({ hasText: 'Chi tiết' })).toBeVisible()
 })
 
 test('Chuông dùng được bằng bàn phím: Enter mở, Esc đóng và trả focus; link "Xem tất cả" tới danh sách đang mở', async ({ page }) => {
@@ -97,17 +99,17 @@ test('Chuông dùng được bằng bàn phím: Enter mở, Esc đóng và trả
 test('Tiêu chí xong: STAFF xác nhận rồi đóng cảnh báo, ghi tên người và thời điểm; chuông giảm ngay', async ({ page }) => {
   await loginAs(page, 'STAFF')
   await page.goto('/admin/alerts')
-  await expect(rows(page)).toHaveCount(7)
+  await expect(rows(page)).toHaveCount(5)
   await expect(bell(page)).toHaveAccessibleName('Cảnh báo: 3 đang mở, 1 nghiêm trọng')
   const seeded = row(page, SEEDED)
   await expect(seeded).toContainText('Chưa có người tiếp nhận')
   await seeded.getByRole('button', { name: /^Xác nhận cảnh báo Nhiệt độ cao/ }).click()
   const confirm = page.getByRole('alertdialog', { name: 'Xác nhận đã tiếp nhận cảnh báo?' })
-  await expect(confirm).toContainText('ghi tên bạn và thời điểm')
+  await expect(confirm).toContainText('ghi tài khoản của bạn và thời điểm')
   await confirm.getByRole('button', { name: 'Xác nhận' }).click()
   await expect(confirm).toBeHidden()
   await expect(seeded).toContainText('Đã tiếp nhận')
-  await expect(seeded).toContainText(new RegExp(`Xác nhận: Nhân viên vận hành, ${TIME}`))
+  await expect(seeded).toContainText(new RegExp(`Xác nhận: staff@freshvend\\.test, ${TIME}`))
   await expect(seeded.getByRole('button', { name: /^Xác nhận cảnh báo/ })).toHaveCount(0)
   await expect(bell(page)).toHaveAccessibleName('Cảnh báo: 2 đang mở, 1 nghiêm trọng')
 
@@ -116,48 +118,58 @@ test('Tiêu chí xong: STAFF xác nhận rồi đóng cảnh báo, ghi tên ngư
   await sheet.getByLabel('Ghi chú xử lý (không bắt buộc)').fill('Đã đóng chặt cửa máy, nhiệt độ về 5 °C.')
   await sheet.getByRole('button', { name: 'Đóng cảnh báo' }).click()
   await expect(sheet).toBeHidden()
+  // Closed alerts leave the default list (not closed yet); they are listed with status RESOLVED.
+  await expect(seeded).toHaveCount(0)
+  await expect(rows(page)).toHaveCount(4)
+  await page.getByLabel('Trạng thái').selectOption('RESOLVED')
   await expect(seeded).toContainText('Đã xử lý')
-  await expect(seeded).toContainText(new RegExp(`Đóng: Nhân viên vận hành, ${TIME}`))
+  await expect(seeded).toContainText(new RegExp(`Đóng: staff@freshvend\\.test, ${TIME}`))
   await expect(seeded).toContainText('Đã đóng')
 
   // Detail: who and when for both steps, the note as text, no actions left, no delete anywhere.
   await seeded.getByRole('link', { name: /^Nhiệt độ cao/ }).click()
   const handling = page.getByRole('region', { name: 'Xử lý' })
-  await expect(handling).toContainText(new RegExp(`Xác nhận: Nhân viên vận hành, ${TIME}`))
-  await expect(handling).toContainText(new RegExp(`Đóng: Nhân viên vận hành, ${TIME}`))
+  await expect(handling).toContainText(new RegExp(`Xác nhận: staff@freshvend\\.test, ${TIME}`))
+  await expect(handling).toContainText(new RegExp(`Đóng: staff@freshvend\\.test, ${TIME}`))
   await expect(handling).toContainText('Ghi chú: Đã đóng chặt cửa máy, nhiệt độ về 5 °C.')
   await expect(page.getByRole('button', { name: /Đóng cảnh báo|Xác nhận|Mở phiếu/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
 })
 
-test('ADMIN đóng thẳng cảnh báo đang mở từ trang chi tiết; "Mở phiếu" mở form phiếu bằng bàn phím (FE 7.1); link máy, đơn', async ({ page }) => {
+test('ADMIN: "Mở phiếu" mở form phiếu từ cảnh báo bằng bàn phím; đóng thẳng cảnh báo đang mở; link phiếu đang xử lý, mã lỗi', async ({ page }) => {
   await loginAs(page, 'ADMIN')
-  await page.goto(`/admin/alerts/${OFFLINE}`)
+  await page.goto(`/admin/alerts/${SEEDED}`)
   const ticket = page.getByRole('button', { name: 'Mở phiếu' })
   await expect(ticket).toBeEnabled()
   await expect(ticket).not.toHaveAttribute('aria-disabled', 'true')
-  // Keyboard: Enter opens the create-ticket sheet pre-filled for this machine; Hủy closes it and focus comes back.
+  // Keyboard: Enter opens the work-order sheet of this alert (POST /alerts/{id}/work-orders); Hủy closes it and focus comes back.
   await ticket.focus()
   await page.keyboard.press('Enter')
-  const sheet = page.getByRole('dialog', { name: 'Tạo phiếu công việc' })
-  await expect(sheet).toContainText('Mở từ cảnh báo: Máy mất kết nối · máy DEV-MACHINE-02')
-  await expect(sheet.getByLabel('Loại phiếu')).toHaveValue('MAINTENANCE')
+  const sheet = page.getByRole('dialog', { name: 'Mở phiếu công việc từ cảnh báo' })
+  await expect(sheet).toContainText('Cảnh báo: Nhiệt độ cao · máy DEV-MACHINE-01')
+  await expect(sheet.getByLabel('Loại phiếu')).toHaveValue('')
+  await expect(sheet.getByLabel('Loại phiếu').locator('option').first()).toHaveText('Theo cảnh báo (Bảo trì)')
+  await expect(sheet.getByLabel('Mức ưu tiên').locator('option').first()).toHaveText('Theo mức độ cảnh báo (Cao)')
   await sheet.getByRole('button', { name: 'Hủy' }).click()
   await expect(sheet).toBeHidden()
   await expect(ticket).toBeFocused()
-  await expect(page).toHaveURL(`/admin/alerts/${OFFLINE}`)
+  await expect(page).toHaveURL(`/admin/alerts/${SEEDED}`)
   await page.getByRole('button', { name: 'Đóng cảnh báo' }).click()
   await page.getByRole('dialog', { name: 'Đóng cảnh báo' }).getByRole('button', { name: 'Đóng cảnh báo' }).click()
   const handling = page.getByRole('region', { name: 'Xử lý' })
-  await expect(handling).toContainText(new RegExp(`Đóng: Quản trị viên, ${TIME}`))
+  await expect(handling).toContainText(new RegExp(`Đóng: admin@freshvend\\.test, ${TIME}`))
   await expect(handling).not.toContainText('Xác nhận:')
   await expect(page.getByRole('region', { name: 'Thông tin cảnh báo' })).toContainText('Đã xử lý')
+
+  // An alert already handled by an unfinished work order links it instead of offering a second one.
+  await page.goto(`/admin/alerts/${OFFLINE}`)
+  await expect(page.getByRole('button', { name: 'Mở phiếu' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Xử lý' }).getByRole('link', { name: /^Mở phiếu WO-\d{8}-[0-9A-F]{4} đang xử lý cảnh báo$/ })).toHaveAttribute('href', /^\/admin\/tickets\//)
 
   await page.goto(`/admin/alerts/${DISPENSE_FAILED}`)
   const info = page.getByRole('region', { name: 'Thông tin cảnh báo' })
   await expect(page.getByRole('region', { name: 'Xử lý' })).toContainText('Ghi chú: Đã kiểm tra ngăn tại máy và hoàn tiền thủ công cho khách.')
-  await info.getByRole('link', { name: /^Đơn ORD-/ }).click()
-  await expect(page).toHaveURL(`/admin/orders/${id('93000000', 1)}`)
+  await expect(info.getByRole('definition').filter({ hasText: 'RESULT_TIMEOUT' })).toBeVisible()
 })
 
 test('409: hộp xác nhận đóng lại, màn tải lại, toast giải thích bằng tiếng Việt (câu riêng cho trang chi tiết); 400 đánh dấu ô ghi chú', async ({ page }) => {
@@ -168,7 +180,7 @@ test('409: hộp xác nhận đóng lại, màn tải lại, toast giải thích
   await confirm.getByRole('button', { name: 'Xác nhận' }).click()
   // Retrying cannot help: the dialog closes instead of offering the button again.
   await expect(confirm).toBeHidden()
-  await expect(page.getByText(/vừa được người khác xác nhận hoặc đóng nên không xác nhận được nữa\. Danh sách đã được tải lại/)).toBeVisible()
+  await expect(page.getByText(/vừa được đóng \(bởi người khác hoặc hệ thống\) nên không xác nhận được nữa\. Danh sách đã được tải lại/)).toBeVisible()
   await expect(page.getByText('Đã xác nhận cảnh báo')).toHaveCount(0)
   // Focus is back on the button that opened the dialog (the row is unchanged here: the 409 is simulated).
   await expect(row(page, SEEDED).getByRole('button', { name: /^Xác nhận cảnh báo/ })).toBeFocused()
@@ -208,7 +220,7 @@ test('Lọc trên URL: lọc nhanh nghiêm trọng, loại, máy; link ngăn t�
   await expect(rows(page)).toHaveCount(0)
   await expect(page.getByText('Không có cảnh báo khớp bộ lọc. Hãy đổi hoặc xóa bộ lọc.')).toBeVisible()
   await page.getByRole('button', { name: /^Xóa bộ lọc/ }).click()
-  await expect(rows(page)).toHaveCount(7)
+  await expect(rows(page)).toHaveCount(5)
 })
 
 test('Máy chủ chưa có API cảnh báo (404): trang báo chưa có dữ liệu, chuông ẩn; 403: giải thích quyền, chuông ẩn', async ({ page }) => {
@@ -239,7 +251,7 @@ test('Máy chủ chưa có API cảnh báo (404): trang báo chưa có dữ li�
   await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible()
   await expect(bell(page)).toHaveAccessibleName('Cảnh báo')
   await page.goto('/admin/alerts?scenario=none')
-  await expect(rows(page)).toHaveCount(7)
+  await expect(rows(page)).toHaveCount(5)
 })
 
 for (const theme of THEMES) {
@@ -247,7 +259,7 @@ for (const theme of THEMES) {
     await useThemeChoice(page, theme)
     await loginAs(page, 'STAFF')
     await page.goto('/admin/alerts')
-    await auditScreen(page, testInfo, 'alerts', theme, () => expect(rows(page)).toHaveCount(7))
+    await auditScreen(page, testInfo, 'alerts', theme, () => expect(rows(page)).toHaveCount(5))
     await page.goto(`/admin/alerts/${SEEDED}`)
     await auditScreen(page, testInfo, 'alert-detail', theme, () => expect(page.getByRole('region', { name: 'Xử lý' })).toBeVisible())
     await auditScreen(page, testInfo, 'alert-bell', theme, async () => {
@@ -264,7 +276,7 @@ test('Danh sách rỗng ở 390px: không còn bảng thiếu hàng (axe), có c
     if (theme === THEMES[0]) await loginAs(page, 'STAFF')
     await page.goto('/admin/alerts?scenario=empty')
     await auditScreen(page, testInfo, 'alerts-empty', theme, async () => {
-      await expect(page.getByText('Chưa có cảnh báo nào. Máy sẽ gửi cảnh báo khi nhiệt độ, độ ẩm, kết nối hoặc hàng trong ngăn bất thường.')).toBeVisible()
+      await expect(page.getByText('Không có cảnh báo nào chưa đóng. Hệ thống tạo cảnh báo khi nhiệt độ, độ ẩm, kết nối, phần cứng hoặc hàng trong ngăn bất thường.')).toBeVisible()
       await expect(page.getByRole('table')).toHaveCount(0)
     }, phone)
   }

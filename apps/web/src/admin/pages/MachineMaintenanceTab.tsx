@@ -60,7 +60,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
   const rawPage = Number(params.get('commandPage') ?? 0)
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 0
   const slotId = params.get('maintenanceSlot') ?? ''
-  const shown = useConnection(machine.lastSeenAt, connection)
+  const shown = useConnection(machine.lastSeenAt, connection, machine.connectivity)
 
   // The newest command decides the lock (the server runs one at a time, so only the newest can be unfinished).
   const [fast, setFast] = useState(false)

@@ -1,25 +1,38 @@
-// Connectivity of a machine (Trực tuyến / Mất kết nối = OFFLINE), decided in ONE place for every screen that shows a
-// machine: the machines list (C2), the machine detail header, overview and "Cảm biến & Sự kiện" tab (C3), and the
-// machine picker and map of the inventory screen (I2). Rule (FE 6.4, "máy mất heartbeat > 180 s hiện OFFLINE ở mọi màn"):
-// OFFLINE when `lastSeenAt` is null (never connected) or more than 180 s old; never stored, always derived from the
-// clock (the server's: callers pass serverNow() of client.ts, so a wrong PC clock does not matter). It is kept apart from the administrative status (ACTIVE/MAINTENANCE/INACTIVE, see saleState in machines.ts):
-// a machine can be ACTIVE and OFFLINE at the same time. `lastSeenAt` is MachineResponse.lastSeenAt of api.yaml, touched
-// by the backend on every MQTT message of the machine (MachineMessageHandler). Pure and unit-tested; the React side is
-// useConnection.ts (re-renders exactly when the 180 s are up) and connection-parts.tsx (the badge).
+// Connectivity of a machine, decided in ONE place for every screen that shows a machine: the machines list (C2), the
+// machine detail header, overview and "Cảm biến & Sự kiện" tab (C3), and the machine picker and map of the inventory
+// screen (I2). The backend derives `connectivity` of MachineResponse (docs/machine-health.md, never stored):
+//   lastSeenAt null → NEVER_SEEN; Last Will after the last message → OFFLINE; silent > 180 s → OFFLINE;
+//   silent > 60 s → WARNING; otherwise ONLINE.
+// The web follows the same rule on the clock between two reloads (the server's clock: callers pass serverNow() of
+// client.ts, so a wrong PC clock does not matter), so a machine turns WARNING / OFFLINE on screen at the right second
+// without waiting for the next poll. The value the backend sent with the same `lastSeenAt` is kept when it is worse
+// (the Last Will makes a machine OFFLINE at once, which lastSeenAt alone cannot tell). Connectivity is apart from the
+// administrative status (ACTIVE/MAINTENANCE/INACTIVE, see saleState in machines.ts) and does not block sales.
+// Pure and unit-tested; the React side is useConnection.ts (re-renders exactly at each crossing) and connection-parts.tsx.
+import type { Machine } from '../api/resources.ts'
 import { formatDateTime } from '../lib/format.ts'
 
-/** A machine silent for longer than this is OFFLINE (180 s). Exactly 180 s is still online. */
+/** A machine silent for longer than this is WARNING (two missed 30 s heartbeats, MACHINE_WARNING_AFTER). */
+export const WARNING_AFTER_MS = 60_000
+/** A machine silent for longer than this is OFFLINE (MACHINE_OFFLINE_AFTER, 180 s). Exactly 180 s is not yet. */
 export const OFFLINE_AFTER_MS = 180_000
-/** How often screens showing connectivity reload `lastSeenAt` (a machine coming back shows within one poll). */
+/** How often screens showing connectivity reload the machine (a machine coming back shows within one poll). */
 export const CONNECTION_POLL_MS = 30_000
 
-export type ConnectionState = 'ONLINE' | 'OFFLINE'
+/** MachineResponse.connectivity of api.yaml. */
+export type Connectivity = Machine['connectivity']
+export const CONNECTIVITY_VALUES: readonly Connectivity[] = ['ONLINE', 'WARNING', 'OFFLINE', 'NEVER_SEEN']
+
+/** ONLINE / WARNING / OFFLINE; a never-seen machine is OFFLINE with `never` (it cannot receive commands either). */
+export type ConnectionState = 'ONLINE' | 'WARNING' | 'OFFLINE'
 export interface Connection {
   state: ConnectionState
-  /** Never connected (or an unreadable time): OFFLINE, worded "Chưa từng kết nối". */
+  /** Never heard from (or an unreadable time): OFFLINE, shown as "Chưa từng kết nối" (NEVER_SEEN). */
   never: boolean
   /** ms since the last message (0 when the server clock is ahead of ours), null when never connected. */
   ageMs: number | null
+  /** OFFLINE because the backend says so (Last Will) while the last message is still recent. */
+  lastWill?: boolean
 }
 
 function timeOf(value: string | null | undefined): number | null {
@@ -28,12 +41,26 @@ function timeOf(value: string | null | undefined): number | null {
   return Number.isNaN(time) ? null : time
 }
 
-/** The connectivity of a machine at `now` (ms). */
-export function connectionOf(lastSeenAt: string | null | undefined, now: number): Connection {
+const RANK: Record<ConnectionState, number> = { ONLINE: 0, WARNING: 1, OFFLINE: 2 }
+
+/**
+ * The connectivity of a machine at `now` (ms, server clock). `reported`: the backend's connectivity read together with
+ * `lastSeenAt`; time only makes a machine worse, so the worse of the two wins (Last Will OFFLINE stays OFFLINE until
+ * a newer message moves lastSeenAt).
+ */
+export function connectionOf(lastSeenAt: string | null | undefined, now: number, reported?: Connectivity | null): Connection {
   const seen = timeOf(lastSeenAt)
   if (seen === null) return { state: 'OFFLINE', never: true, ageMs: null }
   const ageMs = Math.max(0, now - seen)
-  return { state: ageMs > OFFLINE_AFTER_MS ? 'OFFLINE' : 'ONLINE', never: false, ageMs }
+  const byTime: ConnectionState = ageMs > OFFLINE_AFTER_MS ? 'OFFLINE' : ageMs > WARNING_AFTER_MS ? 'WARNING' : 'ONLINE'
+  const told: ConnectionState | null = reported === 'OFFLINE' || reported === 'WARNING' ? reported : null
+  if (told && RANK[told] > RANK[byTime]) return { state: told, never: false, ageMs, ...(told === 'OFFLINE' ? { lastWill: true } : {}) }
+  return { state: byTime, never: false, ageMs }
+}
+
+/** The four values of the backend for a connection (badge value): NEVER_SEEN for a machine never heard from. */
+export function connectivityOf(connection: Pick<Connection, 'state' | 'never'>): Connectivity {
+  return connection.never ? 'NEVER_SEEN' : connection.state
 }
 
 /** ms until a machine that is online now turns OFFLINE if nothing new arrives (at least 1); null when already OFFLINE. */
@@ -43,7 +70,15 @@ export function msUntilOffline(lastSeenAt: string | null | undefined, now: numbe
   return Math.max(1, OFFLINE_AFTER_MS - connection.ageMs + 1)
 }
 
-/** The newer of several `lastSeenAt` values (the machine and its heartbeat may be read at different times). */
+/** ms until the next change by time alone (ONLINE → WARNING, WARNING → OFFLINE), at least 1; null once OFFLINE. */
+export function msUntilChange(lastSeenAt: string | null | undefined, now: number, reported?: Connectivity | null): number | null {
+  const connection = connectionOf(lastSeenAt, now, reported)
+  if (connection.state === 'OFFLINE' || connection.ageMs === null) return null
+  const limit = connection.state === 'ONLINE' ? WARNING_AFTER_MS : OFFLINE_AFTER_MS
+  return Math.max(1, limit - connection.ageMs + 1)
+}
+
+/** The newer of several `lastSeenAt` values (the machine may be read by several screens at different times). */
 export function latestSeen(...values: (string | null | undefined)[]): string | null {
   let best: string | null = null
   let bestTime = -Infinity
@@ -66,25 +101,27 @@ export function formatAge(ms: number): string {
 }
 
 /**
- * One line under the badge: when the machine was last heard from, and for OFFLINE what it means. Ages are not shown
- * for ONLINE (they would change every second); the absolute time is enough.
+ * One line under the badge: when the machine was last heard from, and for WARNING/OFFLINE for how long. Ages are not
+ * shown for ONLINE (they would change every second); the absolute time is enough.
  */
 export function connectionDetail(connection: Connection, lastSeenAt: string | null | undefined): string {
   if (connection.never) return 'Chưa từng kết nối'
   const at = formatDateTime(lastSeenAt)
   if (connection.state === 'ONLINE') return `Tín hiệu lần cuối ${at}`
+  if (connection.state === 'WARNING') return `Chậm tín hiệu: lần cuối ${at} (hơn ${formatAge(connection.ageMs ?? 0)})`
+  if (connection.lastWill) return `Máy báo ngắt kết nối; tín hiệu lần cuối ${at}`
   return `Mất tín hiệu từ ${at} (hơn ${formatAge(connection.ageMs ?? 0)})`
 }
 
 /** What an OFFLINE machine means for the operator, and what to check. */
-export const OFFLINE_HELP = 'Máy không gửi tín hiệu quá 180 giây (3 phút). Lệnh nhả hàng có thể không tới được máy nên đơn đã thanh toán có thể nhả hàng thất bại. Kiểm tra nguồn điện và Wi-Fi của máy.'
+export const OFFLINE_HELP = 'Máy không gửi tín hiệu quá 180 giây (3 phút) hoặc đã báo ngắt kết nối. Lệnh nhả hàng có thể không tới được máy nên đơn đã thanh toán có thể nhả hàng thất bại. Kiểm tra nguồn điện và Wi-Fi của máy.'
 export const NEVER_HELP = 'Máy chưa từng gửi tín hiệu về hệ thống. Kiểm tra máy đã được cấu hình mã máy, Wi-Fi và tài khoản MQTT chưa.'
 
 // ---- data that may be out of date
 
 /**
  * The data holding `lastSeenAt` is not trusted any more after a failed reload, or when no reload succeeded for two
- * cycles plus a margin (75 s): then the screen never claims OFFLINE, it says it does not know.
+ * cycles plus a margin (75 s): then the screen never claims WARNING/OFFLINE, it says it does not know.
  */
 export const STALE_AFTER_MS = 2 * CONNECTION_POLL_MS + 15_000
 
@@ -107,10 +144,13 @@ export function msUntilStale(source: ConnectionSource | undefined, clientNow: nu
   return left >= 0 ? Math.max(1, left + 1) : null
 }
 
-/** What the badge shows: OFFLINE is only claimed from data that is up to date; online stays true until its 180 s. */
+/**
+ * What the screen relies on: WARNING/OFFLINE is only claimed from data that is up to date (else UNKNOWN); ONLINE stays
+ * true until its 60 s. A never-seen machine is OFFLINE here (see `never`); the badge shows NEVER_SEEN (connectivityOf).
+ */
 export type ShownConnection = ConnectionState | 'UNKNOWN'
 export function shownConnection(connection: Connection, stale: boolean): ShownConnection {
-  return stale && connection.state === 'OFFLINE' ? 'UNKNOWN' : connection.state
+  return stale && connection.state !== 'ONLINE' ? 'UNKNOWN' : connection.state
 }
 
 export function unknownDetail(since: number | undefined): string {

@@ -2,9 +2,6 @@
 import { api, request } from './client.ts'
 import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
-import type { components as DispenseDraft } from './drafts/dispense-commands'
-import type { components as AlertsDraft, operations as AlertOperations } from './drafts/alerts'
-import type { components as TelemetryDraft, operations as TelemetryOperations } from './drafts/machine-telemetry'
 import type { components as RefundsDraft, operations as RefundOperations } from './drafts/refunds'
 import type { components as IncidentDraft, operations as IncidentOperations } from './drafts/incident-reports'
 import type { components as TicketsDraft, operations as TicketOperations } from './drafts/work-tickets'
@@ -123,49 +120,42 @@ export const rolesApi = {
   replacePermissions: (roleId: string, body: ReplaceRolePermissionsBody) => api.put<RoleWithPermissions>(`/roles/${id(roleId)}/permissions`, body),
 }
 
-// Dispense commands of an order (screen T1, FE 6.1): draft contract api-contract/drafts/dispense-commands.yaml, waiting
-// for backend issue 3.3. Until it ships the real backend answers 404 here; the order screen then shows "chưa có dữ liệu"
-// (see dispenseAvailability in src/admin/order-detail.ts). When 3.3 lands: move the path into api.yaml, run gen:api,
-// switch this type to schema.d.ts and delete the draft.
-export type DispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse']
-
-export const dispenseCommandsApi = {
-  /** One command per paid bowl of the order, oldest first; empty for an order that was never paid. */
-  listForOrder: (orderId: string, signal?: AbortSignal) => api.get<DispenseCommand[]>(`/orders/${id(orderId)}/dispense-commands`, undefined, signal),
-}
-
-// Alerts (screen O2 and the alert bell, FE 6.3): draft contract api-contract/drafts/alerts.yaml, waiting for backend
-// issue 3.6. Until it ships the real backend answers 404 here; the alerts screen then says "chưa có dữ liệu" and the
-// bell hides itself and stops polling (see alertsAvailability in src/admin/alerts.ts). When 3.6 lands: move the paths
-// into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
-export type Alert = AlertsDraft['schemas']['AlertResponse']
-export type AlertListQuery = NonNullable<AlertOperations['listAlerts']['parameters']['query']>
-export type ResolveAlertBody = AlertsDraft['schemas']['ResolveAlertRequest']
+// Alerts (screen O2 and the alert bell, FE 6.3): GET/POST /alerts of api-contract/api.yaml (backend #58). ALERT_READ to
+// read, ALERT_MANAGE to acknowledge/resolve. The list has no `sort` (CRITICAL, WARNING, INFO, then newest first) and,
+// without `status`, only returns alerts that are not RESOLVED. POST /alerts/{alertId}/work-orders (WORK_ORDER_MANAGE)
+// opens a work order for the alert; the rest of the work orders stay on the tickets API until FM7 moves them.
+export type Alert = S['AlertResponse']
+export type AlertListQuery = Query<'listAlerts'>
+export type ResolveAlertBody = S['ResolveAlertRequest']
+export type CreateWorkOrderFromAlertBody = S['CreateWorkOrderFromAlertRequest']
+export type WorkOrder = S['WorkOrderResponse']
 
 export const alertsApi = {
   list: (query: AlertListQuery, signal?: AbortSignal) => list<Alert>('/alerts', query, signal),
   get: (alertId: string, signal?: AbortSignal) => api.get<Alert>(`/alerts/${id(alertId)}`, undefined, signal),
-  /** OPEN → ACKNOWLEDGED, no body; 409 when someone else changed it first. */
+  /** OPEN → ACKNOWLEDGED, no body; an ACKNOWLEDGED alert comes back unchanged (200); RESOLVED is 409. */
   acknowledge: (alertId: string) => api.post<Alert>(`/alerts/${id(alertId)}/acknowledge`),
-  /** OPEN/ACKNOWLEDGED → RESOLVED; the note is only sent when there is one. 409 when already resolved. */
+  /** OPEN/ACKNOWLEDGED → RESOLVED; the note (at most 500) is only sent when there is one. 409 when already resolved. */
   resolve: (alertId: string, body: ResolveAlertBody) => api.post<Alert>(`/alerts/${id(alertId)}/resolve`, body),
+  /** Work order for the alert (source ALERT, its machine); an OPEN alert becomes ACKNOWLEDGED. 409 ALERT_RESOLVED / ALERT_ALREADY_HANDLED. */
+  createWorkOrder: (alertId: string, body: CreateWorkOrderFromAlertBody) => api.post<WorkOrder>(`/alerts/${id(alertId)}/work-orders`, body),
 }
 
-// Heartbeat, sensor readings and events of a machine (tab "Cảm biến & Sự kiện" of C3, FE 6.4): draft contract
-// api-contract/drafts/machine-telemetry.yaml, waiting for backend issues 3.4/3.5. Until they ship the real backend answers
-// 404 here; the tab then says "chưa có dữ liệu" and stops refreshing (see telemetryAvailability in
-// src/admin/telemetry.ts). Connectivity (ONLINE/OFFLINE) never needs these: it comes from Machine.lastSeenAt, already in
-// api.yaml. When 3.4/3.5 land: move the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete
-// the draft.
-export type MachineHeartbeat = TelemetryDraft['schemas']['MachineHeartbeatResponse']
-export type SensorReading = TelemetryDraft['schemas']['SensorReadingResponse']
-export type MachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
-export type SensorReadingQuery = NonNullable<TelemetryOperations['listMachineSensorReadings']['parameters']['query']>
-export type MachineEventQuery = NonNullable<TelemetryOperations['listMachineEvents']['parameters']['query']>
+// Telemetry and events of a machine (tab "Cảm biến & Sự kiện" of C3, FE 6.4): api-contract/api.yaml (backend #53, #56),
+// MACHINE_READ. There is no heartbeat endpoint: connectivity and the last heartbeat's diagnostics (firmware, uptime,
+// Wi-Fi RSSI, free heap) are fields of MachineResponse (machinesApi.get).
+export type TelemetryReading = S['TelemetryReadingResponse']
+export type TelemetryLatest = S['TelemetryLatestResponse']
+export type MachineEvent = S['MachineEventResponse']
+export type TelemetryQuery = Query<'listTelemetry'>
+export type MachineEventQuery = Query<'listMachineEvents'>
 
 export const telemetryApi = {
-  heartbeat: (machineId: string, signal?: AbortSignal) => api.get<MachineHeartbeat>(`/machines/${id(machineId)}/heartbeat`, undefined, signal),
-  readings: (machineId: string, query: SensorReadingQuery, signal?: AbortSignal) => list<SensorReading>(`/machines/${id(machineId)}/sensor-readings`, query, signal),
+  /** Latest reading with LOW/NORMAL/HIGH against the machine thresholds; reading fields null when there is none yet. */
+  latest: (machineId: string, signal?: AbortSignal) => api.get<TelemetryLatest>(`/machines/${id(machineId)}/telemetry/latest`, undefined, signal),
+  /** History, newest first; `from` and `to` are required (to after from, at most 31 days). */
+  readings: (machineId: string, query: TelemetryQuery, signal?: AbortSignal) => list<TelemetryReading>(`/machines/${id(machineId)}/telemetry`, query, signal),
+  /** Event timeline, newest first; MACHINE payloads are untrusted device data (render escaped). */
   events: (machineId: string, query: MachineEventQuery, signal?: AbortSignal) => list<MachineEvent>(`/machines/${id(machineId)}/events`, query, signal),
 }
 

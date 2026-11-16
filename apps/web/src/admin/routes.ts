@@ -64,7 +64,7 @@ export const NAV: NavItem[] = [
   { to: '/admin/products', label: 'Sản phẩm', group: 'Vận hành', permission: 'PRODUCT_READ', match: ['products'] },
   { to: '/admin/batches', label: 'Lô hàng', group: 'Vận hành', permission: 'BATCH_READ', match: ['batches'] },
   { to: '/admin/inventory', label: 'Tồn kho', group: 'Vận hành', permission: 'INVENTORY_READ', match: ['inventory', 'inventory-history'] },
-  // Draft permission (api-contract/drafts/alerts.yaml, BE 3.6): see DRAFT_PERMISSIONS in permissions.ts.
+  // ALERT_READ of api.yaml (backend #58, V17).
   { to: '/admin/alerts', label: 'Cảnh báo', group: 'Vận hành', permission: 'ALERT_READ', match: ['alerts', 'alert-detail'] },
   // Draft permission (api-contract/drafts/work-tickets.yaml, BE 4.3).
   { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'WORK_ORDER_READ_ASSIGNED', match: ['tickets', 'ticket-detail', 'ticket-restock'] },

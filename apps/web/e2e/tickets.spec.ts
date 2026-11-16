@@ -8,7 +8,6 @@ import { ACCOUNTS, auditScreen, loginAs, THEMES, typeLogin, useThemeChoice } fro
 
 const id = (prefix: string, n: number) => `${prefix}-0000-0000-0000-${String(n).padStart(12, '0')}`
 const T = (n: number) => id('61000000', n)
-const LOW_STOCK_ALERT = id('60000000', 5)
 const MACHINE_1 = id('20000000', 1)
 const TITLES = {
   1: 'Máy mất kết nối · máy DEV-MACHINE-02',
@@ -215,23 +214,28 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
   await expect(rows(page).first()).toContainText('Lê Văn Nạp Hàng')
   expect(await creates()).toBe(1)
 
-  // "Mở phiếu" on an alert: machine and alert pre-filled, machine locked.
-  await page.goto(`/admin/alerts/${LOW_STOCK_ALERT}`)
+  // "Mở phiếu" on an alert (POST /alerts/{alertId}/work-orders): every field optional, the backend takes the rest from the
+  // alert. The seed's LOW_STOCK alert is already handled by a ticket, so a machine raises a new one (in-app navigation
+  // keeps the in-memory mock).
+  await page.goto('/admin/alerts')
+  const raised = await page.evaluate(() => (window as unknown as { __fvMock: { raiseAlert: (input: object) => { id: string } } }).__fvMock
+    .raiseAlert({ type: 'LOW_STOCK', severity: 'INFO', machineId: '20000000-0000-0000-0000-000000000001', title: 'Ngăn B1 sắp hết hàng', message: 'Ngăn B1 còn 0 hộp.' }).id)
+  await page.getByLabel('Loại').selectOption('LOW_STOCK')
+  await page.locator(`a[href="/admin/alerts/${raised}"]`).click()
   await page.getByRole('button', { name: 'Mở phiếu' }).click()
-  const fromAlert = page.getByRole('dialog', { name: 'Tạo phiếu công việc' })
-  await expect(fromAlert).toContainText('Mở từ cảnh báo: Ngăn sắp hết hàng · máy DEV-MACHINE-01')
-  await expect(fromAlert.getByRole('combobox', { name: 'Máy', exact: true })).toBeDisabled()
-  await expect(fromAlert.getByRole('combobox', { name: 'Máy', exact: true })).toHaveValue(MACHINE_1)
-  await expect(fromAlert.getByLabel('Loại phiếu')).toHaveValue('RESTOCK')
-  await expect(fromAlert.getByLabel('Tiêu đề')).toHaveValue('Ngăn sắp hết hàng · máy DEV-MACHINE-01, ngăn A2')
+  const fromAlert = page.getByRole('dialog', { name: 'Mở phiếu công việc từ cảnh báo' })
+  await expect(fromAlert).toContainText('Cảnh báo: Ngăn sắp hết hàng · máy DEV-MACHINE-01: Ngăn B1 sắp hết hàng')
+  await expect(fromAlert.getByLabel('Loại phiếu')).toHaveValue('')
+  await expect(fromAlert.getByLabel('Loại phiếu').locator('option').first()).toHaveText('Theo cảnh báo (Nạp hàng)')
+  await expect(fromAlert.getByLabel('Tiêu đề (không bắt buộc)')).toHaveAttribute('placeholder', 'Ngăn B1 sắp hết hàng')
   await fromAlert.getByLabel('Người phụ trách (không bắt buộc)').selectOption({ label: 'Nhân viên vận hành (staff@freshvend.test)' })
-  await fromAlert.getByRole('button', { name: 'Tạo phiếu' }).click()
+  await fromAlert.getByRole('button', { name: 'Mở phiếu' }).click()
   await expect(fromAlert).toBeHidden()
-  await expect(page.getByRole('status').filter({ hasText: 'Đã mở phiếu “Ngăn sắp hết hàng · máy DEV-MACHINE-01, ngăn A2”.' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: /^Đã mở phiếu WO-\d{8}-[0-9A-F]{4} “Ngăn B1 sắp hết hàng”\./ })).toBeVisible()
   await page.getByRole('link', { name: 'Xem phiếu' }).click()
   await expect(page).toHaveURL(/\/admin\/tickets\/[0-9a-f-]{36}$/)
   await expect(info(page)).toContainText('Đã phân công')
-  await expect(info(page).getByRole('link', { name: 'Mở cảnh báo gốc' })).toHaveAttribute('href', `/admin/alerts/${LOW_STOCK_ALERT}`)
+  await expect(info(page).getByRole('link', { name: 'Mở cảnh báo gốc' })).toHaveAttribute('href', `/admin/alerts/${raised}`)
   // The server planned the restock lines (mock of the draft rule: B1 is the slot of DEV-MACHINE-01 below the threshold).
   await expect(progress(page)).toContainText('Phiếu nạp 1 ngăn (B1), tổng 8 hộp theo kế hoạch.')
   await expect(progress(page).getByRole('link', { name: 'Xem tiến độ nạp hàng' })).toBeVisible()
@@ -250,8 +254,9 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
   await expect(progress(page)).toContainText('Phiếu nạp 1 ngăn (B1), tổng 8 hộp theo kế hoạch.')
   await expect(progress(page).getByRole('link', { name: 'Thực hiện nạp hàng từng bước' })).toHaveAttribute('href', `${ticketUrl}/restock`)
 
+  // STAFF (no WORK_ORDER_MANAGE) on an alert without a work order: told who opens tickets.
   await switchTo(page, 'STAFF')
-  await page.goto(`/admin/alerts/${LOW_STOCK_ALERT}`)
+  await page.goto(`/admin/alerts/${id('60000000', 1)}`)
   await expect(page.getByRole('region', { name: 'Xử lý' })).toContainText('Phiếu công việc do quản trị viên mở.')
   await expect(page.getByRole('button', { name: 'Mở phiếu' })).toHaveCount(0)
 })

@@ -77,6 +77,16 @@ export function paginate<T>(rows: T[], query: URLSearchParams, rule: PageRule<T>
   return { content: sorted.slice(page * size, page * size + size), page, size, totalElements: sorted.length, totalPages: Math.ceil(sorted.length / size) }
 }
 
+/**
+ * Paging of an endpoint without a sort parameter (rows already in the backend's fixed order): page >= 0, size 1..maxSize
+ * with its own default. A `sort` sent anyway is ignored, as Spring ignores unknown parameters.
+ */
+export function fixedPage<T>(rows: T[], query: URLSearchParams, { defaultSize, maxSize }: { defaultSize: number; maxSize: number }) {
+  const page = intParam(query, 'page', 0, 0, Infinity)
+  const size = intParam(query, 'size', defaultSize, 1, maxSize)
+  return { content: rows.slice(page * size, page * size + size), page, size, totalElements: rows.length, totalPages: Math.ceil(rows.length / size) }
+}
+
 /** Validates a JSON body the way the backend does: unknown fields rejected, per-field messages. */
 export class Form {
   readonly errors: Record<string, string> = {}

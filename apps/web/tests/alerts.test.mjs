@@ -1,5 +1,7 @@
-// FE 6.3 Cảnh báo & chuông thông báo: pure rules (filters, who handled, 409 text, bell), the bell's polling with fake
-// timers against the mock API (a new alert shows within one poll), and the mock of the draft contract drafts/alerts.yaml.
+// FE 6.3 Cảnh báo & chuông thông báo: pure rules (filters, who handled, 409 text, bell, work order from an alert), the
+// bell's polling with fake timers against the mock API (a new alert shows within one poll), and the mock of the real
+// API (api-contract/api.yaml, backend #58): GET /alerts without sort, default OPEN + ACKNOWLEDGED, acknowledge/resolve,
+// POST /alerts/{alertId}/work-orders.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -9,9 +11,11 @@ import { alertsApi, authApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import {
-  ALERTS_MISSING, ALERT_NOT_FOUND, ALERT_SEVERITIES, ALERT_STATUSES, ALERT_TYPES, ALERT_TYPE_HINTS, ALERT_TYPE_LABELS, BELL_CRITICAL_QUERY, BELL_POLL_MS, BELL_QUERY, BELL_SIZE, TICKETS_AVAILABLE,
-  alertActionError, alertListQuery, alertPath, alertsAvailability, badgeText, bellAnnouncement, bellLabel, canAcknowledge, canResolve,
-  detailFailure, freshAlerts, handledByLines, handlingSteps, machinePath, readAlertFilters, resolveBody,
+  ALERTS_MISSING, ALERT_DEFAULT_STATUS_LABEL, ALERT_NOT_FOUND, ALERT_SEVERITIES, ALERT_STATUSES, ALERT_TYPES, ALERT_TYPE_HINTS, ALERT_TYPE_LABELS, BELL_CRITICAL_QUERY,
+  BELL_POLL_MS, BELL_QUERY, BELL_SIZE, NEW_ALERT_WORK_ORDER, TICKETS_AVAILABLE,
+  actorText, alertActionError, alertListQuery, alertPath, alertRangeInvalid, alertWorkOrderBody, alertsAvailability, badgeText, bellAnnouncement, bellLabel,
+  canAcknowledge, canResolve, detailFailure, freshAlerts, handledByLines, handlingSteps, machinePath, readAlertFilters, resolveBody, resolutionNoteText,
+  validateAlertWorkOrder, workOrderDefaults, workOrderError, workOrderPath,
 } from '../src/admin/alerts.ts'
 import { createAlertBell, notifyAlertsChanged, onAlertsChanged } from '../src/admin/alert-bell.ts'
 import { PERMISSIONS, can, permissionsOf } from '../src/admin/permissions.ts'
@@ -20,10 +24,13 @@ import { NAV, canOpen, matchRoute, navFor } from '../src/admin/routes.ts'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const MACHINE_1 = '20000000-0000-0000-0000-000000000001'
 const SEEDED = '60000000-0000-0000-0000-000000000001'
+const alertId = n => `60000000-0000-0000-0000-${String(n).padStart(12, '0')}`
+const STAFF_ID = '11000000-0000-0000-0000-000000000002'
 
+/** Constant names of a backend alert enum, comments stripped (AlertType documents HARDWARE_FAULT with a Javadoc). */
 function javaEnum(name) {
   const body = readFileSync(`${root}backend/src/main/java/com/fruitmachine/backend/alert/enums/${name}.java`, 'utf8').match(new RegExp(`enum\\s+${name}\\s*\\{([^}]*)\\}`))
-  return body[1].split(';')[0].split(',').map(item => item.trim()).filter(Boolean)
+  return body[1].replace(/\/\/.*$|\/\*[\s\S]*?\*\//gm, '').split(';')[0].split(',').map(item => item.trim()).filter(Boolean)
 }
 
 /** Real client wired to a fresh mock. */
@@ -36,36 +43,39 @@ function setup(overrides = {}) {
 async function signIn(state, account) {
   state.token = (await authApi.login({ email: MOCK_ACCOUNTS[account], password: MOCK_PASSWORDS[account] })).accessToken
 }
-async function rejects(promise, status) {
-  await assert.rejects(promise, error => error instanceof ApiError && error.status === status)
+async function rejects(promise, status, check = () => true) {
+  await assert.rejects(promise, error => error instanceof ApiError && error.status === status && check(error))
 }
 
 // ---- names follow the backend
 
-test('types, severities and statuses are the backend enums AlertType, AlertSeverity, AlertStatus', () => {
+test('types, severities and statuses are the backend enums AlertType (with HARDWARE_FAULT), AlertSeverity, AlertStatus', () => {
   assert.deepEqual([...ALERT_TYPES], javaEnum('AlertType'))
+  assert.ok(ALERT_TYPES.includes('HARDWARE_FAULT'))
   assert.deepEqual([...ALERT_SEVERITIES], javaEnum('AlertSeverity'))
   assert.deepEqual([...ALERT_STATUSES], javaEnum('AlertStatus'))
   for (const type of ALERT_TYPES) { assert.ok(ALERT_TYPE_LABELS[type], type); assert.ok(ALERT_TYPE_HINTS[type], type) }
+  assert.equal(ALERT_TYPE_LABELS.HARDWARE_FAULT, 'Lỗi phần cứng')
 })
-test('the draft contract follows table alerts and records who acknowledged and closed', () => {
-  const yaml = readFileSync(`${root}api-contract/drafts/alerts.yaml`, 'utf8')
-  for (const field of ['triggeredAt', 'acknowledgedAt', 'acknowledgedByName', 'resolvedAt', 'resolvedByName', 'resolutionNote']) assert.match(yaml, new RegExp(`\\n        ${field}:`), field)
-  for (const path of ['/api/v1/alerts:', '/api/v1/alerts/{id}:', '/api/v1/alerts/{id}/acknowledge:', '/api/v1/alerts/{id}/resolve:']) assert.ok(yaml.includes(path), path)
-  assert.match(yaml, /"409":/)
-  // Nothing deletes an alert.
-  assert.doesNotMatch(yaml, /\n\s+delete:/)
+test('the web calls the alert paths of api.yaml, never a draft', () => {
+  const yaml = readFileSync(`${root}api-contract/api.yaml`, 'utf8')
+  for (const path of ['"/api/v1/alerts":', '"/api/v1/alerts/{id}":', '"/api/v1/alerts/{id}/acknowledge":', '"/api/v1/alerts/{id}/resolve":', '"/api/v1/alerts/{alertId}/work-orders":']) assert.ok(yaml.includes(path), path)
+  const resources = readFileSync(`${root}apps/web/src/api/resources.ts`, 'utf8')
+  assert.doesNotMatch(resources, /drafts\/alerts/)
+  assert.match(resources, /\/alerts\/\$\{id\(alertId\)\}\/work-orders/)
 })
 
-// ---- permissions (draft codes)
+// ---- permissions
 
-test('ALERT_READ / ALERT_MANAGE (V17): both roles hold them', () => {
+test('ALERT_READ / ALERT_MANAGE (V17): both roles hold them; opening a work order needs WORK_ORDER_MANAGE (admin only)', () => {
   assert.ok(PERMISSIONS.includes('ALERT_READ') && PERMISSIONS.includes('ALERT_MANAGE'))
   for (const role of ['ADMIN', 'STAFF']) {
     assert.equal(can([role], 'ALERT_READ'), true, role)
     assert.equal(can([role], 'ALERT_MANAGE'), true, role)
   }
-  // Once GET /auth/me lists permissions, an account without the alert codes sees neither the screen nor the bell.
+  assert.equal(can(['ADMIN'], 'WORK_ORDER_MANAGE'), true)
+  assert.equal(can(['STAFF'], 'WORK_ORDER_MANAGE'), false)
+  // An account without the alert codes sees neither the screen nor the bell.
   const subject = { roles: ['ADMIN'], permissions: ['MACHINE_READ', 'ORDER_READ'] }
   assert.equal(can(subject, 'ALERT_READ'), false)
   assert.equal(navFor(subject).some(item => item.to === '/admin/alerts'), false)
@@ -83,25 +93,40 @@ test('routes: list and detail need ALERT_READ; the nav item sits in "Vận hành
 
 // ---- list filters
 
-test('URL filters keep only values the contract accepts, and the query sends only contract parameters', () => {
-  const filters = readAlertFilters(new URLSearchParams(`status=OPEN&severity=LOUD&type=LOW_STOCK&machineId=nope&from=2026-11-30&to=bad&sort=severity,asc&page=2&x=1`))
-  assert.deepEqual(filters, { status: 'OPEN', severity: '', type: 'LOW_STOCK', machineId: '', from: '2026-11-30', to: '', sort: { field: 'triggeredAt', direction: 'desc' }, page: 2 })
+test('URL filters keep only values the contract accepts; the query sends from/to, one status at most, never sort', () => {
+  const filters = readAlertFilters(new URLSearchParams(`status=OPEN&severity=LOUD&type=HARDWARE_FAULT&machineId=nope&from=2026-11-30&to=bad&sort=severity,asc&page=2&x=1`))
+  assert.deepEqual(filters, { status: 'OPEN', severity: '', type: 'HARDWARE_FAULT', machineId: '', from: '2026-11-30', to: '', page: 2 })
   assert.deepEqual(alertListQuery(filters, 20), {
-    page: 2, size: 20, sort: 'triggeredAt,desc', status: 'OPEN', severity: undefined, type: 'LOW_STOCK', machineId: undefined,
-    triggeredFrom: '2026-11-29T17:00:00.000Z', triggeredTo: undefined,
+    page: 2, size: 20, status: 'OPEN', severity: undefined, type: 'HARDWARE_FAULT', machineId: undefined, from: '2026-11-29T17:00:00.000Z', to: undefined,
   })
-  assert.equal(readAlertFilters(new URLSearchParams(`machineId=${MACHINE_1}&sort=triggeredAt,asc`)).machineId, MACHINE_1)
-  assert.deepEqual(readAlertFilters(new URLSearchParams('sort=triggeredAt,asc')).sort, { field: 'triggeredAt', direction: 'asc' })
+  assert.equal('sort' in alertListQuery(filters, 20), false, 'GET /alerts has no sort parameter')
+  assert.equal(readAlertFilters(new URLSearchParams(`machineId=${MACHINE_1}`)).machineId, MACHINE_1)
+  // No status: the backend default (OPEN + ACKNOWLEDGED), so nothing is sent.
+  const open = alertListQuery(readAlertFilters(new URLSearchParams('')), 20)
+  assert.equal(open.status, undefined)
+  assert.match(ALERT_DEFAULT_STATUS_LABEL, /Chưa đóng/)
+  assert.equal(readAlertFilters(new URLSearchParams('status=ALL')).status, '', 'there is no "all statuses" value')
 })
-test('links: detail by id, machine only for a UUID', () => {
+test('dates: "Đến ngày" includes that day (to = next midnight, exclusive); an end before the start is not sent', () => {
+  const both = readAlertFilters(new URLSearchParams('from=2026-11-29&to=2026-11-30'))
+  assert.deepEqual([alertListQuery(both, 20).from, alertListQuery(both, 20).to], ['2026-11-28T17:00:00.000Z', '2026-11-30T17:00:00.000Z'])
+  const reversed = readAlertFilters(new URLSearchParams('from=2026-11-30&to=2026-11-29'))
+  assert.equal(alertRangeInvalid(reversed), true)
+  assert.equal(alertListQuery(reversed, 20).to, undefined, 'the backend would answer 400 (to must be after from)')
+  assert.equal(alertRangeInvalid(both), false)
+})
+test('links: detail by id, machine only for a UUID, work order on the ticket screens', () => {
   assert.equal(alertPath(SEEDED), `/admin/alerts/${SEEDED}`)
   assert.equal(machinePath(MACHINE_1), `/admin/machines/${MACHINE_1}`)
   assert.equal(machinePath('x'), '')
+  assert.equal(workOrderPath('62000000-0000-0000-0000-000000000001'), '/admin/tickets/62000000-0000-0000-0000-000000000001')
+  assert.equal(workOrderPath(null), '')
+  assert.equal(workOrderPath('WO-1'), '')
 })
 
 // ---- availability, actions, who handled it
 
-test('availability: 404/405/501 mean BE 3.6 is not there yet; 401/403 stop; the rest is an ordinary failure', () => {
+test('availability: 404/405/501 mean the alerts path is missing; 401/403 stop; the rest is an ordinary failure', () => {
   assert.equal(alertsAvailability(new ApiError(404, 'x')), 'missing')
   assert.equal(alertsAvailability(new ApiError(405, 'x')), 'missing')
   assert.equal(alertsAvailability(new ApiError(501, 'x')), 'missing')
@@ -114,7 +139,7 @@ test('actions follow the status: acknowledge only OPEN, close OPEN or ACKNOWLEDG
   assert.deepEqual(ALERT_STATUSES.map(status => [canAcknowledge({ status }), canResolve({ status })]), [[true, true], [false, true], [false, false]])
   assert.deepEqual(resolveBody('   '), {})
   assert.deepEqual(resolveBody('  Đã rút hộp  '), { note: 'Đã rút hộp' })
-  assert.equal(TICKETS_AVAILABLE, true, '"Mở phiếu" is on since FE 7.1')
+  assert.equal(TICKETS_AVAILABLE, true)
 })
 test('detail 404: "chưa có chức năng" only when the list is missing too; otherwise the neutral "không tìm thấy"', () => {
   assert.equal(detailFailure(new ApiError(404, 'x')), 'missing')
@@ -125,13 +150,12 @@ test('detail 404: "chưa có chức năng" only when the list is missing too; ot
   assert.doesNotMatch(ALERT_NOT_FOUND, /máy chủ chưa/)
   assert.match(ALERTS_MISSING, /máy chủ chưa cung cấp/)
 })
-test('a 409 becomes a Vietnamese explanation with the next step; other errors are kept', () => {
-  const ack = alertActionError(new ApiError(409, 'Alert is not OPEN'), 'acknowledge')
+test('a 409 (alert already resolved) becomes a Vietnamese explanation with the next step; other errors are kept', () => {
+  const ack = alertActionError(new ApiError(409, 'Alert is already resolved'), 'acknowledge')
   assert.equal(ack.status, 409)
-  assert.match(ack.message, /vừa được người khác xác nhận hoặc đóng/)
+  assert.match(ack.message, /vừa được đóng/)
   assert.match(ack.message, /tải lại/)
-  assert.match(alertActionError(new ApiError(409, 'Alert is already RESOLVED'), 'resolve').message, /đã được đóng trước đó/)
-  // On the detail screen the text speaks of the page and its "Xử lý" section, never of a list or a column.
+  assert.match(alertActionError(new ApiError(409, 'Alert is already resolved'), 'resolve').message, /đã được đóng trước đó/)
   for (const action of ['acknowledge', 'resolve']) {
     const text = alertActionError(new ApiError(409, 'x'), action, 'detail').message
     assert.match(text, /Trang đã được tải lại; xem người (xử lý|đã đóng) ở mục Xử lý./)
@@ -140,31 +164,57 @@ test('a 409 becomes a Vietnamese explanation with the next step; other errors ar
   const other = new ApiError(500, 'Hệ thống đang gặp sự cố.')
   assert.equal(alertActionError(other, 'resolve'), other)
 })
-test('who acknowledged and who closed, with Vietnam time and the note', () => {
+test('who acknowledged and who closed: emails as sent, "system" and "Condition cleared" in Vietnamese, Vietnam time', () => {
   const alert = {
     id: SEEDED, status: 'RESOLVED', triggeredAt: '2026-11-30T05:00:00Z',
-    acknowledgedAt: '2026-11-30T06:05:00Z', acknowledgedByName: 'Nhân viên vận hành', acknowledgedById: 'x',
-    resolvedAt: '2026-11-30T07:10:00Z', resolvedByName: null, resolvedById: '11000000-0000-0000-0000-000000000001', resolutionNote: '  Đã rút hộp  ',
+    acknowledgedAt: '2026-11-30T06:05:00Z', acknowledgedBy: 'staff@freshvend.test',
+    resolvedAt: '2026-11-30T07:10:00Z', resolvedBy: 'system', resolutionNote: 'Condition cleared',
   }
   assert.deepEqual(handlingSteps(alert), [
     { key: 'triggered', label: 'Phát sinh', at: '30/11/2026 12:00' },
-    { key: 'acknowledged', label: 'Xác nhận', at: '30/11/2026 13:05', by: 'Nhân viên vận hành' },
-    { key: 'resolved', label: 'Đóng', at: '30/11/2026 14:10', by: 'Tài khoản …00000001', note: 'Đã rút hộp' },
+    { key: 'acknowledged', label: 'Xác nhận', at: '30/11/2026 13:05', by: 'staff@freshvend.test' },
+    { key: 'resolved', label: 'Đóng', at: '30/11/2026 14:10', by: 'Hệ thống (tự đóng khi sự cố hết)', note: 'Điều kiện gây cảnh báo đã hết.' },
   ])
-  assert.deepEqual(handledByLines(alert), ['Xác nhận: Nhân viên vận hành, 30/11/2026 13:05', 'Đóng: Tài khoản …00000001, 30/11/2026 14:10'])
+  assert.deepEqual(handledByLines(alert), ['Xác nhận: staff@freshvend.test, 30/11/2026 13:05', 'Đóng: Hệ thống (tự đóng khi sự cố hết), 30/11/2026 14:10'])
   assert.deepEqual(handledByLines({ ...alert, status: 'OPEN', acknowledgedAt: null, resolvedAt: null }), [])
+  assert.equal(actorText(null), 'Không rõ người thực hiện')
+  assert.equal(resolutionNoteText('  Đã rút hộp  '), 'Đã rút hộp')
+  assert.equal(resolutionNoteText(''), undefined)
+})
+
+// ---- work order from an alert (POST /alerts/{alertId}/work-orders)
+
+test('work order form: only the fields filled in are sent; defaults follow the backend (type by alert, priority by severity)', () => {
+  assert.deepEqual(alertWorkOrderBody(NEW_ALERT_WORK_ORDER), {}, 'body optional: the backend fills everything from the alert')
+  assert.deepEqual(alertWorkOrderBody({ type: 'MAINTENANCE', title: '  Kiểm tra cửa  ', description: ' ', priority: 'HIGH', assigneeId: STAFF_ID, dueAt: '2026-12-04T11:00' }),
+    { type: 'MAINTENANCE', priority: 'HIGH', title: 'Kiểm tra cửa', dueAt: '2026-12-04T04:00:00.000Z', assigneeId: STAFF_ID })
+  assert.deepEqual(alertWorkOrderBody({ ...NEW_ALERT_WORK_ORDER, type: 'OTHER', priority: 'P1', assigneeId: 'x' }), {}, 'unknown values never reach the API')
+  assert.deepEqual(workOrderDefaults({ type: 'LOW_STOCK', severity: 'INFO' }), { type: 'RESTOCK', priority: 'NORMAL' })
+  assert.deepEqual(workOrderDefaults({ type: 'HARDWARE_FAULT', severity: 'CRITICAL' }), { type: 'MAINTENANCE', priority: 'URGENT' })
+  assert.deepEqual(workOrderDefaults({ type: 'HIGH_TEMPERATURE', severity: 'WARNING' }), { type: 'MAINTENANCE', priority: 'HIGH' })
+  const now = Date.parse('2026-12-04T03:00:00Z')
+  assert.deepEqual(validateAlertWorkOrder({ ...NEW_ALERT_WORK_ORDER, title: 'x'.repeat(201), dueAt: '2026-12-04T09:00' }, now), { title: 'Tối đa 200 ký tự.', dueAt: 'Thời hạn phải ở tương lai.' })
+  assert.deepEqual(validateAlertWorkOrder(NEW_ALERT_WORK_ORDER, now), {})
+})
+test('work order 409s in Vietnamese: ALERT_ALREADY_HANDLED names the work order, ALERT_RESOLVED says it is closed', () => {
+  const handled = workOrderError(new ApiError(409, 'ALERT_ALREADY_HANDLED: the alert is handled by work order WO-20261130-AB12 (62000000-0000-0000-0000-000000000001)'))
+  assert.match(handled.message, /đã có phiếu công việc WO-20261130-AB12 chưa hoàn tất/)
+  assert.match(workOrderError(new ApiError(409, 'ALERT_RESOLVED: the alert is already resolved')).message, /đã được đóng/)
+  const other = new ApiError(400, 'x')
+  assert.equal(workOrderError(other), other)
 })
 
 // ---- bell (pure)
 
-test('bell: nothing is new on the first load; later only unseen ids; polite text names type and machine', () => {
-  const a = { id: 'a', type: 'HIGH_TEMPERATURE', machineCode: 'DEV-MACHINE-01' }
-  const b = { id: 'b', type: 'MACHINE_OFFLINE', machineCode: 'DEV-MACHINE-02' }
+test('bell: nothing is new on the first load; later only unseen ids; polite text names the newest new alert', () => {
+  const a = { id: 'a', type: 'HIGH_TEMPERATURE', machineCode: 'DEV-MACHINE-01', triggeredAt: '2026-11-30T05:00:00Z' }
+  const b = { id: 'b', type: 'MACHINE_OFFLINE', machineCode: 'DEV-MACHINE-02', triggeredAt: '2026-11-30T06:00:00Z' }
   assert.deepEqual(freshAlerts(null, [a, b]), [])
   assert.deepEqual(freshAlerts(new Set(['a']), [b, a]), [b])
   assert.equal(bellAnnouncement([], false), '')
   assert.equal(bellAnnouncement([b], false), 'Cảnh báo mới: Máy mất kết nối tại máy DEV-MACHINE-02.')
-  assert.equal(bellAnnouncement([b, a], false), 'Có 2 cảnh báo mới. Mới nhất: Máy mất kết nối tại máy DEV-MACHINE-02.')
+  // The list comes CRITICAL first: the newest one is named, whatever its position.
+  assert.equal(bellAnnouncement([a, b], false), 'Có 2 cảnh báo mới. Mới nhất: Máy mất kết nối tại máy DEV-MACHINE-02.')
   assert.match(bellAnnouncement(Array.from({ length: BELL_SIZE }, (_, i) => ({ ...a, id: String(i) })), true), /^Có ít nhất 5 cảnh báo mới/)
   assert.equal(badgeText(7), '7')
   assert.equal(badgeText(120), '99+')
@@ -172,10 +222,9 @@ test('bell: nothing is new on the first load; later only unseen ids; polite text
   assert.equal(bellLabel(0), 'Cảnh báo: không có cảnh báo đang mở')
   assert.equal(bellLabel(3), 'Cảnh báo: 3 đang mở')
   assert.equal(bellLabel(3, 1), 'Cảnh báo: 3 đang mở, 1 nghiêm trọng')
-  assert.equal(bellLabel(0, 0), 'Cảnh báo: không có cảnh báo đang mở')
-  assert.deepEqual(BELL_CRITICAL_QUERY, { status: 'OPEN', severity: 'CRITICAL', page: 0, size: 1, sort: 'triggeredAt,desc' })
   assert.equal(BELL_POLL_MS, 30_000)
-  assert.deepEqual(BELL_QUERY, { status: 'OPEN', page: 0, size: 5, sort: 'triggeredAt,desc' })
+  assert.deepEqual(BELL_QUERY, { status: 'OPEN', page: 0, size: 5 }, 'GET /alerts?status=OPEN&size=5, no sort')
+  assert.deepEqual(BELL_CRITICAL_QUERY, { status: 'OPEN', severity: 'CRITICAL', page: 0, size: 1 })
 })
 
 // ---- bell polling with fake timers
@@ -219,25 +268,25 @@ test('acceptance: a new alert raised between two polls is on the bell after exac
   assert.equal(h.last.criticalCount, 1, 'seed: 1 OPEN CRITICAL alert')
   assert.equal(h.last.announcement, '', 'nothing announced on the first load')
   assert.equal(h.timers.size, 1)
+  const logged = fetcher.control.requests('/alerts')
+  assert.ok(logged.every(entry => entry.method === 'GET'))
 
-  const raised = fetcher.control.raiseAlert({ type: 'MACHINE_OFFLINE', severity: 'CRITICAL', machineId: MACHINE_1, title: 'Machine offline' })
+  const raised = fetcher.control.raiseAlert({ type: 'MACHINE_OFFLINE', severity: 'CRITICAL', machineId: MACHINE_1, title: 'Máy mất kết nối' })
   state.clock += BELL_POLL_MS
   await h.tick()
   assert.equal(calls.length, 2, 'one poll (list + critical count) per interval')
   assert.equal(h.last.openCount, 4)
   assert.equal(h.last.criticalCount, 2)
-  assert.equal(h.last.latest[0].id, raised.id, 'newest first')
+  assert.equal(h.last.latest[0].id, raised.id, 'CRITICAL first, newest first within it')
   assert.deepEqual(h.last.fresh, [raised.id])
   assert.equal(h.last.announcement, 'Cảnh báo mới: Máy mất kết nối tại máy DEV-MACHINE-01.')
   assert.equal(h.last.announcementSeq, 1)
 
-  // Next poll without changes: no longer "new", the announcement is not repeated with other text.
   state.clock += BELL_POLL_MS
   await h.tick()
   assert.deepEqual(h.last.fresh, [])
   assert.equal(h.last.announcementSeq, 1, 'nothing new: no announcement')
-  // A second alert with the same words is announced again (same text, new sequence number).
-  fetcher.control.raiseAlert({ type: 'MACHINE_OFFLINE', severity: 'CRITICAL', machineId: MACHINE_1, title: 'Machine offline' })
+  fetcher.control.raiseAlert({ type: 'MACHINE_OFFLINE', severity: 'CRITICAL', machineId: MACHINE_1, title: 'Máy mất kết nối' })
   state.clock += BELL_POLL_MS
   await h.tick()
   assert.equal(h.last.announcement, 'Cảnh báo mới: Máy mất kết nối tại máy DEV-MACHINE-01.')
@@ -271,7 +320,6 @@ test('bell: hidden tab pauses polling; a missing endpoint, 403 or 401 turns it o
     await h.flush()
     assert.equal(calls, 1, 'refresh does not wake a bell that is off')
   }
-  // 500 / network: keep the last data, try again next interval.
   let fail = false
   const page = { content: [{ id: 'a', type: 'LOW_STOCK', machineCode: 'M' }], totalElements: 1 }
   const h = bellHarness(async () => { if (fail) throw new TypeError('Failed to fetch'); return { page } })
@@ -291,46 +339,94 @@ test('bell: hidden tab pauses polling; a missing endpoint, 403 or 401 turns it o
   h.bell.dispose()
 })
 
-// ---- mock of the draft contract
+// ---- mock of the real API
 
-test('mock: alerts are their own group; list filters and sorts on the server', async () => {
+test('mock: alerts are their own group; no status = not closed yet; CRITICAL first then newest; filters on the server', async () => {
   assert.equal(groupOf('/alerts'), 'alerts')
   assert.equal(groupOf(`/alerts/${SEEDED}/acknowledge`), 'alerts')
+  assert.equal(groupOf(`/alerts/${SEEDED}/work-orders`), 'alerts')
   const { state } = setup()
   await signIn(state, 'staff')
-  const all = await alertsApi.list({ page: 0, size: 100 })
-  assert.equal(all.totalElements, 7)
-  assert.deepEqual(all.content.map(alert => alert.triggeredAt), [...all.content.map(alert => alert.triggeredAt)].sort().reverse(), 'newest first by default')
-  const seeded = all.content.find(alert => alert.id === SEEDED)
+  const open = await alertsApi.list({})
+  assert.equal(open.size, 50, 'default size 50')
+  assert.equal(open.totalElements, 5, 'seed: 3 OPEN + 2 ACKNOWLEDGED')
+  assert.ok(open.content.every(alert => alert.status !== 'RESOLVED'))
+  const rank = { CRITICAL: 0, WARNING: 1, INFO: 2 }
+  for (let i = 1; i < open.content.length; i += 1) {
+    const [a, b] = [open.content[i - 1], open.content[i]]
+    assert.ok(rank[a.severity] < rank[b.severity] || (rank[a.severity] === rank[b.severity] && a.triggeredAt >= b.triggeredAt), `${a.id} before ${b.id}`)
+  }
+  assert.equal((await alertsApi.list({ status: 'RESOLVED' })).totalElements, 3)
+  const seeded = (await alertsApi.get(SEEDED))
   assert.equal(seeded.title, 'Temperature above range', 'same alert as backend/db/dev/seed.sql')
+  assert.deepEqual(Object.keys(seeded).sort(), ['acknowledgedAt', 'acknowledgedBy', 'errorCode', 'id', 'machineCode', 'machineId', 'message', 'resolutionNote', 'resolvedAt', 'resolvedBy',
+    'severity', 'slotCode', 'slotId', 'status', 'title', 'triggeredAt', 'type', 'workOrderCode', 'workOrderId'], 'only AlertResponse fields')
   assert.equal((await alertsApi.list({ status: 'OPEN', severity: 'CRITICAL' })).totalElements, 1)
-  assert.equal((await alertsApi.list({ type: 'DISPENSE_FAILED' })).content[0].resolvedByName, 'Quản trị viên')
+  const failed = (await alertsApi.list({ type: 'DISPENSE_FAILED', status: 'RESOLVED' })).content[0]
+  assert.equal(failed.resolvedBy, 'admin@freshvend.test')
+  assert.equal(failed.errorCode, 'RESULT_TIMEOUT')
+  const fault = (await alertsApi.list({ type: 'HARDWARE_FAULT', errorCode: 'CONTROLLER_FAULT' })).content[0]
+  assert.equal(fault.status, 'ACKNOWLEDGED')
+  assert.equal((await alertsApi.list({ type: 'HIGH_HUMIDITY', status: 'RESOLVED' })).content[0].resolvedBy, 'system')
   assert.equal((await alertsApi.list({ machineId: MACHINE_1, status: 'OPEN' })).totalElements, 2)
-  await rejects(alertsApi.list({ sort: 'severity,asc' }), 400)
+  // Linked unfinished work tickets show as workOrderId / workOrderCode.
+  const offline = await alertsApi.get(alertId(2))
+  assert.match(offline.workOrderCode, /^WO-\d{8}-[0-9A-F]{4}$/)
+  assert.ok(offline.workOrderId)
+  assert.equal(seeded.workOrderId, null)
+  // Range: from inclusive, to exclusive; to must be after from.
+  assert.equal((await alertsApi.list({ from: '2026-11-30T02:00:00Z', to: '2026-11-30T03:00:00Z' })).totalElements, 3, 'raised in the last hour (alerts 2, 5, 8)')
+  await rejects(alertsApi.list({ from: '2026-11-30T03:00:00Z', to: '2026-11-30T02:00:00Z' }), 400)
+  await rejects(alertsApi.list({ status: 'ALL' }), 400)
+  await rejects(alertsApi.list({ size: 201 }), 400)
+  assert.equal((await alertsApi.list({ sort: 'severity,asc' })).totalElements, 5, 'sort is not a parameter: ignored like Spring does')
 })
-test('mock: acknowledge records the name; a second acknowledge is 409; resolve records name and note; RESOLVED again is 409', async () => {
+test('mock: acknowledge records the email; again is 200 unchanged; resolve records email and note; RESOLVED again is 409', async () => {
   const { state } = setup()
   await signIn(state, 'staff')
   const acknowledged = await alertsApi.acknowledge(SEEDED)
   assert.equal(acknowledged.status, 'ACKNOWLEDGED')
-  assert.equal(acknowledged.acknowledgedByName, 'Nhân viên vận hành')
+  assert.equal(acknowledged.acknowledgedBy, 'staff@freshvend.test')
   assert.equal(acknowledged.acknowledgedAt, new Date(state.clock).toISOString())
-  await rejects(alertsApi.acknowledge(SEEDED), 409)
+  state.clock += 60_000
+  assert.deepEqual(await alertsApi.acknowledge(SEEDED), acknowledged, 'acknowledging an ACKNOWLEDGED alert returns it unchanged')
 
   await signIn(state, 'admin')
-  state.clock += 60_000
   const resolved = await alertsApi.resolve(SEEDED, { note: 'Đã đóng cửa máy' })
   assert.equal(resolved.status, 'RESOLVED')
-  assert.equal(resolved.resolvedByName, 'Quản trị viên')
+  assert.equal(resolved.resolvedBy, 'admin@freshvend.test')
   assert.equal(resolved.resolutionNote, 'Đã đóng cửa máy')
-  assert.equal(resolved.acknowledgedByName, 'Nhân viên vận hành', 'acknowledgement kept')
+  assert.equal(resolved.acknowledgedBy, 'staff@freshvend.test', 'acknowledgement kept')
   await rejects(alertsApi.resolve(SEEDED, {}), 409)
   await rejects(alertsApi.acknowledge(SEEDED), 409)
   // An OPEN alert can be closed directly, without a note.
-  const offline = (await alertsApi.list({ type: 'MACHINE_OFFLINE', status: 'OPEN' })).content[0]
-  const closed = await alertsApi.resolve(offline.id, resolveBody(''))
-  assert.equal(closed.resolutionNote, null)
-  assert.equal(closed.acknowledgedAt, null)
+  const lowStock = await alertsApi.resolve(alertId(5), resolveBody(''))
+  assert.equal(lowStock.resolutionNote, null)
+  assert.equal(lowStock.acknowledgedAt, null)
+})
+test('mock: POST /alerts/{id}/work-orders opens a work order (admin), OPEN → ACKNOWLEDGED, then ALERT_ALREADY_HANDLED; RESOLVED is ALERT_RESOLVED', async () => {
+  const { state } = setup()
+  await signIn(state, 'staff')
+  await rejects(alertsApi.createWorkOrder(SEEDED, {}), 403, () => true)
+  await signIn(state, 'admin')
+  const workOrder = await alertsApi.createWorkOrder(SEEDED, { priority: 'HIGH', assigneeId: STAFF_ID })
+  assert.equal(workOrder.source, 'ALERT')
+  assert.equal(workOrder.type, 'MAINTENANCE', 'default from the alert type')
+  assert.equal(workOrder.title, 'Temperature above range', 'default from the alert title')
+  assert.equal(workOrder.priority, 'HIGH')
+  assert.equal(workOrder.status, 'ASSIGNED')
+  assert.equal(workOrder.machineId, MACHINE_1)
+  assert.match(workOrder.code, /^WO-\d{8}-[0-9A-F]{4}$/)
+  const alert = await alertsApi.get(SEEDED)
+  assert.equal(alert.status, 'ACKNOWLEDGED')
+  assert.equal(alert.acknowledgedBy, 'admin@freshvend.test')
+  assert.equal(alert.workOrderId, workOrder.id)
+  assert.equal(alert.workOrderCode, workOrder.code)
+  await rejects(alertsApi.createWorkOrder(SEEDED, {}), 409, error => error.message.startsWith('ALERT_ALREADY_HANDLED') && error.message.includes(workOrder.code))
+  await rejects(alertsApi.createWorkOrder(alertId(4), {}), 409, error => error.message.startsWith('ALERT_RESOLVED'))
+  await rejects(alertsApi.createWorkOrder(alertId(1), { machineId: MACHINE_1 }), 400, error => 'machineId' in error.fieldErrors)
+  const defaults = await alertsApi.createWorkOrder(alertId(8), {})
+  assert.deepEqual([defaults.type, defaults.priority, defaults.status], ['MAINTENANCE', 'URGENT', 'OPEN'])
 })
 test('mock: 400 for unknown fields, a too long note or a bad id; 404 unknown alert; 401 signed out', async () => {
   const { state } = setup()
@@ -342,7 +438,7 @@ test('mock: 400 for unknown fields, a too long note or a bad id; 404 unknown ale
   state.token = null
   await rejects(alertsApi.list({}), 401)
 })
-test('mock: ?scenario=missing:alerts answers 404 like a backend without BE 3.6', async () => {
+test('mock: ?scenario=missing:alerts answers 404 like a backend without the alerts path', async () => {
   const { state } = setup()
   await signIn(state, 'admin')
   state.search = '?scenario=missing:alerts'

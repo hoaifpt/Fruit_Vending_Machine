@@ -48,7 +48,7 @@ function MachinesPage() {
     { head: 'Tên máy', sortKey: 'name', cell: machine => <span className="font-medium">{machine.name}</span> },
     { head: 'Vị trí', sortKey: 'location', cell: machine => machine.location || <span className="text-muted-foreground">Chưa có vị trí</span> },
     { head: 'Bán hàng', sortKey: 'status', cell: machine => <SaleCell machine={machine} canManage={canManage} /> },
-    { head: 'Kết nối', cell: machine => <ConnectionStatus lastSeenAt={machine.lastSeenAt} source={state} /> },
+    { head: 'Kết nối', cell: machine => <ConnectionStatus lastSeenAt={machine.lastSeenAt} connectivity={machine.connectivity} source={state} /> },
   ]
 
   const empty = pastEnd

@@ -255,8 +255,7 @@ test('Tiêu chí xong (mock): staff carries out the RESTOCK ticket end to end; L
   assert.deepEqual(done.resolvedAlertIds, [LOW_STOCK_A2])
   const alert = await alertsApi.get(LOW_STOCK_A2)
   assert.equal(alert.status, 'RESOLVED')
-  assert.equal(alert.resolvedById, null)
-  assert.equal(alert.resolvedByName, 'Hệ thống')
+  assert.equal(alert.resolvedBy, 'system', 'AlertResponse.resolvedBy: "system" when the backend closes it')
   assert.match(alert.resolutionNote, /^Tự đóng khi hoàn tất phiếu nạp hàng “Nạp thêm hộp ngăn A2 · máy DEV-MACHINE-01”: đã nạp 4 hộp vào ngăn A2\.$/)
   // Closed ticket: lines are read-only.
   await rejects(ticketsApi.loadLine(T2, LINE_B1, { batchId: BATCH_MIXED, quantity: 1 }), 409)

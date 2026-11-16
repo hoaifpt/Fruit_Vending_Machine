@@ -1,6 +1,6 @@
 // One handler per endpoint the web calls. Rules follow api-contract/api.yaml and docs/*.md, and each write updates the
 // in-memory store, so a change shows up on the next read and is gone after a page reload.
-import { conflict, created, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
+import { conflict, created, fixedPage, Form, MockHttpError, notFound, ok, paginate } from './http.ts'
 import type { Reply } from './http.ts'
 import type {
   MockAlert, MockCredential, MockHeartbeat, MockItem, MockMaintenanceCommand, MockOrder, MockPayment, MockRestockLine, MockRole, MockSchedule, MockStore,
@@ -40,7 +40,7 @@ export interface KioskSimulation {
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
  * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_MANAGE of
- * drafts/alerts.yaml, WORK_ORDER_READ_ASSIGNED/WORK_ORDER_MANAGE of drafts/work-tickets.yaml, MAINTENANCE_PLAN_READ/_WRITE of
+ * api.yaml (now checked as `permission`), WORK_ORDER_READ_ASSIGNED/WORK_ORDER_MANAGE of drafts/work-tickets.yaml, MAINTENANCE_PLAN_READ/_WRITE of
  * drafts/maintenance-schedules.yaml, MAINTENANCE_COMMAND_EXECUTE of drafts/machine-maintenance.yaml); checked against the web's
  * proposed seed DRAFT_ROLE_PERMISSIONS.
  */
@@ -174,11 +174,10 @@ function releaseOrder(ctx: HandlerContext, order: MockOrder, reason: string) {
   }
 }
 
-function markPaid(store: MockStore, order: MockOrder, payment: MockPayment, now: number) {
+function markPaid(order: MockOrder, payment: MockPayment, now: number) {
   Object.assign(payment, { status: 'SUCCESS', paidAt: iso(now), transactionId: `MOCK-TXN-${randomCode(8)}`, qrCode: undefined })
   order.status = 'PAID'
   order.paidAt = iso(now)
-  createDispenseCommands(store, order, now)
 }
 
 /**
@@ -189,14 +188,15 @@ export function payLatestKioskOrder(ctx: HandlerContext): string | null {
   advanceOrders(ctx)
   const order = [...ctx.store.orders].reverse().find(candidate => candidate.live && candidate.status === 'PENDING_PAYMENT' && latestPayment(ctx.store, candidate.id)?.status === 'PENDING')
   if (!order) return null
-  markPaid(ctx.store, order, latestPayment(ctx.store, order.id)!, ctx.now)
+  markPaid(order, latestPayment(ctx.store, order.id)!, ctx.now)
   return order.orderCode
 }
 
 /**
  * Simulates what the backend does in the background (payment webhook, dispensing, reservation sweep) for kiosk orders:
  * PENDING_PAYMENT → PAID (webhook) → DISPENSING (command acknowledged, after a quarter of dispenseMs) → COMPLETED or
- * DISPENSE_FAILED (machine report, after dispenseMs). The real dispense-command read endpoint is BE 3.3 (due 30/11).
+ * DISPENSE_FAILED (machine report, after dispenseMs). The backend has no read endpoint for dispense commands: only the
+ * order and its allocations change.
  */
 export function advanceOrders(ctx: HandlerContext) {
   const { store, now, options } = ctx
@@ -205,46 +205,24 @@ export function advanceOrders(ctx: HandlerContext) {
     const payment = latestPayment(store, order.id)
     if (order.status === 'PENDING_PAYMENT') {
       if (payment?.status === 'PENDING' && payment.expiredAt && Date.parse(payment.expiredAt) <= now) payment.status = 'EXPIRED'
-      if (options.autoPay && payment?.status === 'PENDING' && Date.parse(payment.createdAt) + options.autoPayMs <= now) markPaid(store, order, payment, now)
+      if (options.autoPay && payment?.status === 'PENDING' && Date.parse(payment.createdAt) + options.autoPayMs <= now) markPaid(order, payment, now)
       else if (order.expiresAt && Date.parse(order.expiresAt) <= now) releaseOrder(ctx, order, 'RESERVATION_EXPIRED')
     }
     const paidAt = order.paidAt ? Date.parse(order.paidAt) : NaN
-    const commands = store.dispenseCommands.filter(command => command.orderId === order.id)
-    if (order.status === 'PAID' && paidAt + options.dispenseMs / 4 <= now) {
-      order.status = 'DISPENSING'
-      for (const command of commands) if (command.status === 'PENDING') Object.assign(command, { status: 'SENT', sentAt: iso(now), updatedAt: iso(now) })
-    }
+    if (order.status === 'PAID' && paidAt + options.dispenseMs / 4 <= now) order.status = 'DISPENSING'
     if (order.status !== 'DISPENSING' || paidAt + options.dispenseMs > now || options.dispense === 'slow') continue
     if (options.dispense === 'fail') {
       order.status = 'DISPENSE_FAILED'
-      for (const command of commands) Object.assign(command, { status: 'FAILED', acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
       for (const item of allocationItems(store, order)) setItemStatus(item, 'DISPENSE_FAILED', now)
       continue
     }
     order.status = 'COMPLETED'
     order.completedAt = iso(now)
-    for (const command of commands) Object.assign(command, { status: 'SUCCESS', sentAt: command.sentAt ?? iso(now), acknowledgedAt: command.acknowledgedAt ?? iso(now), completedAt: iso(now), updatedAt: iso(now) })
     for (const line of order.items) for (const allocation of line.allocations) allocation.status = 'DISPENSED'
     for (const item of allocationItems(store, order)) {
       setItemStatus(item, 'SOLD', now)
       history(store, item, 'SALE', now, { referenceId: order.id, reason: 'ORDER_COMPLETED', statusBefore: 'RESERVED', statusAfter: 'SOLD' })
     }
-  }
-}
-
-/**
- * Like the payment webhook + DispenseService for a kiosk order: one PENDING command per bowl, created with the move to
- * PAID. advanceOrders then sends them (SENT, order DISPENSING) and ends them SUCCESS, or FAILED with scenario `dispense-failed`.
- */
-function createDispenseCommands(store: MockStore, order: MockOrder, now: number) {
-  for (const allocation of order.items.flatMap(line => line.allocations)) {
-    const item = store.items.find(candidate => candidate.id === allocation.inventoryItemId)
-    if (!item) continue
-    const code = `D-${Array.from({ length: 16 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('')}`
-    store.dispenseCommands.push({
-      id: newId(), commandCode: code, orderId: order.id, machineId: order.machineId, slotId: item.slotId, slotCode: allocation.slotCode ?? item.slotCode,
-      inventoryItemId: item.id, status: 'PENDING', createdAt: iso(now), sentAt: null, acknowledgedAt: null, completedAt: null, updatedAt: iso(now),
-    })
   }
 }
 
@@ -421,7 +399,7 @@ function resolveLowStock(store: MockStore, ticket: MockTicket, now: number): str
     if (alert.slotId ? !line : full.length !== lines.length) continue
     const at = iso(Math.max(now, Date.parse(alert.triggeredAt)))
     const what = line ? `đã nạp ${line.loadedQuantity} hộp vào ngăn ${line.slotCode}.` : `đã nạp đủ ${lines.length} ngăn theo kế hoạch.`
-    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedById: null, resolvedByName: 'Hệ thống', resolutionNote: `Tự đóng khi hoàn tất phiếu nạp hàng “${ticket.title}”: ${what}`, updatedAt: at })
+    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedBy: 'system', resolutionNote: `Tự đóng khi hoàn tất phiếu nạp hàng “${ticket.title}”: ${what}` })
     resolved.push(alert.id)
   }
   return resolved
@@ -602,10 +580,13 @@ export const routes: Route[] = [
   // ---- machines
   route('GET', '/machines', 'any', ctx => {
     const { query } = ctx
-    const rows = ctx.store.machines.filter(machine => eq(query, 'status', machine.status) && contains(query.get('search'), machine.code, machine.name, machine.location))
+    const connectivity = query.get('connectivity')
+    if (connectivity && !(CONNECTIVITY as readonly string[]).includes(connectivity)) throw new MockHttpError(400, 'Invalid request parameter', { connectivity: `Must be one of: ${CONNECTIVITY.join(', ')}` })
+    const rows = ctx.store.machines.map(machine => machineView(ctx.store, machine, ctx.now))
+      .filter(machine => eq(query, 'status', machine.status) && eq(query, 'connectivity', machine.connectivity) && contains(query.get('search'), machine.code, machine.name, machine.location))
     return ok(paginate(rows, query, { sorts: { id: row => row.id, code: row => row.code, name: row => row.name, location: row => row.location, status: row => row.status, createdAt: row => row.createdAt, updatedAt: row => row.updatedAt }, defaultSort: 'createdAt,desc' }))
   }),
-  route('GET', '/machines/:machineId', 'any', ctx => ok(findMachine(ctx))),
+  route('GET', '/machines/:machineId', 'any', ctx => ok(machineView(ctx.store, findMachine(ctx), ctx.now))),
   route('POST', '/machines', 'admin', ctx => {
     const { form, values } = machineForm(ctx.body, ['code', ...MACHINE_FIELDS])
     const code = form.text('code', 64).toUpperCase()
@@ -615,7 +596,7 @@ export const routes: Route[] = [
     const at = iso(ctx.now)
     const machine = { id: newId(), code, ...values, status: 'INACTIVE' as const, lastSeenAt: null, connectivity: 'NEVER_SEEN' as const, createdAt: at, updatedAt: at }
     ctx.store.machines.push(machine)
-    return created(machine)
+    return created(machineView(ctx.store, machine, ctx.now))
   }),
   route('PUT', '/machines/:machineId', 'admin', ctx => {
     const machine = findMachine(ctx)
@@ -623,12 +604,12 @@ export const routes: Route[] = [
     form.done()
     checkThresholdOrder(values)
     Object.assign(machine, values, { updatedAt: iso(ctx.now) })
-    return ok(machine)
+    return ok(machineView(ctx.store, machine, ctx.now))
   }),
   route('PATCH', '/machines/:machineId/status', 'admin', ctx => {
     const machine = findMachine(ctx)
     Object.assign(machine, { status: statusForm(ctx, MACHINE_STATUSES), updatedAt: iso(ctx.now) })
-    return ok(machine)
+    return ok(machineView(ctx.store, machine, ctx.now))
   }),
 
   // ---- slots
@@ -703,17 +684,36 @@ export const routes: Route[] = [
     return ok(credentialView(credential))
   }),
 
-  // ---- heartbeat, sensor readings, events: draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml)
-  route('GET', '/machines/:machineId/heartbeat', { permission: 'MACHINE_READ' }, ctx => ok(heartbeatView(heartbeatOf(ctx.store, findMachine(ctx).id)))),
-  route('GET', '/machines/:machineId/sensor-readings', { permission: 'MACHINE_READ' }, ctx => {
+  // ---- telemetry and events (backend #53, #56; api.yaml). MACHINE_READ; invalid parameters are 400 before the machine.
+  route('GET', '/machines/:machineId/telemetry/latest', { permission: 'MACHINE_READ' }, ctx => {
     const machine = findMachine(ctx)
-    const rows = ctx.store.readings.filter(reading => reading.machineId === machine.id && within(ctx.query, 'recordedFrom', 'recordedTo', reading.recordedAt))
-    return ok(paginate(rows, ctx.query, { sorts: { recordedAt: row => row.recordedAt }, defaultSort: 'recordedAt,desc' }))
+    const reading = ctx.store.readings.filter(row => row.machineId === machine.id).sort(newestReading)[0]
+    const level = (value: number | null | undefined, min: number, max: number) => (typeof value !== 'number' ? null : value < min ? 'LOW' : value > max ? 'HIGH' : 'NORMAL')
+    return ok({
+      machineId: machine.id, recordedAt: reading?.recordedAt ?? null, temperature: reading?.temperature ?? null, humidity: reading?.humidity ?? null,
+      temperatureStatus: level(reading?.temperature, machine.minTemperature, machine.maxTemperature),
+      humidityStatus: level(reading?.humidity, machine.minHumidity, machine.maxHumidity),
+      connectivity: machineView(ctx.store, machine, ctx.now).connectivity,
+    })
+  }),
+  route('GET', '/machines/:machineId/telemetry', { permission: 'MACHINE_READ' }, ctx => {
+    const { from, to } = instantRange(ctx.query, true, 31 * 86_400_000)
+    const machine = findMachine(ctx)
+    const rows = ctx.store.readings.filter(row => row.machineId === machine.id && Date.parse(row.recordedAt) >= from! && Date.parse(row.recordedAt) < to!)
+      .sort(newestReading).map(({ recordedAt, temperature, humidity }) => ({ recordedAt, temperature, humidity }))
+    return ok(fixedPage(rows, ctx.query, { defaultSize: 100, maxSize: 500 }))
   }),
   route('GET', '/machines/:machineId/events', { permission: 'MACHINE_READ' }, ctx => {
+    const { query } = ctx
+    const source = query.get('source')
+    if (source && source !== 'MACHINE' && source !== 'BACKEND') throw new MockHttpError(400, 'Invalid request parameter', { source: 'Must be one of: MACHINE, BACKEND' })
+    const { from, to } = instantRange(query, false)
     const machine = findMachine(ctx)
-    const rows = ctx.store.machineEvents.filter(event => event.machineId === machine.id && eq(ctx.query, 'eventType', event.eventType) && within(ctx.query, 'createdFrom', 'createdTo', event.createdAt))
-    return ok(paginate(rows, ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc' }))
+    const rows = ctx.store.machineEvents.filter(event => event.machineId === machine.id && eq(query, 'type', event.eventType) && eq(query, 'source', event.source)
+      && (from === undefined || Date.parse(event.createdAt) >= from) && (to === undefined || Date.parse(event.createdAt) < to))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .map(({ machineId: _machineId, ...event }) => event)
+    return ok(fixedPage(rows, query, { defaultSize: 50, maxSize: 200 }))
   }),
 
   // ---- maintenance commands: draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml), FE 7.4
@@ -817,43 +817,93 @@ export const routes: Route[] = [
     return ok({ ...order, payments })
   }),
 
-  // Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): commands of one order, oldest first. An order
-  // unknown to the mock (VITE_API_MOCK=dispense-commands with real orders) answers 404 like the backend would.
-  route('GET', '/orders/:orderId/dispense-commands', 'any', ctx => {
-    const order = byId(ctx.store.orders, ctx.params.orderId, 'Không tìm thấy đơn hàng.')
-    const rows = ctx.store.dispenseCommands.filter(command => command.orderId === order.id)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
-    return ok(rows.map(command => ({ ...command })))
-  }),
-
-  // ---- alerts: draft of backend 3.6 (api-contract/drafts/alerts.yaml). Messages in English as the backend would send.
-  route('GET', '/alerts', { draftPermission: 'ALERT_READ' }, ctx => {
+  // ---- alerts (backend #58, api.yaml). Messages in English as the backend sends them.
+  route('GET', '/alerts', { permission: 'ALERT_READ' }, ctx => {
     const { query } = ctx
-    const rows = ctx.store.alerts.filter(alert => eq(query, 'status', alert.status) && eq(query, 'severity', alert.severity) && eq(query, 'type', alert.type)
-      && eq(query, 'machineId', alert.machineId) && within(query, 'triggeredFrom', 'triggeredTo', alert.triggeredAt)).map(alert => ({ ...alert }))
-    return ok(paginate(rows, query, { sorts: { triggeredAt: row => row.triggeredAt }, defaultSort: 'triggeredAt,desc' }))
+    const errors: Record<string, string> = {}
+    const check = (name: string, values: readonly string[]) => { const value = query.get(name); if (value && !values.includes(value)) errors[name] = `Must be one of: ${values.join(', ')}` }
+    check('status', ALERT_STATUSES); check('type', ALERT_TYPES); check('severity', ALERT_SEVERITIES)
+    for (const name of ['machineId', 'slotId']) if (query.get(name) && !UUID_PATTERN.test(query.get(name)!)) errors[name] = 'Must be a valid UUID'
+    if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
+    const { from, to } = instantRange(query, false)
+    // No status: OPEN and ACKNOWLEDGED (every alert not closed yet). `sort` is not a parameter: the order is fixed.
+    const status = query.get('status')
+    const rows = ctx.store.alerts.filter(alert => (status ? alert.status === status : alert.status !== 'RESOLVED')
+      && eq(query, 'severity', alert.severity) && eq(query, 'type', alert.type) && eq(query, 'machineId', alert.machineId) && eq(query, 'slotId', alert.slotId)
+      && eq(query, 'errorCode', alert.errorCode)
+      && (from === undefined || Date.parse(alert.triggeredAt) >= from) && (to === undefined || Date.parse(alert.triggeredAt) < to))
+      .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.triggeredAt.localeCompare(a.triggeredAt) || b.id.localeCompare(a.id))
+      .map(alert => alertView(ctx.store, alert))
+    return ok(fixedPage(rows, query, { defaultSize: 50, maxSize: 200 }))
   }),
-  route('GET', '/alerts/:id', { draftPermission: 'ALERT_READ' }, ctx => ok({ ...findAlert(ctx) })),
-  route('POST', '/alerts/:id/acknowledge', { draftPermission: 'ALERT_MANAGE' }, ctx => {
+  route('GET', '/alerts/:id', { permission: 'ALERT_READ' }, ctx => ok(alertView(ctx.store, findAlert(ctx)))),
+  route('POST', '/alerts/:id/acknowledge', { permission: 'ALERT_MANAGE' }, ctx => {
     const alert = findAlert(ctx)
-    if (alert.status !== 'OPEN') throw conflict('Alert is not OPEN')
-    const at = iso(ctx.now)
-    Object.assign(alert, { status: 'ACKNOWLEDGED', acknowledgedAt: at, acknowledgedById: ctx.user!.id, acknowledgedByName: ctx.user!.fullName, updatedAt: at })
-    return ok({ ...alert })
+    if (alert.status === 'RESOLVED') throw conflict('Alert is already resolved')
+    // Acknowledging an ACKNOWLEDGED alert again returns it unchanged.
+    if (alert.status === 'OPEN') Object.assign(alert, { status: 'ACKNOWLEDGED', acknowledgedAt: iso(ctx.now), acknowledgedBy: ctx.user!.email })
+    return ok(alertView(ctx.store, alert))
   }),
-  route('POST', '/alerts/:id/resolve', { draftPermission: 'ALERT_MANAGE' }, ctx => {
+  route('POST', '/alerts/:id/resolve', { permission: 'ALERT_MANAGE' }, ctx => {
     let note: string | null = null
-    if (ctx.body !== undefined) {
+    if (ctx.body !== undefined && ctx.body !== null) {
       const form = new Form(ctx.body, ['note'])
       note = form.optionalText('note', 500)
       form.done()
     }
     const alert = findAlert(ctx)
-    if (alert.status === 'RESOLVED') throw conflict('Alert is already RESOLVED')
+    if (alert.status === 'RESOLVED') throw conflict('Alert is already resolved')
     // ck_alerts_resolution: resolved_at >= triggered_at.
     const at = iso(Math.max(ctx.now, Date.parse(alert.triggeredAt)))
-    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedById: ctx.user!.id, resolvedByName: ctx.user!.fullName, resolutionNote: note, updatedAt: at })
-    return ok({ ...alert })
+    Object.assign(alert, { status: 'RESOLVED', resolvedAt: at, resolvedBy: ctx.user!.email, resolutionNote: note })
+    return ok(alertView(ctx.store, alert))
+  }),
+  // POST /alerts/{alertId}/work-orders (WORK_ORDER_MANAGE): the work order is stored as a work ticket of the mock so it
+  // shows on the ticket screens; the answer is shaped as WorkOrderResponse.
+  route('POST', '/alerts/:id/work-orders', { permission: 'WORK_ORDER_MANAGE' }, ctx => {
+    const data = (ctx.body ?? {}) as Record<string, unknown>
+    const form = new Form(data, ['type', 'title', 'description', 'priority', 'assigneeId', 'dueAt'])
+    const type = data.type === undefined || data.type === null ? null : form.oneOf('type', WORK_ORDER_TYPES)
+    const priority = data.priority === undefined || data.priority === null ? null : form.oneOf('priority', WORK_ORDER_PRIORITIES)
+    const title = form.optionalText('title', 200)
+    const description = form.optionalText('description', 1000)
+    let dueAt: string | null = null
+    if (data.dueAt !== undefined && data.dueAt !== null) {
+      const due = form.instant('dueAt')
+      if (due && due <= ctx.now) form.reject('dueAt', 'Must be in the future')
+      else if (due) dueAt = iso(due)
+    }
+    const assignee = data.assigneeId !== undefined && data.assigneeId !== null ? ticketAssignee(ctx, form, data.assigneeId) : null
+    form.done()
+    const alert = findAlert(ctx)
+    if (alert.status === 'RESOLVED') throw conflict('ALERT_RESOLVED: the alert is already resolved')
+    const active = activeTicketOf(ctx.store, alert.id)
+    if (active) throw conflict(`ALERT_ALREADY_HANDLED: the alert is handled by work order ${ticketCode(active)} (${active.id})`)
+    const machine = ctx.store.machines.find(candidate => candidate.id === alert.machineId)!
+    const restock = alert.type === 'LOW_STOCK' || alert.type === 'PRODUCT_EXPIRED' || alert.type === 'PRODUCT_EXPIRING'
+    const at = iso(ctx.now)
+    const ticket: MockTicket = {
+      id: newId(), type: type ?? (restock ? 'RESTOCK' : 'MAINTENANCE'), status: 'OPEN', title: title ?? alert.title, description, machineId: machine.id, machineCode: machine.code, machineName: machine.name,
+      alertId: alert.id, dueAt, assigneeId: null, assigneeName: null, createdById: ctx.user!.id, createdByName: ctx.user!.fullName,
+      assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
+      completedAt: null, completedById: null, completedByName: null, completionNote: null,
+      cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: at, updatedAt: at,
+    }
+    // Same planning as a restock ticket created by hand (the ticket screens of FM7 read it).
+    if (ticket.type === 'RESTOCK') {
+      const restockLines = planRestockLines(ctx.store, ticket.machineId, ctx.now)
+      Object.assign(ticket, { restockLines, reconciliation: restockReconciliation(restockLines) })
+    }
+    if (assignee) assignTo(ticket, assignee, ctx.user!, at)
+    ctx.store.tickets.push(ticket)
+    if (alert.status === 'OPEN') Object.assign(alert, { status: 'ACKNOWLEDGED', acknowledgedAt: at, acknowledgedBy: ctx.user!.email })
+    const person = (id: string | null | undefined, fullName: string | null | undefined) => (id ? { id, fullName: fullName ?? '' } : undefined)
+    return created({
+      id: ticket.id, code: ticketCode(ticket), type: ticket.type, source: 'ALERT', machineId: machine.id, machineCode: machine.code, machineName: machine.name,
+      title: ticket.title, description: ticket.description, priority: priority ?? (alert.severity === 'CRITICAL' ? 'URGENT' : alert.severity === 'WARNING' ? 'HIGH' : 'NORMAL'),
+      status: ticket.assigneeId ? 'ASSIGNED' : 'OPEN', assignee: person(ticket.assigneeId, ticket.assigneeName), createdBy: person(ctx.user!.id, ctx.user!.fullName),
+      dueAt, overdue: false, linkedAlerts: [{ alertId: alert.id }], createdAt: at, updatedAt: at,
+    })
   }),
 
   // ---- work tickets: draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
@@ -1183,7 +1233,7 @@ export const routes: Route[] = [
   ...refundRoutes,
 ]
 
-export interface RaiseAlertInput { type?: MockAlert['type']; severity?: MockAlert['severity']; machineId?: string; title?: string; message?: string | null }
+export interface RaiseAlertInput { type?: MockAlert['type']; severity?: MockAlert['severity']; machineId?: string; title?: string; message?: string | null; errorCode?: string | null }
 
 /**
  * Mock-only control (window.__fvMock.raiseAlert, see index.ts): a machine raises a new OPEN alert now, as the backend
@@ -1193,40 +1243,54 @@ export function raiseAlert(store: MockStore, now: number, input: RaiseAlertInput
   const machine = store.machines.find(candidate => candidate.id === input.machineId) ?? store.machines[0]
   const at = iso(now)
   const alert: MockAlert = {
-    id: newId(), machineId: machine.id, machineCode: machine.code, machineName: machine.name,
-    type: input.type ?? 'HIGH_TEMPERATURE', severity: input.severity ?? 'CRITICAL', title: input.title ?? 'Temperature above range',
-    message: input.message === undefined ? 'Reading of 12.00 C exceeds the 8.00 C maximum.' : input.message, status: 'OPEN', triggeredAt: at,
-    slotId: null, slotCode: null, orderId: null, orderCode: null, acknowledgedAt: null, acknowledgedById: null, acknowledgedByName: null,
-    resolvedAt: null, resolvedById: null, resolvedByName: null, resolutionNote: null, createdAt: at, updatedAt: at,
+    id: newId(), machineId: machine.id, machineCode: machine.code,
+    type: input.type ?? 'HIGH_TEMPERATURE', severity: input.severity ?? 'CRITICAL', title: input.title ?? 'Nhiệt độ cao',
+    message: input.message === undefined ? 'Nhiệt độ 12.00 °C vượt ngưỡng tối đa 8.00 °C.' : input.message, errorCode: input.errorCode ?? null, status: 'OPEN', triggeredAt: at,
+    slotId: null, slotCode: null, acknowledgedAt: null, acknowledgedBy: null, resolvedAt: null, resolvedBy: null, resolutionNote: null,
   }
   store.alerts.push(alert)
   return alert
 }
 
-/** Heartbeat row of a machine; machines registered during the session start with one that has never connected. */
+/** Presence row of a machine; machines registered during the session start with one that has never connected. */
 function heartbeatOf(store: MockStore, machineId: string): MockHeartbeat {
   let heartbeat = store.heartbeats.find(candidate => candidate.machineId === machineId)
   if (!heartbeat) {
-    heartbeat = { machineId, lastSeenAt: null, reportedAt: null, state: null, firmwareVersion: null, uptimeSeconds: null, rssi: null, dispenseState: null, live: false, bootedAt: null }
+    heartbeat = { machineId, lastHeartbeatAt: null, lastOfflineAt: null, firmwareVersion: null, uptimeSeconds: null, wifiRssi: null, freeHeapBytes: null, dispenseState: null, live: false, bootedAt: null }
     store.heartbeats.push(heartbeat)
   }
   return heartbeat
 }
-function heartbeatView(heartbeat: MockHeartbeat) {
-  const { machineId, lastSeenAt, reportedAt, state, firmwareVersion, uptimeSeconds, rssi, dispenseState } = heartbeat
-  return { machineId, lastSeenAt, reportedAt, state, firmwareVersion, uptimeSeconds, rssi, dispenseState }
+
+const CONNECTIVITY = ['ONLINE', 'WARNING', 'OFFLINE', 'NEVER_SEEN'] as const
+const MACHINE_WARNING_AFTER_MS = 60_000
+/**
+ * MachineResponse as the backend derives it (docs/machine-health.md): connectivity from lastSeenAt and the Last Will
+ * (NEVER_SEEN, OFFLINE, WARNING after 60 s, OFFLINE after 180 s) and the last heartbeat's diagnostics.
+ */
+export function machineView(store: MockStore, machine: MockStore['machines'][number], now: number): MockStore['machines'][number] {
+  const presence = store.heartbeats.find(candidate => candidate.machineId === machine.id)
+  const seen = machine.lastSeenAt ? Date.parse(machine.lastSeenAt) : NaN
+  const offline = presence?.lastOfflineAt ? Date.parse(presence.lastOfflineAt) : NaN
+  const connectivity: typeof CONNECTIVITY[number] = !Number.isFinite(seen) ? 'NEVER_SEEN'
+    : offline >= seen || now - seen > MACHINE_OFFLINE_AFTER_MS ? 'OFFLINE'
+    : now - seen > MACHINE_WARNING_AFTER_MS ? 'WARNING' : 'ONLINE'
+  return {
+    ...machine, connectivity, lastHeartbeatAt: presence?.lastHeartbeatAt ?? null, firmwareVersion: presence?.firmwareVersion ?? null,
+    uptimeSeconds: presence?.uptimeSeconds ?? null, wifiRssi: presence?.wifiRssi ?? null, freeHeapBytes: presence?.freeHeapBytes ?? null,
+  }
 }
 
 /**
  * What MachineMessageHandler does in the background, applied before each request: a machine whose heartbeat is live
- * keeps talking, so its last_seen_at (and the heartbeat) is "now". A stopped one keeps its last value and turns OFFLINE
- * on screen 180 s later.
+ * keeps talking, so its last_seen_at and last heartbeat are "now". A stopped one keeps its last value and turns WARNING
+ * after 60 s and OFFLINE after 180 s.
  */
 export function syncHeartbeats(store: MockStore, now: number) {
   for (const heartbeat of store.heartbeats) {
     if (!heartbeat.live) continue
     const at = iso(now)
-    Object.assign(heartbeat, { lastSeenAt: at, reportedAt: at, state: 'ONLINE', uptimeSeconds: heartbeat.bootedAt ? Math.max(0, Math.floor((now - Date.parse(heartbeat.bootedAt)) / 1000)) : null })
+    Object.assign(heartbeat, { lastHeartbeatAt: at, uptimeSeconds: heartbeat.bootedAt ? Math.max(0, Math.floor((now - Date.parse(heartbeat.bootedAt)) / 1000)) : null })
     const machine = store.machines.find(candidate => candidate.id === heartbeat.machineId)
     if (machine) machine.lastSeenAt = at
   }
@@ -1241,7 +1305,7 @@ export function setHeartbeat(store: MockStore, now: number, machine: string, liv
   if (!target) throw new Error(`Không có máy ${machine}`)
   const heartbeat = heartbeatOf(store, target.id)
   const at = iso(now)
-  Object.assign(heartbeat, { live, lastSeenAt: at, reportedAt: at, state: 'ONLINE', bootedAt: heartbeat.bootedAt ?? at })
+  Object.assign(heartbeat, { live, lastHeartbeatAt: at, bootedAt: heartbeat.bootedAt ?? at })
   target.lastSeenAt = at
   return at
 }
@@ -1319,7 +1383,13 @@ function completeMaintenanceCommand(store: MockStore, command: MockMaintenanceCo
     Object.assign(command, { status: 'FAILED', failureCode: 'NOT_IN_FAULT', completedAt: at, updatedAt: at })
     return
   }
-  if (command.type === 'RESET' && heartbeat) heartbeat.dispenseState = 'IDLE'
+  if (command.type === 'RESET' && heartbeat) {
+    heartbeat.dispenseState = 'IDLE'
+    // The firmware answers a RESET with FAULT_CLEARED (mqtt-contract §4.2), stored in the machine history.
+    const code = store.machineEvents.filter(event => event.machineId === command.machineId && event.eventType === 'FAULT').sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+    const details = { code: (code?.payload as { details?: { code?: unknown } } | undefined)?.details?.code ?? null }
+    store.machineEvents.push({ id: newId(), machineId: command.machineId, eventType: 'FAULT_CLEARED', source: 'MACHINE', messageId: `mock-${randomCode(8)}`, payload: { eventType: 'FAULT_CLEARED', details }, createdAt: at })
+  }
   let removed: number | null = null
   if (command.slotId) {
     const present = presentItems(store, command.slotId).filter(item => REMOVABLE.includes(item.status))
@@ -1359,4 +1429,46 @@ export function advanceMaintenanceCommands(ctx: HandlerContext) {
       Object.assign(command, { status: 'TIMEOUT', completedAt: iso(now), updatedAt: iso(now) })
     }
   }
+}
+
+// ---- alerts and telemetry helpers (backend #53, #56, #58)
+
+const ALERT_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'RESOLVED'] as const
+const ALERT_SEVERITIES = ['INFO', 'WARNING', 'CRITICAL'] as const
+const ALERT_TYPES = ['HIGH_TEMPERATURE', 'LOW_TEMPERATURE', 'HIGH_HUMIDITY', 'MACHINE_OFFLINE', 'PRODUCT_EXPIRED', 'PRODUCT_EXPIRING', 'DISPENSE_FAILED', 'LOW_STOCK', 'HARDWARE_FAULT'] as const
+const WORK_ORDER_TYPES = ['RESTOCK', 'MAINTENANCE', 'INCIDENT'] as const
+const WORK_ORDER_PRIORITIES = ['LOW', 'NORMAL', 'HIGH', 'URGENT'] as const
+const SEVERITY_RANK: Record<MockAlert['severity'], number> = { CRITICAL: 0, WARNING: 1, INFO: 2 }
+const FINISHED_TICKETS: readonly string[] = ['COMPLETED', 'CANCELLED']
+
+/** Code of a mock work ticket in the backend's format (WO-yyyyMMdd-XXXX), stable for one ticket. */
+export function ticketCode(ticket: Pick<MockTicket, 'id' | 'createdAt'>): string {
+  return `WO-${ticket.createdAt.slice(0, 10).replaceAll('-', '')}-${ticket.id.replaceAll('-', '').slice(-4).toUpperCase()}`
+}
+function activeTicketOf(store: MockStore, alertId: string): MockTicket | undefined {
+  return store.tickets.find(ticket => ticket.alertId === alertId && !FINISHED_TICKETS.includes(ticket.status))
+}
+/** AlertResponse: the stored alert plus the unfinished work order handling it (issue #66). */
+function alertView(store: MockStore, alert: MockAlert) {
+  const ticket = activeTicketOf(store, alert.id)
+  return { ...alert, workOrderId: ticket?.id ?? null, workOrderCode: ticket ? ticketCode(ticket) : null }
+}
+
+const newestReading = (a: { recordedAt: string; id: number }, b: { recordedAt: string; id: number }) => b.recordedAt.localeCompare(a.recordedAt) || b.id - a.id
+
+/** from (inclusive) / to (exclusive) ISO instants: 400 when malformed, missing while required, not ordered or too far apart. */
+function instantRange(query: URLSearchParams, required: boolean, maxSpanMs?: number): { from?: number; to?: number } {
+  const errors: Record<string, string> = {}
+  const read = (name: string) => {
+    const raw = query.get(name)
+    if (!raw) { if (required) errors[name] = 'Required'; return undefined }
+    const value = Date.parse(raw)
+    if (!Number.isFinite(value) || !/T/.test(raw)) { errors[name] = 'Must be an ISO-8601 instant'; return undefined }
+    return value
+  }
+  const from = read('from'), to = read('to')
+  if (from !== undefined && to !== undefined && to <= from) errors.to = 'Must be after from'
+  else if (maxSpanMs && from !== undefined && to !== undefined && to - from > maxSpanMs) errors.to = 'Range must be at most 31 days'
+  if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
+  return { from, to }
 }

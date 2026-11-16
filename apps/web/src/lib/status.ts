@@ -21,9 +21,11 @@ export const STATUS_CATALOG = {
     MAINTENANCE: { label: 'Bảo trì', tone: 'warning', icon: 'wrench', description: 'Máy tạm dừng nhận đơn. Kiểm tra máy rồi để quản trị viên bật lại.' },
   },
   connection: {
-    // Derived on the web from lastSeenAt (src/admin/connection.ts): OFFLINE after 180 s without any message.
-    ONLINE: { label: 'Trực tuyến', tone: 'success', icon: 'online', description: 'Máy đã gửi tín hiệu về hệ thống trong 3 phút gần nhất.' },
-    OFFLINE: { label: 'Mất kết nối (OFFLINE)', tone: 'danger', icon: 'offline', description: 'Máy không gửi tín hiệu quá 180 giây. Kiểm tra nguồn điện và Wi-Fi của máy.' },
+    // MachineResponse.connectivity (docs/machine-health.md), followed on the clock by src/admin/connection.ts.
+    ONLINE: { label: 'Trực tuyến', tone: 'success', icon: 'online', description: 'Máy đã gửi tín hiệu về hệ thống trong 60 giây gần nhất.' },
+    WARNING: { label: 'Chậm tín hiệu', tone: 'warning', icon: 'signal', description: 'Máy im lặng hơn 60 giây (lỡ hai nhịp heartbeat); quá 180 giây sẽ chuyển Mất kết nối. Theo dõi thêm hoặc kiểm tra Wi-Fi của máy.' },
+    OFFLINE: { label: 'Mất kết nối (OFFLINE)', tone: 'danger', icon: 'offline', description: 'Máy không gửi tín hiệu quá 180 giây hoặc đã báo ngắt kết nối. Kiểm tra nguồn điện và Wi-Fi của máy.' },
+    NEVER_SEEN: { label: 'Chưa từng kết nối', tone: 'neutral', icon: 'dashed', description: 'Máy chưa gửi tín hiệu nào về hệ thống. Kiểm tra cấu hình mã máy, Wi-Fi và tài khoản MQTT.' },
   },
   box: {
     AVAILABLE: { label: 'Sẵn sàng', tone: 'success', icon: 'boxOk', description: 'Hộp nằm trong ngăn và có thể bán.' },

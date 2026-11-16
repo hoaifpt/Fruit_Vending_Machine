@@ -38,10 +38,13 @@ for (const [domain, [path, name]] of Object.entries(JAVA_SOURCES)) {
   })
 }
 
-test('connection badges match the MQTT status topic states', () => {
-  const states = read('docs/mqtt-dispense.md').match(/"state":"([A-Z_\\|]+)"/)
-  assert.ok(states, 'docs/mqtt-dispense.md không còn mô tả state của topic status')
-  assert.deepEqual([...keys('connection')].sort(), states[1].split('\\|').sort())
+test('connection badges match the connectivity values of docs/machine-health.md', () => {
+  // The "Kết nối (tính ra, không lưu)" block: one rule per line, the value after the condition (two spaces or more).
+  const block = read('docs/machine-health.md').replaceAll('\r\n', '\n').match(/## Kết nối[^\n]*\n+```text\n([\s\S]*?)```/)
+  assert.ok(block, 'docs/machine-health.md không còn mô tả các giá trị kết nối')
+  const values = [...new Set(block[1].split('\n').map(line => line.match(/\s{2,}([A-Z][A-Z_]+)\b/)?.[1]).filter(Boolean))].sort()
+  assert.deepEqual(values, ['NEVER_SEEN', 'OFFLINE', 'ONLINE', 'WARNING'])
+  assert.deepEqual([...keys('connection')].sort(), values)
 })
 
 test('ticket badges match WorkOrderStatus, or the SRS vocabulary until that enum exists', () => {

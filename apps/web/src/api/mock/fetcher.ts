@@ -8,7 +8,7 @@ import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'dispense-commands', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'incident-reports', 'refunds', 'reports'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'incident-reports', 'refunds', 'reports'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -25,7 +25,7 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   auth: 'auth', users: 'users', products: 'products', machines: 'machines', 'product-batches': 'batches',
   inventory: 'inventory', orders: 'orders', payments: 'payments', 'payment-webhook-logs': 'webhook-logs', kiosk: 'kiosk',
   roles: 'roles', permissions: 'roles',
-  // Draft of backend 3.6 (api-contract/drafts/alerts.yaml).
+  // Alerts of backend #58 (api.yaml); POST /alerts/{id}/work-orders belongs here too.
   alerts: 'alerts',
   // Draft of backend 5.1 (api-contract/drafts/refunds.yaml, FE 8.1).
   refunds: 'refunds',
@@ -42,12 +42,10 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
 export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/kiosk-credentials(\/|$)/.test(path)) return 'kiosk-credentials'
   if (/^\/machines\/[^/]+\/slots(\/|$)/.test(path)) return 'slots'
-  // Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): its own group, so it can be mocked while orders are real.
-  if (/^\/orders\/[^/]+\/dispense-commands(\/|$)/.test(path)) return 'dispense-commands'
   // Draft of backend 5.1 (api-contract/drafts/refunds.yaml): recording a refund belongs with GET /refunds, not orders.
   if (/^\/orders\/[^/]+\/refund\/?$/.test(path)) return 'refunds'
-  // Draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml): its own group, like dispense-commands.
-  if (/^\/machines\/[^/]+\/(heartbeat|sensor-readings|events)(\/|$)/.test(path)) return 'telemetry'
+  // Telemetry and events of backend #53/#56 (api.yaml): their own group, so they can be mocked while machines are real.
+  if (/^\/machines\/[^/]+\/(telemetry|events)(\/|$)/.test(path)) return 'telemetry'
   // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): public report form of FE 8.2.
   if (/^\/public\/incident-reports(\/|$)/.test(path)) return 'incident-reports'
   // Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): its own group, like telemetry.

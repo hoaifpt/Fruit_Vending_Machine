@@ -119,9 +119,9 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
       actions={canWrite ? <Button type="button" variant="outline" data-focus-key="machine-edit" onClick={() => setEditing(true)}><Pencil aria-hidden="true" />Sửa cấu hình</Button> : undefined} />
     <div role="group" aria-label="Trạng thái máy"><dl className="mb-4 flex flex-wrap items-start gap-x-8 gap-y-3 text-sm">
       <div className="grid gap-1"><dt className="text-xs text-muted-foreground">Trạng thái quản trị</dt><dd><StatusBadge domain="machine" value={data.status} describe={false} /></dd></div>
-      <div className="grid gap-1"><dt className="text-xs text-muted-foreground">Kết nối</dt><dd><ConnectionStatus lastSeenAt={data.lastSeenAt} source={machine} /></dd></div>
+      <div className="grid gap-1"><dt className="text-xs text-muted-foreground">Kết nối</dt><dd><ConnectionStatus lastSeenAt={data.lastSeenAt} connectivity={data.connectivity} source={machine} /></dd></div>
     </dl></div>
-    <OfflineNotice lastSeenAt={data.lastSeenAt} source={machine} />
+    <OfflineNotice lastSeenAt={data.lastSeenAt} connectivity={data.connectivity} source={machine} />
     <Tabs ref={tabsRef} value={tab} onValueChange={value => openTab(value as DetailTab)}>
       <TabsList aria-label="Thông tin máy">
         {visibleTabs(canKeys).map(name => <TabsTrigger key={name} value={name}>{TAB_LABELS[name]}</TabsTrigger>)}

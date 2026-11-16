@@ -3,7 +3,7 @@
 // Targets narrow it to groups or path prefixes: `?scenario=403:orders,payments`, `?scenario=409:/inventory/load`.
 // `expire`: tokens issued before the scenario started get 401 (session expired once); signing in again works,
 // so the return to the previous page can be tested. Unlike `401`, it does not fail the new session.
-// `missing`: 404 as a backend that has not shipped the endpoint yet (use with a target, e.g. `missing:dispense-commands`).
+// `missing`: 404 as a backend that has not shipped the endpoint yet (use with a target, e.g. `missing:telemetry`).
 // Kiosk-only states (no error, they change what the simulated backend does): `maintenance` shows the kiosk machine in
 // MAINTENANCE; `dispense-failed` / `dispense-slow` make a paid kiosk order end DISPENSE_FAILED / stay DISPENSING.
 export const SCENARIO_NAMES = ['empty', 'slow', 'error500', 'network', '401', '403', '400', '409', 'pending', 'expire', 'missing', 'maintenance', 'dispense-failed', 'dispense-slow'] as const

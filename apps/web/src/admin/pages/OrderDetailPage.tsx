@@ -1,30 +1,29 @@
 // T1 Chi tiết đơn (FE 6.1), read only: the order timeline (created → payment → dispensing → end), what needs a person,
-// the payments (one click to the payment, ADMIN), the bowls held for the order (one click to their slot on the
-// inventory map and to their history), the dispense commands and the lines at the price of the order.
-// Order, bowls and payments come from GET /orders/{id} (real API). Dispense commands come from the DRAFT
-// GET /orders/{orderId}/dispense-commands (api-contract/drafts/dispense-commands.yaml), mocked until backend issue 3.3
-// ships; on the real backend that path answers 404 today and the section says "chưa có dữ liệu" without breaking the page.
-// No action changes the order: status is driven by the kiosk, the payment webhook and the machine.
-import type { ReactNode } from 'react'
+// the payments (one click to the payment, ADMIN), the bowls held for the order with how far dispensing got (one click to
+// their slot on the inventory map and to their history) and the lines at the price of the order.
+// Everything comes from GET /orders/{id} (api.yaml). The backend has no per-order dispense command endpoint: dispensing
+// is read from the order status and the allocations (order-detail.ts); the commands themselves are in the machine's
+// event history, one click away. No action changes the order: status is driven by the kiosk, the payment webhook and
+// the machine.
 import { useId, useState } from 'react'
 import { Circle, CircleCheck, CircleDot, CircleSlash, CircleX, TriangleAlert } from 'lucide-react'
 import { ApiError } from '../../api/client.ts'
-import { dispenseCommandsApi, ordersApi, slotsApi } from '../../api/resources.ts'
-import type { DispenseCommand, OrderDetail, OrderLine } from '../../api/resources.ts'
+import { ordersApi, slotsApi } from '../../api/resources.ts'
+import type { OrderDetail, OrderLine } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime, formatMoney } from '../../lib/format.ts'
 import { lineView, orderDiscount } from '../../lib/price.ts'
 import { DISCOUNT_TAG, PriceTag } from '../../components/ui/price-tag.tsx'
-import { Badge, DataTable, ErrorState, Forbidden, Link, Loading, PageHead } from '../kit.tsx'
+import { Badge, DataTable, ErrorState, Link, Loading, PageHead } from '../kit.tsx'
 import {
-  DISPENSE_MISSING, LIVE_POLL_MS, STEP_STATE_TEXT, allocationRows, commandEndedAt, commandNote, dispenseAvailability, noCommandText, inventoryMapPath, isLiveOrder, orderAttention, orderTimeline,
+  LIVE_POLL_MS, STEP_STATE_TEXT, allocationRows, dispenseTally, inventoryMapPath, isLiveOrder, machineEventsPath, noCommandText, orderAttention, orderTimeline,
   paymentPath, shortId, slotIdsByCode, wasPaid,
 } from '../order-detail.ts'
+import type { DispenseTally } from '../order-detail.ts'
 import type { AllocationRow, StepState, TimelineStep } from '../order-detail.ts'
 import { refundEntry, refundPathFor } from '../refunds.ts'
 import { useApi } from '../useApi.ts'
-import type { ApiState } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 
 const BACK = { to: '/admin/orders', label: 'Danh sách đơn hàng' }
@@ -45,13 +44,6 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
   // State adjusted during render (React's pattern for state derived from a previous render), not in an effect.
   if (nowLive !== live) setLive(nowLive)
   const paid = !!current && wasPaid(current)
-  const status = current?.status ?? ''
-  // DRAFT endpoint (backend 3.3): asked only once the order was paid; an unpaid order has no command by definition.
-  // Once the backend has said the endpoint does not exist (404/405/501), stop asking: latched for this order.
-  const [commandsMissing, setCommandsMissing] = useState(false)
-  const commands = useApi(signal => (paid ? dispenseCommandsApi.listForOrder(orderId, signal) : Promise.resolve(undefined)),
-    `${orderId}|commands|${paid}|${status}`, { pollMs: nowLive && paid && !commandsMissing ? LIVE_POLL_MS : undefined })
-  if (!commandsMissing && !!commands.error && dispenseAvailability(commands.error) === 'missing') setCommandsMissing(true)
   // Allocations carry the slot code only: the machine's slots (first 100 by code) turn it into the slot id of the map link.
   const machineId = current?.machineId ?? ''
   const slots = useApi(signal => (canInventory && canMachines && machineId ? slotsApi.list(machineId, { page: 0, size: 100, sort: 'slotCode,asc' }, signal) : Promise.resolve(undefined)),
@@ -70,10 +62,9 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
   }
   if (!current) return <><PageHead title="Đơn hàng" back={BACK} /><Loading label="Đang tải đơn hàng…" rows={6} /></>
 
-  const commandList = commands.data
-  const rows = allocationRows(current, commandList ?? [], slotIdsByCode(slots.data?.content))
-  const attention = orderAttention(current, commandList)
-  const steps = orderTimeline(current, commandList)
+  const rows = allocationRows(current, slotIdsByCode(slots.data?.content))
+  const attention = orderAttention(current)
+  const steps = orderTimeline(current)
   const updatedAt = order.updatedAt
   // Near-expiry discount (FE 7.5, draft pricing-discount.yaml): only shown when the server reports one.
   const discount = orderDiscount(current)
@@ -118,8 +109,8 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
       </section>
     </div>
     <Payments order={current} canPayments={canPayments} />
-    <Boxes rows={rows} canInventory={canInventory} commandsKnown={!!commandList} slotsFailed={!!slots.error} slotsPending={slots.loading && !slots.data && !slots.error} />
-    <Commands state={commands} order={current} paid={paid} missing={commandsMissing} rows={rows} />
+    <Boxes rows={rows} canInventory={canInventory} slotsFailed={!!slots.error} slotsPending={slots.loading && !slots.data && !slots.error}
+      paid={paid} order={current} tally={dispenseTally(current)} eventsPath={canMachines ? machineEventsPath(current.machineId) : ''} />
     <section className={PANEL} aria-labelledby="items-title">
       <h2 id="items-title" className={HEADING}>Sản phẩm (giá tại thời điểm đặt)</h2>
       <DataTable state={NONE} rows={current.items ?? []} rowKey={item => item.id ?? ''} caption="Sản phẩm của đơn" empty="Đơn không có dòng sản phẩm." columns={[
@@ -193,14 +184,23 @@ function Payments({ order, canPayments }: { order: OrderDetail; canPayments: boo
 
 // ---- bowls
 
-function Boxes({ rows, canInventory, commandsKnown, slotsFailed, slotsPending }: {
-  rows: AllocationRow[]; canInventory: boolean; commandsKnown: boolean; slotsFailed: boolean
+function Boxes({ rows, canInventory, slotsFailed, slotsPending, paid, order, tally, eventsPath }: {
+  rows: AllocationRow[]; canInventory: boolean; slotsFailed: boolean
   /** The machine's slots are still loading: a slot link now would open the whole machine, then change under the pointer. */
   slotsPending: boolean
+  paid: boolean; order: OrderDetail; tally: DispenseTally
+  /** Machine event history (dispense commands as events); '' without MACHINE_READ. */
+  eventsPath: string
 }) {
   const hintId = useId()
   return <section className={PANEL} aria-labelledby="alloc-title" aria-describedby={hintId}>
-    <h2 id="alloc-title" className={HEADING}>Hộp của đơn</h2>
+    <h2 id="alloc-title" className={HEADING}>Hộp của đơn và nhả hàng</h2>
+    <p className="mb-2! text-[14px]" aria-live="polite">
+      {!paid ? noCommandText(order)
+        : tally.total ? <>Đã nhả <strong>{tally.dispensed}/{tally.total}</strong> hộp{tally.held ? <>, {tally.held} hộp {isLiveOrder(order) ? 'đang chờ máy nhả' : 'nhả lỗi đang chặn ngăn'}</> : null}{tally.released ? <>, {tally.released} hộp đã trả lại ngăn</> : null}.</>
+        : 'Chưa có hộp nào được giữ cho đơn này.'}
+      {paid && eventsPath ? <> <Link to={eventsPath} className={LINK}>Xem sự kiện nhả hàng của máy</Link></> : null}
+    </p>
     <p id={hintId} className={HINT}>
       {canInventory
         ? <>Bấm mã ngăn để mở ngăn trên sơ đồ tồn kho, bấm mã hộp để xem lịch sử của hộp.{slotsFailed ? ' Chưa đọc được danh sách ngăn của máy nên link ngăn mở sơ đồ cả máy.' : ''}</>
@@ -218,51 +218,8 @@ function Boxes({ rows, canInventory, commandsKnown, slotsFailed, slotsPending }:
         { head: 'Lô', secondary: true, cell: row => row.allocation.batchCode ?? '—' },
         { head: 'Hạn lô', secondary: true, cell: row => formatDateTime(row.allocation.batchExpiresAt) },
         { head: 'Giữ hộp', cell: row => <Badge domain="allocation" value={row.allocation.status} /> },
-        ...(commandsKnown ? [{ head: 'Lệnh nhả hàng', cell: (row: AllocationRow) => row.command ? <Badge domain="dispense" value={row.command.status} /> : '—' }] : []),
         { head: 'Trả lại ngăn lúc', secondary: true, cell: row => formatDateTime(row.allocation.releasedAt) },
       ]} />
-  </section>
-}
-
-// ---- dispense commands (DRAFT API, backend 3.3)
-
-function Commands({ state, order, paid, missing, rows }: {
-  state: ApiState<DispenseCommand[] | undefined>; order: OrderDetail; paid: boolean
-  /** The backend has no commands endpoint yet (latched, so a reload in between does not flash a spinner). */
-  missing: boolean; rows: AllocationRow[]
-}) {
-  // Overdue is judged against when the commands were read, not the render time (stable between renders).
-  const now = state.updatedAt ?? 0
-  let body: ReactNode
-  if (!paid) body = <p className="text-[14px] text-muted-foreground">{noCommandText(order)}</p>
-  else if (missing) body = <p role="status" className="text-[14px] text-muted-foreground">{DISPENSE_MISSING}</p>
-  else if (state.error && !state.data) {
-    const availability = dispenseAvailability(state.error)
-    body = availability === 'missing' ? <p role="status" className="text-[14px] text-muted-foreground">{DISPENSE_MISSING}</p>
-      : availability === 'forbidden' ? <Forbidden />
-      : <ErrorState error={state.error} retry={state.reload} />
-  } else if (!state.data) body = <Loading label="Đang tải lệnh nhả hàng…" rows={2} />
-  else {
-    const slotOf = (command: DispenseCommand) => rows.find(row => row.allocation.inventoryItemId === command.inventoryItemId)
-    body = <DataTable state={state} rows={state.data} rowKey={command => command.id} caption="Lệnh nhả hàng của đơn"
-      empty="Đơn đã thanh toán nhưng máy chủ chưa ghi lệnh nhả hàng nào." columns={[
-        { head: 'Mã lệnh', nowrap: true, cell: command => <span className="font-mono text-[13px]">{command.commandCode}</span> },
-        { head: 'Ngăn', nowrap: true, cell: command => command.slotCode ?? slotOf(command)?.allocation.slotCode ?? '—' },
-        { head: 'Trạng thái', cell: command => <Badge domain="dispense" value={command.status} /> },
-        { head: 'Tạo lúc', cell: command => formatDateTime(command.createdAt) },
-        { head: 'Gửi lúc', secondary: true, cell: command => formatDateTime(command.sentAt) },
-        { head: 'Máy nhận lúc', secondary: true, cell: command => formatDateTime(command.acknowledgedAt) },
-        { head: 'Kết thúc lúc', cell: command => {
-          const ended = commandEndedAt(command)
-          return ended.approximate ? <>{formatDateTime(ended.at)} <span className="block text-xs text-muted-foreground">(lần cập nhật cuối; lệnh chưa từng gửi được)</span></> : formatDateTime(ended.at)
-        } },
-        { head: 'Diễn giải', cell: command => <span className="text-[13px]">{commandNote(command, now)}</span> },
-      ]} />
-  }
-  return <section className={PANEL} aria-labelledby="dispense-title">
-    <h2 id="dispense-title" className={HEADING}>Lệnh nhả hàng</h2>
-    {paid && !missing && <p className={HINT}>Mỗi hộp đã trả tiền có một lệnh. Lệnh chưa được máy phản hồi được gửi lại sau mỗi 5 giây với cùng mã; quá 60 giây chưa xong thì chuyển “Quá thời gian”.</p>}
-    {body}
   </section>
 }
 

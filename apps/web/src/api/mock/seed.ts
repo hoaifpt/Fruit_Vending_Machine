@@ -2,9 +2,6 @@
 // no accounts, kiosk keys, orders or payments, so those rows are invented here to exercise the screens.
 // MOCK_PASSWORDS are fake values for the mock only; they exist nowhere else.
 import type { components } from '../schema'
-import type { components as DispenseDraft } from '../drafts/dispense-commands'
-import type { components as AlertsDraft } from '../drafts/alerts'
-import type { components as TelemetryDraft } from '../drafts/machine-telemetry'
 import type { MockIncidentReport } from './incident-reports.ts'
 import { seedRefunds } from './refunds.ts'
 import type { MockRefund } from './refunds.ts'
@@ -42,17 +39,26 @@ export type MockWebhookLog = Omit<S['PaymentWebhookLogDetailResponse'], 'rawPayl
 export type MockPayment = Omit<S['PaymentDetailResponse'], 'orderCode' | 'machineCode'> & {
   id: string; orderId: string; provider: string; status: NonNullable<S['PaymentDetailResponse']['status']>; amount: number; createdAt: string
 }
-/** Draft of backend 3.3 (api-contract/drafts/dispense-commands.yaml): one command per paid bowl. */
-export type MockDispenseCommand = DispenseDraft['schemas']['DispenseCommandResponse']
-/** Draft of backend 3.6 (api-contract/drafts/alerts.yaml): an alert of a machine, people named by fullName. */
-export type MockAlert = AlertsDraft['schemas']['AlertResponse']
 /**
- * Draft of backend 3.4/3.5 (api-contract/drafts/machine-telemetry.yaml). `live`: the machine keeps sending, so every
- * request sees it heard from just now (syncHeartbeats in handlers.ts); `bootedAt` gives its uptime.
+ * AlertResponse of api.yaml (backend #58): actors are emails ("system" for the backend). workOrderId/workOrderCode are
+ * filled when read, from the unfinished work ticket of the alert (alertView in handlers.ts).
  */
-export type MockHeartbeat = TelemetryDraft['schemas']['MachineHeartbeatResponse'] & { live: boolean; bootedAt: string | null }
-export type MockReading = TelemetryDraft['schemas']['SensorReadingResponse']
-export type MockMachineEvent = TelemetryDraft['schemas']['MachineEventResponse']
+export type MockAlert = Omit<S['AlertResponse'], 'workOrderId' | 'workOrderCode'>
+/**
+ * What the backend keeps about a machine's MQTT presence (docs/machine-health.md, V15): the columns behind
+ * MachineResponse.lastHeartbeatAt, firmwareVersion, uptimeSeconds, wifiRssi, freeHeapBytes and the derived connectivity
+ * (lastOfflineAt: the Last Will). `live`: the machine keeps sending, so every request sees it heard from just now
+ * (syncHeartbeats in handlers.ts); `bootedAt` gives its uptime. `dispenseState` is the controller state the mock uses
+ * for RESET (maintenance commands); it is not part of any response.
+ */
+export interface MockHeartbeat {
+  machineId: string; lastHeartbeatAt: string | null; lastOfflineAt: string | null; firmwareVersion: string | null; uptimeSeconds: number | null
+  wifiRssi: number | null; freeHeapBytes: number | null; dispenseState: string | null; live: boolean; bootedAt: string | null
+}
+/** sensor_readings: TelemetryReadingResponse plus the machine and an id for the order tie-break. */
+export type MockReading = S['TelemetryReadingResponse'] & { id: number; machineId: string }
+/** machine_events: MachineEventResponse plus the machine. */
+export type MockMachineEvent = S['MachineEventResponse'] & { machineId: string }
 /** Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml): a job at one machine, people named by fullName. */
 export type MockTicket = TicketsDraft['schemas']['WorkTicketResponse']
 export type MockRestockLine = TicketsDraft['schemas']['RestockLineResponse']
@@ -80,7 +86,6 @@ export interface MockStore {
   transactions: MockTransaction[]
   orders: MockOrder[]
   payments: MockPayment[]
-  dispenseCommands: MockDispenseCommand[]
   alerts: MockAlert[]
   tickets: MockTicket[]
   schedules: MockSchedule[]
@@ -323,8 +328,8 @@ export function createStore(nowMs: number): MockStore {
   const completed = orders.find(order => order.status === 'COMPLETED')!
   payments.push({ id: uuid('a0000000', 99), orderId: completed.id, provider: 'MOCK', status: 'SUCCESS', amount: completed.totalAmount, paymentReference: 'MOCKREFDUP001', transactionId: 'TXNDUP000001', createdAt: iso(-2 * HOUR), paidAt: iso(-2 * HOUR), expiredAt: iso(-HOUR) })
 
-  // Dispense commands (FE 6.1, draft of backend 3.3): one per allocation of every paid order. The second COMPLETED order
-  // finished after the 60 s timeout (a late DISPENSE_COMPLETED), so the "kết quả đến muộn" note is visible.
+  // Order detail (FE 6.1): the second COMPLETED order finished 75 s after payment (a late DISPENSE_COMPLETED of the
+  // machine after the 60 s timeout).
   const lateOrder = orders.filter(order => order.status === 'COMPLETED')[1]
   if (lateOrder?.paidAt) lateOrder.completedAt = new Date(Date.parse(lateOrder.paidAt) + 75_000).toISOString()
   // The third COMPLETED order has two bowls: the first failed (its allocation stays RESERVED, as DispenseService.fail
@@ -386,14 +391,13 @@ export function createStore(nowMs: number): MockStore {
   const mismatched = payments.find(payment => payment.id === uuid('a0000000', 24))!
   webhookLogs.push(call(uuid('b2000000', 24), { ...mismatched, transactionId: 'TXNMISMATCH01' }, plus(mismatched.createdAt, 90_000), 'SUCCESS', 1000))
   for (const payment of payments) if (payment.id.startsWith('a3000000')) webhookLogs.push(call(`b3000000${payment.id.slice(8)}`, payment, payment.paidAt!, 'SUCCESS'))
-  const dispenseCommands = seedDispenseCommands(orders, items, { timeoutOrderId: uuid('93000000', 1) })
   const alerts = seedAlerts(nowMs, { machines, slots, orders, admin: users[0], staff: users[1] })
   const { heartbeats, readings, machineEvents } = seedTelemetry(nowMs, machines)
   const tickets = seedTickets(nowMs, { machines, alerts, users, slots, batches })
   const schedules = seedSchedules(nowMs, { machines, users, tickets })
 
   return {
-    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, dispenseCommands, alerts, tickets, schedules, webhookLogs,
+    users, products, machines, slots, credentials, batches, items, transactions, orders, payments, alerts, tickets, schedules, webhookLogs,
     heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, users }),
     incidentReports: [], incidentRequestLog: [], refunds: seedRefunds(payments, users[0]),
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
@@ -407,46 +411,10 @@ export function seedCommandCode(n: number): string {
 }
 
 /**
- * Commands of the seed orders, following DispenseService: created with the move to PAID (createdAt = paidAt), SENT on
- * the first publish, ACKNOWLEDGED on DISPENSE_ACCEPTED, then SUCCESS (order COMPLETED), FAILED (DISPENSE_ABORTED) or
- * TIMEOUT (no result within 60 s). Order status → command status: PAID → PENDING (not delivered yet), DISPENSING →
- * ACKNOWLEDGED or SENT (alternately), COMPLETED → SUCCESS (FAILED for a bowl whose allocation is still RESERVED),
- * DISPENSE_FAILED → FAILED (TIMEOUT for `timeoutOrderId`), REFUNDED → FAILED.
- */
-function seedDispenseCommands(orders: MockOrder[], items: MockItem[], { timeoutOrderId }: { timeoutOrderId: string }): MockDispenseCommand[] {
-  const at = (base: string, offsetMs: number) => new Date(Date.parse(base) + offsetMs).toISOString()
-  const commands: MockDispenseCommand[] = []
-  let dispensing = 0
-  for (const order of orders) {
-    if (!order.paidAt) continue
-    const paidAt = order.paidAt
-    for (const allocation of order.items.flatMap(line => line.allocations)) {
-      const item = items.find(candidate => candidate.id === allocation.inventoryItemId)
-      if (!item) continue
-      const n = commands.length + 1
-      const base = { id: `94000000-0000-0000-0000-${String(n).padStart(12, '0')}`, commandCode: seedCommandCode(n), orderId: order.id, machineId: order.machineId, slotId: item.slotId, slotCode: allocation.slotCode ?? item.slotCode, inventoryItemId: item.id, createdAt: paidAt }
-      const sent = { sentAt: at(paidAt, 1_000) }
-      const acknowledged = { ...sent, acknowledgedAt: at(paidAt, 3_000) }
-      let row: Omit<MockDispenseCommand, 'updatedAt'>
-      // A bowl still RESERVED in a COMPLETED order is one whose command failed before another bowl succeeded.
-      if (order.status === 'COMPLETED' && allocation.status === 'RESERVED') row = { ...base, ...acknowledged, status: 'FAILED', completedAt: at(paidAt, 20_000) }
-      else if (order.status === 'COMPLETED') row = { ...base, ...acknowledged, status: 'SUCCESS', completedAt: order.completedAt ?? at(paidAt, 30_000) }
-      // DISPENSING starts with the first publish (markSent): alternately still SENT, and already ACKNOWLEDGED.
-      else if (order.status === 'DISPENSING') row = (dispensing++ % 2) ? { ...base, ...sent, status: 'SENT' } : { ...base, ...acknowledged, status: 'ACKNOWLEDGED' }
-      else if (order.status === 'DISPENSE_FAILED' && order.id === timeoutOrderId) row = { ...base, ...sent, status: 'TIMEOUT', completedAt: at(paidAt, 70_000) }
-      else if (order.status === 'DISPENSE_FAILED' || order.status === 'REFUNDED') row = { ...base, ...acknowledged, status: 'FAILED', completedAt: at(paidAt, 20_000) }
-      // PAID: the command exists but was not published yet (machine offline or MQTT off); once sent the order is DISPENSING.
-      else row = { ...base, status: 'PENDING', sentAt: null }
-      commands.push({ ...row, updatedAt: row.completedAt ?? row.acknowledgedAt ?? row.sentAt ?? row.createdAt })
-    }
-  }
-  return commands
-}
-
-/**
- * Alerts of the draft of backend 3.6. The first one is the alert of backend/db/dev/seed.sql (same id, type, title and
- * message); the others cover every status, severity and the slot/order context: 3 OPEN (one CRITICAL), 1 ACKNOWLEDGED,
- * 3 RESOLVED (one closed with a note, one closed without being acknowledged first).
+ * Alerts as the backend raises them (#58). The first one is the alert of backend/db/dev/seed.sql (same id, type, title
+ * and message); the others cover every status, severity, the slot context, error codes and a system resolution:
+ * 3 OPEN (one CRITICAL), 2 ACKNOWLEDGED (one CRITICAL hardware fault), 3 RESOLVED (one closed with a note, one closed
+ * without being acknowledged first, one closed by the system).
  */
 function seedAlerts(nowMs: number, { machines, slots, orders, admin, staff }: { machines: S['MachineResponse'][]; slots: S['MachineSlotResponse'][]; orders: MockOrder[]; admin: MockUser; staff: MockUser }): MockAlert[] {
   const iso = (offset: number) => new Date(nowMs + offset).toISOString()
@@ -454,23 +422,24 @@ function seedAlerts(nowMs: number, { machines, slots, orders, admin, staff }: { 
   const slotOf = (machine: S['MachineResponse'], code: string) => slots.find(slot => slot.machineId === machine.id && slot.slotCode === code)
   const failed = orders.find(order => order.id === uuid('93000000', 1))
   const failedMachine = machines.find(machine => machine.id === failed?.machineId) ?? m1
+  const failedSlot = failed?.items[0]?.allocations[0]?.slotCode ?? 'A1'
   const alert = (n: number, machine: S['MachineResponse'], fields: Partial<MockAlert> & Pick<MockAlert, 'type' | 'severity' | 'title' | 'status'>, triggered: number): MockAlert => ({
-    id: uuid('60000000', n), machineId: machine.id, machineCode: machine.code, machineName: machine.name, message: null,
-    slotId: null, slotCode: null, orderId: null, orderCode: null, acknowledgedAt: null, acknowledgedById: null, acknowledgedByName: null,
-    resolvedAt: null, resolvedById: null, resolvedByName: null, resolutionNote: null,
-    triggeredAt: iso(triggered), createdAt: iso(triggered), updatedAt: iso(triggered), ...fields,
+    id: uuid('60000000', n), machineId: machine.id, machineCode: machine.code, message: null, errorCode: null,
+    slotId: null, slotCode: null, acknowledgedAt: null, acknowledgedBy: null, resolvedAt: null, resolvedBy: null, resolutionNote: null,
+    triggeredAt: iso(triggered), ...fields,
   })
-  const ack = (user: MockUser, at: number) => ({ acknowledgedAt: iso(at), acknowledgedById: user.id, acknowledgedByName: user.fullName, updatedAt: iso(at) })
-  const done = (user: MockUser, at: number, note: string | null = null) => ({ resolvedAt: iso(at), resolvedById: user.id, resolvedByName: user.fullName, resolutionNote: note, updatedAt: iso(at) })
+  const ack = (user: MockUser, at: number) => ({ acknowledgedAt: iso(at), acknowledgedBy: user.email })
+  const done = (by: string, at: number, note: string | null = null) => ({ resolvedAt: iso(at), resolvedBy: by, resolutionNote: note })
   const slot = (machine: S['MachineResponse'], code: string) => ({ slotId: slotOf(machine, code)?.id ?? null, slotCode: code })
   return [
     alert(1, m1, { type: 'HIGH_TEMPERATURE', severity: 'WARNING', title: 'Temperature above range', message: 'Seeded reading of 9.50 C exceeds the 8.00 C maximum.', status: 'OPEN' }, -2 * HOUR),
-    alert(2, m2, { type: 'MACHINE_OFFLINE', severity: 'CRITICAL', title: 'Machine offline', message: 'No heartbeat for more than 180 seconds.', status: 'OPEN' }, -35 * 60_000),
-    alert(3, m1, { type: 'PRODUCT_EXPIRED', severity: 'WARNING', title: 'Expired bowl at slot head', message: 'The bowl at the head of slot B1 has expired; the slot cannot sell until it is removed.', status: 'ACKNOWLEDGED', ...slot(m1, 'B1'), ...ack(staff, -4 * HOUR) }, -5 * HOUR),
-    alert(4, failedMachine, { type: 'DISPENSE_FAILED', severity: 'CRITICAL', title: 'Dispense timed out', message: 'The machine did not report the drop within 60 seconds.', status: 'RESOLVED', orderId: failed?.id ?? null, orderCode: failed?.orderCode ?? null, ...ack(admin, -110 * 60_000), ...done(admin, -HOUR, 'Đã kiểm tra ngăn tại máy và hoàn tiền thủ công cho khách.') }, -2 * HOUR + 70_000),
-    alert(5, m1, { type: 'LOW_STOCK', severity: 'INFO', title: 'Low stock', message: 'Slot A2 has 1 bowl left.', status: 'OPEN', ...slot(m1, 'A2') }, -50 * 60_000),
-    alert(6, m1, { type: 'PRODUCT_EXPIRING', severity: 'INFO', title: 'Bowls expiring soon', message: 'Bowls in slot A1 expire within 2 days.', status: 'RESOLVED', ...slot(m1, 'A1'), ...ack(staff, -23 * HOUR), ...done(staff, -20 * HOUR) }, -DAY),
-    alert(7, m2, { type: 'HIGH_HUMIDITY', severity: 'WARNING', title: 'Humidity above range', message: 'Humidity stayed at the configured maximum for 15 minutes.', status: 'RESOLVED', ...done(admin, -3 * DAY + 2 * HOUR) }, -3 * DAY),
+    alert(2, m2, { type: 'MACHINE_OFFLINE', severity: 'CRITICAL', title: 'Máy mất kết nối', message: 'Máy không gửi tín hiệu quá 180 giây.', status: 'OPEN' }, -35 * 60_000),
+    alert(3, m1, { type: 'PRODUCT_EXPIRED', severity: 'WARNING', title: 'Hộp hết hạn ở đáy ngăn B1', message: 'Hộp ở đáy ngăn B1 đã hết hạn; ngăn không bán được cho tới khi rút hộp.', status: 'ACKNOWLEDGED', ...slot(m1, 'B1'), ...ack(staff, -4 * HOUR) }, -5 * HOUR),
+    alert(4, failedMachine, { type: 'DISPENSE_FAILED', severity: 'CRITICAL', title: 'Nhả hàng thất bại', message: 'Máy không báo kết quả trong 60 giây.', errorCode: 'RESULT_TIMEOUT', status: 'RESOLVED', ...slot(failedMachine, failedSlot), ...ack(admin, -110 * 60_000), ...done(admin.email, -HOUR, 'Đã kiểm tra ngăn tại máy và hoàn tiền thủ công cho khách.') }, -2 * HOUR + 70_000),
+    alert(5, m1, { type: 'LOW_STOCK', severity: 'INFO', title: 'Ngăn A2 sắp hết hàng', message: 'Ngăn A2 còn 1 hộp.', status: 'OPEN', ...slot(m1, 'A2') }, -50 * 60_000),
+    alert(6, m1, { type: 'PRODUCT_EXPIRING', severity: 'INFO', title: 'Hộp sắp hết hạn ở ngăn A1', message: 'Hộp ở ngăn A1 hết hạn trong 2 ngày.', status: 'RESOLVED', ...slot(m1, 'A1'), ...ack(staff, -23 * HOUR), ...done(staff.email, -20 * HOUR) }, -DAY),
+    alert(7, m2, { type: 'HIGH_HUMIDITY', severity: 'WARNING', title: 'Độ ẩm cao', message: 'Độ ẩm ở mức tối đa cấu hình trong 15 phút.', status: 'RESOLVED', ...done('system', -3 * DAY + 2 * HOUR, 'Condition cleared') }, -3 * DAY),
+    alert(8, m2, { type: 'HARDWARE_FAULT', severity: 'CRITICAL', title: 'Lỗi phần cứng: CONTROLLER_FAULT', message: 'Bộ điều khiển chuyển sang FAULT; máy đã chuyển sang bảo trì.', errorCode: 'CONTROLLER_FAULT', status: 'ACKNOWLEDGED', ...ack(admin, -45 * 60_000) }, -50 * 60_000),
   ]
 }
 
@@ -553,51 +522,64 @@ function seedSchedules(nowMs: number, { machines, users, tickets }: { machines: 
 }
 
 /**
- * Heartbeats, readings and events of the draft of backend 3.4/3.5 (FE 6.4):
+ * Presence, readings and events of backend #53/#56 (FE 6.4):
  * - DEV-MACHINE-01: online (live heartbeat, firmware 0.3.0 like app_config.h, good Wi-Fi), the 24 hourly readings of
  *   backend/db/dev/seed.sql (9.50 °C two hours ago, above its 8 °C maximum), dispense events and a FAULT
- *   (CYCLE_INTERRUPTED) cleared by a RESET, plus an old FAULT with a code the web does not know.
+ *   (GATE_POSITION_UNKNOWN) cleared by a RESET, plus an old FAULT with a code the web does not know.
  * - DEV-MACHINE-02: silent for 35 minutes (OFFLINE, its broker sent the Last Will), weak Wi-Fi, controller in FAULT
- *   (CYCLE_INTERRUPTED) and a refused command because of it; readings stop when it went quiet.
- * - DEV-MACHINE-03: never connected (heartbeat all null, no readings, no events).
+ *   (CONTROLLER_FAULT) and a refused command because of it; readings stop when it went quiet.
+ * - DEV-MACHINE-03: never connected (presence all null, no readings, no events).
  */
 function seedTelemetry(nowMs: number, machines: S['MachineResponse'][]): { heartbeats: MockHeartbeat[]; readings: MockReading[]; machineEvents: MockMachineEvent[] } {
   const iso = (offset: number) => new Date(nowMs + offset).toISOString()
   const MIN = 60_000
   const [m1, m2] = machines
   const heartbeats: MockHeartbeat[] = machines.map(machine => ({
-    machineId: machine.id, lastSeenAt: null, reportedAt: null, state: null, firmwareVersion: null, uptimeSeconds: null, rssi: null, dispenseState: null, live: false, bootedAt: null,
+    machineId: machine.id, lastHeartbeatAt: null, lastOfflineAt: null, firmwareVersion: null, uptimeSeconds: null, wifiRssi: null, freeHeapBytes: null, dispenseState: null, live: false, bootedAt: null,
   }))
-  Object.assign(heartbeats[0], { lastSeenAt: iso(0), reportedAt: iso(0), state: 'ONLINE', firmwareVersion: '0.3.0', rssi: -58, dispenseState: 'IDLE', live: true, bootedAt: iso(-(2 * DAY + 3 * HOUR)), uptimeSeconds: (2 * DAY + 3 * HOUR) / 1000 })
-  Object.assign(heartbeats[1], { lastSeenAt: m2.lastSeenAt, reportedAt: iso(-34 * MIN), state: 'OFFLINE', firmwareVersion: '0.2.1', rssi: -86, dispenseState: 'FAULT', bootedAt: iso(-5 * HOUR - 35 * MIN), uptimeSeconds: 5 * 3600 })
+  Object.assign(heartbeats[0], { lastHeartbeatAt: iso(0), firmwareVersion: '0.3.0', wifiRssi: -58, freeHeapBytes: 182_400, dispenseState: 'IDLE', live: true, bootedAt: iso(-(2 * DAY + 3 * HOUR)), uptimeSeconds: (2 * DAY + 3 * HOUR) / 1000 })
+  Object.assign(heartbeats[1], { lastHeartbeatAt: m2.lastSeenAt, lastOfflineAt: iso(-34 * MIN), firmwareVersion: '0.2.1', wifiRssi: -86, freeHeapBytes: 18_240, dispenseState: 'FAULT', bootedAt: iso(-5 * HOUR - 35 * MIN), uptimeSeconds: 5 * 3600 })
 
   const readings: MockReading[] = []
   let readingId = 0
   for (let h = 23; h >= 0; h--) readings.push({ id: ++readingId, machineId: m1.id, temperature: h === 2 ? 9.5 : 4 + (h % 4) * 0.5, humidity: 60 + (h % 5), recordedAt: iso(-h * HOUR) })
   for (let h = 12; h >= 1; h--) readings.push({ id: ++readingId, machineId: m2.id, temperature: 5 + (h % 3) * 0.25, humidity: h === 1 ? null : 70 + (h % 4), recordedAt: iso(-h * HOUR) })
 
+  // MACHINE events keep the envelope payload { eventType, details } (mqtt-contract §4) and a messageId; BACKEND events
+  // carry ids and a reason only (docs/machine-event-logging.md).
   let eventN = 0
-  const event = (machine: S['MachineResponse'], eventType: string, payload: Record<string, unknown>, offset: number): MockMachineEvent =>
-    ({ id: uuid('95000000', ++eventN), machineId: machine.id, eventType, payload, createdAt: iso(offset) })
+  const event = (machine: S['MachineResponse'], eventType: string, details: Record<string, unknown>, offset: number): MockMachineEvent => {
+    const n = ++eventN
+    return { id: uuid('95000000', n), machineId: machine.id, eventType, source: 'MACHINE', messageId: `seed-${String(n).padStart(4, '0')}`, payload: { eventType, details }, createdAt: iso(offset) }
+  }
+  const status = (machine: S['MachineResponse'], online: boolean, payload: Record<string, unknown>, offset: number): MockMachineEvent => {
+    const n = ++eventN
+    return { id: uuid('95000000', n), machineId: machine.id, eventType: online ? 'STATUS_ONLINE' : 'STATUS_OFFLINE', source: 'MACHINE', messageId: `seed-${String(n).padStart(4, '0')}`, payload, createdAt: iso(offset) }
+  }
+  const backend = (machine: S['MachineResponse'], eventType: string, payload: Record<string, unknown>, offset: number): MockMachineEvent =>
+    ({ id: uuid('95000000', ++eventN), machineId: machine.id, eventType, source: 'BACKEND', messageId: null, payload, createdAt: iso(offset) })
   const machineEvents: MockMachineEvent[] = [
     event(m1, 'FAULT', { code: 'GATE_POSITION_LOST' }, -6 * DAY),
-    event(m1, 'FAULT_CLEARED', {}, -6 * DAY + 20 * MIN),
-    event(m1, 'ONLINE', { firmwareVersion: '0.3.0', uptimeSeconds: 0 }, -(2 * DAY + 3 * HOUR)),
+    event(m1, 'FAULT_CLEARED', { code: 'GATE_POSITION_LOST' }, -6 * DAY + 20 * MIN),
+    event(m1, 'BOOT', { resetReason: 'POWERON', firmwareVersion: '0.3.0' }, -(2 * DAY + 3 * HOUR)),
+    status(m1, true, { state: 'ONLINE', firmwareVersion: '0.3.0' }, -(2 * DAY + 3 * HOUR) + 2_000),
     event(m1, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(901), column: 1 }, -5 * HOUR),
     event(m1, 'DISPENSE_COMPLETED', { commandId: seedCommandCode(901) }, -5 * HOUR + 12_000),
     event(m1, 'BOWL_SENSOR_TRIGGERED', { dispenseState: 'IDLE' }, -3 * HOUR),
     event(m1, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(902), column: 1 }, -150 * MIN),
-    event(m1, 'DISPENSE_ABORTED', { commandId: seedCommandCode(902) }, -150 * MIN + 4_000),
-    event(m1, 'FAULT', { code: 'CYCLE_INTERRUPTED', commandId: seedCommandCode(902) }, -150 * MIN + 4_000),
-    event(m1, 'FAULT_CLEARED', {}, -130 * MIN),
+    event(m1, 'DISPENSE_ABORTED', { commandId: seedCommandCode(902), reason: 'MANUAL_STOP' }, -150 * MIN + 4_000),
+    backend(m1, 'BACKEND_DISPENSE_FAILED', { commandCode: seedCommandCode(902), slotCode: 'A1', reason: 'MANUAL_STOP', bowlReturned: false }, -150 * MIN + 4_100),
+    event(m1, 'FAULT', { code: 'GATE_POSITION_UNKNOWN' }, -150 * MIN + 4_000),
+    backend(m1, 'BACKEND_MAINTENANCE_ENTERED', { reason: 'MANUAL_STOP' }, -150 * MIN + 4_200),
+    event(m1, 'FAULT_CLEARED', { code: 'GATE_POSITION_UNKNOWN' }, -130 * MIN),
     event(m1, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(903), column: 1 }, -40 * MIN),
     event(m1, 'DISPENSE_COMPLETED', { commandId: seedCommandCode(903) }, -40 * MIN + 12_000),
-    event(m2, 'ONLINE', { firmwareVersion: '0.2.1', uptimeSeconds: 0 }, -5 * HOUR - 35 * MIN),
+    status(m2, true, { state: 'ONLINE', firmwareVersion: '0.2.1' }, -5 * HOUR - 35 * MIN),
     event(m2, 'DISPENSE_ACCEPTED', { commandId: seedCommandCode(904), column: 1 }, -52 * MIN),
     event(m2, 'DISPENSE_ABORTED', { commandId: seedCommandCode(904) }, -50 * MIN),
-    event(m2, 'FAULT', { code: 'CYCLE_INTERRUPTED', commandId: seedCommandCode(904) }, -50 * MIN),
+    event(m2, 'FAULT', { code: 'CONTROLLER_FAULT', state: 'FAULT' }, -50 * MIN),
     event(m2, 'DISPENSE_REJECTED', { commandId: seedCommandCode(905), state: 'FAULT' }, -45 * MIN),
-    event(m2, 'OFFLINE', {}, -34 * MIN),
+    status(m2, false, { state: 'OFFLINE' }, -34 * MIN),
   ]
   return { heartbeats, readings, machineEvents }
 }

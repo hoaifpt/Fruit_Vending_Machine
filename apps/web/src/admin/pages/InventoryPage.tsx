@@ -41,6 +41,7 @@ import { useBatchOptions, useMachineOptions, useSlotOptions } from '../options.t
 import { focusByKey, focusLost } from '../return-focus.ts'
 import { ConnectionStatus, OfflineNotice } from '../connection-parts.tsx'
 import { CONNECTION_POLL_MS } from '../connection.ts'
+import type { Connectivity } from '../connection.ts'
 import { useApi } from '../useApi.ts'
 import { useLiveLastSeen } from '../useConnection.ts'
 import { useSession } from '../useSession.ts'
@@ -179,7 +180,7 @@ function MachinePicker({ choose }: { choose: (machineId: string) => void }) {
               <span className="grid min-w-0 gap-0.5"><span className="font-medium">{machine.name}</span><span className="font-mono text-xs text-muted-foreground">{machine.code}</span></span>
               <span className="grid justify-items-end gap-1">
                 <StatusBadge domain="machine" value={machine.status} describe={false} />
-                <ConnectionStatus lastSeenAt={machine.lastSeenAt} source={state} detail={false} className="justify-items-end" />
+                <ConnectionStatus lastSeenAt={machine.lastSeenAt} connectivity={machine.connectivity} source={state} detail={false} className="justify-items-end" />
               </span>
             </Button>
           </li>)}
@@ -217,7 +218,7 @@ function MapBody({ state, data, slotId, canWrite, remove, load, showAll }: {
         <RefreshCw aria-hidden="true" className={cn(state.loading && 'motion-safe:animate-spin')} />{state.loading ? 'Đang tải…' : 'Tải lại'}
       </Button>
     </div>
-    <MapConnection machineId={data.machine.id} lastSeenAt={data.machine.lastSeenAt} />
+    <MapConnection machineId={data.machine.id} lastSeenAt={data.machine.lastSeenAt} connectivity={data.machine.connectivity} />
     {state.error ? <p role="alert" className="mb-3 rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-[13px] text-destructive">Không tải lại được sơ đồ; đang hiện dữ liệu cũ. Bấm Tải lại để thử lần nữa.</p> : null}
     {data.machine.status !== 'ACTIVE' && <p role="note" className="mb-3 rounded-lg border border-status-warning-foreground/30 bg-status-warning px-3.5 py-2.5 text-[13px] text-status-warning-foreground">
       Máy đang ở trạng thái <strong>{machineMeta.label}</strong>: kiosk không bán hộp nào, kể cả ở ngăn có hộp đáy sẵn sàng.
@@ -241,14 +242,14 @@ function MapBody({ state, data, slotId, canWrite, remove, load, showAll }: {
 }
 
 /** Connectivity of the machine on the map: its own 30 s reload, since the map itself is not polled. */
-function MapConnection({ machineId, lastSeenAt }: { machineId: string; lastSeenAt: string | null | undefined }) {
-  const { lastSeenAt: seen, source } = useLiveLastSeen(machineId, lastSeenAt)
+function MapConnection({ machineId, lastSeenAt, connectivity }: { machineId: string; lastSeenAt: string | null | undefined; connectivity?: Connectivity | null }) {
+  const { lastSeenAt: seen, connectivity: reported, source } = useLiveLastSeen(machineId, lastSeenAt, connectivity)
   return <>
     <div className="mb-3 flex flex-wrap items-start gap-x-2 gap-y-1 text-[13px]">
       <span className="text-muted-foreground">Kết nối của máy:</span>
-      <ConnectionStatus lastSeenAt={seen} source={source} />
+      <ConnectionStatus lastSeenAt={seen} connectivity={reported} source={source} />
     </div>
-    <OfflineNotice lastSeenAt={seen} source={source} className="mb-0 [&>p]:mb-3" />
+    <OfflineNotice lastSeenAt={seen} connectivity={reported} source={source} className="mb-0 [&>p]:mb-3" />
   </>
 }
 

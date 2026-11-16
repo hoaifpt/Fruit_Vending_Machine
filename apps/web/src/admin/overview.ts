@@ -8,7 +8,7 @@
 // - Bảo trì: GET /machines?status=MAINTENANCE (server-side filter; count = totalElements).
 // - Sắp hết hàng: for the first LOW_STOCK_MACHINE_LIMIT ACTIVE machines, GET /machines/{id}/slots?status=ACTIVE and
 //   GET /inventory?machineId&status=AVAILABLE&expired=false (2 requests per machine, LOW_STOCK_CONCURRENCY at a time).
-// - Cảnh báo nghiêm trọng: GET /alerts?status=OPEN&severity=CRITICAL (draft alerts.yaml, BE 3.6).
+// - Cảnh báo nghiêm trọng: GET /alerts?status=OPEN&severity=CRITICAL (api.yaml; no sort parameter, newest first within a severity).
 // TODO(BE 6.1): replace the low-stock fan-out and the OFFLINE scan with the dashboard endpoint when it ships.
 import { ApiError, serverNow } from '../api/client.ts'
 import { alertsApi, inventoryApi, machinesApi, slotsApi } from '../api/resources.ts'
@@ -71,7 +71,7 @@ export interface OfflineMachine { machine: Machine; connection: Connection }
 export function offlineMachines(machines: readonly Machine[], now: number): OfflineMachine[] {
   return machines
     .filter(machine => machine.status !== 'INACTIVE')
-    .map(machine => ({ machine, connection: connectionOf(machine.lastSeenAt, now) }))
+    .map(machine => ({ machine, connection: connectionOf(machine.lastSeenAt, now, machine.connectivity) }))
     .filter(entry => entry.connection.state === 'OFFLINE')
     .sort((a, b) => {
       if (a.connection.never !== b.connection.never) return a.connection.never ? 1 : -1
@@ -194,7 +194,7 @@ export async function loadLowStock(signal?: AbortSignal, now: () => number = ser
 
 // ---- CRITICAL alerts
 
-export const CRITICAL_QUERY: AlertListQuery = { status: 'OPEN', severity: 'CRITICAL', page: 0, size: OVERVIEW_ROWS, sort: 'triggeredAt,desc' }
+export const CRITICAL_QUERY: AlertListQuery = { status: 'OPEN', severity: 'CRITICAL', page: 0, size: OVERVIEW_ROWS }
 export function loadCritical(signal?: AbortSignal): Promise<Page<Alert>> {
   return alertsApi.list(CRITICAL_QUERY, signal)
 }

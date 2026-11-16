@@ -1,10 +1,12 @@
-// FE 6.4 "Chi tiết máy: tab Cảm biến & Sự kiện" on the mock API (draft of BE 3.4/3.5). Done criterion: a machine that
-// stops its heartbeat for more than 180 s shows OFFLINE on every screen that shows it — machines list, machine detail
-// header, the "Cảm biến & Sự kiện" tab, the inventory machine picker and the inventory map — without reloading the page.
-// Playwright's fake clock proves the threshold: still online 179 s after the last message, OFFLINE at 181 s
-// (window.__fvMock.stopHeartbeat makes the machine go silent). Also: heartbeat (RSSI level, firmware, uptime), latest
-// reading against thresholds and history, events with FAULT and its code, filters on the URL, never-connected machine,
-// STAFF, missing endpoint / 403 / 500; screenshots + axe at 1440/768/390 light and dark.
+// FE 6.4 "Chi tiết máy: tab Cảm biến & Sự kiện" on the mock of the real API (api.yaml, backend #53/#56: connectivity and
+// the last heartbeat in MachineResponse, /telemetry, /telemetry/latest, /events). Done criterion: a machine that stops
+// its heartbeat for more than 180 s shows OFFLINE on every screen that shows it — machines list, machine detail header,
+// the "Cảm biến & Sự kiện" tab, the inventory machine picker and the inventory map — without reloading the page.
+// Playwright's fake clock proves the thresholds of docs/machine-health.md: WARNING ("Chậm tín hiệu") after 60 s, still
+// not OFFLINE at 179 s, OFFLINE at 181 s (window.__fvMock.stopHeartbeat makes the machine go silent). Also: last
+// heartbeat (RSSI level, firmware, uptime, free heap), latest reading against thresholds and history, events with FAULT
+// and its code, filters on the URL, never-connected machine, STAFF, missing endpoint / 403 / 500; screenshots + axe at
+// 1440/768/390 light and dark.
 import { expect, test } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 import { auditScreen, loginAs, THEMES, useThemeChoice } from './support.ts'
@@ -42,8 +44,8 @@ async function jumpTo(page: Page, lastSeenAt: string, seconds: number) {
 }
 
 /**
- * One screen of the acceptance: the badge picks up the machine's last message at the next 30 s reload, stays online at
- * 179 s and shows OFFLINE at 181 s, with no reload of the page.
+ * One screen of the acceptance: the badge picks up the machine's last message at the next 30 s reload, is WARNING
+ * ("Chậm tín hiệu") past 60 s and still at 179 s, and shows OFFLINE at 181 s, with no reload of the page.
  */
 async function provesThreshold(page: Page, badge: () => Locator) {
   await expect(badge()).toHaveAttribute('data-connection', 'ONLINE')
@@ -55,17 +57,19 @@ async function provesThreshold(page: Page, badge: () => Locator) {
     await page.clock.fastForward(15_000)
     await expect(badge()).toHaveAttribute('data-last-seen', last, { timeout: 2_000 })
   }).toPass({ timeout: 10_000, intervals: [0] })
+  await jumpTo(page, last, 61)
+  await expect(badge()).toHaveAttribute('data-connection', 'WARNING')
+  await expect(badge()).toContainText('Chậm tín hiệu')
   await jumpTo(page, last, 178)
   await page.waitForTimeout(300)
   await jumpTo(page, last, 179)
-  await expect(badge()).toHaveAttribute('data-connection', 'ONLINE')
-  await expect(badge()).toContainText('Trực tuyến')
+  await expect(badge()).toHaveAttribute('data-connection', 'WARNING')
   await jumpTo(page, last, 181)
   await expect(badge()).toHaveAttribute('data-connection', 'OFFLINE')
   await expect(badge()).toContainText('Mất kết nối (OFFLINE)')
 }
 
-test.describe('Tiêu chí xong: máy mất heartbeat > 180 s hiện OFFLINE ở mọi màn (179 s vẫn trực tuyến, 181 s OFFLINE)', () => {
+test.describe('Tiêu chí xong: máy mất heartbeat > 180 s hiện OFFLINE ở mọi màn (61–179 s Chậm tín hiệu, 181 s OFFLINE)', () => {
   test.beforeEach(async ({ page }) => {
     await page.clock.install()
     await loginAs(page, 'ADMIN')
@@ -120,19 +124,19 @@ test.describe('Thẻ Cảm biến & Sự kiện (Quản trị viên)', () => {
     await expect(statusGroup(page)).toContainText('Mất kết nối (OFFLINE)')
 
     const fault = page.getByRole('region', { name: /Bộ nhả hàng đang báo lỗi FAULT/ })
-    await expect(fault).toContainText('mã CYCLE_INTERRUPTED')
-    await expect(fault).toContainText('Chu trình nhả hàng bị dừng giữa chừng')
-    await expect(fault).toContainText('Việc cần làm: Kiểm tra tại máy hai cửa đã đóng')
+    await expect(fault).toContainText('mã CONTROLLER_FAULT')
+    await expect(fault).toContainText('Bộ điều khiển nhả hàng chuyển sang trạng thái lỗi')
+    await expect(fault).toContainText('Việc cần làm: Kiểm tra cửa và hộp kẹt tại máy')
 
     const beat = heartbeatPanel(page)
     await expect(beat).toContainText('-86 dBm (Rất yếu, dễ mất kết nối)')
     await expect(beat).toContainText('0.2.1')
-    await expect(beat).toContainText('Ngắt kết nối (tin nhắn Last Will')
+    await expect(beat).toContainText('17,8 KB')
     await expect(beat.locator('[data-connection]')).toHaveAttribute('data-connection', 'OFFLINE')
 
     // Events: newest first; the FAULT row carries its code; "Chỉ lỗi FAULT" filters on the server and lands on the URL.
     await expect(eventsTable(page).locator('tbody tr').first()).toContainText('Máy báo ngắt kết nối')
-    await expect(eventsTable(page)).toContainText('FAULT · CYCLE_INTERRUPTED')
+    await expect(eventsTable(page)).toContainText('FAULT · CONTROLLER_FAULT')
     await expect(eventsTable(page)).toContainText('Máy đang ở trạng thái FAULT nên không nhả hàng')
     await page.getByRole('button', { name: 'Chỉ lỗi FAULT' }).click()
     await page.waitForURL(/eventType=FAULT/)
@@ -143,7 +147,7 @@ test.describe('Thẻ Cảm biến & Sự kiện (Quản trị viên)', () => {
     const raw = eventsTable(page).getByText('Dữ liệu máy gửi')
     await raw.focus()
     await page.keyboard.press('Enter')
-    await expect(eventsTable(page).locator('pre')).toContainText('"code": "CYCLE_INTERRUPTED"')
+    await expect(eventsTable(page).locator('pre')).toContainText('"code": "CONTROLLER_FAULT"')
     // Filters replace the history entry; pressing the toggle again shows every event.
     await page.getByRole('button', { name: 'Chỉ lỗi FAULT' }).click()
     await page.waitForURL(/\?tab=sensors$/)
@@ -157,7 +161,7 @@ test.describe('Thẻ Cảm biến & Sự kiện (Quản trị viên)', () => {
     await expect(beat).toContainText('-58 dBm (Tốt)')
     await expect(beat).toContainText('0.3.0')
     await expect(beat).toContainText('2 ngày 3 giờ')
-    await expect(beat).toContainText('Sẵn sàng')
+    await expect(beat).toContainText('178,1 KB')
     const latest = page.getByRole('region', { name: 'Nhiệt độ và độ ẩm gần nhất' })
     await expect(latest).toContainText('4 °C')
     await expect(latest).toContainText('60 %')
@@ -205,7 +209,8 @@ test.describe('Thẻ Cảm biến & Sự kiện (Quản trị viên)', () => {
     await page.goto(`${DEV_03}?tab=sensors`)
     await expect(page.getByText('Máy chưa từng kết nối.', { exact: false }).first()).toBeVisible()
     await expect(heartbeatPanel(page)).toContainText('Chưa từng kết nối')
-    await expect(heartbeatPanel(page)).toContainText('Chưa có số đo (máy chưa gửi RSSI)')
+    await expect(heartbeatPanel(page)).toContainText('Máy chưa gửi nhịp heartbeat nào')
+    await expect(heartbeatPanel(page).locator('[data-connection]')).toHaveAttribute('data-connection', 'NEVER_SEEN')
     await expect(page.getByText('Máy chưa gửi số đo nào.', { exact: false })).toBeVisible()
     await expect(page.getByText('Máy chưa gửi sự kiện nào.')).toBeVisible()
   })
@@ -221,7 +226,9 @@ test.describe('Thẻ Cảm biến & Sự kiện (Quản trị viên)', () => {
     await expect(page.getByRole('table')).toHaveCount(0)
 
     await page.goto(`${DEV_01}?tab=sensors&scenario=error500:telemetry`)
-    await expect(heartbeatPanel(page).getByRole('button', { name: 'Thử lại' })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Nhiệt độ và độ ẩm gần nhất' }).getByRole('button', { name: 'Thử lại' })).toBeVisible()
+    // Connectivity and the last heartbeat come with the machine, not from /telemetry: still shown.
+    await expect(heartbeatPanel(page)).toContainText('-58 dBm')
     await page.goto(`${DEV_01}?tab=sensors&scenario=none`)
     await expect(heartbeatPanel(page)).toContainText('-58 dBm')
   })
@@ -231,7 +238,7 @@ test('Nhân viên (MACHINE_READ) xem được thẻ Cảm biến & Sự kiện, 
   await loginAs(page, 'STAFF')
   await page.goto(`${DEV_02}?tab=sensors`)
   await expect(tab(page)).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('region', { name: /Bộ nhả hàng đang báo lỗi FAULT/ })).toContainText('CYCLE_INTERRUPTED')
+  await expect(page.getByRole('region', { name: /Bộ nhả hàng đang báo lỗi FAULT/ })).toContainText('CONTROLLER_FAULT')
   await expect(page.getByRole('button', { name: /xóa|xoá|delete|gỡ|reset/i }).filter({ hasNotText: /bộ lọc/i })).toHaveCount(0)
 })
 

@@ -1,7 +1,8 @@
 // T1 Chi tiết đơn (issue FE 6.1) on the mock API. Done criterion: from an order, the payment and each bowl are one click
-// away. Also: timeline of a failed dispense, dispense commands (draft API of backend 3.3) with a late result, the
-// "no data yet" state when the backend lacks the endpoint, 403/500 on that section only, STAFF without payment links,
-// unknown order, the quick filter of the list, screenshots + axe at 1440/768/390 light and dark.
+// away. Also: timeline of a failed dispense and how far dispensing got, read from the order and its allocations only
+// (the backend has no per-order dispense command endpoint: the page never asks for one, and links the machine's event
+// history instead), STAFF without payment links, unknown order, the quick filter of the list, screenshots + axe at
+// 1440/768/390 light and dark.
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { auditScreen, loginAs, THEMES, useThemeChoice } from './support.ts'
@@ -15,8 +16,7 @@ const ORDER_LATE = '90000000-0000-0000-0000-000000000002'
 const ORDER_MIXED = '90000000-0000-0000-0000-000000000003'
 
 const section = (page: Page, name: string) => page.getByRole('region', { name })
-const boxes = (page: Page) => section(page, 'Hộp của đơn')
-const commands = (page: Page) => section(page, 'Lệnh nhả hàng')
+const boxes = (page: Page) => section(page, 'Hộp của đơn và nhả hàng')
 const timeline = (page: Page) => page.getByRole('list', { name: 'Các bước của đơn' })
 
 /** Opens the failed-dispense order from the list through the quick filter (the way staff reach it). */
@@ -57,14 +57,14 @@ test.describe('Chi tiết đơn (Quản trị viên)', () => {
     await expect(page.getByRole('table', { name: 'Lịch sử kho, mới nhất ở trên' }).locator('tbody tr')).toHaveCount(3)
   })
 
-  test('Dòng thời gian, cần xử lý và lệnh nhả hàng của đơn nhả lỗi (quá thời gian)', async ({ page }) => {
+  test('Dòng thời gian, cần xử lý và phần nhả hàng của đơn nhả lỗi', async ({ page }) => {
     await page.goto(`/admin/orders/${ORDER_FAILED}`)
     const steps = timeline(page).getByRole('listitem')
     await expect(steps).toHaveCount(3)
     await expect(steps.nth(0)).toContainText('Tạo đơn')
     await expect(steps.nth(1)).toContainText('Đã thanh toán')
     await expect(steps.nth(2)).toContainText('Nhả hàng thất bại')
-    await expect(steps.nth(2)).toContainText('không báo kết quả trong 60 giây')
+    await expect(steps.nth(2)).toContainText('1 hộp bị đánh dấu nhả lỗi và chặn ngăn')
     await expect(steps.nth(2)).toHaveAttribute('data-state', 'failed')
     await expect(steps.nth(0).locator('time')).toHaveText(/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}$/)
 
@@ -72,20 +72,18 @@ test.describe('Chi tiết đơn (Quản trị viên)', () => {
     await expect(attention).toContainText('hoàn tiền thủ công')
     await expect(attention.getByRole('link', { name: 'Mở thanh toán' })).toHaveAttribute('href', `/admin/payments/${PAYMENT_FAILED_ORDER}`)
 
-    const row = commands(page).locator('tbody tr')
-    await expect(row).toHaveCount(1)
-    await expect(row).toContainText(/D-[0-9A-F]{16}/)
-    await expect(row).toContainText('Quá thời gian')
-    await expect(boxes(page).locator('tbody tr')).toContainText('Quá thời gian')
+    await expect(boxes(page)).toContainText('Đã nhả 0/1 hộp, 1 hộp nhả lỗi đang chặn ngăn.')
+    await expect(boxes(page).getByRole('link', { name: 'Xem sự kiện nhả hàng của máy' })).toHaveAttribute('href', `/admin/machines/${MACHINE_2}?tab=sensors`)
+    await expect(boxes(page).getByRole('columnheader', { name: 'Lệnh nhả hàng' })).toHaveCount(0)
     await expect(page.getByText('Tổng tiền', { exact: true }).locator('xpath=following-sibling::dd[1]')).toHaveText('30.000 ₫')
     await expect(page.getByRole('button', { name: /Hủy|Sửa|Xóa/ })).toHaveCount(0)
   })
 
-  test('Kết quả đến muộn được giải thích; đơn hoàn tất không có mục cần xử lý', async ({ page }) => {
+  test('Đơn hoàn tất: đã nhả đủ hộp, không có mục cần xử lý', async ({ page }) => {
     await page.goto(`/admin/orders/${ORDER_LATE}`)
     await expect(timeline(page).getByRole('listitem')).toHaveCount(4)
-    await expect(timeline(page)).toContainText('kết quả đến muộn')
-    await expect(commands(page).locator('tbody tr')).toContainText('Kết quả đến muộn: máy báo nhả xong sau 75 giây')
+    await expect(timeline(page).getByRole('listitem').nth(2)).toContainText('Đã nhả hàng')
+    await expect(boxes(page)).toContainText('Đã nhả 1/1 hộp.')
     await expect(section(page, 'Cần xử lý')).toHaveCount(0)
   })
 
@@ -101,33 +99,23 @@ test.describe('Chi tiết đơn (Quản trị viên)', () => {
     const attention = section(page, 'Cần xử lý')
     await expect(attention).toContainText('1 hộp của đơn nhả lỗi')
     await expect(attention.getByRole('link', { name: 'Mở thanh toán' })).toBeVisible()
-    await expect(commands(page).locator('tbody tr')).toHaveCount(2)
-    await expect(boxes(page).locator('tbody tr').first()).toContainText('Thất bại')
+    await expect(boxes(page)).toContainText('Đã nhả 1/2 hộp, 1 hộp nhả lỗi đang chặn ngăn.')
+    await expect(boxes(page).locator('tbody tr')).toHaveCount(2)
   })
 
-  test('Backend chưa có API lệnh (?scenario=missing:dispense-commands): báo chưa có dữ liệu, phần còn lại vẫn chạy', async ({ page }) => {
-    await page.goto(`/admin/orders/${ORDER_FAILED}?scenario=missing:dispense-commands`)
-    await expect(commands(page).getByRole('status')).toContainText('Chưa có dữ liệu lệnh nhả hàng')
-    await expect(commands(page).getByRole('table')).toHaveCount(0)
-    await expect(commands(page)).not.toContainText('Mỗi hộp đã trả tiền có một lệnh')
-    await expect(boxes(page).getByRole('link', { name: 'Mở trên sơ đồ ngăn A1' })).toBeVisible()
-    await expect(boxes(page).getByRole('columnheader', { name: 'Lệnh nhả hàng' })).toHaveCount(0)
-    await expect(timeline(page).getByRole('listitem').nth(2)).toContainText('Nhả hàng thất bại')
-    await expect(page.getByRole('alert')).toHaveCount(0)
-  })
-
-  test('Lỗi 403 / 500 chỉ ở phần lệnh nhả hàng; đơn chưa thanh toán không gọi API lệnh', async ({ page }) => {
-    await page.goto(`/admin/orders/${ORDER_FAILED}?scenario=403:dispense-commands`)
-    await expect(commands(page).getByRole('alert')).toContainText('Không có quyền truy cập')
-    await expect(section(page, 'Thanh toán').getByRole('link', { name: /^Mở thanh toán/ })).toBeVisible()
-
-    await page.goto(`/admin/orders/${ORDER_FAILED}?scenario=error500:dispense-commands`)
-    await expect(commands(page).getByRole('button', { name: 'Thử lại' })).toBeVisible()
+  test('Không gọi API lệnh nhả hàng (backend không có); đơn chưa thanh toán nói rõ chưa nhả hàng', async ({ page }) => {
+    const asked: string[] = []
+    page.on('request', request => { if (/dispense-commands/.test(request.url())) asked.push(request.url()) })
+    await page.goto(`/admin/orders/${ORDER_FAILED}`)
     await expect(boxes(page).locator('tbody tr')).toHaveCount(1)
+    await expect(timeline(page).getByRole('listitem').nth(2)).toContainText('Nhả hàng thất bại')
+    expect(asked).toEqual([])
 
-    await page.goto('/admin/orders/90000000-0000-0000-0000-000000000005?scenario=none')
-    await expect(commands(page)).toContainText('lệnh chỉ được tạo khi đơn đã thanh toán')
+    await page.goto('/admin/orders/90000000-0000-0000-0000-000000000005')
+    await expect(boxes(page)).toContainText('lệnh nhả hàng chỉ được tạo khi đơn đã thanh toán')
     await expect(timeline(page).locator('[aria-current="step"]')).toContainText('Chờ thanh toán')
+    await expect(boxes(page).getByRole('link', { name: 'Xem sự kiện nhả hàng của máy' })).toHaveCount(0)
+    expect(asked).toEqual([])
   })
 
   test('Đơn không tồn tại, 403 và lỗi 500 của chính đơn', async ({ page }) => {
@@ -169,6 +157,6 @@ for (const theme of THEMES) {
     await useThemeChoice(page, theme)
     await loginAs(page, 'ADMIN')
     await page.goto(`/admin/orders/${ORDER_FAILED}`)
-    await auditScreen(page, testInfo, 'order-detail', theme, () => expect(commands(page).locator('tbody tr')).toHaveCount(1))
+    await auditScreen(page, testInfo, 'order-detail', theme, () => expect(boxes(page).locator('tbody tr')).toHaveCount(1))
   })
 }
