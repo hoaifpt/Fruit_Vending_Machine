@@ -31,7 +31,7 @@ function AlertsPage() {
   const { params, update } = useQueryParams()
   const filters = readAlertFilters(params)
   const { can } = useSession()
-  const canWrite = can('ALERT_WRITE'), canMachines = can('MACHINE_READ'), canInventory = can('INVENTORY_READ'), canOrders = can('ORDER_READ')
+  const canWrite = can('ALERT_MANAGE'), canMachines = can('MACHINE_READ'), canInventory = can('INVENTORY_READ'), canOrders = can('ORDER_READ')
   const machines = useMachineOptions()
   // A backend without BE 3.6 answers 404: polling ends on that answer itself (no extra request), the screen explains.
   const state = useApi(signal => alertsApi.list(alertListQuery(filters, PAGE_SIZE), signal), params.toString(), { pollMs: BELL_POLL_MS, stopOn: isMissing })

@@ -179,7 +179,7 @@ function createError(error: unknown): unknown {
 }
 
 /**
- * Opens a ticket (TICKET_WRITE). `initial` pre-fills it, e.g. from an alert (ticketFromAlert): the machine is then
+ * Opens a ticket (WORK_ORDER_MANAGE). `initial` pre-fills it, e.g. from an alert (ticketFromAlert): the machine is then
  * locked, since the alert belongs to it. Only fields of CreateWorkTicketRequest are sent, optional ones when filled in.
  */
 export function CreateTicketSheet({ initial = NEW_TICKET, alertLabel, close, created }: {

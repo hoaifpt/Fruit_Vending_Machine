@@ -110,7 +110,7 @@ export function refillState(commands: readonly MaintenanceCommand[] | undefined)
 export type LockCode = 'missing' | 'permission' | 'status' | 'offline' | 'running'
 export interface Lock { code: LockCode; reason: string; next: string }
 export interface LockInput {
-  /** The account holds MACHINE_MAINTENANCE. */
+  /** The account holds MAINTENANCE_COMMAND_EXECUTE. */
   canMaintain: boolean
   /** The account may change the machine status (MACHINE_WRITE), so the next step can be done by itself. */
   canChangeStatus: boolean

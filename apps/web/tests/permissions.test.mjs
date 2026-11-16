@@ -1,34 +1,31 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { PERMISSIONS, ROLE_PERMISSIONS, can, permissionsOf, rolesWith } from '../src/admin/permissions.ts'
 import { NAV, canOpen, homeFor, matchRoute, navFor } from '../src/admin/routes.ts'
 
-const ADMIN_ONLY_ACTIONS = ['USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE', 'PRODUCT_WRITE', 'MACHINE_WRITE', 'KIOSK_CREDENTIAL_MANAGE', 'PAYMENT_READ', 'PAYMENT_WEBHOOK_LOG_READ']
+const ADMIN_ONLY_ACTIONS = ['USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE', 'PRODUCT_WRITE', 'MACHINE_WRITE', 'KIOSK_CREDENTIAL_MANAGE', 'PAYMENT_READ', 'PAYMENT_WEBHOOK_LOG_READ', 'PAYMENT_REFUND', 'REFUND_READ', 'REPORT_SALES_READ', 'WORK_ORDER_MANAGE', 'INVENTORY_LOAD_DIRECT']
 const STAFF_ACTIONS = ['PRODUCT_READ', 'MACHINE_READ', 'BATCH_READ', 'BATCH_CREATE', 'INVENTORY_READ', 'INVENTORY_WRITE', 'ORDER_READ']
 
-const MIGRATION = 'backend/src/main/resources/db/migration/V13__create_permissions.sql'
-/** Commit of backend #48 (not merged into dev yet); read with git when the migration is not in the working tree. */
-const BE_48_COMMIT = 'b6b11f8'
+const MIGRATIONS = 'backend/src/main/resources/db/migration/'
+const STAFF_ROLE_ID = '10000000-0000-0000-0000-000000000002'
 
-/** Codes and the role grants of backend #48, from its migration; null when neither the file nor the commit is available. */
+/** Codes and STAFF grants of every backend migration (V13, V16–V25); null when the backend is not in the working tree. */
 function backendSeed() {
-  const root = fileURLToPath(new URL('../../../', import.meta.url))
-  let sql = existsSync(root + MIGRATION) ? readFileSync(root + MIGRATION, 'utf8') : null
-  if (!sql) {
-    try { sql = execFileSync('git', ['show', `${BE_48_COMMIT}:${MIGRATION}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null }
-  }
-  const codes = [...sql.matchAll(/'2000[0-9-]+',\s*'([A-Z_]+)'/g)].map(match => match[1])
-  const staff = sql.match(/WHERE code IN \(([^)]*)\)/)[1].match(/[A-Z_]+/g)
-  return { codes, staff }
+  const dir = fileURLToPath(new URL('../../../', import.meta.url)) + MIGRATIONS
+  if (!existsSync(dir)) return null
+  const sql = readdirSync(dir).filter(name => /^V\d+__.*\.sql$/.test(name)).map(name => readFileSync(dir + name, 'utf8')).join('\n')
+  const byId = new Map([...sql.matchAll(/'(2000[0-9-]+)',\s*'([A-Z_]+)'/g)].map(match => [match[1], match[2]]))
+  const staff = new Set(sql.match(/WHERE code IN \(([^)]*)\)/)[1].match(/[A-Z_]+/g))
+  for (const match of sql.matchAll(new RegExp(`'${STAFF_ROLE_ID}',\\s*'(2000[0-9-]+)'`, 'g'))) staff.add(byId.get(match[1]))
+  return { codes: [...byId.values()], staff: [...staff] }
 }
 
-test('the codes are the 15 UPPER_SNAKE permission codes of backend #48', () => {
-  assert.equal(PERMISSIONS.length, 15)
+test('the codes are the UPPER_SNAKE permission codes of the backend migrations, STAFF grants included', () => {
+  assert.equal(PERMISSIONS.length, 41)
   for (const code of PERMISSIONS) assert.match(code, /^[A-Z][A-Z0-9_]{2,63}$/)
-  assert.deepEqual([...PERMISSIONS].sort(), [...ADMIN_ONLY_ACTIONS, ...STAFF_ACTIONS].sort())
+  for (const code of [...ADMIN_ONLY_ACTIONS, ...STAFF_ACTIONS]) assert.ok(PERMISSIONS.includes(code), code)
   const seed = backendSeed()
   if (seed) {
     assert.deepEqual([...PERMISSIONS].sort(), [...seed.codes].sort())
@@ -54,7 +51,7 @@ test('a write code does not imply its read code, and no role means no permission
   assert.equal(can([], 'ORDER_READ'), false)
 })
 test('explicit permissions (future GET /auth/me) replace the role table and ignore unknown or old-style names', () => {
-  const subject = { roles: ['ADMIN'], permissions: ['ORDER_READ', 'REPORT_EXPORT', 'orders:read', 'users:manage'] }
+  const subject = { roles: ['ADMIN'], permissions: ['ORDER_READ', 'REPORT_READ', 'orders:read', 'users:manage'] }
   assert.equal(can(subject, 'ORDER_READ'), true)
   assert.equal(can(subject, 'USER_READ'), false)
   assert.deepEqual([...permissionsOf(subject)], ['ORDER_READ'])

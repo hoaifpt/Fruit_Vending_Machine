@@ -11,7 +11,7 @@ import { authApi, inventoryApi, machinesApi, maintenanceCommandsApi, telemetryAp
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { STATUS_CATALOG } from '../src/lib/status.ts'
-import { DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
+import { PERMISSIONS as DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
 import {
   COMMAND_INFO, MAINTENANCE_COMMAND_TYPES, MAINTENANCE_MISSING, MAINTENANCE_TARGET_GONE, NOT_MAINTENANCE_NEXT_ADMIN, NOT_MAINTENANCE_NEXT_STAFF, SLOT_COMMANDS,
   commandDetail, describeMaintenanceError, failureText, isMaintenanceMissing, machineLock, maintenanceAvailability, maintenanceCommandBody,
@@ -60,12 +60,12 @@ test('draft: five command types, dispense-command statuses, paths, permission, n
   assert.equal(groupOf(`/machines/${MACHINE_1}/maintenance-commands`), 'maintenance-commands')
 })
 
-test('draft permission MACHINE_MAINTENANCE: ADMIN and STAFF send commands', () => {
-  assert.ok(DRAFT_PERMISSIONS.includes('MACHINE_MAINTENANCE'))
-  assert.equal(can(['ADMIN'], 'MACHINE_MAINTENANCE'), true)
-  assert.equal(can(['STAFF'], 'MACHINE_MAINTENANCE'), true)
+test('draft permission MAINTENANCE_COMMAND_EXECUTE: ADMIN and STAFF send commands', () => {
+  assert.ok(DRAFT_PERMISSIONS.includes('MAINTENANCE_COMMAND_EXECUTE'))
+  assert.equal(can(['ADMIN'], 'MAINTENANCE_COMMAND_EXECUTE'), true)
+  assert.equal(can(['STAFF'], 'MAINTENANCE_COMMAND_EXECUTE'), true)
   // Once GET /auth/me lists permissions, an account without it has the buttons locked.
-  assert.equal(can({ roles: ['STAFF'], permissions: ['MACHINE_READ'] }, 'MACHINE_MAINTENANCE'), false)
+  assert.equal(can({ roles: ['STAFF'], permissions: ['MACHINE_READ'] }, 'MAINTENANCE_COMMAND_EXECUTE'), false)
 })
 
 // ---- done criterion: locked with a reason when the machine is not MAINTENANCE

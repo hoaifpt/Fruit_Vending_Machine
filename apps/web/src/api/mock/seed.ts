@@ -102,27 +102,53 @@ export interface MockStore {
 export interface MockPermission { code: string; description: string }
 export interface MockRole { id: string; name: string; description: string | null; permissions: string[] }
 
-/** V13__create_permissions.sql, in code order like GET /permissions (descriptions are the backend's, in English). */
+/** Permissions of the migrations V13, V16–V25, in code order like GET /permissions (descriptions are the backend's, in English). */
 export const SEED_PERMISSIONS: readonly MockPermission[] = [
-  { code: 'BATCH_CREATE', description: 'Create product batches' },
-  { code: 'BATCH_READ', description: 'List and view product batches' },
-  { code: 'INVENTORY_READ', description: 'View inventory items, machine and slot inventory, summaries and history' },
-  { code: 'INVENTORY_WRITE', description: 'Load bowls into slots and remove bowls' },
-  { code: 'KIOSK_CREDENTIAL_MANAGE', description: 'Issue, list and revoke kiosk credentials' },
-  { code: 'MACHINE_READ', description: 'List and view machines and slots' },
-  { code: 'MACHINE_WRITE', description: 'Create and update machines and slots and change their status' },
-  { code: 'ORDER_READ', description: 'List and view orders' },
-  { code: 'PAYMENT_READ', description: 'List and view payments' },
-  { code: 'PAYMENT_WEBHOOK_LOG_READ', description: 'List and view payment webhook logs' },
+  { code: 'ALERT_MANAGE', description: "Acknowledge and resolve alerts" },
+  { code: 'ALERT_NOTIFY', description: "Receive a portal notification for every new alert" },
+  { code: 'ALERT_READ', description: "List and view alerts" },
+  { code: 'AUDIT_LOG_READ', description: "List and view the audit log" },
+  { code: 'BATCH_CREATE', description: "Create product batches" },
+  { code: 'BATCH_READ', description: "List and view product batches" },
+  { code: 'CUSTOMER_REPORT_MANAGE', description: "Review, resolve and reject customer incident reports" },
+  { code: 'CUSTOMER_REPORT_READ', description: "View customer incident reports (STAFF: only those of their work orders)" },
+  { code: 'DASHBOARD_READ', description: "View the operations dashboard (machines, alerts, work orders, stock)" },
+  { code: 'INVENTORY_LOAD_DIRECT', description: "Load bowls without a work order (POST /api/v1/inventory/load)" },
+  { code: 'INVENTORY_READ', description: "View inventory items, machine and slot inventory, summaries and history" },
+  { code: 'INVENTORY_WRITE', description: "Load bowls into slots and remove bowls" },
+  { code: 'KIOSK_CREDENTIAL_MANAGE', description: "Issue, list and revoke kiosk credentials" },
+  { code: 'MACHINE_READ', description: "List and view machines and slots" },
+  { code: 'MACHINE_REPORT_LINK_MANAGE', description: "Rotate the public report token (QR) of a machine" },
+  { code: 'MACHINE_RESET', description: "Clear a controller fault remotely (RESET)" },
+  { code: 'MACHINE_WRITE', description: "Create and update machines and slots and change their status" },
+  { code: 'MAINTENANCE_COMMAND_EXECUTE', description: "Send maintenance commands to machines and reconcile them" },
+  { code: 'MAINTENANCE_COMMAND_READ', description: "List and view maintenance commands" },
+  { code: 'MAINTENANCE_PLAN_MANAGE', description: "Create, change, activate, deactivate maintenance plans and generate their work orders" },
+  { code: 'MAINTENANCE_PLAN_READ', description: "View maintenance plans and upcoming maintenance" },
+  { code: 'ORDER_READ', description: "List and view orders" },
+  { code: 'PAYMENT_READ', description: "List and view payments" },
+  { code: 'PAYMENT_REFUND', description: "Record a manual refund of a payment" },
+  { code: 'PAYMENT_WEBHOOK_LOG_READ', description: "List and view payment webhook logs" },
   { code: 'PERMISSION_MANAGE', description: "View roles and permissions and change a role's permissions" },
-  { code: 'PRODUCT_READ', description: 'List and view products' },
-  { code: 'PRODUCT_WRITE', description: 'Create and update products and change product status' },
-  { code: 'USER_READ', description: 'List and view management user accounts' },
-  { code: 'USER_WRITE', description: 'Create users, update profiles and change account status' },
+  { code: 'PRICING_MANAGE', description: "Change the near-expiry discount setting" },
+  { code: 'PRICING_READ', description: "View the near-expiry discount setting" },
+  { code: 'PRODUCT_READ', description: "List and view products" },
+  { code: 'PRODUCT_WRITE', description: "Create and update products and change product status" },
+  { code: 'REFUND_READ', description: "View refund candidates, refunds and refund totals" },
+  { code: 'REPORT_EXPORT', description: "Export sales reports as CSV or PDF" },
+  { code: 'REPORT_SALES_READ', description: "View sales reports and the revenue figures of the dashboard" },
+  { code: 'RESTOCK_EXECUTE', description: "Load bowls against a line of an IN_PROGRESS restock work order" },
+  { code: 'RESTOCK_PLAN', description: "Restock suggestions and planning of restock lines" },
+  { code: 'USER_READ', description: "List and view management user accounts" },
+  { code: 'USER_WRITE', description: "Create users, update profiles and change account status" },
+  { code: 'WORK_ORDER_EXECUTE', description: "Start, annotate and complete work orders assigned to me" },
+  { code: 'WORK_ORDER_MANAGE', description: "Create, edit, assign and cancel work orders" },
+  { code: 'WORK_ORDER_READ_ALL', description: "List and view every work order" },
+  { code: 'WORK_ORDER_READ_ASSIGNED', description: "View the work orders assigned to me" },
 ]
 /** V8 role ids (fixed in every environment); V13 maps ADMIN to every permission and STAFF to the operations ones. */
 export const SEED_ROLE_IDS = { ADMIN: '10000000-0000-0000-0000-000000000001', STAFF: '10000000-0000-0000-0000-000000000002' } as const
-export const SEED_STAFF_PERMISSIONS = ['BATCH_CREATE', 'BATCH_READ', 'INVENTORY_READ', 'INVENTORY_WRITE', 'MACHINE_READ', 'ORDER_READ', 'PRODUCT_READ'] as const
+export const SEED_STAFF_PERMISSIONS = ['ALERT_MANAGE', 'ALERT_READ', 'BATCH_CREATE', 'BATCH_READ', 'CUSTOMER_REPORT_READ', 'DASHBOARD_READ', 'INVENTORY_READ', 'INVENTORY_WRITE', 'MACHINE_READ', 'MAINTENANCE_COMMAND_EXECUTE', 'MAINTENANCE_COMMAND_READ', 'MAINTENANCE_PLAN_READ', 'ORDER_READ', 'PRICING_READ', 'PRODUCT_READ', 'RESTOCK_EXECUTE', 'WORK_ORDER_EXECUTE', 'WORK_ORDER_READ_ASSIGNED'] as const
 const seedRoles = (): MockRole[] => [
   { id: SEED_ROLE_IDS.ADMIN, name: 'ADMIN', description: 'System administrator', permissions: SEED_PERMISSIONS.map(permission => permission.code) },
   { id: SEED_ROLE_IDS.STAFF, name: 'STAFF', description: 'Machine operations and inventory staff', permissions: [...SEED_STAFF_PERMISSIONS] },
@@ -154,7 +180,7 @@ export function createStore(nowMs: number): MockStore {
   const staffId = users[1].id
 
   const machine = (n: number, code: string, name: string, status: S['MachineResponse']['status'], lastSeenAt: string | null): S['MachineResponse'] =>
-    ({ id: uuid('20000000', n), code, name, location: 'Local development', status, minTemperature: 2, maxTemperature: 8, minHumidity: 0, maxHumidity: 100, lastSeenAt, ...stamp })
+    ({ id: uuid('20000000', n), code, name, location: 'Local development', status, minTemperature: 2, maxTemperature: 8, minHumidity: 0, maxHumidity: 100, lastSeenAt, connectivity: lastSeenAt ? 'ONLINE' : 'NEVER_SEEN', ...stamp })
   const machines = [
     machine(1, 'DEV-MACHINE-01', 'Development fruit machine', 'ACTIVE', iso(0)),
     // Unlike backend/db/dev/seed.sql (last_seen_at NULL), the mock has it silent for 35 minutes (FE 6.4): OFFLINE with a
@@ -165,7 +191,9 @@ export function createStore(nowMs: number): MockStore {
   ]
 
   const slot = (n: number, machineIndex: number, slotCode: string, capacity: number): S['MachineSlotResponse'] =>
-    ({ id: uuid('30000000', n), machineId: machines[machineIndex].id, slotCode, capacity, status: 'ACTIVE', ...stamp })
+    // The real backend only allows slot codes A and B (one per column); the mock keeps its older multi-slot layout so the
+    // sample stock stays rich, hence the cast.
+    ({ id: uuid('30000000', n), machineId: machines[machineIndex].id, slotCode: slotCode as S['MachineSlotResponse']['slotCode'], capacity, status: 'ACTIVE', refillGateOpen: false, ...stamp })
   const slots = [slot(1, 0, 'A1', 10), slot(2, 0, 'A2', 10), slot(3, 0, 'B1', 10), slot(4, 1, 'A1', 8), slot(5, 1, 'A2', 8)]
 
   const product = (n: number, sku: string, name: string, price: number, status: S['ProductResponse']['status'] = 'ACTIVE'): S['ProductResponse'] =>

@@ -42,10 +42,10 @@ async function rejects(promise, status, check = () => true) {
 
 // ---- permission: ADMIN only, never STAFF
 
-test('REFUND_RECORD is ADMIN only: STAFF sees no menu and the route is refused before the screen mounts', () => {
-  assert.equal(can(['ADMIN'], 'REFUND_RECORD'), true)
-  assert.equal(can(['STAFF'], 'REFUND_RECORD'), false)
-  assert.deepEqual(matchRoute('/admin/refunds'), { page: 'refunds', id: undefined, permission: 'REFUND_RECORD', roles: ['ADMIN'] })
+test('PAYMENT_REFUND is ADMIN only: STAFF sees no menu and the route is refused before the screen mounts', () => {
+  assert.equal(can(['ADMIN'], 'PAYMENT_REFUND'), true)
+  assert.equal(can(['STAFF'], 'PAYMENT_REFUND'), false)
+  assert.deepEqual(matchRoute('/admin/refunds'), { page: 'refunds', id: undefined, permission: 'REFUND_READ', roles: ['ADMIN'] })
   assert.equal(canOpen(['STAFF'], matchRoute('/admin/refunds')), false)
   assert.equal(canOpen(['ADMIN'], matchRoute('/admin/refunds')), true)
   assert.equal(navFor(['STAFF']).some(item => item.to === '/admin/refunds'), false)

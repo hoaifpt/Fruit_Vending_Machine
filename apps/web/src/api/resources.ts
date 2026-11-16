@@ -179,13 +179,13 @@ export type RefundListQuery = NonNullable<RefundOperations['listRefunds']['param
 
 export const refundsApi = {
   list: (query: RefundListQuery, signal?: AbortSignal) => list<Refund>('/refunds', query, signal),
-  /** REFUND_RECORD (ADMIN): payment SUCCESS → REFUNDED; 409 when already refunded or not a refund case. Never retried. */
+  /** PAYMENT_REFUND (ADMIN): payment SUCCESS → REFUNDED; 409 when already refunded or not a refund case. Never retried. */
   record: (orderId: string, body: RefundBody) => api.post<Refund>(`/orders/${id(orderId)}/refund`, body),
 }
 
 // Work tickets (screen O3, FE 7.1): draft contract api-contract/drafts/work-tickets.yaml, waiting for backend issue 4.3.
 // Until it ships the real backend answers 404 here; the screens then say "chưa có dữ liệu" (ticketsAvailability in
-// src/admin/tickets.ts). A caller without TICKET_WRITE only receives its own tickets (server-side). When 4.3 lands: move
+// src/admin/tickets.ts). A caller without WORK_ORDER_MANAGE only receives its own tickets (server-side). When 4.3 lands: move
 // the paths into api.yaml, run gen:api, switch these types to schema.d.ts and delete the draft.
 type T = TicketsDraft['schemas']
 export type WorkTicket = T['WorkTicketResponse']
@@ -255,7 +255,7 @@ export type MaintenanceCommandQuery = NonNullable<MaintenanceOperations['listMac
 export const maintenanceCommandsApi = {
   /** Newest first (fixed order), unfinished commands included. MACHINE_READ. */
   list: (machineId: string, query: MaintenanceCommandQuery, signal?: AbortSignal) => list<MaintenanceCommand>(`/machines/${id(machineId)}/maintenance-commands`, query, signal),
-  /** Creates the command PENDING (MACHINE_MAINTENANCE). Build the body with maintenanceCommandBody. */
+  /** Creates the command PENDING (MAINTENANCE_COMMAND_EXECUTE). Build the body with maintenanceCommandBody. */
   create: (machineId: string, body: CreateMaintenanceCommandBody) => api.post<MaintenanceCommand>(`/machines/${id(machineId)}/maintenance-commands`, body),
 }
 
@@ -269,6 +269,6 @@ export type IncidentReport = IncidentDraft['schemas']['IncidentReportResponse']
 export type IncidentReportListQuery = NonNullable<IncidentOperations['listIncidentReports']['parameters']['query']>
 export const incidentReportsApi = {
   create: (form: FormData, signal?: AbortSignal) => request<IncidentReportReceipt>('POST', '/public/incident-reports', { body: form, auth: false, signal }),
-  /** FE 8.3, ADMIN (REFUND_RECORD): reports for W-12; `flagged: true` = orders still to check for a refund. */
+  /** FE 8.3, ADMIN (PAYMENT_REFUND): reports for W-12; `flagged: true` = orders still to check for a refund. */
   list: (query: IncidentReportListQuery, signal?: AbortSignal) => list<IncidentReport>('/incident-reports', query, signal),
 }

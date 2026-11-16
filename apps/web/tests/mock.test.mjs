@@ -79,7 +79,7 @@ test('GET /auth/me follows the draft contract', async () => {
   const me = await api.get('/auth/me')
   assert.equal(me.email, MOCK_ACCOUNTS.staff)
   assert.deepEqual(me.roles, ['STAFF'])
-  assert.deepEqual([...me.permissions].sort(), ['BATCH_CREATE', 'BATCH_READ', 'INVENTORY_READ', 'INVENTORY_WRITE', 'MACHINE_READ', 'ORDER_READ', 'PRODUCT_READ'])
+  assert.ok(me.permissions.includes('WORK_ORDER_EXECUTE') && !me.permissions.includes('PAYMENT_REFUND'))
   // The mock reads the same table as the web (src/admin/permissions.ts), so the two cannot drift apart.
   assert.deepEqual(me.permissions, [...ROLE_PERMISSIONS.STAFF])
 })

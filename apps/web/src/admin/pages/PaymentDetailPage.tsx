@@ -80,8 +80,8 @@ function PaymentDetailPage({ paymentId }: { paymentId: string }) {
         {findings.map(finding => <li key={finding.kind} data-finding={finding.kind} className="list-none text-[14px]">{finding.text}</li>)}
       </ul>
     </section>}
-    {/* FE 8.1: ADMIN only (REFUND_RECORD). A payment to refund links to the refund screen; a refunded one to its record. */}
-    {can('REFUND_RECORD') && order.data && refundEntry(order.data, data.id) && <p data-refund-entry className="mb-4! text-[14px]">
+    {/* FE 8.1: ADMIN only (PAYMENT_REFUND). A payment to refund links to the refund screen; a refunded one to its record. */}
+    {can('PAYMENT_REFUND') && order.data && refundEntry(order.data, data.id) && <p data-refund-entry className="mb-4! text-[14px]">
       {refundEntry(order.data, data.id) === 'record'
         ? <>Khoản này cần hoàn cho khách. <Link to={refundPathFor(data.orderId)} className={LINK}>Ghi nhận hoàn tiền</Link></>
         : <>Khoản này đã được hoàn tiền. <Link to={refundPathFor(data.orderId)} className={LINK}>Xem mã chuyển khoản và người ghi nhận</Link></>}

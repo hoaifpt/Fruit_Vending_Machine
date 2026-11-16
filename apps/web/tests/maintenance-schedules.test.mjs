@@ -9,7 +9,7 @@ import { ApiError, configureClient } from '../src/api/client.ts'
 import { authApi, maintenanceSchedulesApi, ticketsApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
-import { DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
+import { PERMISSIONS as DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
 import { NAV, matchRoute } from '../src/admin/routes.ts'
 import { formatDate } from '../src/lib/format.ts'
 import {
@@ -114,11 +114,11 @@ test('draft contract: paths, fields, rule and ticket link documented; no delete;
   assert.doesNotMatch(yaml, /\n\s+delete:/, 'schedules are never deleted')
   const readme = readFileSync(`${root}api-contract/drafts/README.md`, 'utf8')
   assert.ok(readme.includes('`maintenance-schedules.yaml`'))
-  assert.ok(DRAFT_PERMISSIONS.includes('MAINTENANCE_SCHEDULE_READ') && DRAFT_PERMISSIONS.includes('MAINTENANCE_SCHEDULE_WRITE'))
-  assert.equal(can(['STAFF'], 'MAINTENANCE_SCHEDULE_READ'), true)
-  assert.equal(can(['STAFF'], 'MAINTENANCE_SCHEDULE_WRITE'), false)
-  assert.equal(can(['ADMIN'], 'MAINTENANCE_SCHEDULE_WRITE'), true)
-  assert.deepEqual(matchRoute(SCHEDULES_PATH), { page: 'maintenance-schedules', id: undefined, permission: 'MAINTENANCE_SCHEDULE_READ', roles: ['ADMIN', 'STAFF'] })
+  assert.ok(DRAFT_PERMISSIONS.includes('MAINTENANCE_PLAN_READ') && DRAFT_PERMISSIONS.includes('MAINTENANCE_PLAN_MANAGE'))
+  assert.equal(can(['STAFF'], 'MAINTENANCE_PLAN_READ'), true)
+  assert.equal(can(['STAFF'], 'MAINTENANCE_PLAN_MANAGE'), false)
+  assert.equal(can(['ADMIN'], 'MAINTENANCE_PLAN_MANAGE'), true)
+  assert.deepEqual(matchRoute(SCHEDULES_PATH), { page: 'maintenance-schedules', id: undefined, permission: 'MAINTENANCE_PLAN_READ', roles: ['ADMIN', 'STAFF'] })
   const index = NAV.findIndex(entry => entry.to === SCHEDULES_PATH)
   assert.equal(NAV[index].group, 'Vận hành')
   assert.equal(NAV[index].label, 'Lịch bảo trì')

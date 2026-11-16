@@ -105,7 +105,7 @@ function listRefunds(ctx: HandlerContext) {
 }
 
 export const refundRoutes: Route[] = [
-  { method: 'POST', pattern: /^\/orders\/(?<orderId>[^/]+)\/refund\/?$/, policy: { draftPermission: 'REFUND_RECORD' }, handle: recordRefund },
+  { method: 'POST', pattern: /^\/orders\/(?<orderId>[^/]+)\/refund\/?$/, policy: { draftPermission: 'PAYMENT_REFUND' }, handle: recordRefund },
   // PAYMENT_READ, ADMIN only like the payments it belongs to (the mock's 'admin' policy, as for GET /payments).
   { method: 'GET', pattern: /^\/refunds\/?$/, policy: 'admin', handle: listRefunds },
 ]

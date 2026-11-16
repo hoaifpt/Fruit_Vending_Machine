@@ -1,8 +1,8 @@
 // Rules of screen O3 "Phiếu công việc" (FE 7.1) that do not need React, unit-tested in tests/tickets.test.mjs.
 // API: draft contract api-contract/drafts/work-tickets.yaml, waiting for backend issue 4.3. Lifecycle OPEN → ASSIGNED →
 // IN_PROGRESS → COMPLETED, CANCELLED before COMPLETED; statuses are the `ticket` domain of src/lib/status.ts. A ticket is
-// never deleted. Opening, assigning and cancelling need TICKET_WRITE; starting and completing are for the assignee only.
-// Who sees which ticket is decided by the server (a caller without TICKET_WRITE only receives its own); the web never
+// never deleted. Opening, assigning and cancelling need WORK_ORDER_MANAGE; starting and completing are for the assignee only.
+// Who sees which ticket is decided by the server (a caller without WORK_ORDER_MANAGE only receives its own); the web never
 // filters on its own and only uses the viewer's id to decide which buttons to show.
 // FE 8.3: INCIDENT tickets ("Sự cố") are opened by the server from a customer report (drafts/incident-reports.yaml,
 // BE 5.2), never from the "Tạo phiếu" form; they carry the report summary (incidentReport) and follow the same lifecycle.
@@ -56,7 +56,7 @@ export function readTicketFilters(params: URLSearchParams): TicketFilters {
 }
 
 /**
- * Query of GET /work-tickets: only parameters of the draft contract, absent when not in effect. Without TICKET_WRITE
+ * Query of GET /work-tickets: only parameters of the draft contract, absent when not in effect. Without WORK_ORDER_MANAGE
  * the assignee filter is not sent: the server answers with the caller's own tickets whatever it says.
  */
 export function ticketListQuery(filters: TicketFilters, size: number, canWrite: boolean): WorkTicketListQuery {
@@ -97,7 +97,7 @@ export const TICKET_NOT_FOUND = 'Không tìm thấy phiếu này: đường dẫ
 export interface TicketViewer {
   /** Account id of the session (JWT `sub`). */
   userId: string | undefined
-  /** Holds TICKET_WRITE: opens, assigns and cancels tickets, sees everyone's. */
+  /** Holds WORK_ORDER_MANAGE: opens, assigns and cancels tickets, sees everyone's. */
   canWrite: boolean
 }
 export type TicketAction = 'assign' | 'start' | 'complete' | 'cancel'

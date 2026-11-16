@@ -22,7 +22,7 @@ type CredentialLike = Pick<S['KioskCredentialResponse'], 'status'>
 /**
  * `sensors` (FE 6.4): heartbeat, Wi-Fi, firmware, temperature/humidity and machine events with FAULT codes.
  * `maintenance` (FE 7.4): maintenance commands (open/close refill, take bowls out, reset) and their history; the
- * history needs MACHINE_READ like the page, sending needs MACHINE_MAINTENANCE (the tab says so when it is missing).
+ * history needs MACHINE_READ like the page, sending needs MAINTENANCE_COMMAND_EXECUTE (the tab says so when it is missing).
  */
 export const DETAIL_TABS = ['overview', 'sensors', 'maintenance', 'slots', 'kiosk'] as const
 export type DetailTab = (typeof DETAIL_TABS)[number]
@@ -71,7 +71,10 @@ export function slotListQuery(filters: SlotFilters, size: number) {
 // ---- slot forms
 
 /** Limits of CreateMachineSlotRequest / UpdateMachineSlotRequest (capacity is a positive 32-bit integer). */
-export const SLOT_LIMITS = { slotCode: 32, capacityMax: 2_147_483_647 } as const
+export const SLOT_LIMITS = { slotCode: 1, capacityMax: 2_147_483_647 } as const
+/** The backend only accepts the two columns of the machine (CreateMachineSlotRequest.slotCode enum). */
+export const SLOT_CODES = ['A', 'B'] as const
+export type SlotCode = typeof SLOT_CODES[number]
 export type SlotValues = { slotCode: string; capacity: string }
 
 export type CapacityResult = { ok: true; value: number } | { ok: false; message: string }
@@ -93,7 +96,7 @@ export function validateSlot(values: SlotValues, mode: 'create' | 'edit'): Recor
   if (mode === 'create') {
     const code = values.slotCode.trim()
     if (!code) errors.slotCode = 'Vui lòng nhập mã ngăn.'
-    else if (code.length > SLOT_LIMITS.slotCode) errors.slotCode = `Mã ngăn tối đa ${SLOT_LIMITS.slotCode} ký tự.`
+    else if (!SLOT_CODES.includes(code.toUpperCase() as SlotCode)) errors.slotCode = 'Mã ngăn chỉ là A hoặc B (máy có hai cột).'
   }
   const capacity = parseCapacity(values.capacity)
   if (!capacity.ok) errors.capacity = capacity.message
@@ -110,7 +113,7 @@ function capacityOf(values: SlotValues): number {
 export function createSlotBody(values: SlotValues): S['CreateMachineSlotRequest'] {
   const errors = validateSlot(values, 'create')
   if (Object.keys(errors).length) throw new ValidationError(errors)
-  return { slotCode: values.slotCode.trim().toUpperCase(), capacity: capacityOf(values) }
+  return { slotCode: values.slotCode.trim().toUpperCase() as SlotCode, capacity: capacityOf(values) }
 }
 
 /** PUT body: capacity only (the slot code never changes). */

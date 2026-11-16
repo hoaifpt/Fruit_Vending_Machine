@@ -37,7 +37,7 @@ async function loadAlert(alertId: string, signal: AbortSignal) {
 
 function AlertDetailPage({ alertId }: { alertId: string }) {
   const { can } = useSession()
-  const canWrite = can('ALERT_WRITE'), canMachines = can('MACHINE_READ'), canInventory = can('INVENTORY_READ'), canOrders = can('ORDER_READ')
+  const canWrite = can('ALERT_MANAGE'), canMachines = can('MACHINE_READ'), canInventory = can('INVENTORY_READ'), canOrders = can('ORDER_READ')
   const state = useApi(signal => loadAlert(alertId, signal), alertId)
   const action = useDialog<'acknowledge' | 'resolve'>()
   const alert = state.data

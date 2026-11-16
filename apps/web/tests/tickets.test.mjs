@@ -10,7 +10,7 @@ import { authApi, ticketsApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { STATUS_CATALOG } from '../src/lib/status.ts'
-import { DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
+import { PERMISSIONS as DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
 import { NAV, matchRoute, navFor } from '../src/admin/routes.ts'
 import { NAV_ICONS } from '../src/admin/shell/nav-icons.ts'
 import {
@@ -54,18 +54,18 @@ test('statuses are the ticket domain of status.ts (COMPLETED, not DONE), in life
   assert.doesNotMatch(yaml, /\n\s+delete:/, 'tickets are never deleted')
 })
 
-test('draft permissions: TICKET_READ for ADMIN and STAFF, TICKET_WRITE for ADMIN only; route, nav in "Vận hành"', () => {
-  assert.ok(DRAFT_PERMISSIONS.includes('TICKET_READ') && DRAFT_PERMISSIONS.includes('TICKET_WRITE'))
-  assert.equal(can(['ADMIN'], 'TICKET_READ'), true)
-  assert.equal(can(['ADMIN'], 'TICKET_WRITE'), true)
-  assert.equal(can(['STAFF'], 'TICKET_READ'), true)
-  assert.equal(can(['STAFF'], 'TICKET_WRITE'), false)
-  assert.deepEqual(matchRoute('/admin/tickets'), { page: 'tickets', id: undefined, permission: 'TICKET_READ', roles: ['ADMIN', 'STAFF'] })
+test('draft permissions: WORK_ORDER_READ_ASSIGNED for ADMIN and STAFF, WORK_ORDER_MANAGE for ADMIN only; route, nav in "Vận hành"', () => {
+  assert.ok(DRAFT_PERMISSIONS.includes('WORK_ORDER_READ_ASSIGNED') && DRAFT_PERMISSIONS.includes('WORK_ORDER_MANAGE'))
+  assert.equal(can(['ADMIN'], 'WORK_ORDER_READ_ASSIGNED'), true)
+  assert.equal(can(['ADMIN'], 'WORK_ORDER_MANAGE'), true)
+  assert.equal(can(['STAFF'], 'WORK_ORDER_READ_ASSIGNED'), true)
+  assert.equal(can(['STAFF'], 'WORK_ORDER_MANAGE'), false)
+  assert.deepEqual(matchRoute('/admin/tickets'), { page: 'tickets', id: undefined, permission: 'WORK_ORDER_READ_ASSIGNED', roles: ['ADMIN', 'STAFF'] })
   assert.equal(matchRoute(`/admin/tickets/${T(1)}`).page, 'ticket-detail')
   const item = NAV.find(entry => entry.to === TICKETS_PATH)
   assert.equal(item.group, 'Vận hành')
   assert.equal(item.label, 'Phiếu công việc')
-  // Once GET /auth/me lists permissions, an account without TICKET_READ has no ticket screen.
+  // Once GET /auth/me lists permissions, an account without WORK_ORDER_READ_ASSIGNED has no ticket screen.
   assert.equal(navFor({ roles: ['STAFF'], permissions: ['ALERT_READ'] }).some(entry => entry.to === TICKETS_PATH), false)
   assert.equal(ticketPath(T(1)), `/admin/tickets/${T(1)}`)
 })

@@ -96,9 +96,9 @@ test('mock kiosk: the near-expiry watermelon is sold at 12.500 ₫ (25.000 ₫ s
   const kiosk = createKioskApi('any-kiosk-key')
   const products = (await kiosk.catalog()).data.products
   const watermelon = products.find(product => product.productId === WATERMELON)
-  assert.deepEqual([watermelon.price, watermelon.originalUnitPrice, watermelon.discountPercent, watermelon.discountReason], [12500, 25000, 50, 'NEAR_EXPIRY'])
+  assert.deepEqual([watermelon.price, watermelon.originalPrice, watermelon.discountPercent, watermelon.discountReason], [12500, 25000, 50, 'NEAR_EXPIRY'])
   const mixed = products.find(product => product.productId === MIXED)
-  assert.deepEqual([mixed.price, mixed.originalUnitPrice, mixed.discountPercent], [35000, 35000, null], 'fresh boxes keep the list price')
+  assert.deepEqual([mixed.price, mixed.originalPrice, mixed.discountPercent], [35000, 35000, null], 'fresh boxes keep the list price')
 
   const order = (await kiosk.createOrder(WATERMELON)).data
   assert.equal(order.totalAmount, 12500, 'the amount to pay is the discounted price')

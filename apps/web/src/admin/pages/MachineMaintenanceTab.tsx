@@ -4,7 +4,7 @@
 //   EMPTY_COLUMN (asks first, naming the slot and how many bowls will be taken out).
 // - Lịch sử lệnh: newest first with the delivery status; reloads every 2 s while a command is unfinished, else 30 s.
 // Every button stays focusable but locked (aria-disabled) with the reason and the next step while the machine is not in
-// MAINTENANCE, OFFLINE, busy with another command, the account lacks MACHINE_MAINTENANCE, or the backend does not have
+// MAINTENANCE, OFFLINE, busy with another command, the account lacks MAINTENANCE_COMMAND_EXECUTE, or the backend does not have
 // the draft API yet (404/501 → "chưa có"). Rules and wording: ../maintenance-commands.ts (shared with FE 7.2).
 // Draft contract api-contract/drafts/machine-maintenance.yaml (BE 4.2). Nothing is deleted from here.
 import { useEffect, useId, useRef, useState } from 'react'
@@ -55,7 +55,7 @@ export default function MachineMaintenanceTab({ machine, connection, reloadMachi
 }) {
   const machineId = machine.id
   const { can } = useSession()
-  const canMaintain = can('MACHINE_MAINTENANCE')
+  const canMaintain = can('MAINTENANCE_COMMAND_EXECUTE')
   const { params, update } = useQueryParams()
   const rawPage = Number(params.get('commandPage') ?? 0)
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 0

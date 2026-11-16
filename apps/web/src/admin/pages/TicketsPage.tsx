@@ -1,5 +1,5 @@
 // O3 Phiếu công việc (FE 7.1): restock, maintenance and (FE 8.3) incident jobs at a machine, newest first, server-side filters on the URL.
-// Admins (TICKET_WRITE) see every ticket, open, assign and cancel; staff only receive the tickets given to them (the
+// Admins (WORK_ORDER_MANAGE) see every ticket, open, assign and cancel; staff only receive the tickets given to them (the
 // server filters) and start / complete them. Each row only offers the valid next step. No delete.
 // API: draft contract api-contract/drafts/work-tickets.yaml (waiting for BE 4.3); on a backend without it (404) the
 // screen says there is no data yet.

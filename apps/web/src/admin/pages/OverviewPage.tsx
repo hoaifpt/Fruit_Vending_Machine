@@ -31,8 +31,8 @@ const nothing = () => Promise.resolve(undefined)
 function OverviewPage() {
   const { can } = useSession()
   const canMachines = can('MACHINE_READ'), canStock = canMachines && can('INVENTORY_READ'), canAlerts = can('ALERT_READ')
-  // FE 9.2: revenue block for accounts with REPORT_READ (ADMIN); Làm mới reloads it too.
-  const canRevenue = can('REPORT_READ')
+  // FE 9.2: revenue block for accounts with REPORT_SALES_READ (ADMIN); Làm mới reloads it too.
+  const canRevenue = can('REPORT_SALES_READ')
   const [revenueTick, setRevenueTick] = useState(0)
   const poll = (allowed: boolean) => ({ pollMs: allowed ? OVERVIEW_POLL_MS : undefined })
   // A block the account may not read never calls its API (the backend would answer 403 anyway).

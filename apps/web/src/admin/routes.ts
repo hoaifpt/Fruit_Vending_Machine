@@ -27,22 +27,22 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/alerts$/, page: 'alerts', permission: 'ALERT_READ' },
   { pattern: /^\/admin\/alerts\/([^/]+)$/, page: 'alert-detail', permission: 'ALERT_READ' },
   // O3 (FE 7.1): draft permission of api-contract/drafts/work-tickets.yaml; staff only receive their own tickets.
-  { pattern: /^\/admin\/tickets$/, page: 'tickets', permission: 'TICKET_READ' },
-  { pattern: /^\/admin\/tickets\/([^/]+)$/, page: 'ticket-detail', permission: 'TICKET_READ' },
+  { pattern: /^\/admin\/tickets$/, page: 'tickets', permission: 'WORK_ORDER_READ_ASSIGNED' },
+  { pattern: /^\/admin\/tickets\/([^/]+)$/, page: 'ticket-detail', permission: 'WORK_ORDER_READ_ASSIGNED' },
   // O4 (FE 7.2): carrying out a RESTOCK ticket on a phone; the server only discloses the ticket to its assignee/admins.
-  { pattern: /^\/admin\/tickets\/([^/]+)\/restock$/, page: 'ticket-restock', permission: 'TICKET_READ' },
-  // O5 (FE 7.3): draft permission of api-contract/drafts/maintenance-schedules.yaml; changes need MAINTENANCE_SCHEDULE_WRITE.
-  { pattern: /^\/admin\/maintenance-schedules$/, page: 'maintenance-schedules', permission: 'MAINTENANCE_SCHEDULE_READ' },
+  { pattern: /^\/admin\/tickets\/([^/]+)\/restock$/, page: 'ticket-restock', permission: 'WORK_ORDER_READ_ASSIGNED' },
+  // O5 (FE 7.3): draft permission of api-contract/drafts/maintenance-schedules.yaml; changes need MAINTENANCE_PLAN_MANAGE.
+  { pattern: /^\/admin\/maintenance-schedules$/, page: 'maintenance-schedules', permission: 'MAINTENANCE_PLAN_READ' },
   { pattern: /^\/admin\/orders$/, page: 'orders', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/orders\/([^/]+)$/, page: 'order-detail', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/payments$/, page: 'payments', permission: 'PAYMENT_READ' },
   { pattern: /^\/admin\/payments\/([^/]+)$/, page: 'payment-detail', permission: 'PAYMENT_READ' },
-  // T3 / W-12 (FE 8.1): draft permission REFUND_RECORD, ADMIN only (api-contract/drafts/refunds.yaml, BE 5.1).
-  { pattern: /^\/admin\/refunds$/, page: 'refunds', permission: 'REFUND_RECORD' },
+  // T3 / W-12 (FE 8.1): draft permission PAYMENT_REFUND, ADMIN only (api-contract/drafts/refunds.yaml, BE 5.1).
+  { pattern: /^\/admin\/refunds$/, page: 'refunds', permission: 'REFUND_READ' },
   { pattern: /^\/admin\/webhook-logs$/, page: 'webhook-logs', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   { pattern: /^\/admin\/webhook-logs\/([^/]+)$/, page: 'webhook-log-detail', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   // R1 (FE 9.1): draft permission of api-contract/drafts/revenue-reports.yaml (BE 6.1), ADMIN only.
-  { pattern: /^\/admin\/reports\/revenue$/, page: 'revenue-report', permission: 'REPORT_READ' },
+  { pattern: /^\/admin\/reports\/revenue$/, page: 'revenue-report', permission: 'REPORT_SALES_READ' },
 ]
 
 export function matchRoute(pathname: string): RouteMatch | undefined {
@@ -67,16 +67,16 @@ export const NAV: NavItem[] = [
   // Draft permission (api-contract/drafts/alerts.yaml, BE 3.6): see DRAFT_PERMISSIONS in permissions.ts.
   { to: '/admin/alerts', label: 'Cảnh báo', group: 'Vận hành', permission: 'ALERT_READ', match: ['alerts', 'alert-detail'] },
   // Draft permission (api-contract/drafts/work-tickets.yaml, BE 4.3).
-  { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'TICKET_READ', match: ['tickets', 'ticket-detail', 'ticket-restock'] },
+  { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'WORK_ORDER_READ_ASSIGNED', match: ['tickets', 'ticket-detail', 'ticket-restock'] },
   // Draft permission (api-contract/drafts/maintenance-schedules.yaml, BE 4.5).
-  { to: '/admin/maintenance-schedules', label: 'Lịch bảo trì', group: 'Vận hành', permission: 'MAINTENANCE_SCHEDULE_READ', match: ['maintenance-schedules'] },
+  { to: '/admin/maintenance-schedules', label: 'Lịch bảo trì', group: 'Vận hành', permission: 'MAINTENANCE_PLAN_READ', match: ['maintenance-schedules'] },
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },
   // Draft permission (api-contract/drafts/refunds.yaml, BE 5.1), ADMIN only: see DRAFT_PERMISSIONS in permissions.ts.
-  { to: '/admin/refunds', label: 'Hoàn tiền', group: 'Giao dịch', permission: 'REFUND_RECORD', match: ['refunds'] },
+  { to: '/admin/refunds', label: 'Hoàn tiền', group: 'Giao dịch', permission: 'REFUND_READ', match: ['refunds'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },
   // Draft permission (api-contract/drafts/revenue-reports.yaml, BE 6.1).
-  { to: '/admin/reports/revenue', label: 'Báo cáo doanh thu', group: 'Giao dịch', permission: 'REPORT_READ', match: ['revenue-report'] },
+  { to: '/admin/reports/revenue', label: 'Báo cáo doanh thu', group: 'Giao dịch', permission: 'REPORT_SALES_READ', match: ['revenue-report'] },
   { to: '/admin/users', label: 'Tài khoản', group: 'Hệ thống', permission: 'USER_READ', match: ['users'] },
   { to: '/admin/roles', label: 'Vai trò & quyền', group: 'Hệ thống', permission: 'PERMISSION_MANAGE', match: ['roles'] },
 ]

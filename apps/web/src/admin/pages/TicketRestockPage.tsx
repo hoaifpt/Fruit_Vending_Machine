@@ -179,7 +179,7 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
   const refill = refillSince(commands.data?.content, ticket.startedAt)
 
   const lock = machineLock({
-    canMaintain: can('MACHINE_MAINTENANCE'), canChangeStatus: can('MACHINE_WRITE'), machineStatus: machine.data?.status ?? 'ACTIVE',
+    canMaintain: can('MAINTENANCE_COMMAND_EXECUTE'), canChangeStatus: can('MACHINE_WRITE'), machineStatus: machine.data?.status ?? 'ACTIVE',
     connection: shown.shown, neverConnected: shown.never, running, missing,
   })
   const lockRef = useRef<HTMLDivElement>(null)

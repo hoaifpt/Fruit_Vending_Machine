@@ -11,7 +11,7 @@ export type KioskIdentity = S['KioskIdentityResponse']
 export type KioskCatalog = S['KioskCatalogResponse']
 // Near-expiry discount fields (FE 7.5): DRAFT api-contract/drafts/pricing-discount.yaml (backend 4.1), optional.
 type P = PricingDraft['schemas']
-export type KioskProduct = S['KioskCatalogProductResponse'] & P['KioskCatalogProductPricing']
+export type KioskProduct = S['KioskCatalogProductResponse']
 export type KioskOrderLine = S['KioskOrderItemResponse'] & P['OrderItemPricing']
 export type KioskOrder = Omit<S['KioskOrderResponse'], 'items'> & P['OrderPricing'] & { items?: KioskOrderLine[] }
 export type KioskPayment = S['KioskPaymentResponse']

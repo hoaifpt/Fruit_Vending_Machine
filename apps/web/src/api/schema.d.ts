@@ -135,7 +135,7 @@ export interface paths {
         put?: never;
         /**
          * Record physically confirmed stock loading
-         * @description ADMIN or STAFF. Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. Physical occupancy includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED. Total registered batch items include all statuses. Lock order Product/Batch/Machine/Slot serializes state and count checks. Quantity 1..1000 per bounded bulk request, strict JSON integer. Actor is current principal. Operation UUID groups per-item history using reference_id; not an idempotency key. Retries may register more boxes if limits permit. No hardware action.
+         * @description INVENTORY_LOAD_DIRECT (ADMIN only since issue #68: Staff loads through a RESTOCK work order, POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads). Creates N AVAILABLE items and N append-only LOAD rows in one transaction. Product ACTIVE, batch unexpired, Machine ACTIVE/MAINTENANCE and Slot ACTIVE required. Physical occupancy includes AVAILABLE/RESERVED/EXPIRED/DISPENSE_FAILED. Total registered batch items include all statuses. Lock order Product/Batch/Machine/Slot serializes state and count checks. Quantity 1..1000 per bounded bulk request, strict JSON integer. Actor is current principal. Operation UUID groups per-item history using reference_id; not an idempotency key. Retries may register more boxes if limits permit. No hardware action.
          */
         post: operations["loadInventory"];
         delete?: never;
@@ -247,7 +247,7 @@ export interface paths {
         put?: never;
         /**
          * Configure a new machine slot
-         * @description ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. Accepts only slotCode (nonblank, stripped/uppercase, at most 32 characters) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). Code is immutable and unique per machine; another machine may reuse it. DB UNIQUE protects concurrent creates. No fixed slot count/capacity or inventory checks.
+         * @description ADMIN only. Parent must exist; INACTIVE/MAINTENANCE machines may be provisioned. Creates ACTIVE slot. Accepts only slotCode (the physical column A or B, stripped and uppercased first) and capacity (positive 32-bit JSON integer token; no string or decimal coercion). Code is immutable and unique per machine, so a machine has at most two slots; another machine may reuse it. Dispense commands send it as columnCode. DB UNIQUE protects concurrent creates. No fixed capacity or inventory checks.
          */
         post: operations["createMachineSlot"];
         delete?: never;
@@ -309,7 +309,7 @@ export interface paths {
         };
         /**
          * List/search machines
-         * @description ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on code/name/location. Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. All three statuses are visible by default; out-of-range pages are empty.
+         * @description ADMIN or STAFF. Database pagination with combined optional status, connectivity and case-insensitive literal substring search on code/name/location. Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. All three statuses are visible by default; out-of-range pages are empty.
          */
         get: operations["listMachines"];
         put?: never;
@@ -593,7 +593,7 @@ export interface paths {
         };
         /**
          * List and filter orders
-         * @description ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode). Approved sorts createdAt (default desc), totalAmount, orderCode, each with a UUID tie-break.
+         * @description ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode), discounted (issue #61). Approved sorts createdAt (default desc), totalAmount, orderCode, each with a UUID tie-break.
          */
         get: operations["listOrders"];
         put?: never;
@@ -804,6 +804,1430 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List all permissions
+         * @description Requires PERMISSION_MANAGE. The full catalog (code, description) sorted by code. Permissions are added by migrations only.
+         */
+        get: operations["listPermissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List roles with their permissions
+         * @description Requires PERMISSION_MANAGE. Every role with its sorted permission codes.
+         */
+        get: operations["listRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a role
+         * @description Requires PERMISSION_MANAGE. The role with its sorted permission codes.
+         */
+        get: operations["getRole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/roles/{id}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace the permission set of a role
+         * @description Requires PERMISSION_MANAGE. Replaces the whole set (an empty list leaves the role without access). Unknown or duplicate codes are rejected (400, codes listed in fieldErrors). The ADMIN role must keep PERMISSION_MANAGE and USER_WRITE (409). The role row is locked while replacing, so concurrent changes never lose an update. One audit_logs row ROLE_PERMISSIONS_CHANGED records the old and new sorted codes and the actor. Members get the new permissions on their next request; the JWT does not change.
+         */
+        put: operations["replaceRolePermissions"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Telemetry history of a machine
+         * @description MACHINE_READ. Readings with from <= recordedAt < to, newest first (recordedAt DESC, id DESC), paged in the database. from and to are required ISO-8601 instants, to must be after from and the range at most 31 days; page >= 0, size 1 to 500 (default 100). Invalid parameters are 400 before the machine is looked up; a missing machine is 404.
+         */
+        get: operations["listTelemetry"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/telemetry/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Latest telemetry reading of a machine
+         * @description MACHINE_READ. Latest reading by receive time (recordedAt, then id), each value compared with the machine thresholds: below the minimum LOW, above the maximum HIGH, otherwise NORMAL; a missing value has a null status. No reading yet: 200 with null reading fields. Includes the derived connectivity. Display only, not an alert.
+         */
+        get: operations["getLatestTelemetry"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event timeline of a machine
+         * @description MACHINE_READ. Newest first (createdAt DESC, id DESC), filtered and paged in the database. type is an exact eventType, source MACHINE or BACKEND; from (inclusive) and to (exclusive) are optional ISO-8601 instants and to must be after from. page >= 0, size 1 to 200 (default 50). payload of MACHINE events is untrusted device data: render it escaped. Invalid parameters are 400 before the machine is looked up; a missing machine is 404.
+         */
+        get: operations["listMachineEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search the audit log
+         * @description AUDIT_LOG_READ. Newest first (createdAt DESC, id DESC), filtered and paged in the database. Every filter is optional: action and entityType are exact values, entityId and userId are UUIDs, from (inclusive) and to (exclusive) are ISO-8601 instants and to must be after from. page >= 0, size 1 to 200 (default 50). System changes have userId null and actor "system".
+         */
+        get: operations["listAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audit-logs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one audit entry
+         * @description AUDIT_LOG_READ. One audit entry by UUID.
+         */
+        get: operations["getAuditLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List alerts
+         * @description ALERT_READ. Default status filter: OPEN and ACKNOWLEDGED; status selects exactly one status. Optional type, severity, machineId, slotId, errorCode and triggeredAt range (from inclusive, to exclusive, to after from). Sorted CRITICAL, WARNING, INFO, then newest first, id tie-break; paged in the database (page >= 0, size 1 to 200, default 50).
+         */
+        get: operations["listAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one alert
+         * @description ALERT_READ. One alert by UUID, with machine and slot codes and actors.
+         */
+        get: operations["getAlert"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts/{id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge an alert
+         * @description ALERT_MANAGE. OPEN -> ACKNOWLEDGED with the caller and time; acknowledging an ACKNOWLEDGED alert again returns it unchanged. A RESOLVED alert is 409. No request body.
+         */
+        post: operations["acknowledgeAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve an alert
+         * @description ALERT_MANAGE. OPEN or ACKNOWLEDGED -> RESOLVED with the caller, time and an optional note (at most 500 characters; body optional). A RESOLVED alert is 409, also when the system resolved it a moment earlier. A state-based alert whose condition still holds is raised again as a new alert by the next health check.
+         */
+        post: operations["resolveAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my notifications
+         * @description Signed-in user. Own notifications, newest first; unreadOnly=true keeps unread ones. page >= 0, size 1 to 100 (default 20).
+         */
+        get: operations["listMyNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/me/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count my unread notifications
+         * @description Signed-in user. Cheap count for polling (every 30 s recommended).
+         */
+        get: operations["countMyUnreadNotifications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark one notification read
+         * @description Signed-in user, own notification only (another user's id is 404). Idempotent: marked is 0 when it was already read.
+         */
+        post: operations["markNotificationRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/me/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark all my notifications read
+         * @description Signed-in user. Marks every unread own notification read.
+         */
+        post: operations["markAllMyNotificationsRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/near-expiry-discount": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the near-expiry discount
+         * @description PRICING_READ. Current setting with its version.
+         */
+        get: operations["getNearExpiryDiscount"];
+        /**
+         * Change the near-expiry discount
+         * @description PRICING_MANAGE. enabled and percent (integer 1 to 90) replace the setting when version matches the stored one; otherwise 409. Same values: 200, version unchanged, no audit row. A change writes one audit_logs row PRICING_NEAR_EXPIRY_UPDATED and applies at once to the catalog and new orders; existing orders never change.
+         */
+        put: operations["updateNearExpiryDiscount"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a maintenance command to one column
+         * @description MAINTENANCE_COMMAND_EXECUTE. Machine in MAINTENANCE and online, no unfinished maintenance or running dispense command, no RESERVED bowl in the column. REMOVE_ITEM takes the head bowl (AVAILABLE, EXPIRED or DISPENSE_FAILED) only; REMOVE_ITEM and EMPTY_COLUMN need the refill gate closed and a reason; OPEN_REFILL needs it closed; CLOSE_REFILL is always allowed. Same Idempotency-Key and body: 200 with the existing command; same key, other body: 409 IDEMPOTENCY_KEY_REUSED.
+         */
+        post: operations["createMaintenanceCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clear a controller fault (RESET)
+         * @description MACHINE_RESET (Admin). Same preconditions as other maintenance commands, no column. The machine answers RESET_ACCEPTED (command COMPLETED) or RESET_REJECTED; FAULT_CLEARED then resolves the CONTROLLER_FAULT alert. The machine stays MAINTENANCE.
+         */
+        post: operations["resetMachine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List maintenance commands
+         * @description MAINTENANCE_COMMAND_READ. Optional machineId, slotId, operation, status and createdAt range (from inclusive, to exclusive); newest first; paged in the database (page >= 0, size 1 to 100, default 20).
+         */
+        get: operations["listMaintenanceCommands"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-commands/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one maintenance command
+         * @description MAINTENANCE_COMMAND_READ.
+         */
+        get: operations["getMaintenanceCommand"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-commands/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile an uncertain maintenance command
+         * @description MAINTENANCE_COMMAND_EXECUTE. Only NEEDS_RECONCILIATION (aborted, no result in time, head changed). DONE applies the effect (409 EFFECT_NOT_POSSIBLE when the head bowl is no longer the target); NOT_DONE changes nothing. Both end RECONCILED with an audit_logs row; a second reconcile is 409 NOT_RECONCILABLE.
+         */
+        post: operations["reconcileMaintenanceCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List work orders
+         * @description WORK_ORDER_READ_ALL. Filters: status (repeatable), type, source, machineId, assigneeId, priority, overdue=true, createdAt range (from inclusive, to exclusive). Sorted URGENT, HIGH, NORMAL, LOW, then due time (none last), then oldest; page >= 0, size 1 to 100 (default 20).
+         */
+        get: operations["listWorkOrders"];
+        put?: never;
+        /**
+         * Create a work order
+         * @description WORK_ORDER_MANAGE. Source MANUAL; OPEN without assignee, ASSIGNED (assignee notified) with one. Machine must exist and not be INACTIVE (409 MACHINE_INACTIVE); dueAt not in the past.
+         */
+        post: operations["createWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List my work orders
+         * @description WORK_ORDER_READ_ASSIGNED. Work orders assigned to the caller; optional status (repeatable) and overdue; same order and paging as the full list.
+         */
+        get: operations["listMyWorkOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one work order
+         * @description WORK_ORDER_READ_ASSIGNED; without WORK_ORDER_READ_ALL only the caller's own work orders (others are 404). Includes linked alerts and version.
+         */
+        get: operations["getWorkOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit a work order
+         * @description WORK_ORDER_MANAGE. title, description, priority, dueAt of an unfinished work order; stale version 409 STALE_VERSION. No change: 200 without history.
+         */
+        patch: operations["updateWorkOrder"];
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Work order history
+         * @description Same visibility as the detail. Oldest first; append-only.
+         */
+        get: operations["listWorkOrderEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign or reassign
+         * @description WORK_ORDER_MANAGE. OPEN -> ASSIGNED; ASSIGNED and IN_PROGRESS keep their status with the new assignee, who is notified.
+         */
+        post: operations["assignWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/unassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unassign
+         * @description WORK_ORDER_MANAGE. ASSIGNED -> OPEN.
+         */
+        post: operations["unassignWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a work order
+         * @description WORK_ORDER_EXECUTE, assignee (or Admin). ASSIGNED -> IN_PROGRESS; again: 200 unchanged. RESTOCK / MAINTENANCE (INCIDENT with stopMachine) put an ACTIVE machine in MAINTENANCE: 409 MACHINE_HAS_ACTIVE_ORDERS / MACHINE_COMMAND_IN_PROGRESS while customers are served; an INACTIVE machine is 409 MACHINE_INACTIVE. Body optional.
+         */
+        post: operations["startWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a note
+         * @description WORK_ORDER_EXECUTE, assignee (or Admin); unfinished work orders only.
+         */
+        post: operations["addWorkOrderNote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete a work order
+         * @description WORK_ORDER_EXECUTE, assignee (or Admin). IN_PROGRESS -> DONE with resultNote; 409 MACHINE_COMMAND_IN_PROGRESS while a maintenance command runs. Linked OPEN/ACKNOWLEDGED alerts are resolved (resolveLinkedAlerts, default true). The machine stays MAINTENANCE.
+         */
+        post: operations["completeWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a work order
+         * @description WORK_ORDER_MANAGE. Any unfinished status -> CANCELLED with a reason; the machine status is not changed.
+         */
+        post: operations["cancelWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Link an alert
+         * @description WORK_ORDER_MANAGE. An unresolved alert of the same machine (another machine: 400) not handled by another unfinished work order.
+         */
+        post: operations["linkWorkOrderAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/alerts/{alertId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Unlink an alert
+         * @description WORK_ORDER_MANAGE. Not after DONE or CANCELLED.
+         */
+        delete: operations["unlinkWorkOrderAlert"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alerts/{alertId}/work-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a work order for an alert
+         * @description WORK_ORDER_MANAGE. Source ALERT, the alert's machine, linked to the alert; an OPEN alert becomes ACKNOWLEDGED. Defaults come from the alert. A RESOLVED alert is 409 ALERT_RESOLVED; an alert already handled by an unfinished work order is 409 ALERT_ALREADY_HANDLED (the message names that work order). Body optional.
+         */
+        post: operations["createWorkOrderFromAlert"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/restock-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Restock suggestions of a machine
+         * @description RESTOCK_PLAN. Per slot: counts, head status, current product, open alerts and NONE / LOAD / EMPTY_THEN_LOAD with a load quantity. One aggregate query; nothing is locked.
+         */
+        get: operations["getRestockSuggestions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{machineId}/restock-work-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a RESTOCK work order from suggestions
+         * @description RESTOCK_PLAN (with WORK_ORDER_MANAGE). Lines for every slot whose suggestion is not NONE and whose product is known; open stock alerts of those slots linked. Nothing to restock: 409 NOTHING_TO_RESTOCK.
+         */
+        post: operations["createRestockWorkOrderFromSuggestions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/restock-lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a restock line
+         * @description RESTOCK_PLAN. RESTOCK work order not DONE / CANCELLED.
+         */
+        post: operations["addRestockLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/restock-lines/{lineId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a restock line
+         * @description RESTOCK_PLAN. Only while nothing was loaded against it.
+         */
+        delete: operations["deleteRestockLine"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a restock line
+         * @description RESTOCK_PLAN. Only while nothing was loaded against it (409 LINE_ALREADY_LOADED).
+         */
+        patch: operations["updateRestockLine"];
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Load bowls against a restock line
+         * @description RESTOCK_EXECUTE, assignee (or Admin) of the IN_PROGRESS RESTOCK work order. Batch of the line's product, valid beyond the reservation hold; slot ACTIVE or ERROR; capacity and the batch's declared quantity; a batch expiring earlier than bowls already in the column is 409 EXPIRY_INVERSION unless acknowledged. Creates AVAILABLE bowls with strictly increasing loaded_at and LOAD history referencing the line.
+         */
+        post: operations["loadRestockLine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/work-orders/{id}/restock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Restock view of a work order
+         * @description WORK_ORDER_READ_ASSIGNED, same visibility as the work order. Lines with loads, linked maintenance commands and removed bowls by reason.
+         */
+        get: operations["getRestock"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List maintenance plans
+         * @description MAINTENANCE_PLAN_READ. Optional machineId and active; by next due date; page >= 0, size 1 to 100 (default 20).
+         */
+        get: operations["listMaintenancePlans"];
+        put?: never;
+        /**
+         * Create a maintenance plan
+         * @description MAINTENANCE_PLAN_MANAGE. Machine not INACTIVE (409 MACHINE_INACTIVE); interval 1..365, lead 0..30 and below the interval; firstDueDate today or later (default today + interval); default assignee ACTIVE with WORK_ORDER_EXECUTE.
+         */
+        post: operations["createMaintenancePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans/upcoming": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Upcoming maintenance
+         * @description MAINTENANCE_PLAN_READ. Active plans due within days (1 to 90, default 30; overdue ones included), with their unfinished work orders, by date.
+         */
+        get: operations["listUpcomingMaintenance"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one maintenance plan
+         * @description MAINTENANCE_PLAN_READ.
+         */
+        get: operations["getMaintenancePlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change a maintenance plan
+         * @description MAINTENANCE_PLAN_MANAGE. Partial; version required (stale 409 STALE_VERSION). nextDueDate today or later; changing intervalDays does not move nextDueDate. No change: 200 without an audit row.
+         */
+        patch: operations["updateMaintenancePlan"];
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans/{id}/work-orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Work orders of a plan
+         * @description MAINTENANCE_PLAN_READ. Newest occurrence first.
+         */
+        get: operations["listMaintenancePlanWorkOrders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate a plan
+         * @description MAINTENANCE_PLAN_MANAGE. Idempotent.
+         */
+        post: operations["activateMaintenancePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans/{id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate a plan
+         * @description MAINTENANCE_PLAN_MANAGE. Idempotent. No new work orders; existing ones stay linked (plans are never deleted).
+         */
+        post: operations["deactivateMaintenancePlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maintenance-plans/{id}/generate-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create the plan's work order now
+         * @description MAINTENANCE_PLAN_MANAGE. The current occurrence regardless of lead days. 409 MAINTENANCE_PLAN_INACTIVE, PLAN_HAS_OPEN_WORK_ORDER, OCCURRENCE_ALREADY_GENERATED or MACHINE_INACTIVE.
+         */
+        post: operations["generateMaintenancePlanWorkOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{paymentId}/refund": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a manual refund of a payment
+         * @description PAYMENT_REFUND (ADMIN). The money was already transferred; the amount is always the payment amount. SUCCESS -> REFUNDED with the transfer reference, reason and note; the order becomes REFUNDED only when this is its paying payment (the first money that arrived) and the order is DISPENSE_FAILED or COMPLETED. Reasons: DISPENSE_FAILED (order DISPENSE_FAILED, paying payment), LATE_PAYMENT (order CANCELLED, stays CANCELLED), DUPLICATE_PAYMENT (an earlier payment of the order exists; order unchanged), PRODUCT_QUALITY (order COMPLETED, paying payment), OTHER (COMPLETED or DISPENSE_FAILED, paying payment, note required). One audit_logs row PAYMENT_REFUNDED with actor and IP. workOrderId optionally adds a NOTE to an INCIDENT work order. Inventory is never changed.
+         */
+        post: operations["refundPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recorded refunds
+         * @description REFUND_READ (ADMIN). REFUNDED payments, newest refund first. from/to are business-zone dates of refundedAt (inclusive).
+         */
+        get: operations["listRefunds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/refunds/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Payments waiting for a refund
+         * @description REFUND_READ (ADMIN). SUCCESS payments of finished orders: LATE_PAYMENT (order CANCELLED), DUPLICATE_PAYMENT (an earlier payment of the order exists), DISPENSE_FAILED (order DISPENSE_FAILED, paying payment). CUSTOMER_REPORT is reserved and returns nothing yet. Refunded payments disappear. payer comes from the verified webhook of the payment only (null when the provider did not send it). Oldest waiting first; from/to are business-zone dates of paidAt (inclusive).
+         */
+        get: operations["listRefundCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/refunds/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Refund totals
+         * @description REFUND_READ (ADMIN). Count and total amount of refunds, overall and by reason, by business-zone date of refundedAt (inclusive). Reports show refunds separately from revenue.
+         */
+        get: operations["getRefundSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/report-forms/{reportToken}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Form information for a machine's report QR
+         * @description Public. Machine name and code, report types and photo limits. 30 requests / minute / source.
+         */
+        get: operations["getReportForm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/report-forms/{reportToken}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a customer incident report
+         * @description Public, multipart/form-data: part `report` (application/json) and 0..3 `photos` (JPEG or PNG by content, at most 2 MB and 4000 x 4000 px each; re-encoded without metadata). PAID_NOT_RECEIVED needs orderCode; other types need a description; PAID_NOT_RECEIVED and PRODUCT_QUALITY need a phone or e-mail; consent must be true; unknown fields are 400. Every accepted submission gets the same 201 body, whatever the order state; a filled honeypot (website) is accepted and not stored. 5 submissions / minute / source and 60 / hour / machine, counted before validation.
+         */
+        post: operations["submitCustomerReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/kiosk/incident-report-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Public report URL for the kiosk's "Báo sự cố" QR
+         * @description KIOSK only (issue #74). The URL of the public report form of this kiosk's machine. orderCode is added as ?order= only when it is an order of this machine; otherwise it is ignored. 409 REPORT_LINK_NOT_CONFIGURED when PUBLIC_REPORT_BASE_URL is not set.
+         */
+        get: operations["getKioskIncidentReportLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List customer reports
+         * @description CUSTOMER_REPORT_READ. Newest first, database paging; from/to are business-zone dates of createdAt (inclusive). Contact data is always masked here. Without CUSTOMER_REPORT_MANAGE only reports of work orders assigned to the caller are listed.
+         */
+        get: operations["listCustomerReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-reports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a customer report
+         * @description CUSTOMER_REPORT_READ. Full contact data only for CUSTOMER_REPORT_MANAGE; reports the caller may not see are 404.
+         */
+        get: operations["getCustomerReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-reports/{id}/photos/{photoId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a report photo
+         * @description CUSTOMER_REPORT_READ, same visibility as the report. The re-encoded image with its stored Content-Type, inline, nosniff, private no-store.
+         */
+        get: operations["getCustomerReportPhoto"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-reports/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take a report into review
+         * @description CUSTOMER_REPORT_MANAGE (ADMIN). NEW -> IN_REVIEW, audited. 409 REPORT_NOT_NEW or REPORT_ALREADY_CLOSED.
+         */
+        post: operations["reviewCustomerReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-reports/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a report
+         * @description CUSTOMER_REPORT_MANAGE (ADMIN). resolution FIXED, NO_ACTION_NEEDED or REFUNDED; RESOLVED is final (409 REPORT_ALREADY_CLOSED). Audited. Recording a refund for the order (POST /payments/{id}/refund) resolves its open reports as REFUNDED automatically.
+         */
+        post: operations["resolveCustomerReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customer-reports/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject a report
+         * @description CUSTOMER_REPORT_MANAGE (ADMIN). resolution SPAM or DUPLICATE; REJECTED is final (409 REPORT_ALREADY_CLOSED). Audited.
+         */
+        post: operations["rejectCustomerReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/machines/{id}/report-token/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate the public report QR of a machine
+         * @description MACHINE_REPORT_LINK_MANAGE (ADMIN). A new report token; the old QR stops working at once (404). Returns the new URL. Audited. 409 REPORT_LINK_NOT_CONFIGURED when PUBLIC_REPORT_BASE_URL is not set.
+         */
+        post: operations["rotateMachineReportToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Home screen overview
+         * @description DASHBOARD_READ (ADMIN, STAFF). Machines (status, connectivity, latest temperature, sellable bowls, open alerts), alerts by severity, work orders (open, in progress, overdue, assigned to me), stock (low-stock and blocked slots, bowls expiring today; health-check predicates). today (orders and net sales of the business day, yesterday's net sales) and refunds (pending candidates) only with REPORT_SALES_READ: the fields are absent for STAFF. At most 7 SQL statements; poll every 30 s.
+         */
+        get: operations["getDashboardOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales summary
+         * @description REPORT_SALES_READ. ordersSold, grossSales, discounts, netSales (sales by completed_at); deliveredRefunds (PRODUCT_QUALITY / OTHER refunds of delivered orders by refunded_at); netRevenue = netSales - deliveredRefunds; averageOrderValue = netSales / ordersSold rounded down; moneyCollected (payments SUCCESS / REFUNDED by paid_at); moneyRefunded (all refunds by refunded_at, by reason); pendingRefunds (current refund candidates, ignores the filters); failedDispenses (orders paid in range that failed to dispense).
+         */
+        get: operations["getSalesSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales time series
+         * @description REPORT_SALES_READ. One bucket per DAY, ISO WEEK (Monday start) or calendar MONTH in the business zone, zero-filled; start / end are clipped to the range. Per bucket: ordersSold, grossSales, discounts, netSales, deliveredRefunds (by refunded_at), netRevenue.
+         */
+        get: operations["getSalesTimeseries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales/peak-hours": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales by hour of day
+         * @description REPORT_SALES_READ. 24 entries (hour of completed_at in the business zone) with ordersSold and netSales, plus a 7 x 24 matrix of ordersSold (Monday first).
+         */
+        get: operations["getSalesPeakHours"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Top products
+         * @description REPORT_SALES_READ. Products with sales or delivered refunds in range (inactive products included): quantity, grossSales, discounts, netSales, deliveredRefunds, sharePercent (netSales / total netSales, 1 decimal, 0 when the total is 0). Sorted by QUANTITY or NET_SALES descending, ties by name then id; limit 1..100.
+         */
+        get: operations["getSalesByProduct"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales/machines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales by machine
+         * @description REPORT_SALES_READ. Every machine (or the filtered ones) with ordersSold, netSales, deliveredRefunds and netRevenue; zeros when nothing was sold.
+         */
+        get: operations["getSalesByMachine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/sales/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the sales report as CSV or PDF
+         * @description REPORT_EXPORT. One report (summary, DAY series, peak hours, all products, machines) rendered as CSV (UTF-8 with BOM, sections, RFC 4180, formula-injection guard) or PDF (A4, Noto Sans, amounts 1.234.567 ₫); both carry exactly the same numbers. Attachment freshvend-sales_<from>_<to>.<csv|pdf>, Cache-Control no-store. One audit_logs row REPORT_EXPORTED per export.
+         */
+        get: operations["exportSalesReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -952,6 +2376,8 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             expired?: boolean;
+            /** @description Issue #61: the batch expires on today's business day (Asia/Ho_Chi_Minh), is not expired yet and the near-expiry discount is enabled: this bowl sells at the discount now. */
+            discountEligibleToday?: boolean;
             /** Format: date-time */
             loadedAt?: string;
             /** Format: date-time */
@@ -1084,10 +2510,11 @@ export interface components {
              */
             machineId: string;
             /**
-             * @description Immutable code unique within the machine.
-             * @example A1
+             * @description Immutable physical column of the machine: A or B, unique within the machine.
+             * @example A
+             * @enum {string}
              */
-            slotCode: string;
+            slotCode: "A" | "B";
             /**
              * Format: int32
              * @description Maximum physical capacity, not inventory quantity.
@@ -1098,6 +2525,8 @@ export interface components {
              * @enum {string}
              */
             status: "ACTIVE" | "INACTIVE" | "ERROR";
+            /** @description Issue #64: the refill (upper) gate is open; the slot does not sell and cannot be set ACTIVE until CLOSE_REFILL completes. */
+            refillGateOpen: boolean;
             /**
              * Format: date-time
              * @description Creation instant, UTC.
@@ -1109,13 +2538,14 @@ export interface components {
              */
             updatedAt: string;
         };
-        /** @description Configure a slot on an existing machine; initial status ACTIVE. */
+        /** @description Configure a slot on an existing machine; initial status ACTIVE. A slot is one physical column of the machine, so a machine has at most two slots. */
         CreateMachineSlotRequest: {
             /**
-             * @description Stable code within the parent machine; stripped and uppercased using Locale.ROOT. No hardware naming restriction.
-             * @example A1
+             * @description Physical column of the machine: A or B, unique within the parent machine. Stripped and uppercased using Locale.ROOT before validation. Sent to the machine as columnCode of dispense commands.
+             * @example A
+             * @enum {string}
              */
-            slotCode: string;
+            slotCode: "A" | "B";
             /**
              * Format: int32
              * @description Maximum physical capacity, not current stock. Positive 32-bit integer.
@@ -1201,7 +2631,7 @@ export interface components {
             message?: string;
             data?: components["schemas"]["MachineResponse"];
         };
-        /** @description Machine identity, administrative status and environmental configuration; no slot/inventory/telemetry collections. */
+        /** @description Machine identity, administrative status, environmental configuration, derived connectivity and the latest controller diagnostics; no slot/inventory/telemetry collections. */
         MachineResponse: {
             /**
              * Format: uuid
@@ -1231,10 +2661,43 @@ export interface components {
             /** @description Configured maximum humidity percentage. */
             maxHumidity: number;
             /**
+             * @description Derived from presence, never stored: NEVER_SEEN (no message yet), OFFLINE (Last Will after the last message, or silent more than 180 s), WARNING (silent more than 60 s), otherwise ONLINE. Independent of status; does not block sales.
+             * @enum {string}
+             */
+            connectivity: "ONLINE" | "WARNING" | "OFFLINE" | "NEVER_SEEN";
+            /**
              * Format: date-time
-             * @description System-managed last communication instant, UTC; null until heartbeat exists. Read-only.
+             * @description System-managed instant of the last valid MQTT message except the OFFLINE Last Will, UTC; null until the machine was heard from. Read-only.
              */
             lastSeenAt?: string | null;
+            /**
+             * Format: date-time
+             * @description System-managed instant of the last valid heartbeat, UTC; null until the first heartbeat. Read-only.
+             */
+            lastHeartbeatAt?: string | null;
+            /**
+             * @description Firmware version last reported by the machine (heartbeat or status ONLINE). Read-only.
+             * @example 0.3.0
+             */
+            firmwareVersion?: string | null;
+            /**
+             * Format: int64
+             * @description Controller uptime in seconds last reported by the machine. Read-only.
+             * @example 12345
+             */
+            uptimeSeconds?: number | null;
+            /**
+             * Format: int32
+             * @description Wi-Fi signal in dBm (-127 to 0) from the last heartbeat; null when not reported, never 0 by default. Read-only.
+             * @example -55
+             */
+            wifiRssi?: number | null;
+            /**
+             * Format: int64
+             * @description Free controller heap in bytes from the last heartbeat; null when not reported. Read-only.
+             * @example 18240
+             */
+            freeHeapBytes?: number | null;
             /**
              * Format: date-time
              * @description Creation instant, UTC.
@@ -1713,7 +3176,17 @@ export interface components {
             sku?: string;
             name?: string;
             description?: string;
+            /** @description Issue #61: what the customer pays for the next bowl (the FEFO head that would be reserved now), after any near-expiry discount. The order may still differ (midnight, setting change, head change): show the order's totalAmount before the QR. */
             price?: number;
+            /** @description Product price before any discount. */
+            originalPrice?: number;
+            /**
+             * Format: int32
+             * @description 0, or the current near-expiry percent when the next bowl expires today. Show the badge and strike-through only when > 0.
+             */
+            discountPercent?: number;
+            /** @enum {string} */
+            discountReason?: "NONE" | "NEAR_EXPIRY";
             imageUrl?: string;
             /**
              * Format: int64
@@ -1757,6 +3230,8 @@ export interface components {
              * @description Total number of bowls ordered (sum of line quantities).
              */
             totalQuantity?: number;
+            /** @description subtotal - totalAmount; 0 without a discount. */
+            discountAmount?: number;
             totalAmount?: number;
             /** Format: date-time */
             createdAt?: string;
@@ -1791,6 +3266,7 @@ export interface components {
             /** Format: date-time */
             expiredAt?: string;
             qrCode?: string;
+            refund?: components["schemas"]["RefundInfoResponse"];
         };
         /** @description Kiosk order for exactly ONE fruit bowl (one purchase = one bowl). The machine comes from the kiosk credential, the price from the database and the physical bowl is chosen by the backend; items, quantity, machineId, price, status, orderCode and slot/inventory ids are rejected as unknown fields. Breaking change of issue #35: the former items[] shape is no longer accepted. */
         CreateOrderRequest: {
@@ -1817,7 +3293,11 @@ export interface components {
             /** @enum {string} */
             status?: "PENDING_PAYMENT" | "PAID" | "DISPENSING" | "COMPLETED" | "CANCELLED" | "PAYMENT_FAILED" | "DISPENSE_FAILED" | "REFUNDED";
             items?: components["schemas"]["KioskOrderItemResponse"][];
+            /** @description Sum of original prices. */
             subtotal?: number;
+            /** @description subtotal - totalAmount; 0 without a discount. */
+            discountAmount?: number;
+            /** @description Amount to pay (the QR amount). Show it before generating the QR: it can differ from the catalog price. */
             totalAmount?: number;
             /** Format: date-time */
             createdAt?: string;
@@ -1835,8 +3315,18 @@ export interface components {
             productName?: string;
             /** Format: int32 */
             quantity?: number;
+            /** @description Product price when the bowl was reserved. */
+            originalUnitPrice?: number;
+            /** @description Price charged for one bowl (after the discount). */
             unitPrice?: number;
             totalPrice?: number;
+            /**
+             * Format: int32
+             * @description 0 without a discount.
+             */
+            discountPercent?: number;
+            /** @enum {string} */
+            discountReason?: "NONE" | "NEAR_EXPIRY";
         };
         ApiResponseOrderDetailResponse: {
             /** Format: date-time */
@@ -1853,7 +3343,11 @@ export interface components {
             machineCode?: string;
             /** @enum {string} */
             status?: "PENDING_PAYMENT" | "PAID" | "DISPENSING" | "COMPLETED" | "CANCELLED" | "PAYMENT_FAILED" | "DISPENSE_FAILED" | "REFUNDED";
+            /** @description Sum of original prices. */
             subtotal?: number;
+            /** @description subtotal - totalAmount; 0 without a discount. */
+            discountAmount?: number;
+            /** @description Amount charged (payment amount). */
             totalAmount?: number;
             /** Format: date-time */
             createdAt?: string;
@@ -1865,8 +3359,15 @@ export interface components {
             completedAt?: string;
             /** Format: date-time */
             cancelledAt?: string;
+            /**
+             * Format: date-time
+             * @description Set when the order itself was refunded (status REFUNDED, issue #72).
+             */
+            refundedAt?: string;
             items?: components["schemas"]["OrderItemDetailResponse"][];
             payments?: components["schemas"]["PaymentSummaryResponse"][];
+            /** @description Refunded payments of the order with transfer reference; empty unless the caller holds REFUND_READ. */
+            refunds?: components["schemas"]["OrderRefundResponse"][];
         };
         OrderItemDetailResponse: {
             /** Format: uuid */
@@ -1877,8 +3378,18 @@ export interface components {
             productName?: string;
             /** Format: int32 */
             quantity?: number;
+            /** @description Product price when the bowl was reserved. */
+            originalUnitPrice?: number;
+            /** @description Price charged for one bowl. */
             unitPrice?: number;
             totalPrice?: number;
+            /**
+             * Format: int32
+             * @description 0 without a discount.
+             */
+            discountPercent?: number;
+            /** @enum {string} */
+            discountReason?: "NONE" | "NEAR_EXPIRY";
             allocations?: components["schemas"]["OrderAllocationResponse"][];
         };
         OrderAllocationResponse: {
@@ -2025,6 +3536,2021 @@ export interface components {
             paidAt?: string;
             /** Format: date-time */
             expiredAt?: string;
+        };
+        ApiResponseListPermissionResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["PermissionResponse"][];
+        };
+        /** @description A permission of the catalog. Permissions are reference data added by migrations, never through the API. */
+        PermissionResponse: {
+            /**
+             * @description Stable permission code checked by the backend.
+             * @example PRODUCT_WRITE
+             */
+            code?: string;
+            /**
+             * @description What the permission allows.
+             * @example Create and update products and change product status
+             */
+            description?: string;
+        };
+        ApiResponseListRoleResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RoleResponse"][];
+        };
+        /** @description A role and the permission codes it grants. Roles cannot be created, renamed or deleted through the API. */
+        RoleResponse: {
+            /** Format: uuid */
+            id?: string;
+            /**
+             * @description Role name (uppercase).
+             * @example STAFF
+             */
+            name?: string;
+            /**
+             * @description Role description.
+             * @example Machine operations and inventory staff
+             */
+            description?: string | null;
+            /**
+             * @description Granted permission codes, sorted.
+             * @example [
+             *       "BATCH_CREATE",
+             *       "BATCH_READ",
+             *       "INVENTORY_READ"
+             *     ]
+             */
+            permissions?: string[];
+        };
+        ApiResponseRoleResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RoleResponse"];
+        };
+        /** @description The complete new permission set of the role (replaces the old one). An empty list is allowed (role without access). Unknown or duplicate codes are rejected; the ADMIN role must keep PERMISSION_MANAGE and USER_WRITE. */
+        ReplaceRolePermissionsRequest: {
+            /** @description Permission codes; no duplicates. */
+            permissions: string[];
+        };
+        ApiResponseTelemetryPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["TelemetryPageResponse"];
+        };
+        /** @description Database page of telemetry readings, newest first (recordedAt DESC, then id DESC). */
+        TelemetryPageResponse: {
+            /** @description Readings of this page. */
+            content: components["schemas"]["TelemetryReadingResponse"][];
+            /**
+             * Format: int32
+             * @description Zero-based page index.
+             */
+            page: number;
+            /**
+             * Format: int32
+             * @description Requested page size.
+             */
+            size: number;
+            /**
+             * Format: int64
+             * @description Readings in the time range.
+             */
+            totalElements: number;
+            /**
+             * Format: int32
+             * @description Pages in the time range.
+             */
+            totalPages: number;
+        };
+        /** @description One stored telemetry reading; at least one value is present. */
+        TelemetryReadingResponse: {
+            /**
+             * Format: date-time
+             * @description Backend receive instant, UTC.
+             */
+            recordedAt: string;
+            /**
+             * @description Temperature in Celsius, 2 decimals; null when not reported.
+             * @example 4.7
+             */
+            temperature?: number | null;
+            /**
+             * @description Relative humidity in percent, 2 decimals; null when not reported.
+             * @example 68.2
+             */
+            humidity?: number | null;
+        };
+        ApiResponseTelemetryLatestResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["TelemetryLatestResponse"];
+        };
+        /** @description Latest telemetry reading of a machine with its status against the machine thresholds, and the machine connectivity. Reading fields are null when the machine has no reading yet. Display only, not an alert. */
+        TelemetryLatestResponse: {
+            /**
+             * Format: uuid
+             * @description Machine UUID.
+             */
+            machineId: string;
+            /**
+             * Format: date-time
+             * @description Backend receive instant of the reading, UTC; null when there is no reading.
+             */
+            recordedAt?: string | null;
+            /**
+             * @description Temperature in Celsius, 2 decimals; null when not reported.
+             * @example 4.7
+             */
+            temperature?: number | null;
+            /**
+             * @description Relative humidity in percent, 2 decimals; null when not reported.
+             * @example 68.2
+             */
+            humidity?: number | null;
+            /**
+             * @description Temperature against minTemperature/maxTemperature of the machine; null when there is no temperature.
+             * @enum {string|null}
+             */
+            temperatureStatus?: "LOW" | "NORMAL" | "HIGH" | null;
+            /**
+             * @description Humidity against minHumidity/maxHumidity of the machine; null when there is no humidity.
+             * @enum {string|null}
+             */
+            humidityStatus?: "LOW" | "NORMAL" | "HIGH" | null;
+            /**
+             * @description Derived connectivity of the machine now.
+             * @enum {string}
+             */
+            connectivity: "ONLINE" | "WARNING" | "OFFLINE" | "NEVER_SEEN";
+        };
+        ApiResponseMachineEventPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MachineEventPageResponse"];
+        };
+        /** @description Database page of machine events, newest first (createdAt DESC, then id DESC). */
+        MachineEventPageResponse: {
+            /** @description Events of this page. */
+            content: components["schemas"]["MachineEventResponse"][];
+            /**
+             * Format: int32
+             * @description Zero-based page index.
+             */
+            page: number;
+            /**
+             * Format: int32
+             * @description Requested page size.
+             */
+            size: number;
+            /**
+             * Format: int64
+             * @description Matching events.
+             */
+            totalElements: number;
+            /**
+             * Format: int32
+             * @description Pages of matching events.
+             */
+            totalPages: number;
+        };
+        /** @description One entry of a machine's history: a message the machine sent (MACHINE) or a backend decision about it (BACKEND). */
+        MachineEventResponse: {
+            /**
+             * Format: uuid
+             * @description Event UUID.
+             */
+            id: string;
+            /**
+             * @description MACHINE: the reported eventType (DISPENSE_ACCEPTED, FAULT, BOOT, unknown types too), STATUS_ONLINE or STATUS_OFFLINE; BACKEND: BACKEND_DISPENSE_FAILED, BACKEND_DISPENSE_LATE_SUCCESS, BACKEND_DISPENSE_MULTIPLE_BOWLS, BACKEND_MAINTENANCE_ENTERED, BACKEND_REBOOT_DETECTED.
+             * @example DISPENSE_ABORTED
+             */
+            eventType: string;
+            /**
+             * @description MACHINE or BACKEND.
+             * @enum {string}
+             */
+            source: "MACHINE" | "BACKEND";
+            /**
+             * @description Envelope messageId of a MACHINE event (unique per machine); null for BACKEND events.
+             * @example a1b2c3d4-0042
+             */
+            messageId?: string | null;
+            /** @description MACHINE: the message payload as the machine sent it. Untrusted device data: render it escaped, never as HTML. BACKEND: ids and reason only. */
+            payload: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: date-time
+             * @description Backend receive or decision instant, UTC.
+             */
+            createdAt: string;
+        };
+        ApiResponseAuditLogPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["AuditLogPageResponse"];
+        };
+        /** @description Database page of audit entries, newest first (createdAt DESC, then id DESC). */
+        AuditLogPageResponse: {
+            /** @description Entries of this page. */
+            content: components["schemas"]["AuditLogResponse"][];
+            /**
+             * Format: int32
+             * @description Zero-based page index.
+             */
+            page: number;
+            /**
+             * Format: int32
+             * @description Requested page size.
+             */
+            size: number;
+            /**
+             * Format: int64
+             * @description Matching entries.
+             */
+            totalElements: number;
+            /**
+             * Format: int32
+             * @description Pages of matching entries.
+             */
+            totalPages: number;
+        };
+        /** @description One audit log entry. userId/userEmail are null when the system made the change; actor then says "system". */
+        AuditLogResponse: {
+            /**
+             * Format: uuid
+             * @description Audit entry UUID.
+             */
+            id: string;
+            /**
+             * @description What happened, for example ROLE_PERMISSIONS_CHANGED, MACHINE_MAINTENANCE_AUTO, DISPENSE_SUCCESS_AFTER_REFUND, PAYMENT_LATE.
+             * @example MACHINE_MAINTENANCE_AUTO
+             */
+            action: string;
+            /**
+             * @description Kind of record changed, for example Role, Machine, DispenseCommand, Payment.
+             * @example Machine
+             */
+            entityType: string;
+            /**
+             * Format: uuid
+             * @description UUID of the record changed (no foreign key: the record may be of any kind).
+             */
+            entityId: string;
+            /**
+             * Format: uuid
+             * @description Acting user; null for system changes.
+             */
+            userId?: string | null;
+            /**
+             * @description Email of the acting user; null for system changes.
+             * @example admin@example.com
+             */
+            userEmail?: string | null;
+            /**
+             * @description userEmail, or "system" when no user made the change.
+             * @example system
+             */
+            actor: string;
+            /** @description State before the change, as recorded; null when not recorded. */
+            oldValue?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description State after the change, as recorded; null when not recorded. */
+            newValue?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Client IP address when recorded; null otherwise. */
+            ipAddress?: string | null;
+            /**
+             * Format: date-time
+             * @description Instant of the change, UTC.
+             */
+            createdAt: string;
+        };
+        ApiResponseAuditLogResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["AuditLogResponse"];
+        };
+        ApiResponseAlertPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["AlertPageResponse"];
+        };
+        /** @description Database page of alerts: CRITICAL first, then WARNING, then INFO; newest first within a severity (then id DESC). */
+        AlertPageResponse: {
+            /** @description Alerts of this page. */
+            content: components["schemas"]["AlertResponse"][];
+            /**
+             * Format: int32
+             * @description Zero-based page index.
+             */
+            page: number;
+            /**
+             * Format: int32
+             * @description Requested page size.
+             */
+            size: number;
+            /**
+             * Format: int64
+             * @description Matching alerts.
+             */
+            totalElements: number;
+            /**
+             * Format: int32
+             * @description Pages of matching alerts.
+             */
+            totalPages: number;
+        };
+        /** @description One alert. title/message are Vietnamese UI text; type and errorCode let a frontend localize. */
+        AlertResponse: {
+            /**
+             * Format: uuid
+             * @description Alert UUID.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Machine UUID.
+             */
+            machineId: string;
+            /**
+             * @description Machine code.
+             * @example FV-DEV-001
+             */
+            machineCode: string;
+            /**
+             * Format: uuid
+             * @description Slot UUID for slot alerts (stock, expiry, dispense); null for machine alerts.
+             */
+            slotId?: string | null;
+            /**
+             * @description Slot code (A or B) for slot alerts; null otherwise.
+             * @example A
+             */
+            slotCode?: string | null;
+            /**
+             * @description Alert type.
+             * @enum {string}
+             */
+            type: "HIGH_TEMPERATURE" | "LOW_TEMPERATURE" | "HIGH_HUMIDITY" | "MACHINE_OFFLINE" | "PRODUCT_EXPIRED" | "PRODUCT_EXPIRING" | "DISPENSE_FAILED" | "LOW_STOCK" | "HARDWARE_FAULT";
+            /**
+             * @description INFO, WARNING or CRITICAL.
+             * @enum {string}
+             */
+            severity: "INFO" | "WARNING" | "CRITICAL";
+            /**
+             * @description Error code for HARDWARE_FAULT (contract codes, REBOOT_<REASON>, MULTIPLE_BOWLS_DETECTED, UNKNOWN_FAULT) and the failure reason for DISPENSE_FAILED; null otherwise.
+             * @example SERVO_INIT_FAILED
+             */
+            errorCode?: string | null;
+            /** @description Short title. */
+            title: string;
+            /** @description Details. */
+            message?: string | null;
+            /**
+             * @description OPEN, ACKNOWLEDGED or RESOLVED.
+             * @enum {string}
+             */
+            status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+            /**
+             * Format: date-time
+             * @description When the problem was detected, UTC.
+             */
+            triggeredAt: string;
+            /**
+             * Format: date-time
+             * @description When it was acknowledged, UTC; null if not.
+             */
+            acknowledgedAt?: string | null;
+            /** @description Email of the user who acknowledged it; null if not acknowledged. */
+            acknowledgedBy?: string | null;
+            /**
+             * Format: date-time
+             * @description When it was resolved, UTC; null while unresolved.
+             */
+            resolvedAt?: string | null;
+            /**
+             * @description Email of the user who resolved it, "system" when the condition cleared by itself; null while unresolved.
+             * @example system
+             */
+            resolvedBy?: string | null;
+            /** @description Resolution note; "Condition cleared" for system resolutions. */
+            resolutionNote?: string | null;
+            /**
+             * Format: uuid
+             * @description Issue #66: unfinished work order handling this alert; null if none.
+             */
+            workOrderId?: string | null;
+            /** @description Issue #66: its code, e.g. WO-20261113-K7QF; null if none. */
+            workOrderCode?: string | null;
+        };
+        ApiResponseAlertResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["AlertResponse"];
+        };
+        /** @description Optional resolution note. The body may be omitted. */
+        ResolveAlertRequest: {
+            /**
+             * @description What was done, at most 500 characters; blank means no note.
+             * @example Cleared the jam in column A and tested a dispense
+             */
+            note?: string | null;
+        };
+        ApiResponseNotificationPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["NotificationPageResponse"];
+        };
+        /** @description Database page of the signed-in user's notifications, newest first. */
+        NotificationPageResponse: {
+            /** @description Notifications of this page. */
+            content: components["schemas"]["NotificationResponse"][];
+            /**
+             * Format: int32
+             * @description Zero-based page index.
+             */
+            page: number;
+            /**
+             * Format: int32
+             * @description Requested page size.
+             */
+            size: number;
+            /**
+             * Format: int64
+             * @description Matching notifications.
+             */
+            totalElements: number;
+            /**
+             * Format: int32
+             * @description Pages of matching notifications.
+             */
+            totalPages: number;
+        };
+        /** @description One portal notification of the signed-in user. */
+        NotificationResponse: {
+            /**
+             * Format: uuid
+             * @description Notification UUID.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Alert that caused it; open it with GET /api/v1/alerts/{id} (needs ALERT_READ).
+             */
+            alertId?: string | null;
+            /**
+             * Format: uuid
+             * @description Issue #66: work order it is about; open it with GET /api/v1/work-orders/{id}.
+             */
+            workOrderId?: string | null;
+            /** @description Title (copied from the alert or the work order). */
+            title: string;
+            /** @description Message (copied from the alert). */
+            message?: string | null;
+            /**
+             * @description INFO, WARNING or CRITICAL.
+             * @enum {string}
+             */
+            severity: "INFO" | "WARNING" | "CRITICAL";
+            /** @description True once read. */
+            read: boolean;
+            /**
+             * Format: date-time
+             * @description When it was marked read, UTC; null while unread.
+             */
+            readAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Creation instant, UTC.
+             */
+            createdAt: string;
+        };
+        ApiResponseUnreadCountResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["UnreadCountResponse"];
+        };
+        /** @description Number of unread notifications of the signed-in user (poll every 30 s). */
+        UnreadCountResponse: {
+            /**
+             * Format: int64
+             * @description Unread notifications.
+             * @example 3
+             */
+            unread: number;
+        };
+        ApiResponseMarkedReadResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MarkedReadResponse"];
+        };
+        /** @description How many notifications this call marked read (already read ones are not counted). */
+        MarkedReadResponse: {
+            /**
+             * Format: int32
+             * @description Notifications marked read.
+             * @example 3
+             */
+            marked: number;
+        };
+        ApiResponseNearExpiryDiscountResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["NearExpiryDiscountResponse"];
+        };
+        /** @description Near-expiry discount: bowls whose batch expires today (businessZone) cost floor(price x (100 - percent) / 100) VND while enabled. */
+        NearExpiryDiscountResponse: {
+            enabled: boolean;
+            /**
+             * Format: int32
+             * @example 50
+             */
+            percent: number;
+            /**
+             * Format: int64
+             * @description Send it back on PUT; a stale value is 409.
+             * @example 3
+             */
+            version: number;
+            /** Format: date-time */
+            updatedAt: string;
+            /** @description Last Admin who changed it; null for the seeded value. */
+            updatedBy?: components["schemas"]["PricingActorResponse"];
+            /**
+             * @description Zone that decides "today".
+             * @example Asia/Ho_Chi_Minh
+             */
+            businessZone: string;
+        };
+        PricingActorResponse: {
+            /** Format: uuid */
+            id?: string;
+            fullName?: string;
+        };
+        /** @description Whole replacement of the setting. version is the value last read; unknown fields are rejected. */
+        UpdateNearExpiryDiscountRequest: {
+            /** @example true */
+            enabled: boolean;
+            /**
+             * Format: int32
+             * @description Integer 1 to 90.
+             * @example 50
+             */
+            percent: number;
+            /**
+             * Format: int64
+             * @description version from the last GET.
+             * @example 3
+             */
+            version: number;
+        };
+        /** @description A maintenance command for one column. RESET is not accepted here (POST /api/v1/machines/{machineId}/reset). Unknown fields are rejected. */
+        CreateMaintenanceCommandRequest: {
+            /**
+             * @example REMOVE_ITEM
+             * @enum {string}
+             */
+            operation: "REMOVE_ITEM" | "EMPTY_COLUMN" | "OPEN_REFILL" | "CLOSE_REFILL";
+            /**
+             * @description Required for REMOVE_ITEM and EMPTY_COLUMN, not allowed otherwise.
+             * @example DAMAGED
+             * @enum {string|null}
+             */
+            reason?: "EXPIRED" | "DAMAGED" | "DISPENSE_FAILED" | "RESTOCK" | "INSPECTION" | "OTHER" | null;
+            /** @description Optional, at most 500 characters; required when reason is OTHER. Blank means none. */
+            note?: string | null;
+            /**
+             * Format: uuid
+             * @description REMOVE_ITEM only, optional: must be the current head bowl of the column (409 NOT_HEAD_ITEM otherwise).
+             */
+            inventoryItemId?: string | null;
+            /**
+             * Format: uuid
+             * @description Issue #68, optional: the IN_PROGRESS work order of this machine the command serves; the caller must be allowed to execute it.
+             */
+            workOrderId?: string | null;
+        };
+        ApiResponseMaintenanceCommandResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MaintenanceCommandResponse"];
+        };
+        /** @description A maintenance command and where it stands. Inventory changed only if status is COMPLETED, or RECONCILED with outcome DONE. */
+        MaintenanceCommandResponse: {
+            /** Format: uuid */
+            id?: string;
+            /**
+             * @description MQTT commandId, MC- and 32 hex characters.
+             * @example MC-3f2a9c1b7d4e4f0a8b6c5d4e3f2a1b0c
+             */
+            commandCode?: string;
+            /** Format: uuid */
+            machineId?: string;
+            machineCode?: string;
+            /** Format: uuid */
+            slotId?: string | null;
+            /** @description A or B; null for RESET. */
+            slotCode?: string | null;
+            /** @enum {string} */
+            operation?: "REMOVE_ITEM" | "EMPTY_COLUMN" | "OPEN_REFILL" | "CLOSE_REFILL" | "RESET";
+            /** @enum {string} */
+            status?: "PENDING" | "SENT" | "ACCEPTED" | "COMPLETED" | "FAILED" | "NEEDS_RECONCILIATION" | "RECONCILED";
+            /** @enum {string|null} */
+            reason?: "EXPIRED" | "DAMAGED" | "DISPENSE_FAILED" | "RESTOCK" | "INSPECTION" | "OTHER" | null;
+            note?: string | null;
+            /** @description REMOVE_ITEM: the head bowl when the command was created. */
+            targetItem?: components["schemas"]["MaintenanceTargetItem"];
+            requestedBy?: components["schemas"]["MaintenanceActor"];
+            /**
+             * Format: uuid
+             * @description Issue #68: work order the command serves.
+             */
+            workOrderId?: string | null;
+            /**
+             * Format: int32
+             * @description Deliveries to the broker (re-sends use the same commandCode).
+             */
+            attemptCount?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            sentAt?: string | null;
+            /** Format: date-time */
+            acceptedAt?: string | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** @description ACCEPT_TIMEOUT, COMPLETE_TIMEOUT, HEAD_CHANGED, ACCEPTED_AFTER_TIMEOUT, CONTROLLER_FAULT, ABORTED[_<reason>] or a contract reason. */
+            failureReason?: string | null;
+            /**
+             * Format: int32
+             * @description Bowls taken out of inventory by this command.
+             */
+            removedCount?: number | null;
+            /** @enum {string|null} */
+            reconciliationOutcome?: "DONE" | "NOT_DONE" | null;
+            reconciledBy?: components["schemas"]["MaintenanceActor"];
+            /** Format: date-time */
+            reconciledAt?: string | null;
+        };
+        MaintenanceTargetItem: {
+            /** Format: uuid */
+            inventoryItemId?: string;
+            /** Format: uuid */
+            productId?: string;
+            productName?: string;
+            /** Format: uuid */
+            batchId?: string;
+            batchCode?: string;
+        };
+        MaintenanceActor: {
+            /** Format: uuid */
+            id?: string;
+            fullName?: string;
+        };
+        /** @description Optional body of a RESET: a note on what was checked. Unknown fields are rejected. */
+        ResetMachineRequest: {
+            /**
+             * @description At most 500 characters; blank means none.
+             * @example Gates checked, jam cleared
+             */
+            note?: string | null;
+        };
+        ApiResponseMaintenanceCommandPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MaintenanceCommandPageResponse"];
+        };
+        MaintenanceCommandPageResponse: {
+            content?: components["schemas"]["MaintenanceCommandResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalElements?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        /** @description What Staff found at the machine. DONE applies the command's effect as if it had completed; NOT_DONE changes nothing. */
+        ReconcileMaintenanceCommandRequest: {
+            /**
+             * @example DONE
+             * @enum {string}
+             */
+            outcome: "DONE" | "NOT_DONE";
+            /** @description Optional, at most 500 characters. */
+            note?: string | null;
+        };
+        ApiResponseWorkOrderPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["WorkOrderPageResponse"];
+        };
+        WorkOrderPageResponse: {
+            content?: components["schemas"]["WorkOrderResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalElements?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        /** @description A work order. version is sent back on edit, assign, unassign and cancel. */
+        WorkOrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** @example WO-20261113-K7QF */
+            code?: string;
+            /** @enum {string} */
+            type?: "RESTOCK" | "MAINTENANCE" | "INCIDENT";
+            /** @enum {string} */
+            source?: "MANUAL" | "ALERT" | "SCHEDULE" | "CUSTOMER_REPORT";
+            /** Format: uuid */
+            machineId?: string;
+            machineCode?: string;
+            machineName?: string;
+            title?: string;
+            description?: string | null;
+            /** @enum {string} */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+            /** @enum {string} */
+            status?: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "DONE" | "CANCELLED";
+            assignee?: components["schemas"]["WorkOrderUser"];
+            /** @description null = created by the system. */
+            createdBy?: components["schemas"]["WorkOrderUser"];
+            /** Format: date-time */
+            dueAt?: string | null;
+            /** @description Due time passed while unfinished. */
+            overdue?: boolean;
+            /** Format: date-time */
+            startedAt?: string | null;
+            /** Format: date-time */
+            completedAt?: string | null;
+            completedBy?: components["schemas"]["WorkOrderUser"];
+            resultNote?: string | null;
+            /** Format: date-time */
+            cancelledAt?: string | null;
+            cancelledBy?: components["schemas"]["WorkOrderUser"];
+            cancelReason?: string | null;
+            linkedAlerts?: components["schemas"]["WorkOrderLinkedAlert"][];
+            /** @description Issue #74: customer reports attached to this work order (oldest first). */
+            linkedReports?: components["schemas"]["WorkOrderLinkedReport"][];
+            /** @description Issue #68: RESTOCK work orders only. */
+            restockSummary?: components["schemas"]["WorkOrderRestockSummary"];
+            /** @description Issue #70: the maintenance plan of a SCHEDULE work order. */
+            maintenancePlan?: components["schemas"]["WorkOrderPlan"];
+            /**
+             * Format: date
+             * @description Issue #70: the plan occurrence (business-zone date) of a SCHEDULE work order.
+             */
+            scheduledFor?: string | null;
+            /** Format: int64 */
+            version?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        WorkOrderUser: {
+            /** Format: uuid */
+            id?: string;
+            fullName?: string;
+        };
+        WorkOrderLinkedAlert: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            type?: "HIGH_TEMPERATURE" | "LOW_TEMPERATURE" | "HIGH_HUMIDITY" | "MACHINE_OFFLINE" | "PRODUCT_EXPIRED" | "PRODUCT_EXPIRING" | "DISPENSE_FAILED" | "LOW_STOCK" | "HARDWARE_FAULT";
+            /** @enum {string} */
+            severity?: "INFO" | "WARNING" | "CRITICAL";
+            /** @enum {string} */
+            status?: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+            title?: string;
+        };
+        /** @description A new work order (source MANUAL). Unknown fields are rejected. */
+        CreateWorkOrderRequest: {
+            /**
+             * @example MAINTENANCE
+             * @enum {string}
+             */
+            type: "RESTOCK" | "MAINTENANCE" | "INCIDENT";
+            /** Format: uuid */
+            machineId: string;
+            /** @example Kiểm tra servo cột A */
+            title: string;
+            description?: string | null;
+            /**
+             * @description Default NORMAL.
+             * @example HIGH
+             * @enum {string|null}
+             */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
+            /**
+             * Format: uuid
+             * @description Optional: an ACTIVE user holding WORK_ORDER_EXECUTE.
+             */
+            assigneeId?: string | null;
+            /**
+             * Format: date-time
+             * @description Optional; not in the past.
+             */
+            dueAt?: string | null;
+            /** @description Issue #68, RESTOCK only (needs RESTOCK_PLAN): planned lines; other types must leave it out. */
+            restockLines?: components["schemas"]["RestockLineInput"][];
+        };
+        ApiResponseWorkOrderResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["WorkOrderResponse"];
+        };
+        /** @description Partial edit: a field left out (or null) is unchanged; description "" clears it. version is required. */
+        UpdateWorkOrderRequest: {
+            /**
+             * Format: int64
+             * @description version from the last read; stale -> 409.
+             */
+            version: number;
+            title?: string | null;
+            description?: string | null;
+            /** @enum {string|null} */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
+            /**
+             * Format: date-time
+             * @description Not in the past; changing it re-arms the overdue notification.
+             */
+            dueAt?: string | null;
+        };
+        ApiResponseListWorkOrderEventResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["WorkOrderEventResponse"][];
+        };
+        /** @description One history row of a work order (append-only). */
+        WorkOrderEventResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            type?: "CREATED" | "ASSIGNED" | "UNASSIGNED" | "STARTED" | "COMPLETED" | "CANCELLED" | "UPDATED" | "NOTE" | "OVERDUE";
+            /** @enum {string|null} */
+            statusBefore?: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "DONE" | "CANCELLED" | null;
+            /** @enum {string|null} */
+            statusAfter?: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "DONE" | "CANCELLED" | null;
+            /** @description null = the system. */
+            actor?: components["schemas"]["WorkOrderUser"];
+            note?: string | null;
+            /** @description Changed fields, assignees, linked alerts, machine stop; keys depend on type. */
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        AssignWorkOrderRequest: {
+            /**
+             * Format: uuid
+             * @description An ACTIVE user holding WORK_ORDER_EXECUTE.
+             */
+            assigneeId: string;
+            /** Format: int64 */
+            version: number;
+        };
+        /** @description The version from the last read; stale -> 409. */
+        VersionRequest: {
+            /** Format: int64 */
+            version: number;
+        };
+        /** @description Optional body. stopMachine only matters for INCIDENT (RESTOCK and MAINTENANCE always stop the machine). */
+        StartWorkOrderRequest: {
+            /** @description INCIDENT: put the machine in MAINTENANCE. Default false. */
+            stopMachine?: boolean | null;
+        };
+        WorkOrderNoteRequest: {
+            note: string;
+        };
+        CompleteWorkOrderRequest: {
+            /** @example Thay servo 2 */
+            resultNote: string;
+            /** @description Resolve the linked OPEN/ACKNOWLEDGED alerts. Default true. */
+            resolveLinkedAlerts?: boolean | null;
+            /** @description Issue #68, RESTOCK: a reason for each line whose loaded quantity differs from the planned one. */
+            lineVariances?: components["schemas"]["LineVariance"][];
+        };
+        CancelWorkOrderRequest: {
+            reason: string;
+            /** Format: int64 */
+            version: number;
+        };
+        LinkAlertRequest: {
+            /** Format: uuid */
+            alertId: string;
+        };
+        /** @description A work order for an alert (source ALERT, the alert's machine). Every field is optional: type defaults from the alert type (LOW_STOCK, PRODUCT_* -> RESTOCK, others MAINTENANCE), title from the alert title, priority from its severity (CRITICAL -> URGENT, WARNING -> HIGH, INFO -> NORMAL). */
+        CreateWorkOrderFromAlertRequest: {
+            /** @enum {string|null} */
+            type?: "RESTOCK" | "MAINTENANCE" | "INCIDENT" | null;
+            title?: string | null;
+            description?: string | null;
+            /** @enum {string|null} */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
+            /** Format: uuid */
+            assigneeId?: string | null;
+            /** Format: date-time */
+            dueAt?: string | null;
+        };
+        ApiResponseRestockSuggestionResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RestockSuggestionResponse"];
+        };
+        /** @description Restock suggestions of a machine: one entry per slot. Read-only, nothing is locked. */
+        RestockSuggestionResponse: {
+            /** Format: uuid */
+            machineId?: string;
+            machineCode?: string;
+            /**
+             * Format: int32
+             * @description LOW_STOCK threshold used: sellable at most this many is low.
+             */
+            lowStockThreshold?: number;
+            slots?: components["schemas"]["SlotSuggestion"][];
+        };
+        SlotSuggestion: {
+            /** Format: uuid */
+            slotId?: string;
+            slotCode?: string;
+            /** Format: int32 */
+            capacity?: number;
+            slotStatus?: string;
+            refillGateOpen?: boolean;
+            /**
+             * Format: int64
+             * @description Bowls in the column (AVAILABLE, RESERVED, EXPIRED, DISPENSE_FAILED).
+             */
+            physicalCount?: number;
+            /**
+             * Format: int64
+             * @description Bowls a customer can buy now (0 when the head blocks the column).
+             */
+            sellableCount?: number;
+            /** Format: int64 */
+            expiredCount?: number;
+            /** Format: int64 */
+            expiringTodayCount?: number;
+            /** Format: int64 */
+            dispenseFailedCount?: number;
+            /** @description Status of the head bowl (EXPIRED when its batch expired); null for an empty column. */
+            headStatus?: string | null;
+            /** @description Product of the most recently loaded bowl still in the column; null when empty. */
+            currentProduct?: components["schemas"]["CurrentProduct"];
+            /** @enum {string} */
+            suggestedAction?: "NONE" | "LOAD" | "EMPTY_THEN_LOAD";
+            /**
+             * Format: int32
+             * @description Capacity minus the bowls left after the suggested action.
+             */
+            suggestedLoadQuantity?: number;
+            openAlerts?: string[];
+        };
+        CurrentProduct: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+        };
+        /** @description A RESTOCK work order from the machine's suggestions: one line per slot whose suggested action is not NONE (slots without a product skipped); open LOW_STOCK / PRODUCT_* alerts of those slots are linked. */
+        CreateRestockWorkOrderRequest: {
+            /** @example true */
+            fromSuggestions: boolean;
+            /** @description Default: "Nạp hàng máy <code>". */
+            title?: string | null;
+            /** @enum {string|null} */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
+            /** Format: uuid */
+            assigneeId?: string | null;
+            /** Format: date-time */
+            dueAt?: string | null;
+        };
+        /** @description Issue #68: totals of a RESTOCK work order's lines. */
+        WorkOrderRestockSummary: {
+            /** Format: int32 */
+            lines?: number;
+            /** Format: int32 */
+            plannedTotal?: number;
+            /** Format: int32 */
+            loadedTotal?: number;
+            /**
+             * Format: int32
+             * @description Lines whose loaded quantity differs from the planned one.
+             */
+            varianceLines?: number;
+        };
+        /** @description Issue #68: one planned restock line: a slot of the work order's machine, an ACTIVE product, at most the slot capacity. */
+        RestockLineInput: {
+            /** Format: uuid */
+            slotId: string;
+            /** Format: uuid */
+            productId: string;
+            /**
+             * Format: int32
+             * @example 6
+             */
+            plannedQuantity: number;
+        };
+        ApiResponseRestockLineResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RestockLineResponse"];
+        };
+        /** @description One restock line with what was loaded against it. */
+        RestockLineResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            workOrderId?: string;
+            /** Format: uuid */
+            slotId?: string;
+            slotCode?: string;
+            /** Format: uuid */
+            productId?: string;
+            productName?: string;
+            /** Format: int32 */
+            plannedQuantity?: number;
+            /** Format: int32 */
+            loadedQuantity?: number;
+            varianceReason?: string | null;
+            loads?: components["schemas"]["RestockLoad"][];
+        };
+        RestockLoad: {
+            /** Format: uuid */
+            batchId?: string;
+            batchCode?: string;
+            /** Format: int64 */
+            quantity?: number;
+            /** Format: date-time */
+            loadedAt?: string;
+            /** Format: uuid */
+            actorId?: string | null;
+            actorName?: string | null;
+        };
+        ApiResponseVoid: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: unknown;
+        };
+        /** @description Partial change of a line that nothing was loaded against yet; a field left out is unchanged. */
+        UpdateRestockLineRequest: {
+            /** Format: int32 */
+            plannedQuantity?: number | null;
+            /** Format: uuid */
+            productId?: string | null;
+        };
+        /** @description Bowls physically loaded into the line's column from one batch. */
+        RestockLoadRequest: {
+            /** Format: uuid */
+            batchId: string;
+            /**
+             * Format: int32
+             * @example 4
+             */
+            quantity: number;
+            /** @description Load anyway although the batch expires earlier than bowls already in the column (it will be sold after them). Default false: 409 EXPIRY_INVERSION. */
+            acknowledgeExpiryInversion?: boolean | null;
+        };
+        ApiResponseRestockLoadResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RestockLoadResponse"];
+        };
+        RestockLoadResponse: {
+            line?: components["schemas"]["RestockLineResponse"];
+            /** Format: int32 */
+            loaded?: number;
+            inventoryItemIds?: string[];
+        };
+        ApiResponseRestockViewResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RestockViewResponse"];
+        };
+        /** @description A RESTOCK work order: lines with loads, linked maintenance commands and the bowls they removed. */
+        RestockViewResponse: {
+            /** Format: uuid */
+            workOrderId?: string;
+            workOrderCode?: string;
+            status?: string;
+            lines?: components["schemas"]["RestockLineResponse"][];
+            /** Format: int32 */
+            plannedTotal?: number;
+            /** Format: int32 */
+            loadedTotal?: number;
+            maintenanceCommands?: components["schemas"]["LinkedMaintenanceCommand"][];
+            /** @description Bowls removed by completed (or reconciled DONE) linked maintenance commands, by reason. */
+            removedByReason?: {
+                [key: string]: number;
+            };
+        };
+        LinkedMaintenanceCommand: {
+            /** Format: uuid */
+            id?: string;
+            commandCode?: string;
+            operation?: string;
+            status?: string;
+            reason?: string | null;
+            slotCode?: string | null;
+            /** Format: int32 */
+            removedCount?: number | null;
+            reconciliationOutcome?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        /** @description Issue #68: why a restock line was loaded with another quantity than planned. */
+        LineVariance: {
+            /** Format: uuid */
+            lineId: string;
+            /** @example Lô mới chỉ có 4 tô */
+            reason: string;
+        };
+        ApiResponseMaintenancePlanPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MaintenancePlanPageResponse"];
+        };
+        MaintenancePlanPageResponse: {
+            content?: components["schemas"]["MaintenancePlanResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalElements?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        /** @description A maintenance plan. Dates are business-zone dates; dueTime is a local time there. */
+        MaintenancePlanResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            machineId?: string;
+            machineCode?: string;
+            machineName?: string;
+            title?: string;
+            instructions?: string | null;
+            /** Format: int32 */
+            intervalDays?: number;
+            /** Format: int32 */
+            leadDays?: number;
+            /** @example 17:00 */
+            dueTime?: string;
+            /** @enum {string} */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+            defaultAssignee?: components["schemas"]["PlanUser"];
+            /** Format: date */
+            nextDueDate?: string;
+            active?: boolean;
+            /** @description next due date passed and no unfinished work order. */
+            overdue?: boolean;
+            /** @description The unfinished work order of the plan, if any. */
+            currentWorkOrder?: components["schemas"]["PlanWorkOrder"];
+            /** Format: date-time */
+            lastCompletedAt?: string | null;
+            createdBy?: components["schemas"]["PlanUser"];
+            /** Format: int64 */
+            version?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        PlanUser: {
+            /** Format: uuid */
+            id?: string;
+            fullName?: string;
+        };
+        PlanWorkOrder: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            status?: string;
+        };
+        /** @description A recurring maintenance plan. Dates are business-zone (Asia/Ho_Chi_Minh) dates, dueTime a local time there. */
+        CreateMaintenancePlanRequest: {
+            /** Format: uuid */
+            machineId: string;
+            /** @example Vệ sinh khoang lạnh */
+            title: string;
+            /** @example Lau khay, kiểm tra gioăng */
+            instructions?: string | null;
+            /**
+             * Format: int32
+             * @example 7
+             */
+            intervalDays: number;
+            /**
+             * Format: int32
+             * @description Days before the due date the work order is created; < intervalDays. Default 0.
+             * @example 1
+             */
+            leadDays?: number | null;
+            /**
+             * Format: time-local
+             * @description Default 17:00.
+             * @example 17:00
+             */
+            dueTime?: string | null;
+            /**
+             * @description Default NORMAL.
+             * @enum {string|null}
+             */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
+            /**
+             * Format: uuid
+             * @description An ACTIVE user holding WORK_ORDER_EXECUTE.
+             */
+            defaultAssigneeId?: string | null;
+            /**
+             * Format: date
+             * @description Today or later; default today + intervalDays.
+             * @example 2026-11-20
+             */
+            firstDueDate?: string | null;
+        };
+        ApiResponseMaintenancePlanResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MaintenancePlanResponse"];
+        };
+        ApiResponseListMaintenancePlanResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MaintenancePlanResponse"][];
+        };
+        /** @description Partial change; a field left out (or null) is unchanged. instructions "" clears them; clearDefaultAssignee=true removes the default assignee. Changing intervalDays does not move nextDueDate. */
+        UpdateMaintenancePlanRequest: {
+            /**
+             * Format: int64
+             * @description version from the last read; stale -> 409.
+             */
+            version: number;
+            title?: string | null;
+            instructions?: string | null;
+            /** Format: int32 */
+            intervalDays?: number | null;
+            /** Format: int32 */
+            leadDays?: number | null;
+            /**
+             * Format: time-local
+             * @example 17:00
+             */
+            dueTime?: string | null;
+            /** @enum {string|null} */
+            priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT" | null;
+            /** Format: uuid */
+            defaultAssigneeId?: string | null;
+            /** @description true: no default assignee. */
+            clearDefaultAssignee?: boolean | null;
+            /**
+             * Format: date
+             * @description Today or later.
+             */
+            nextDueDate?: string | null;
+        };
+        ApiResponseListPlanWorkOrderResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["PlanWorkOrderResponse"][];
+        };
+        /** @description A work order generated by the plan (history of the plan). */
+        PlanWorkOrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            status?: string;
+            /** Format: date */
+            scheduledFor?: string;
+            /** Format: date-time */
+            dueAt?: string | null;
+            assignee?: components["schemas"]["PlanUser"];
+            /** Format: date-time */
+            completedAt?: string | null;
+            /** Format: date-time */
+            cancelledAt?: string | null;
+        };
+        WorkOrderPlan: {
+            /** Format: uuid */
+            id?: string;
+            title?: string;
+        };
+        RefundPaymentRequest: {
+            /** @enum {string} */
+            reason: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "PRODUCT_QUALITY" | "OTHER";
+            /**
+             * @description Bank transfer reference, surrounding spaces stripped; one transfer can be recorded once.
+             * @example FT26317123456789
+             */
+            transferReference: string;
+            /** @description Required (not blank) for reason OTHER; "" is stored as null. */
+            note?: string;
+            /**
+             * Format: uuid
+             * @description Optional INCIDENT work order (not CANCELLED) that receives a NOTE event about the refund.
+             */
+            workOrderId?: string;
+        };
+        /** @description Manual refund recorded for a REFUNDED payment (issue #72); null for any other payment. */
+        RefundInfoResponse: {
+            /** Format: date-time */
+            refundedAt?: string;
+            refundedBy?: components["schemas"]["RefundActorResponse"];
+            /** @enum {string} */
+            reason?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "PRODUCT_QUALITY" | "OTHER";
+            /** @description Bank transfer reference of the refund. */
+            transferReference?: string;
+            note?: string;
+        };
+        RefundActorResponse: {
+            /** Format: uuid */
+            id?: string;
+            fullName?: string;
+        };
+        ApiResponseRefundPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RefundPageResponse"];
+        };
+        RefundPageResponse: {
+            content?: components["schemas"]["RefundResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalElements?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        RefundResponse: {
+            /** Format: uuid */
+            paymentId?: string;
+            amount?: number;
+            /** Format: date-time */
+            paidAt?: string;
+            /** Format: date-time */
+            refundedAt?: string;
+            refundedBy?: components["schemas"]["RefundActorResponse"];
+            /** @enum {string} */
+            reason?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "PRODUCT_QUALITY" | "OTHER";
+            transferReference?: string;
+            note?: string;
+            order?: components["schemas"]["RefundOrderResponse"];
+        };
+        RefundOrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            orderCode?: string;
+            /** @enum {string} */
+            status?: "PENDING_PAYMENT" | "PAID" | "DISPENSING" | "COMPLETED" | "CANCELLED" | "PAYMENT_FAILED" | "DISPENSE_FAILED" | "REFUNDED";
+            machineCode?: string;
+        };
+        ApiResponseRefundCandidatePageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RefundCandidatePageResponse"];
+        };
+        RefundCandidatePageResponse: {
+            content?: components["schemas"]["RefundCandidateResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalElements?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        RefundCandidateResponse: {
+            /** Format: uuid */
+            paymentId?: string;
+            /** @enum {string} */
+            type?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "CUSTOMER_REPORT";
+            amount?: number;
+            /** Format: date-time */
+            paidAt?: string;
+            order?: components["schemas"]["RefundOrderResponse"];
+            /** @description null when the verified webhook carried no payer account. */
+            payer?: components["schemas"]["PayerAccountResponse"];
+            /**
+             * Format: date-time
+             * @description When the money arrived (paidAt); the list is oldest first.
+             */
+            waitingSince?: string;
+            /** @description The INCIDENT work order of the customer report, when there is one (issue #74). */
+            relatedWorkOrder?: components["schemas"]["RefundWorkOrderResponse"];
+            /** @description Open customer report of the order (issue #74); null when none. */
+            customerReport?: components["schemas"]["RefundCandidateReportResponse"];
+        };
+        /** @description Payer bank account from the VERIFIED webhook of the payment (payOS counterAccount* fields); fields payOS did not send are null. Never logged. */
+        PayerAccountResponse: {
+            accountName?: string;
+            accountNumber?: string;
+            bankId?: string;
+            bankName?: string;
+        };
+        RefundWorkOrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+        };
+        ApiResponseRefundSummaryResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["RefundSummaryResponse"];
+        };
+        /** @description Refund totals by refundedAt in the business zone; every reason is listed, with 0 when there is none. */
+        RefundSummaryResponse: {
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+            /** Format: uuid */
+            machineId?: string;
+            /** Format: int64 */
+            count?: number;
+            totalAmount?: number;
+            byReason?: components["schemas"]["ReasonTotal"][];
+        };
+        ReasonTotal: {
+            /** @enum {string} */
+            reason?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "PRODUCT_QUALITY" | "OTHER";
+            /** Format: int64 */
+            count?: number;
+            totalAmount?: number;
+        };
+        /** @description A refunded payment of the order (issue #72). Listed only for callers holding REFUND_READ. */
+        OrderRefundResponse: {
+            /** Format: uuid */
+            paymentId?: string;
+            amount?: number;
+            /** Format: date-time */
+            refundedAt?: string;
+            refundedBy?: components["schemas"]["RefundActorResponse"];
+            /** @enum {string} */
+            reason?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "PRODUCT_QUALITY" | "OTHER";
+            transferReference?: string;
+            note?: string;
+        };
+        ApiResponseReportFormResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["ReportFormResponse"];
+        };
+        ReportFormResponse: {
+            machineName?: string;
+            machineCode?: string;
+            types?: ("PAID_NOT_RECEIVED" | "PRODUCT_QUALITY" | "MACHINE_FAULT" | "OTHER")[];
+            /** Format: int32 */
+            maxPhotos?: number;
+            /** Format: int32 */
+            maxPhotoBytes?: number;
+        };
+        PublicReportRequest: {
+            /** @enum {string} */
+            type: "PAID_NOT_RECEIVED" | "PRODUCT_QUALITY" | "MACHINE_FAULT" | "OTHER";
+            /**
+             * @description ORD-yyyyMMdd-XXXXXXXX (case-insensitive); required for PAID_NOT_RECEIVED.
+             * @example ORD-20261114-K7QF2M9A
+             */
+            orderCode?: string | null;
+            /** @description Required except for PAID_NOT_RECEIVED; control characters are removed. */
+            description?: string | null;
+            contactName?: string | null;
+            /**
+             * @description ^(0|\+84)[0-9]{9,10}$; phone or email is required for PAID_NOT_RECEIVED and PRODUCT_QUALITY.
+             * @example 0901234567
+             */
+            contactPhone?: string | null;
+            contactEmail?: string | null;
+            /** @description Must be true: the customer accepted the privacy notice. */
+            consent: boolean;
+            /** @description Honeypot: leave empty. A filled value is accepted silently and nothing is stored. */
+            website?: string | null;
+        };
+        ApiResponseReportSubmittedResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["ReportSubmittedResponse"];
+        };
+        ReportSubmittedResponse: {
+            /** @example RPT-20261114-7KQ2 */
+            reportCode?: string;
+            message?: string;
+        };
+        ApiResponseReportLinkResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["ReportLinkResponse"];
+        };
+        ReportLinkResponse: {
+            /** Format: uuid */
+            machineId?: string;
+            /** @example https://staging.freshvend.vn/report/Q2x9…?order=ORD-20261114-K7QF2M9A */
+            url?: string;
+        };
+        ApiResponseCustomerReportPageResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["CustomerReportPageResponse"];
+        };
+        CustomerReportPageResponse: {
+            content?: components["schemas"]["CustomerReportSummaryResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            totalElements?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        CustomerReportSummaryResponse: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            /** @enum {string} */
+            type?: "PAID_NOT_RECEIVED" | "PRODUCT_QUALITY" | "MACHINE_FAULT" | "OTHER";
+            /** @enum {string} */
+            status?: "NEW" | "IN_REVIEW" | "RESOLVED" | "REJECTED";
+            /** @enum {string} */
+            verdict?: "NOT_APPLICABLE" | "ORDER_NOT_FOUND" | "REFUND_ELIGIBLE" | "DISPENSE_PENDING" | "DELIVERED_PER_MACHINE" | "ALREADY_REFUNDED" | "NOT_PAID";
+            /** Format: uuid */
+            machineId?: string;
+            machineCode?: string;
+            orderCode?: string;
+            /** Format: uuid */
+            orderId?: string;
+            contact?: components["schemas"]["ReportContactResponse"];
+            workOrder?: components["schemas"]["ReportWorkOrderResponse"];
+            /** @enum {string} */
+            resolution?: "REFUNDED" | "FIXED" | "NO_ACTION_NEEDED" | "SPAM" | "DUPLICATE";
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+        };
+        /** @description Customer contact. Masked (090****567, a***@example.com) in lists and for callers without CUSTOMER_REPORT_MANAGE. */
+        ReportContactResponse: {
+            name?: string;
+            phone?: string;
+            email?: string;
+            masked?: boolean;
+        };
+        ReportWorkOrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            /** @enum {string} */
+            status?: "OPEN" | "ASSIGNED" | "IN_PROGRESS" | "DONE" | "CANCELLED";
+        };
+        ApiResponseCustomerReportDetailResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["CustomerReportDetailResponse"];
+        };
+        CustomerReportDetailResponse: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            /** @enum {string} */
+            type?: "PAID_NOT_RECEIVED" | "PRODUCT_QUALITY" | "MACHINE_FAULT" | "OTHER";
+            /** @enum {string} */
+            status?: "NEW" | "IN_REVIEW" | "RESOLVED" | "REJECTED";
+            /** @enum {string} */
+            verdict?: "NOT_APPLICABLE" | "ORDER_NOT_FOUND" | "REFUND_ELIGIBLE" | "DISPENSE_PENDING" | "DELIVERED_PER_MACHINE" | "ALREADY_REFUNDED" | "NOT_PAID";
+            /** Format: uuid */
+            machineId?: string;
+            machineCode?: string;
+            machineName?: string;
+            description?: string;
+            /** @description The order code as typed (normalised). */
+            orderCodeInput?: string;
+            /** @description The verified order; null when not found or not checked. */
+            order?: components["schemas"]["ReportOrderResponse"];
+            /** @description PRODUCT_QUALITY with a COMPLETED order: the batch of the sold bowl. */
+            batch?: components["schemas"]["ReportBatchResponse"];
+            contact?: components["schemas"]["ReportContactResponse"];
+            photos?: components["schemas"]["ReportPhotoResponse"][];
+            workOrder?: components["schemas"]["ReportWorkOrderResponse"];
+            /** @enum {string} */
+            resolution?: "REFUNDED" | "FIXED" | "NO_ACTION_NEEDED" | "SPAM" | "DUPLICATE";
+            resolutionNote?: string;
+            resolvedBy?: components["schemas"]["ReportActorResponse"];
+            /** Format: date-time */
+            resolvedAt?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        ReportOrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            orderCode?: string;
+            /** @enum {string} */
+            status?: "PENDING_PAYMENT" | "PAID" | "DISPENSING" | "COMPLETED" | "CANCELLED" | "PAYMENT_FAILED" | "DISPENSE_FAILED" | "REFUNDED";
+        };
+        ReportBatchResponse: {
+            /** Format: uuid */
+            id?: string;
+            batchCode?: string;
+            productName?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+        };
+        ReportPhotoResponse: {
+            /** Format: uuid */
+            id?: string;
+            contentType?: string;
+            /** Format: int32 */
+            sizeBytes?: number;
+        };
+        ReportActorResponse: {
+            /** Format: uuid */
+            id?: string;
+            fullName?: string;
+        };
+        ReportDecisionRequest: {
+            /** @enum {string} */
+            resolution: "REFUNDED" | "FIXED" | "NO_ACTION_NEEDED" | "SPAM" | "DUPLICATE";
+            note?: string | null;
+        };
+        /** @description Issue #74: the open customer report of the order (oldest), contact masked; the full contact is in the report detail. */
+        RefundCandidateReportResponse: {
+            /** Format: uuid */
+            id?: string;
+            reportCode?: string;
+            verdict?: string;
+            contactName?: string;
+            contactPhone?: string;
+            contactEmail?: string;
+        };
+        WorkOrderLinkedReport: {
+            /** Format: uuid */
+            id?: string;
+            code?: string;
+            type?: string;
+            verdict?: string;
+            status?: string;
+        };
+        ApiResponseDashboardOverviewResponse: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["DashboardOverviewResponse"];
+        };
+        DashboardOverviewResponse: {
+            /** Format: date-time */
+            generatedAt?: string;
+            /** @description Only with REPORT_SALES_READ; absent otherwise (not zero). */
+            today?: components["schemas"]["Today"];
+            machines?: components["schemas"]["Machines"];
+            alerts?: components["schemas"]["Alerts"];
+            workOrders?: components["schemas"]["WorkOrders"];
+            stock?: components["schemas"]["Stock"];
+            /** @description Only with REPORT_SALES_READ; absent otherwise (not zero). */
+            refunds?: components["schemas"]["Refunds"];
+            machinesDetail?: components["schemas"]["MachineDetail"][];
+        };
+        /** @description Sales of the current business day (completed_at) and of yesterday, as in the sales report definitions. */
+        Today: {
+            /** Format: date */
+            date?: string;
+            /** Format: int64 */
+            ordersSold?: number;
+            /** Format: int64 */
+            netSales?: number;
+            /** Format: int64 */
+            yesterdayNetSales?: number;
+        };
+        /** @description Machine statuses and connectivity (ONLINE, WARNING, OFFLINE, NEVER_SEEN, same rules as the machine API). */
+        Machines: {
+            /** Format: int64 */
+            total?: number;
+            /** Format: int64 */
+            active?: number;
+            /** Format: int64 */
+            maintenance?: number;
+            /** Format: int64 */
+            inactive?: number;
+            /** Format: int64 */
+            online?: number;
+            /** Format: int64 */
+            warning?: number;
+            /** Format: int64 */
+            offline?: number;
+            /** Format: int64 */
+            neverSeen?: number;
+        };
+        /** @description Alerts not RESOLVED, by severity. */
+        Alerts: {
+            /** Format: int64 */
+            open?: number;
+            /** Format: int64 */
+            critical?: number;
+            /** Format: int64 */
+            warning?: number;
+            /** Format: int64 */
+            info?: number;
+        };
+        /** @description open = OPEN or ASSIGNED, inProgress = IN_PROGRESS, overdue = unfinished past due, assignedToMe = unfinished assigned to the caller. */
+        WorkOrders: {
+            /** Format: int64 */
+            open?: number;
+            /** Format: int64 */
+            inProgress?: number;
+            /** Format: int64 */
+            overdue?: number;
+            /** Format: int64 */
+            assignedToMe?: number;
+        };
+        /** @description Machines not INACTIVE, health-check predicates: lowStockSlots = ACTIVE slots with sellable bowls <= the low-stock threshold; blockedSlots = slots in ERROR or whose head bowl is DISPENSE_FAILED; bowlsExpiringToday = physical unexpired bowls that expire before the end of today. */
+        Stock: {
+            /** Format: int64 */
+            lowStockSlots?: number;
+            /** Format: int64 */
+            blockedSlots?: number;
+            /** Format: int64 */
+            bowlsExpiringToday?: number;
+        };
+        /** @description Current refund candidates (count and amount). */
+        Refunds: {
+            /** Format: int64 */
+            pendingCount?: number;
+            /** Format: int64 */
+            pendingAmount?: number;
+        };
+        MachineDetail: {
+            /** Format: uuid */
+            machineId?: string;
+            code?: string;
+            name?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "INACTIVE" | "MAINTENANCE";
+            /** @enum {string} */
+            connectivity?: "ONLINE" | "WARNING" | "OFFLINE" | "NEVER_SEEN";
+            /** Format: date-time */
+            lastSeenAt?: string;
+            /** @description Latest temperature reading; null without one. */
+            temperature?: number;
+            /**
+             * Format: int64
+             * @description Bowls the kiosk can sell now (catalog rule).
+             */
+            sellableBowls?: number;
+            /**
+             * Format: int64
+             * @description Alerts of the machine not RESOLVED.
+             */
+            openAlerts?: number;
+        };
+        ApiResponseSalesSummary: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["SalesSummary"];
+        };
+        /** @description Sales summary (issue #76). Amounts in whole VND. Sales = orders delivered (completed_at in range); refunds by refunded_at. */
+        SalesSummary: {
+            filters?: components["schemas"]["FiltersEcho"];
+            /**
+             * Format: int64
+             * @description Orders with completed_at in range (COMPLETED, or REFUNDED after completion).
+             */
+            ordersSold?: number;
+            /**
+             * Format: int64
+             * @description Sum of subtotal of sold orders.
+             */
+            grossSales?: number;
+            /**
+             * Format: int64
+             * @description Sum of discount_amount of sold orders.
+             */
+            discounts?: number;
+            /**
+             * Format: int64
+             * @description Sum of total_amount of sold orders (gross - discounts).
+             */
+            netSales?: number;
+            /**
+             * Format: int64
+             * @description Refunds of delivered orders (PRODUCT_QUALITY / OTHER on completed orders) by refunded_at in range.
+             */
+            deliveredRefunds?: number;
+            /**
+             * Format: int64
+             * @description netSales - deliveredRefunds.
+             */
+            netRevenue?: number;
+            /**
+             * Format: int64
+             * @description netSales / ordersSold rounded down; 0 without sales.
+             */
+            averageOrderValue?: number;
+            /**
+             * Format: int64
+             * @description Payments SUCCESS or REFUNDED by paid_at in range (cash view).
+             */
+            moneyCollected?: number;
+            moneyRefunded?: components["schemas"]["MoneyRefunded"];
+            /** @description Current refund candidates (point in time; ignores the range and filters). */
+            pendingRefunds?: components["schemas"]["PendingRefunds"];
+            /**
+             * Format: int64
+             * @description Orders paid in range that failed to dispense (DISPENSE_FAILED, refunded without delivery, or with a FAILED/TIMEOUT dispense command).
+             */
+            failedDispenses?: number;
+            /** Format: date-time */
+            generatedAt?: string;
+        };
+        FiltersEcho: {
+            /** Format: date */
+            from?: string;
+            /** Format: date */
+            to?: string;
+            machineIds?: string[];
+            productIds?: string[];
+            zone?: string;
+        };
+        /** @description REFUNDED payments by refunded_at in range, by refund reason (every reason listed). */
+        MoneyRefunded: {
+            /** Format: int64 */
+            total?: number;
+            byReason?: {
+                [key: string]: number;
+            };
+        };
+        PendingRefunds: {
+            /** Format: int64 */
+            count?: number;
+            /** Format: int64 */
+            amount?: number;
+        };
+        ApiResponseSalesSeries: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["SalesSeries"];
+        };
+        SalesSeries: {
+            filters?: components["schemas"]["FiltersEcho"];
+            /** @enum {string} */
+            granularity?: "DAY" | "WEEK" | "MONTH";
+            buckets?: components["schemas"]["SalesBucket"][];
+            /** Format: date-time */
+            generatedAt?: string;
+        };
+        SalesBucket: {
+            /** Format: date */
+            start?: string;
+            /** Format: date */
+            end?: string;
+            /** Format: int64 */
+            ordersSold?: number;
+            /** Format: int64 */
+            grossSales?: number;
+            /** Format: int64 */
+            discounts?: number;
+            /** Format: int64 */
+            netSales?: number;
+            /** Format: int64 */
+            deliveredRefunds?: number;
+            /** Format: int64 */
+            netRevenue?: number;
+        };
+        ApiResponsePeakHours: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["PeakHours"];
+        };
+        PeakHours: {
+            filters?: components["schemas"]["FiltersEcho"];
+            /** @description 24 entries, hour 0..23 of completed_at in the business zone. */
+            hours?: components["schemas"]["PeakHour"][];
+            /** @description 7 x 24 ordersSold: index 0 = Monday ... 6 = Sunday, then hour 0..23. */
+            weekdayHours?: number[][];
+            /** Format: date-time */
+            generatedAt?: string;
+        };
+        PeakHour: {
+            /** Format: int32 */
+            hour?: number;
+            /** Format: int64 */
+            ordersSold?: number;
+            /** Format: int64 */
+            netSales?: number;
+        };
+        ApiResponseProductReport: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["ProductReport"];
+        };
+        ProductReport: {
+            filters?: components["schemas"]["FiltersEcho"];
+            /** @enum {string} */
+            sortBy?: "QUANTITY" | "NET_SALES";
+            /** Format: int32 */
+            limit?: number;
+            products?: components["schemas"]["ProductSales"][];
+            /** Format: date-time */
+            generatedAt?: string;
+        };
+        ProductSales: {
+            /** Format: uuid */
+            productId?: string;
+            sku?: string;
+            name?: string;
+            status?: string;
+            /** Format: int64 */
+            quantity?: number;
+            /** Format: int64 */
+            grossSales?: number;
+            /** Format: int64 */
+            discounts?: number;
+            /** Format: int64 */
+            netSales?: number;
+            /** Format: int64 */
+            deliveredRefunds?: number;
+            sharePercent?: number;
+        };
+        ApiResponseMachineReport: {
+            /** Format: date-time */
+            timestamp?: string;
+            message?: string;
+            data?: components["schemas"]["MachineReport"];
+        };
+        MachineReport: {
+            filters?: components["schemas"]["FiltersEcho"];
+            machines?: components["schemas"]["MachineSales"][];
+            /** Format: date-time */
+            generatedAt?: string;
+        };
+        MachineSales: {
+            /** Format: uuid */
+            machineId?: string;
+            code?: string;
+            name?: string;
+            /** Format: int64 */
+            ordersSold?: number;
+            /** Format: int64 */
+            netSales?: number;
+            /** Format: int64 */
+            deliveredRefunds?: number;
+            /** Format: int64 */
+            netRevenue?: number;
         };
     };
     responses: never;
@@ -2212,7 +5738,7 @@ export interface operations {
                      *         "createdAt": "2026-10-10T02:00:00Z",
                      *         "status": "AVAILABLE",
                      *         "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                     *         "slotCode": "A1",
+                     *         "slotCode": "A",
                      *         "loadedAt": "2026-10-10T02:00:00Z",
                      *         "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
                      *         "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
@@ -2367,7 +5893,7 @@ export interface operations {
                      *             "createdAt": "2026-10-10T02:00:00Z",
                      *             "status": "AVAILABLE",
                      *             "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                     *             "slotCode": "A1",
+                     *             "slotCode": "A",
                      *             "loadedAt": "2026-10-10T02:00:00Z",
                      *             "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
                      *             "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
@@ -2517,7 +6043,7 @@ export interface operations {
                      *             "createdAt": "2026-10-10T02:00:00Z",
                      *             "status": "AVAILABLE",
                      *             "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                     *             "slotCode": "A1",
+                     *             "slotCode": "A",
                      *             "loadedAt": "2026-10-10T02:00:00Z",
                      *             "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
                      *             "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
@@ -2800,7 +6326,7 @@ export interface operations {
                      *             "createdAt": "2026-10-10T02:00:00Z",
                      *             "status": "AVAILABLE",
                      *             "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                     *             "slotCode": "A1",
+                     *             "slotCode": "A",
                      *             "loadedAt": "2026-10-10T02:00:00Z",
                      *             "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
                      *             "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
@@ -2922,9 +6448,9 @@ export interface operations {
             content: {
                 /**
                  * @example {
-                 *       "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
+                 *       "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                  *       "quantity": 1,
-                 *       "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04"
+                 *       "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05"
                  *     }
                  */
                 "application/json": components["schemas"]["LoadInventoryRequest"];
@@ -2940,30 +6466,30 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "message": "Inventory loaded",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
                      *       "data": {
-                     *         "operationId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07",
-                     *         "quantity": 1,
                      *         "items": [
                      *           {
-                     *             "expiresAt": "2026-10-12T01:00:00Z",
-                     *             "productName": "Mango Fruit Box",
-                     *             "updatedAt": "2026-10-10T02:00:00Z",
-                     *             "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02",
-                     *             "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06",
-                     *             "createdAt": "2026-10-10T02:00:00Z",
-                     *             "status": "AVAILABLE",
-                     *             "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                     *             "slotCode": "A1",
-                     *             "loadedAt": "2026-10-10T02:00:00Z",
-                     *             "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
-                     *             "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
+                     *             "expired": false,
                      *             "batchCode": "MANGO-20261010-01",
-                     *             "expired": false
+                     *             "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
+                     *             "batchId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a05",
+                     *             "loadedAt": "2026-10-10T02:00:00Z",
+                     *             "slotCode": "A",
+                     *             "slotId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
+                     *             "status": "AVAILABLE",
+                     *             "createdAt": "2026-10-10T02:00:00Z",
+                     *             "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a06",
+                     *             "productId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02",
+                     *             "updatedAt": "2026-10-10T02:00:00Z",
+                     *             "productName": "Mango Fruit Box",
+                     *             "expiresAt": "2026-10-12T01:00:00Z"
                      *           }
-                     *         ]
-                     *       },
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "message": "Inventory loaded"
+                     *         ],
+                     *         "quantity": 1,
+                     *         "operationId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07"
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["ApiResponseInventoryLoadResponse"];
@@ -2977,11 +6503,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "message": "Request body is missing or malformed",
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "error": "Bad Request",
+                     *       "status": 400,
                      *       "path": "/api/v1/inventory/load",
-                     *       "status": 400
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
+                     *       "message": "Request body is missing or malformed"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -2996,11 +6522,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "message": "Authentication required or access token invalid",
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "error": "Unauthorized",
+                     *       "status": 401,
                      *       "path": "/api/v1/inventory/load",
-                     *       "status": 401
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
+                     *       "message": "Authentication required or access token invalid"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -3014,11 +6540,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "message": "Access denied",
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "error": "Forbidden",
+                     *       "status": 403,
                      *       "path": "/api/v1/inventory/load",
-                     *       "status": 403
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
+                     *       "message": "Access denied"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -3032,11 +6558,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "message": "Inventory item not found",
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "error": "Not Found",
+                     *       "status": 404,
                      *       "path": "/api/v1/inventory/load",
-                     *       "status": 404
+                     *       "error": "Not Found",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
+                     *       "message": "Inventory item not found"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -3050,11 +6576,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "message": "Slot capacity exceeded",
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "error": "Conflict",
+                     *       "status": 409,
                      *       "path": "/api/v1/inventory/load",
-                     *       "status": 409
+                     *       "error": "Conflict",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
+                     *       "message": "Slot capacity exceeded"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -3068,11 +6594,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "message": "An unexpected error occurred",
-                     *       "timestamp": "2026-10-10T02:00:00Z",
-                     *       "error": "Internal Server Error",
+                     *       "status": 500,
                      *       "path": "/api/v1/inventory/load",
-                     *       "status": 500
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-10-10T02:00:00Z",
+                     *       "message": "An unexpected error occurred"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -3125,7 +6651,7 @@ export interface operations {
                      *         "removedAt": "2026-10-10T02:00:00Z",
                      *         "updatedAt": "2026-10-10T02:00:00Z",
                      *         "status": "REMOVED",
-                     *         "slotCode": "A1"
+                     *         "slotCode": "A"
                      *       },
                      *       "timestamp": "2026-10-10T02:00:00Z",
                      *       "message": "Inventory removed"
@@ -3700,7 +7226,7 @@ export interface operations {
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                      *         "updatedAt": "2026-10-10T00:00:00Z",
                      *         "capacity": 6,
-                     *         "slotCode": "A1",
+                     *         "slotCode": "A",
                      *         "status": "ACTIVE"
                      *       },
                      *       "timestamp": "2026-10-10T00:00:00Z"
@@ -3841,7 +7367,7 @@ export interface operations {
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                      *         "updatedAt": "2026-10-10T00:00:00Z",
                      *         "capacity": 8,
-                     *         "slotCode": "A1",
+                     *         "slotCode": "A",
                      *         "status": "ACTIVE"
                      *       },
                      *       "timestamp": "2026-10-10T00:00:00Z"
@@ -3983,7 +7509,7 @@ export interface operations {
                      *           {
                      *             "updatedAt": "2026-10-10T00:00:00Z",
                      *             "capacity": 6,
-                     *             "slotCode": "A1",
+                     *             "slotCode": "A",
                      *             "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
                      *             "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                      *             "createdAt": "2026-10-10T00:00:00Z",
@@ -4105,7 +7631,7 @@ export interface operations {
                 /**
                  * @example {
                  *       "capacity": 6,
-                 *       "slotCode": "A1"
+                 *       "slotCode": "A"
                  *     }
                  */
                 "application/json": components["schemas"]["CreateMachineSlotRequest"];
@@ -4130,7 +7656,7 @@ export interface operations {
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                      *         "updatedAt": "2026-10-10T00:00:00Z",
                      *         "capacity": 6,
-                     *         "slotCode": "A1",
+                     *         "slotCode": "A",
                      *         "status": "ACTIVE"
                      *       },
                      *       "timestamp": "2026-10-10T00:00:00Z"
@@ -4289,7 +7815,7 @@ export interface operations {
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
                      *         "updatedAt": "2026-10-10T00:00:00Z",
                      *         "capacity": 6,
-                     *         "slotCode": "A1",
+                     *         "slotCode": "A",
                      *         "status": "INACTIVE"
                      *       },
                      *       "timestamp": "2026-10-10T00:00:00Z"
@@ -4415,14 +7941,20 @@ export interface operations {
                      *       "data": {
                      *         "maxTemperature": 8,
                      *         "lastSeenAt": null,
-                     *         "createdAt": "2026-10-10T00:00:00Z",
                      *         "code": "FV-HCM-001",
+                     *         "freeHeapBytes": null,
+                     *         "lastHeartbeatAt": null,
+                     *         "uptimeSeconds": null,
+                     *         "minHumidity": 40,
+                     *         "createdAt": "2026-10-10T00:00:00Z",
+                     *         "connectivity": "NEVER_SEEN",
                      *         "minTemperature": 2,
                      *         "name": "Fruit Machine - Campus A",
                      *         "location": "Building A - Ground Floor",
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
                      *         "maxHumidity": 80,
-                     *         "minHumidity": 40,
+                     *         "wifiRssi": null,
+                     *         "firmwareVersion": null,
                      *         "status": "INACTIVE",
                      *         "updatedAt": "2026-10-10T00:00:00Z"
                      *       },
@@ -4441,11 +7973,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Bad Request",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Request body is missing or malformed",
                      *       "status": 400,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Bad Request"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4460,11 +7992,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Unauthorized",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Authentication required or access token invalid",
                      *       "status": 401,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Unauthorized"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4478,11 +8010,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Forbidden",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Access denied",
                      *       "status": 403,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Forbidden"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4496,11 +8028,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Not Found",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Machine not found",
                      *       "status": 404,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Not Found"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4514,11 +8046,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Internal Server Error",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "An unexpected error occurred",
                      *       "status": 500,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Internal Server Error"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4564,14 +8096,20 @@ export interface operations {
                      *       "data": {
                      *         "maxTemperature": 8,
                      *         "lastSeenAt": null,
-                     *         "createdAt": "2026-10-10T00:00:00Z",
                      *         "code": "FV-HCM-001",
+                     *         "freeHeapBytes": null,
+                     *         "lastHeartbeatAt": null,
+                     *         "uptimeSeconds": null,
+                     *         "minHumidity": 40,
+                     *         "createdAt": "2026-10-10T00:00:00Z",
+                     *         "connectivity": "NEVER_SEEN",
                      *         "minTemperature": 2,
                      *         "name": "Updated Campus Machine",
                      *         "location": "Building A - Ground Floor",
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
                      *         "maxHumidity": 80,
-                     *         "minHumidity": 40,
+                     *         "wifiRssi": null,
+                     *         "firmwareVersion": null,
                      *         "status": "INACTIVE",
                      *         "updatedAt": "2026-10-10T00:00:00Z"
                      *       },
@@ -4590,11 +8128,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Bad Request",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Request body is missing or malformed",
                      *       "status": 400,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Bad Request"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4609,11 +8147,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Unauthorized",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Authentication required or access token invalid",
                      *       "status": 401,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Unauthorized"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4627,11 +8165,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Forbidden",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Access denied",
                      *       "status": 403,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Forbidden"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4645,11 +8183,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Not Found",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Machine not found",
                      *       "status": 404,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Not Found"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4663,11 +8201,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Internal Server Error",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "An unexpected error occurred",
                      *       "status": 500,
-                     *       "path": "/api/v1/machines/{id}",
-                     *       "error": "Internal Server Error"
+                     *       "path": "/api/v1/machines/{id}"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4684,6 +8222,8 @@ export interface operations {
                 size?: number;
                 /** @description Optional ACTIVE, INACTIVE or MAINTENANCE filter. */
                 status?: "ACTIVE" | "INACTIVE" | "MAINTENANCE";
+                /** @description Optional ONLINE, WARNING, OFFLINE or NEVER_SEEN filter, evaluated in SQL with the same rules as the connectivity field. */
+                connectivity?: "ONLINE" | "WARNING" | "OFFLINE" | "NEVER_SEEN";
                 /** @description Optional literal substring of code/name/location, case-insensitive, stripped; blank means no filter. Maximum 200 characters. */
                 search?: string;
                 /** @description One approved field: id, code, name, location, status, createdAt, updatedAt; optional asc/desc (asc when omitted). Example name,asc. */
@@ -4713,14 +8253,20 @@ export interface operations {
                      *           {
                      *             "maxTemperature": 8,
                      *             "lastSeenAt": null,
-                     *             "createdAt": "2026-10-10T00:00:00Z",
                      *             "code": "FV-HCM-001",
+                     *             "freeHeapBytes": null,
+                     *             "lastHeartbeatAt": null,
+                     *             "uptimeSeconds": null,
+                     *             "minHumidity": 40,
+                     *             "createdAt": "2026-10-10T00:00:00Z",
+                     *             "connectivity": "NEVER_SEEN",
                      *             "minTemperature": 2,
                      *             "name": "Fruit Machine - Campus A",
                      *             "location": "Building A - Ground Floor",
                      *             "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
                      *             "maxHumidity": 80,
-                     *             "minHumidity": 40,
+                     *             "wifiRssi": null,
+                     *             "firmwareVersion": null,
                      *             "status": "INACTIVE",
                      *             "updatedAt": "2026-10-10T00:00:00Z"
                      *           }
@@ -4741,11 +8287,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Bad Request",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Request body is missing or malformed",
                      *       "status": 400,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Bad Request"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4760,11 +8306,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Unauthorized",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Authentication required or access token invalid",
                      *       "status": 401,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Unauthorized"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4778,11 +8324,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Forbidden",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Access denied",
                      *       "status": 403,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Forbidden"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4796,11 +8342,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Internal Server Error",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "An unexpected error occurred",
                      *       "status": 500,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Internal Server Error"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4846,14 +8392,20 @@ export interface operations {
                      *       "data": {
                      *         "maxTemperature": 8,
                      *         "lastSeenAt": null,
-                     *         "createdAt": "2026-10-10T00:00:00Z",
                      *         "code": "FV-HCM-001",
+                     *         "freeHeapBytes": null,
+                     *         "lastHeartbeatAt": null,
+                     *         "uptimeSeconds": null,
+                     *         "minHumidity": 40,
+                     *         "createdAt": "2026-10-10T00:00:00Z",
+                     *         "connectivity": "NEVER_SEEN",
                      *         "minTemperature": 2,
                      *         "name": "Fruit Machine - Campus A",
                      *         "location": "Building A - Ground Floor",
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
                      *         "maxHumidity": 80,
-                     *         "minHumidity": 40,
+                     *         "wifiRssi": null,
+                     *         "firmwareVersion": null,
                      *         "status": "INACTIVE",
                      *         "updatedAt": "2026-10-10T00:00:00Z"
                      *       },
@@ -4872,11 +8424,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Bad Request",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Request body is missing or malformed",
                      *       "status": 400,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Bad Request"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4891,11 +8443,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Unauthorized",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Authentication required or access token invalid",
                      *       "status": 401,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Unauthorized"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4909,11 +8461,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Forbidden",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Access denied",
                      *       "status": 403,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Forbidden"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4927,11 +8479,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Conflict",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Machine code is already in use",
                      *       "status": 409,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Conflict"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4945,11 +8497,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Internal Server Error",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "An unexpected error occurred",
                      *       "status": 500,
-                     *       "path": "/api/v1/machines",
-                     *       "error": "Internal Server Error"
+                     *       "path": "/api/v1/machines"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -4990,14 +8542,20 @@ export interface operations {
                      *       "data": {
                      *         "maxTemperature": 8,
                      *         "lastSeenAt": null,
-                     *         "createdAt": "2026-10-10T00:00:00Z",
                      *         "code": "FV-HCM-001",
+                     *         "freeHeapBytes": null,
+                     *         "lastHeartbeatAt": null,
+                     *         "uptimeSeconds": null,
+                     *         "minHumidity": 40,
+                     *         "createdAt": "2026-10-10T00:00:00Z",
+                     *         "connectivity": "NEVER_SEEN",
                      *         "minTemperature": 2,
                      *         "name": "Fruit Machine - Campus A",
                      *         "location": "Building A - Ground Floor",
                      *         "id": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
                      *         "maxHumidity": 80,
-                     *         "minHumidity": 40,
+                     *         "wifiRssi": null,
+                     *         "firmwareVersion": null,
                      *         "status": "MAINTENANCE",
                      *         "updatedAt": "2026-10-10T00:00:00Z"
                      *       },
@@ -5016,11 +8574,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Bad Request",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Request body is missing or malformed",
                      *       "status": 400,
-                     *       "path": "/api/v1/machines/{id}/status",
-                     *       "error": "Bad Request"
+                     *       "path": "/api/v1/machines/{id}/status"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -5035,11 +8593,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Unauthorized",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Authentication required or access token invalid",
                      *       "status": 401,
-                     *       "path": "/api/v1/machines/{id}/status",
-                     *       "error": "Unauthorized"
+                     *       "path": "/api/v1/machines/{id}/status"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -5053,11 +8611,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Forbidden",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Access denied",
                      *       "status": 403,
-                     *       "path": "/api/v1/machines/{id}/status",
-                     *       "error": "Forbidden"
+                     *       "path": "/api/v1/machines/{id}/status"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -5071,11 +8629,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Not Found",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "Machine not found",
                      *       "status": 404,
-                     *       "path": "/api/v1/machines/{id}/status",
-                     *       "error": "Not Found"
+                     *       "path": "/api/v1/machines/{id}/status"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -5089,11 +8647,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Internal Server Error",
                      *       "timestamp": "2026-10-10T00:00:00Z",
                      *       "message": "An unexpected error occurred",
                      *       "status": 500,
-                     *       "path": "/api/v1/machines/{id}/status",
-                     *       "error": "Internal Server Error"
+                     *       "path": "/api/v1/machines/{id}/status"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7137,6 +10695,8 @@ export interface operations {
                 search?: string;
                 /** @description One of createdAt, totalAmount, orderCode with optional asc/desc. */
                 sort?: string;
+                /** @description true: only orders with a discount (discountAmount > 0); false: only full-price orders. */
+                discounted?: boolean;
             };
             header?: never;
             path?: never;
@@ -7153,12 +10713,9 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "timestamp": "2026-10-15T04:00:00Z",
                      *       "message": "Success",
                      *       "data": {
-                     *         "totalElements": 1,
-                     *         "totalPages": 1,
-                     *         "page": 0,
-                     *         "size": 20,
                      *         "content": [
                      *           {
                      *             "id": "e0f1a2b3-0000-4000-8000-000000000001",
@@ -7173,9 +10730,12 @@ export interface operations {
                      *             "expiresAt": "2026-10-15T04:05:00Z",
                      *             "cancelledAt": null
                      *           }
-                     *         ]
-                     *       },
-                     *       "timestamp": "2026-10-15T04:00:00Z"
+                     *         ],
+                     *         "totalElements": 1,
+                     *         "totalPages": 1,
+                     *         "page": 0,
+                     *         "size": 20
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["ApiResponseOrderPageResponse"];
@@ -7189,11 +10749,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Bad Request",
+                     *       "path": "/api/v1/orders",
                      *       "status": 400,
                      *       "message": "Request validation failed",
-                     *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Bad Request",
-                     *       "path": "/api/v1/orders"
+                     *       "timestamp": "2026-10-15T04:00:00Z"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7208,11 +10768,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Unauthorized",
+                     *       "path": "/api/v1/orders",
                      *       "status": 401,
                      *       "message": "Authentication required or access token invalid",
-                     *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Unauthorized",
-                     *       "path": "/api/v1/orders"
+                     *       "timestamp": "2026-10-15T04:00:00Z"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7226,11 +10786,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Forbidden",
+                     *       "path": "/api/v1/orders",
                      *       "status": 403,
                      *       "message": "Access denied",
-                     *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Forbidden",
-                     *       "path": "/api/v1/orders"
+                     *       "timestamp": "2026-10-15T04:00:00Z"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7244,11 +10804,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "error": "Internal Server Error",
+                     *       "path": "/api/v1/orders",
                      *       "status": 500,
                      *       "message": "An unexpected error occurred",
-                     *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Internal Server Error",
-                     *       "path": "/api/v1/orders"
+                     *       "timestamp": "2026-10-15T04:00:00Z"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7277,7 +10837,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "message": "Success",
                      *       "data": {
                      *         "id": "5d6e0000-0000-4000-8000-000000000001",
                      *         "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
@@ -7291,9 +10851,10 @@ export interface operations {
                      *         "createdAt": "2026-10-15T04:00:05Z",
                      *         "paidAt": null,
                      *         "expiredAt": "2026-10-15T04:05:00Z",
-                     *         "qrCode": "MOCK-QR|MOCK-8F3KQ2AB|70000.00"
+                     *         "qrCode": "MOCK-QR|MOCK-8F3KQ2AB|70000.00",
+                     *         "refund": null
                      *       },
-                     *       "message": "Success"
+                     *       "timestamp": "2026-10-15T04:00:00Z"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiResponsePaymentDetailResponse"];
@@ -7307,11 +10868,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "status": 400,
                      *       "path": "/api/v1/payments/{id}",
-                     *       "error": "Bad Request",
+                     *       "status": 400,
+                     *       "message": "Request validation failed",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "message": "Request validation failed"
+                     *       "error": "Bad Request"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7326,11 +10887,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "status": 401,
                      *       "path": "/api/v1/payments/{id}",
-                     *       "error": "Unauthorized",
+                     *       "status": 401,
+                     *       "message": "Authentication required or access token invalid",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "message": "Authentication required or access token invalid"
+                     *       "error": "Unauthorized"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7344,11 +10905,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "status": 403,
                      *       "path": "/api/v1/payments/{id}",
-                     *       "error": "Forbidden",
+                     *       "status": 403,
+                     *       "message": "Access denied",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "message": "Access denied"
+                     *       "error": "Forbidden"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7362,11 +10923,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "status": 404,
                      *       "path": "/api/v1/payments/{id}",
-                     *       "error": "Not Found",
+                     *       "status": 404,
+                     *       "message": "Payment not found",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "message": "Payment not found"
+                     *       "error": "Not Found"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7380,11 +10941,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "status": 500,
                      *       "path": "/api/v1/payments/{id}",
-                     *       "error": "Internal Server Error",
+                     *       "status": 500,
+                     *       "message": "An unexpected error occurred",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "message": "An unexpected error occurred"
+                     *       "error": "Internal Server Error"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7862,20 +11423,21 @@ export interface operations {
                      *         "paidAt": null,
                      *         "completedAt": null,
                      *         "cancelledAt": "2026-10-15T04:01:00Z",
+                     *         "refundedAt": null,
                      *         "items": [
                      *           {
+                     *             "sku": "BOWL-MIX",
+                     *             "quantity": 1,
                      *             "unitPrice": 35000,
                      *             "productId": "1c2d3e4f-0000-4000-8000-000000000001",
                      *             "productName": "Mixed Fruit Bowl",
                      *             "totalPrice": 35000,
-                     *             "sku": "BOWL-MIX",
-                     *             "quantity": 1,
                      *             "id": "01100000-0000-4000-8000-000000000001",
                      *             "allocations": [
                      *               {
                      *                 "id": "a110c000-0000-4000-8000-000000000001",
                      *                 "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
-                     *                 "slotCode": "A1",
+                     *                 "slotCode": "A",
                      *                 "batchCode": "B20261014-01",
                      *                 "batchExpiresAt": "2026-10-17T00:00:00Z",
                      *                 "status": "RELEASED",
@@ -7894,7 +11456,8 @@ export interface operations {
                      *             "paidAt": null,
                      *             "expiredAt": "2026-10-15T04:05:00Z"
                      *           }
-                     *         ]
+                     *         ],
+                     *         "refunds": []
                      *       },
                      *       "timestamp": "2026-10-15T04:00:00Z"
                      *     }
@@ -7910,11 +11473,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "path": "/api/v1/orders/{id}",
                      *       "status": 400,
                      *       "message": "Request validation failed",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Bad Request",
-                     *       "path": "/api/v1/orders/{id}"
+                     *       "error": "Bad Request"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7929,11 +11492,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "path": "/api/v1/orders/{id}",
                      *       "status": 401,
                      *       "message": "Authentication required or access token invalid",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Unauthorized",
-                     *       "path": "/api/v1/orders/{id}"
+                     *       "error": "Unauthorized"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7947,11 +11510,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "path": "/api/v1/orders/{id}",
                      *       "status": 403,
                      *       "message": "Access denied",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Forbidden",
-                     *       "path": "/api/v1/orders/{id}"
+                     *       "error": "Forbidden"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7965,11 +11528,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "path": "/api/v1/orders/{id}",
                      *       "status": 404,
                      *       "message": "Order not found",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Not Found",
-                     *       "path": "/api/v1/orders/{id}"
+                     *       "error": "Not Found"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -7983,11 +11546,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
+                     *       "path": "/api/v1/orders/{id}",
                      *       "status": 500,
                      *       "message": "An unexpected error occurred",
                      *       "timestamp": "2026-10-15T04:00:00Z",
-                     *       "error": "Internal Server Error",
-                     *       "path": "/api/v1/orders/{id}"
+                     *       "error": "Internal Server Error"
                      *     }
                      */
                     "application/json": components["schemas"]["ApiErrorResponse"];
@@ -8750,6 +12313,6251 @@ export interface operations {
                      *       "path": "/api/v1/payments"
                      *     }
                      */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listPermissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Permission catalog */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseListPermissionResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks PERMISSION_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server/configuration error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Roles */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseListRoleResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks PERMISSION_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server/configuration error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getRole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Role UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Role */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRoleResponse"];
+                };
+            };
+            /** @description Malformed role UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks PERMISSION_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Role not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server/configuration error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    replaceRolePermissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Role UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplaceRolePermissionsRequest"];
+            };
+        };
+        responses: {
+            /** @description Role with its new permission set */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRoleResponse"];
+                };
+            };
+            /** @description Validation failure, unknown or duplicate codes, unknown JSON fields */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks PERMISSION_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Role not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Would remove PERMISSION_MANAGE or USER_WRITE from ADMIN */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server/configuration error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listTelemetry: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Required. Start of the range, inclusive, ISO-8601 instant.
+                 * @example 2026-11-10T00:00:00Z
+                 */
+                from?: string;
+                /**
+                 * @description Required. End of the range, exclusive, ISO-8601 instant; after from, at most 31 days later.
+                 * @example 2026-11-11T00:00:00Z
+                 */
+                to?: string;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 500. */
+                size?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of readings */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "size": 100,
+                     *         "page": 0,
+                     *         "totalPages": 1,
+                     *         "totalElements": 2,
+                     *         "content": [
+                     *           {
+                     *             "recordedAt": "2026-11-10T13:05:00Z",
+                     *             "temperature": 4.7,
+                     *             "humidity": 68.2
+                     *           },
+                     *           {
+                     *             "recordedAt": "2026-11-10T13:04:00Z",
+                     *             "temperature": 4.6,
+                     *             "humidity": 68
+                     *           }
+                     *         ]
+                     *       },
+                     *       "message": "Telemetry retrieved",
+                     *       "timestamp": "2026-11-10T13:05:12Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseTelemetryPageResponse"];
+                };
+            };
+            /** @description Malformed machine UUID, missing/invalid time range or invalid paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "The time range must not exceed 31 days",
+                     *       "status": 400,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Authentication required or access token invalid",
+                     *       "status": 401,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MACHINE_READ */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Access denied",
+                     *       "status": 403,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Not Found",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Machine not found",
+                     *       "status": 404,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "An unexpected error occurred",
+                     *       "status": 500,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getLatestTelemetry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Latest reading, or null reading fields */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "data": {
+                     *         "machineId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
+                     *         "recordedAt": "2026-11-10T13:05:00Z",
+                     *         "temperature": 4.7,
+                     *         "humidity": 68.2,
+                     *         "temperatureStatus": "NORMAL",
+                     *         "humidityStatus": "NORMAL",
+                     *         "connectivity": "ONLINE"
+                     *       },
+                     *       "message": "Latest telemetry retrieved",
+                     *       "timestamp": "2026-11-10T13:05:12Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseTelemetryLatestResponse"];
+                };
+            };
+            /** @description Malformed machine UUID, missing/invalid time range or invalid paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Invalid parameter",
+                     *       "status": 400,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry/latest"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Authentication required or access token invalid",
+                     *       "status": 401,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry/latest"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MACHINE_READ */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Access denied",
+                     *       "status": 403,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry/latest"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Not Found",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "Machine not found",
+                     *       "status": 404,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry/latest"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-11-10T13:05:12Z",
+                     *       "message": "An unexpected error occurred",
+                     *       "status": 500,
+                     *       "path": "/api/v1/machines/{machineId}/telemetry/latest"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listMachineEvents: {
+        parameters: {
+            query?: {
+                /** @description Optional exact eventType, for example FAULT or BACKEND_DISPENSE_FAILED. */
+                type?: string;
+                /** @description Optional MACHINE or BACKEND. */
+                source?: "MACHINE" | "BACKEND";
+                /**
+                 * @description Optional start, inclusive, ISO-8601 instant.
+                 * @example 2026-11-11T00:00:00Z
+                 */
+                from?: string;
+                /**
+                 * @description Optional end, exclusive, ISO-8601 instant; after from.
+                 * @example 2026-11-12T00:00:00Z
+                 */
+                to?: string;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 200. */
+                size?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of events */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "data": {
+                     *         "totalElements": 1,
+                     *         "content": [
+                     *           {
+                     *             "id": "0d1e2f30-4a5b-4c6d-8e9f-a0b1c2d3e4f5",
+                     *             "eventType": "DISPENSE_ABORTED",
+                     *             "source": "MACHINE",
+                     *             "messageId": "a1b2c3d4-0042",
+                     *             "payload": {
+                     *               "eventType": "DISPENSE_ABORTED",
+                     *               "details": {
+                     *                 "reason": "NO_BOWL_DETECTED",
+                     *                 "commandId": "D-7F3A91C2E4B05D18"
+                     *               }
+                     *             },
+                     *             "createdAt": "2026-11-11T03:20:01Z"
+                     *           }
+                     *         ],
+                     *         "size": 50,
+                     *         "page": 0,
+                     *         "totalPages": 1
+                     *       },
+                     *       "message": "Machine events retrieved"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseMachineEventPageResponse"];
+                };
+            };
+            /** @description Malformed machine UUID, invalid source, time range or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "path": "/api/v1/machines/{machineId}/events",
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "to must be after from"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "path": "/api/v1/machines/{machineId}/events",
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Authentication required or access token invalid"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MACHINE_READ */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "path": "/api/v1/machines/{machineId}/events",
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Access denied"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "path": "/api/v1/machines/{machineId}/events",
+                     *       "error": "Not Found",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Machine not found"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 500,
+                     *       "path": "/api/v1/machines/{machineId}/events",
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "An unexpected error occurred"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description Optional exact action, for example ROLE_PERMISSIONS_CHANGED. */
+                action?: string;
+                /** @description Optional exact entity type, for example Machine. */
+                entityType?: string;
+                /** @description Optional UUID of the changed record. */
+                entityId?: string;
+                /** @description Optional UUID of the acting user. */
+                userId?: string;
+                /**
+                 * @description Optional start, inclusive, ISO-8601 instant.
+                 * @example 2026-11-11T00:00:00Z
+                 */
+                from?: string;
+                /**
+                 * @description Optional end, exclusive, ISO-8601 instant; after from.
+                 * @example 2026-11-12T00:00:00Z
+                 */
+                to?: string;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 200. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of audit entries */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "data": {
+                     *         "totalElements": 1,
+                     *         "content": [
+                     *           {
+                     *             "id": "7b0f3c2e-55a1-4f0e-9c1d-2a6b8e4f0c11",
+                     *             "action": "MACHINE_MAINTENANCE_AUTO",
+                     *             "entityType": "Machine",
+                     *             "entityId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
+                     *             "userId": null,
+                     *             "userEmail": null,
+                     *             "actor": "system",
+                     *             "oldValue": {
+                     *               "status": "ACTIVE"
+                     *             },
+                     *             "newValue": {
+                     *               "reason": "NO_BOWL_DETECTED",
+                     *               "status": "MAINTENANCE"
+                     *             },
+                     *             "ipAddress": null,
+                     *             "createdAt": "2026-11-11T03:20:01Z"
+                     *           }
+                     *         ],
+                     *         "size": 50,
+                     *         "page": 0,
+                     *         "totalPages": 1
+                     *       },
+                     *       "message": "Audit log retrieved"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseAuditLogPageResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid time range or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "path": "/api/v1/audit-logs",
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "to must be after from"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "path": "/api/v1/audit-logs",
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Authentication required or access token invalid"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks AUDIT_LOG_READ */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "path": "/api/v1/audit-logs",
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Access denied"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 500,
+                     *       "path": "/api/v1/audit-logs",
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "An unexpected error occurred"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getAuditLog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Audit entry UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audit entry */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "data": {
+                     *         "id": "7b0f3c2e-55a1-4f0e-9c1d-2a6b8e4f0c11",
+                     *         "action": "MACHINE_MAINTENANCE_AUTO",
+                     *         "entityType": "Machine",
+                     *         "entityId": "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03",
+                     *         "userId": null,
+                     *         "userEmail": null,
+                     *         "actor": "system",
+                     *         "oldValue": {
+                     *           "status": "ACTIVE"
+                     *         },
+                     *         "newValue": {
+                     *           "reason": "NO_BOWL_DETECTED",
+                     *           "status": "MAINTENANCE"
+                     *         },
+                     *         "ipAddress": null,
+                     *         "createdAt": "2026-11-11T03:20:01Z"
+                     *       },
+                     *       "message": "Audit log entry retrieved"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseAuditLogResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid time range or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "path": "/api/v1/audit-logs/{id}",
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "to must be after from"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "path": "/api/v1/audit-logs/{id}",
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Authentication required or access token invalid"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks AUDIT_LOG_READ */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "path": "/api/v1/audit-logs/{id}",
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Access denied"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Audit log entry not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 404,
+                     *       "path": "/api/v1/audit-logs/{id}",
+                     *       "error": "Not Found",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "Audit log entry not found"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 500,
+                     *       "path": "/api/v1/audit-logs/{id}",
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-11-11T03:21:00Z",
+                     *       "message": "An unexpected error occurred"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listAlerts: {
+        parameters: {
+            query?: {
+                /** @description Optional OPEN, ACKNOWLEDGED or RESOLVED; default OPEN and ACKNOWLEDGED. */
+                status?: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+                /** @description Optional alert type. */
+                type?: "HIGH_TEMPERATURE" | "LOW_TEMPERATURE" | "HIGH_HUMIDITY" | "MACHINE_OFFLINE" | "PRODUCT_EXPIRED" | "PRODUCT_EXPIRING" | "DISPENSE_FAILED" | "LOW_STOCK" | "HARDWARE_FAULT";
+                /** @description Optional INFO, WARNING or CRITICAL. */
+                severity?: "INFO" | "WARNING" | "CRITICAL";
+                /** @description Optional machine UUID. */
+                machineId?: string;
+                /** @description Optional slot UUID. */
+                slotId?: string;
+                /** @description Optional exact error code, for example SERVO_INIT_FAILED. */
+                errorCode?: string;
+                /**
+                 * @description Optional start of triggeredAt, inclusive, ISO-8601.
+                 * @example 2026-11-13T00:00:00Z
+                 */
+                from?: string;
+                /**
+                 * @description Optional end of triggeredAt, exclusive, ISO-8601; after from.
+                 * @example 2026-11-14T00:00:00Z
+                 */
+                to?: string;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 200. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of alerts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseAlertPageResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, time range, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks ALERT_READ / ALERT_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Alert */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseAlertResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, time range, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks ALERT_READ / ALERT_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    acknowledgeAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged alert */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseAlertResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, time range, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks ALERT_READ / ALERT_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert is already resolved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    resolveAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ResolveAlertRequest"];
+            };
+        };
+        responses: {
+            /** @description Resolved alert */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseAlertResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, time range, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks ALERT_READ / ALERT_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert is already resolved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listMyNotifications: {
+        parameters: {
+            query?: {
+                /** @description Only unread notifications. */
+                unreadOnly?: boolean;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of notifications */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseNotificationPageResponse"];
+                };
+            };
+            /** @description Malformed UUID or invalid paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    countMyUnreadNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Unread count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseUnreadCountResponse"];
+                };
+            };
+            /** @description Malformed UUID or invalid paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    markNotificationRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Notification UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Marked read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMarkedReadResponse"];
+                };
+            };
+            /** @description Malformed UUID or invalid paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Notification not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    markAllMyNotificationsRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Number marked read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMarkedReadResponse"];
+                };
+            };
+            /** @description Malformed UUID or invalid paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getNearExpiryDiscount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current setting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseNearExpiryDiscountResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks PRICING_READ / PRICING_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    updateNearExpiryDiscount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNearExpiryDiscountRequest"];
+            };
+        };
+        responses: {
+            /** @description Setting after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseNearExpiryDiscountResponse"];
+                };
+            };
+            /** @description Missing field, percent outside 1..90 or not an integer, unknown field, malformed JSON */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks PRICING_READ / PRICING_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Stale version: changed by someone else */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    createMaintenanceCommand: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 8 to 64 characters of A-Z, a-z, 0-9, _ or -. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+                /** @description Slot UUID of that machine. */
+                slotId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMaintenanceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Existing command for this Idempotency-Key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandResponse"];
+                };
+            };
+            /** @description Command created (PENDING) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging, body or Idempotency-Key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine or slot not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description A precondition does not hold (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    resetMachine: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 8 to 64 characters of A-Z, a-z, 0-9, _ or -. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ResetMachineRequest"];
+            };
+        };
+        responses: {
+            /** @description Existing command for this Idempotency-Key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandResponse"];
+                };
+            };
+            /** @description RESET command created (PENDING) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging, body or Idempotency-Key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description A precondition does not hold (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listMaintenanceCommands: {
+        parameters: {
+            query?: {
+                /** @description Optional machine UUID. */
+                machineId?: string;
+                /** @description Optional slot UUID. */
+                slotId?: string;
+                /** @description Optional operation. */
+                operation?: "REMOVE_ITEM" | "EMPTY_COLUMN" | "OPEN_REFILL" | "CLOSE_REFILL" | "RESET";
+                /** @description Optional status. */
+                status?: "PENDING" | "SENT" | "ACCEPTED" | "COMPLETED" | "FAILED" | "NEEDS_RECONCILIATION" | "RECONCILED";
+                /** @description Optional start of createdAt, inclusive, ISO-8601. */
+                from?: string;
+                /** @description Optional end of createdAt, exclusive, ISO-8601; after from. */
+                to?: string;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of commands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandPageResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging, body or Idempotency-Key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getMaintenanceCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Command UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Command */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging, body or Idempotency-Key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Command not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    reconcileMaintenanceCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Command UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReconcileMaintenanceCommandRequest"];
+            };
+        };
+        responses: {
+            /** @description Reconciled command */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenanceCommandResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging, body or Idempotency-Key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_COMMAND_READ / MAINTENANCE_COMMAND_EXECUTE / MACHINE_RESET */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Command not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not reconcilable or effect no longer possible */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listWorkOrders: {
+        parameters: {
+            query?: {
+                /** @description Optional statuses (repeat the parameter); default all. */
+                status?: ("OPEN" | "ASSIGNED" | "IN_PROGRESS" | "DONE" | "CANCELLED")[];
+                /** @description Optional type. */
+                type?: "RESTOCK" | "MAINTENANCE" | "INCIDENT";
+                /** @description Optional source. */
+                source?: "MANUAL" | "ALERT" | "SCHEDULE" | "CUSTOMER_REPORT";
+                /** @description Optional machine UUID. */
+                machineId?: string;
+                /** @description Optional assignee UUID. */
+                assigneeId?: string;
+                /** @description Optional priority. */
+                priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+                /** @description true: only unfinished work orders past their due time. */
+                overdue?: boolean;
+                /** @description Optional start of createdAt, inclusive, ISO-8601. */
+                from?: string;
+                /** @description Optional end of createdAt, exclusive, ISO-8601; after from. */
+                to?: string;
+                /** @description Issue #70: optional maintenance plan UUID (SCHEDULE work orders of that plan). */
+                maintenancePlanId?: string;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of work orders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderPageResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    createWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine inactive */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listMyWorkOrders: {
+        parameters: {
+            query?: {
+                /** @description Optional statuses (repeat the parameter); default all. */
+                status?: ("OPEN" | "ASSIGNED" | "IN_PROGRESS" | "DONE" | "CANCELLED")[];
+                /** @description true: only unfinished work orders past their due time. */
+                overdue?: boolean;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of work orders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderPageResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Work order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    updateWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listWorkOrderEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description History */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseListWorkOrderEventResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    assignWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    unassignWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    startWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["StartWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    addWorkOrderNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkOrderNoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    completeWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    cancelWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    linkWorkOrderAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkAlertRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    unlinkWorkOrderAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+                /** @description Alert UUID. */
+                alertId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Work order after the action */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order (or linked alert) not found, or assigned to someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Invalid transition, stale version or machine precondition (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    createWorkOrderFromAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert UUID. */
+                alertId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CreateWorkOrderFromAlertRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid filter, paging or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks the WORK_ORDER_* permission of the operation */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Alert resolved or already handled */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getRestockSuggestions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Suggestions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRestockSuggestionResponse"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    createRestockWorkOrderFromSuggestions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine UUID. */
+                machineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRestockWorkOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Work order created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Nothing to restock or machine inactive */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    addRestockLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestockLineInput"];
+            };
+        };
+        responses: {
+            /** @description Line after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRestockLineResponse"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order, line, slot or product not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Finished work order, line already loaded, duplicate line, inactive slot or product */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteRestockLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+                /** @description Line UUID. */
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Line after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order, line, slot or product not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Finished work order, line already loaded, duplicate line, inactive slot or product */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    updateRestockLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+                /** @description Line UUID. */
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateRestockLineRequest"];
+            };
+        };
+        responses: {
+            /** @description Line after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRestockLineResponse"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order, line, slot or product not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Finished work order, line already loaded, duplicate line, inactive slot or product */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    loadRestockLine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+                /** @description Line UUID. */
+                lineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestockLoadRequest"];
+            };
+        };
+        responses: {
+            /** @description Bowls loaded */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRestockLoadResponse"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order, line or batch not found, or work order of someone else */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description A loading rule does not hold (code at the start of the message) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getRestock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Work order UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restock view */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseRestockViewResponse"];
+                };
+            };
+            /** @description Malformed UUID or body, slot of another machine, quantity above capacity, not a RESTOCK work order */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks RESTOCK_PLAN / RESTOCK_EXECUTE / WORK_ORDER_READ_ASSIGNED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Work order not found or not RESTOCK */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listMaintenancePlans: {
+        parameters: {
+            query?: {
+                /** @description Optional machine UUID. */
+                machineId?: string;
+                /** @description Optional true / false. */
+                active?: boolean;
+                /** @description Zero-based page index. */
+                page?: number;
+                /** @description Page size, 1 to 100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of plans */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenancePlanPageResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    createMaintenancePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMaintenancePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Plan created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenancePlanResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine inactive */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listUpcomingMaintenance: {
+        parameters: {
+            query?: {
+                /** @description Days ahead, 1 to 90. */
+                days?: number;
+                /** @description Optional machine UUID. */
+                machineId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Upcoming plans */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseListMaintenancePlanResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getMaintenancePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Found */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenancePlanResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    updateMaintenancePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMaintenancePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Plan after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenancePlanResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Stale version */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listMaintenancePlanWorkOrders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Found */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseListPlanWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    activateMaintenancePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plan after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenancePlanResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Stale version */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    deactivateMaintenancePlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plan after the change */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMaintenancePlanResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Stale version */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    generateMaintenancePlanWorkOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Plan UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Work order created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseWorkOrderResponse"];
+                };
+            };
+            /** @description Malformed UUID, invalid body, interval/lead, dates or paging */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token or unavailable account; kiosk keys are not accepted */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated account lacks MAINTENANCE_PLAN_READ / MAINTENANCE_PLAN_MANAGE */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Plan inactive, unfinished work order, occurrence generated or machine inactive */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    refundPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Payment UUID. */
+                paymentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefundPaymentRequest"];
+            };
+        };
+        responses: {
+            /** @description Payment detail with the refund block */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Success",
+                     *       "data": {
+                     *         "id": "5d6e0000-0000-4000-8000-000000000001",
+                     *         "orderId": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *         "orderCode": "ORD-20261015-7K3QF9XA",
+                     *         "machineCode": "FV-HCM-001",
+                     *         "provider": "MOCK",
+                     *         "status": "REFUNDED",
+                     *         "amount": 70000,
+                     *         "paymentReference": "MOCK-8F3KQ2AB",
+                     *         "transactionId": "MOCKTX-0001",
+                     *         "createdAt": "2026-10-15T04:00:05Z",
+                     *         "paidAt": "2026-10-15T04:01:00Z",
+                     *         "expiredAt": "2026-10-15T04:05:00Z",
+                     *         "qrCode": null,
+                     *         "refund": {
+                     *           "refundedAt": "2026-10-15T06:00:00Z",
+                     *           "refundedBy": {
+                     *             "id": "a0000000-0000-4000-8000-000000000001",
+                     *             "fullName": "Admin Nguyen"
+                     *           },
+                     *           "reason": "DISPENSE_FAILED",
+                     *           "transferReference": "FT26317123456789",
+                     *           "note": "Chuyen khoan lai qua Vietcombank"
+                     *         }
+                     *       },
+                     *       "timestamp": "2026-10-15T04:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponsePaymentDetailResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/payments/{paymentId}/refund",
+                     *       "status": 400,
+                     *       "message": "Request validation failed",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "error": "Bad Request"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token (a kiosk key is not accepted here) */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/payments/{paymentId}/refund",
+                     *       "status": 401,
+                     *       "message": "Authentication required or access token invalid",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "error": "Unauthorized"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the refund permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/payments/{paymentId}/refund",
+                     *       "status": 403,
+                     *       "message": "Access denied",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "error": "Forbidden"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Payment not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/payments/{paymentId}/refund",
+                     *       "status": 404,
+                     *       "message": "Payment not found",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "error": "Not Found"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description PAYMENT_ALREADY_REFUNDED, REFUND_TRANSFER_REF_USED, DISPENSE_IN_PROGRESS (order PAID/DISPENSING or an unfinished dispense command), REFUND_REASON_MISMATCH or PAYMENT_NOT_REFUNDABLE (not SUCCESS), as the message prefix */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/payments/{paymentId}/refund",
+                     *       "status": 409,
+                     *       "message": "PAYMENT_ALREADY_REFUNDED: this payment was already refunded",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "error": "Conflict"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/payments/{paymentId}/refund",
+                     *       "status": 500,
+                     *       "message": "An unexpected error occurred",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "error": "Internal Server Error"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listRefunds: {
+        parameters: {
+            query?: {
+                /** @description First business-zone day (inclusive). */
+                from?: string;
+                /** @description Last business-zone day (inclusive). */
+                to?: string;
+                /** @description Refund reason filter. */
+                reason?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "PRODUCT_QUALITY" | "OTHER";
+                /** @description Machine UUID filter. */
+                machineId?: string;
+                /** @description UUID of the administrator who recorded the refund. */
+                refundedBy?: string;
+                /** @description Zero-based page. */
+                page?: number;
+                /** @description Page size 1..100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of refunds */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Success",
+                     *       "data": {
+                     *         "content": [
+                     *           {
+                     *             "paymentId": "5d6e0000-0000-4000-8000-000000000001",
+                     *             "amount": 17500,
+                     *             "paidAt": "2026-10-15T04:01:00Z",
+                     *             "refundedAt": "2026-10-15T06:00:00Z",
+                     *             "refundedBy": {
+                     *               "id": "a0000000-0000-4000-8000-000000000001",
+                     *               "fullName": "Admin Nguyen"
+                     *             },
+                     *             "reason": "DISPENSE_FAILED",
+                     *             "transferReference": "FT26317123456789",
+                     *             "note": null,
+                     *             "order": {
+                     *               "id": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *               "orderCode": "ORD-20261015-7K3QF9XA",
+                     *               "status": "REFUNDED",
+                     *               "machineCode": "FV-HCM-001"
+                     *             }
+                     *           }
+                     *         ],
+                     *         "totalElements": 1,
+                     *         "totalPages": 1,
+                     *         "page": 0,
+                     *         "size": 20
+                     *       },
+                     *       "timestamp": "2026-10-15T07:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseRefundPageResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds",
+                     *       "status": 400,
+                     *       "message": "Request validation failed",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Bad Request"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token (a kiosk key is not accepted here) */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds",
+                     *       "status": 401,
+                     *       "message": "Authentication required or access token invalid",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Unauthorized"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the refund permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds",
+                     *       "status": 403,
+                     *       "message": "Access denied",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Forbidden"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds",
+                     *       "status": 500,
+                     *       "message": "An unexpected error occurred",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Internal Server Error"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listRefundCandidates: {
+        parameters: {
+            query?: {
+                /** @description Candidate type filter. */
+                type?: "DISPENSE_FAILED" | "LATE_PAYMENT" | "DUPLICATE_PAYMENT" | "CUSTOMER_REPORT";
+                /** @description Machine UUID filter. */
+                machineId?: string;
+                /** @description First business-zone day (inclusive). */
+                from?: string;
+                /** @description Last business-zone day (inclusive). */
+                to?: string;
+                /** @description Zero-based page. */
+                page?: number;
+                /** @description Page size 1..100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of refund candidates */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "data": {
+                     *         "totalElements": 1,
+                     *         "content": [
+                     *           {
+                     *             "paymentId": "5d6e0000-0000-4000-8000-000000000001",
+                     *             "type": "DISPENSE_FAILED",
+                     *             "amount": 17500,
+                     *             "paidAt": "2026-10-15T04:01:00Z",
+                     *             "order": {
+                     *               "id": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *               "orderCode": "ORD-20261015-7K3QF9XA",
+                     *               "status": "DISPENSE_FAILED",
+                     *               "machineCode": "FV-HCM-001"
+                     *             },
+                     *             "payer": {
+                     *               "accountName": "NGUYEN VAN A",
+                     *               "accountNumber": "0123456789",
+                     *               "bankId": "970436",
+                     *               "bankName": "Vietcombank"
+                     *             },
+                     *             "waitingSince": "2026-10-15T04:01:00Z",
+                     *             "relatedWorkOrder": null,
+                     *             "customerReport": null
+                     *           }
+                     *         ],
+                     *         "size": 20,
+                     *         "page": 0,
+                     *         "totalPages": 1
+                     *       },
+                     *       "message": "Success"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseRefundCandidatePageResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 400,
+                     *       "path": "/api/v1/refunds/candidates",
+                     *       "error": "Bad Request",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "message": "Request validation failed"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token (a kiosk key is not accepted here) */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "path": "/api/v1/refunds/candidates",
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "message": "Authentication required or access token invalid"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the refund permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "path": "/api/v1/refunds/candidates",
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "message": "Access denied"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 500,
+                     *       "path": "/api/v1/refunds/candidates",
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "message": "An unexpected error occurred"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getRefundSummary: {
+        parameters: {
+            query?: {
+                /** @description First business-zone day (inclusive). */
+                from?: string;
+                /** @description Last business-zone day (inclusive). */
+                to?: string;
+                /** @description Machine UUID filter. */
+                machineId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Refund totals */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "message": "Success",
+                     *       "data": {
+                     *         "from": "2026-10-15",
+                     *         "to": "2026-10-15",
+                     *         "machineId": null,
+                     *         "count": 1,
+                     *         "totalAmount": 17500,
+                     *         "byReason": [
+                     *           {
+                     *             "count": 1,
+                     *             "reason": "DISPENSE_FAILED",
+                     *             "totalAmount": 17500
+                     *           },
+                     *           {
+                     *             "count": 0,
+                     *             "reason": "LATE_PAYMENT",
+                     *             "totalAmount": 0
+                     *           },
+                     *           {
+                     *             "count": 0,
+                     *             "reason": "DUPLICATE_PAYMENT",
+                     *             "totalAmount": 0
+                     *           },
+                     *           {
+                     *             "count": 0,
+                     *             "reason": "PRODUCT_QUALITY",
+                     *             "totalAmount": 0
+                     *           },
+                     *           {
+                     *             "count": 0,
+                     *             "reason": "OTHER",
+                     *             "totalAmount": 0
+                     *           }
+                     *         ]
+                     *       },
+                     *       "timestamp": "2026-10-15T07:00:00Z"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseRefundSummaryResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds/summary",
+                     *       "status": 400,
+                     *       "message": "Request validation failed",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Bad Request"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token (a kiosk key is not accepted here) */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds/summary",
+                     *       "status": 401,
+                     *       "message": "Authentication required or access token invalid",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Unauthorized"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the refund permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds/summary",
+                     *       "status": 403,
+                     *       "message": "Access denied",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Forbidden"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "path": "/api/v1/refunds/summary",
+                     *       "status": 500,
+                     *       "message": "An unexpected error occurred",
+                     *       "timestamp": "2026-10-15T07:00:00Z",
+                     *       "error": "Internal Server Error"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getReportForm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report token from the QR. */
+                reportToken: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Form information */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseReportFormResponse"];
+                };
+            };
+            /** @description Unknown or rotated report token, or INACTIVE machine (same body) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Too many requests from this source or for this machine; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    submitCustomerReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report token from the QR. */
+                reportToken: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    report: components["schemas"]["PublicReportRequest"];
+                    /** @description 0..3 photos. */
+                    photos?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Report accepted */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseReportSubmittedResponse"];
+                };
+            };
+            /** @description Validation failed */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unknown or rotated report token, or INACTIVE machine (same body) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Request larger than 7 MB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Too many requests from this source or for this machine; see Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getKioskIncidentReportLink: {
+        parameters: {
+            query?: {
+                /** @description Optional order code to prefill (ignored unless it is an order of this machine). */
+                orderCode?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Report URL */
+            200: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "data": {
+                     *         "id": "e0f1a2b3-0000-4000-8000-000000000001",
+                     *         "orderCode": "ORD-20261015-7K3QF9XA",
+                     *         "machineId": "9b1e0000-0000-4000-8000-000000000001",
+                     *         "machineCode": "FV-HCM-001",
+                     *         "status": "CANCELLED",
+                     *         "subtotal": 35000,
+                     *         "totalAmount": 35000,
+                     *         "createdAt": "2026-10-15T04:00:00Z",
+                     *         "expiresAt": "2026-10-15T04:05:00Z",
+                     *         "paidAt": null,
+                     *         "completedAt": null,
+                     *         "cancelledAt": "2026-10-15T04:01:00Z",
+                     *         "refundedAt": null,
+                     *         "items": [
+                     *           {
+                     *             "quantity": 1,
+                     *             "sku": "BOWL-MIX",
+                     *             "totalPrice": 35000,
+                     *             "productName": "Mixed Fruit Bowl",
+                     *             "productId": "1c2d3e4f-0000-4000-8000-000000000001",
+                     *             "unitPrice": 35000,
+                     *             "id": "01100000-0000-4000-8000-000000000001",
+                     *             "allocations": [
+                     *               {
+                     *                 "id": "a110c000-0000-4000-8000-000000000001",
+                     *                 "inventoryItemId": "1e000000-0000-4000-8000-000000000001",
+                     *                 "slotCode": "A",
+                     *                 "batchCode": "B20261014-01",
+                     *                 "batchExpiresAt": "2026-10-17T00:00:00Z",
+                     *                 "status": "RELEASED",
+                     *                 "releasedAt": "2026-10-15T04:01:00Z"
+                     *               }
+                     *             ]
+                     *           }
+                     *         ],
+                     *         "payments": [
+                     *           {
+                     *             "id": "5d6e0000-0000-4000-8000-000000000001",
+                     *             "provider": "MOCK",
+                     *             "status": "EXPIRED",
+                     *             "amount": 35000,
+                     *             "createdAt": "2026-10-15T04:00:05Z",
+                     *             "paidAt": null,
+                     *             "expiredAt": "2026-10-15T04:05:00Z"
+                     *           }
+                     *         ],
+                     *         "refunds": []
+                     *       },
+                     *       "message": "Success"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiResponseReportLinkResponse"];
+                };
+            };
+            /** @description Missing, malformed, unknown, revoked or wrong X-Kiosk-Key */
+            401: {
+                headers: {
+                    "WWW-Authenticate"?: "Bearer";
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 401,
+                     *       "path": "/api/v1/kiosk/incident-report-link",
+                     *       "error": "Unauthorized",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "message": "Authentication required or access token invalid"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Authenticated as a user, not a kiosk */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 403,
+                     *       "path": "/api/v1/kiosk/incident-report-link",
+                     *       "error": "Forbidden",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "message": "Access denied"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description REPORT_LINK_NOT_CONFIGURED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 409,
+                     *       "path": "/api/v1/kiosk/incident-report-link",
+                     *       "error": "Conflict",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "message": "Requested product is not available on this machine"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "status": 500,
+                     *       "path": "/api/v1/kiosk/incident-report-link",
+                     *       "error": "Internal Server Error",
+                     *       "timestamp": "2026-10-15T04:00:00Z",
+                     *       "message": "An unexpected error occurred"
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    listCustomerReports: {
+        parameters: {
+            query?: {
+                /** @description Status filter. */
+                status?: "NEW" | "IN_REVIEW" | "RESOLVED" | "REJECTED";
+                /** @description Type filter. */
+                type?: "PAID_NOT_RECEIVED" | "PRODUCT_QUALITY" | "MACHINE_FAULT" | "OTHER";
+                /** @description Verdict filter. */
+                verdict?: "NOT_APPLICABLE" | "ORDER_NOT_FOUND" | "REFUND_ELIGIBLE" | "DISPENSE_PENDING" | "DELIVERED_PER_MACHINE" | "ALREADY_REFUNDED" | "NOT_PAID";
+                /** @description Machine UUID filter. */
+                machineId?: string;
+                /** @description First business-zone day (inclusive). */
+                from?: string;
+                /** @description Last business-zone day (inclusive). */
+                to?: string;
+                /** @description true: only reports with a verified order; false: only without. */
+                hasOrder?: boolean;
+                /** @description Zero-based page. */
+                page?: number;
+                /** @description Page size 1..100. */
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Page of reports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseCustomerReportPageResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getCustomerReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Report detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseCustomerReportDetailResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Report not found or not visible */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getCustomerReportPhoto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report UUID. */
+                id: string;
+                /** @description Photo UUID. */
+                photoId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": components["schemas"]["ApiErrorResponse"];
+                    "image/png": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": components["schemas"]["ApiErrorResponse"];
+                    "image/png": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": components["schemas"]["ApiErrorResponse"];
+                    "image/png": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Report or photo not found or not visible */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": components["schemas"]["ApiErrorResponse"];
+                    "image/png": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    reviewCustomerReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Report detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseCustomerReportDetailResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Report not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description REPORT_NOT_NEW or REPORT_ALREADY_CLOSED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    resolveCustomerReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Report detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseCustomerReportDetailResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Report not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description REPORT_ALREADY_CLOSED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    rejectCustomerReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Report detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseCustomerReportDetailResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Report not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description REPORT_ALREADY_CLOSED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    rotateMachineReportToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Machine UUID. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New report URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseReportLinkResponse"];
+                };
+            };
+            /** @description Invalid parameters or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the permission */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Machine not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description REPORT_LINK_NOT_CONFIGURED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getDashboardOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Overview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseDashboardOverviewResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing DASHBOARD_READ */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getSalesSummary: {
+        parameters: {
+            query: {
+                /** @description First day (inclusive). */
+                from: string;
+                /** @description Last day (inclusive). */
+                to: string;
+                /** @description Machine filter, repeatable. */
+                machineId?: string[];
+                /** @description Product filter, repeatable. */
+                productId?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseSalesSummary"];
+                };
+            };
+            /** @description Missing / invalid range, too many or unknown ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the report permission (STAFF has no access to revenue) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getSalesTimeseries: {
+        parameters: {
+            query: {
+                /** @description First day (inclusive). */
+                from: string;
+                /** @description Last day (inclusive). */
+                to: string;
+                /** @description Machine filter, repeatable. */
+                machineId?: string[];
+                /** @description Product filter, repeatable. */
+                productId?: string[];
+                /** @description DAY, WEEK or MONTH. */
+                granularity?: "DAY" | "WEEK" | "MONTH";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Time series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseSalesSeries"];
+                };
+            };
+            /** @description Missing / invalid range, too many or unknown ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the report permission (STAFF has no access to revenue) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getSalesPeakHours: {
+        parameters: {
+            query: {
+                /** @description First day (inclusive). */
+                from: string;
+                /** @description Last day (inclusive). */
+                to: string;
+                /** @description Machine filter, repeatable. */
+                machineId?: string[];
+                /** @description Product filter, repeatable. */
+                productId?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Peak hours */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponsePeakHours"];
+                };
+            };
+            /** @description Missing / invalid range, too many or unknown ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the report permission (STAFF has no access to revenue) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getSalesByProduct: {
+        parameters: {
+            query: {
+                /** @description First day (inclusive). */
+                from: string;
+                /** @description Last day (inclusive). */
+                to: string;
+                /** @description Machine filter, repeatable. */
+                machineId?: string[];
+                /** @description Product filter, repeatable. */
+                productId?: string[];
+                /** @description QUANTITY or NET_SALES. */
+                sortBy?: "QUANTITY" | "NET_SALES";
+                /** @description 1..100. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Products */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseProductReport"];
+                };
+            };
+            /** @description Missing / invalid range, too many or unknown ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the report permission (STAFF has no access to revenue) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    getSalesByMachine: {
+        parameters: {
+            query: {
+                /** @description First day (inclusive). */
+                from: string;
+                /** @description Last day (inclusive). */
+                to: string;
+                /** @description Machine filter, repeatable. */
+                machineId?: string[];
+                /** @description Product filter, repeatable. */
+                productId?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Machines */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResponseMachineReport"];
+                };
+            };
+            /** @description Missing / invalid range, too many or unknown ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the report permission (STAFF has no access to revenue) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    exportSalesReport: {
+        parameters: {
+            query: {
+                /** @description CSV or PDF. */
+                format: "CSV" | "PDF";
+                /** @description First day (inclusive). */
+                from: string;
+                /** @description Last day (inclusive). */
+                to: string;
+                /** @description Machine filter, repeatable. */
+                machineId?: string[];
+                /** @description Product filter, repeatable. */
+                productId?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                    "application/pdf": string;
+                };
+            };
+            /** @description Missing / invalid range, too many or unknown ids */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": components["schemas"]["ApiErrorResponse"];
+                    "application/pdf": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing/invalid/expired Bearer token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": components["schemas"]["ApiErrorResponse"];
+                    "application/pdf": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Missing the report permission (STAFF has no access to revenue) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": components["schemas"]["ApiErrorResponse"];
+                    "application/pdf": components["schemas"]["ApiErrorResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unexpected server error; no internal details */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": components["schemas"]["ApiErrorResponse"];
+                    "application/pdf": components["schemas"]["ApiErrorResponse"];
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };

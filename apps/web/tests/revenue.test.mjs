@@ -57,13 +57,13 @@ test('query and links send only the contract parameters, dates always written', 
   assert.deepEqual(overviewRevenueFilters(TODAY), { from: '2026-11-07', to: TODAY, productId: '', groupBy: 'DAY' })
 })
 
-test('route R1: REPORT_READ (draft), ADMIN only, in the Giao dịch group', () => {
+test('route R1: REPORT_SALES_READ (draft), ADMIN only, in the Giao dịch group', () => {
   const route = matchRoute(REVENUE_PATH)
   assert.equal(route.page, 'revenue-report')
-  assert.equal(route.permission, 'REPORT_READ')
+  assert.equal(route.permission, 'REPORT_SALES_READ')
   assert.deepEqual(route.roles, ['ADMIN'])
-  assert.equal(can(['ADMIN'], 'REPORT_READ'), true)
-  assert.equal(can(['STAFF'], 'REPORT_READ'), false)
+  assert.equal(can(['ADMIN'], 'REPORT_SALES_READ'), true)
+  assert.equal(can(['STAFF'], 'REPORT_SALES_READ'), false)
   const item = navFor(['ADMIN']).find(entry => entry.to === REVENUE_PATH)
   assert.equal(item.group, 'Giao dịch')
   assert.equal(item.label, 'Báo cáo doanh thu')

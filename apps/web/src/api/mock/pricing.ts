@@ -30,6 +30,6 @@ export function boxPrice(listPrice: number, expiresAt: string | undefined, now: 
 export function linePricing(price: BoxPrice, quantity: number) {
   return {
     unitPrice: price.unitPrice, totalPrice: price.unitPrice * quantity, originalUnitPrice: price.originalUnitPrice,
-    discountAmount: (price.originalUnitPrice - price.unitPrice) * quantity, discountPercent: price.discountPercent, discountReason: price.discountReason,
+    discountAmount: (price.originalUnitPrice - price.unitPrice) * quantity, discountPercent: price.discountPercent ?? undefined, discountReason: price.discountReason ?? undefined,
   }
 }

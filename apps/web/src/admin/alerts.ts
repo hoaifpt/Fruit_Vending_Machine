@@ -182,7 +182,7 @@ export function handledByLines(alert: Alert): string[] {
 
 /**
  * On since the work ticket screens (FE 7.1) exist: "Mở phiếu" opens the create form pre-filled with the alert's machine
- * and id, for accounts with TICKET_WRITE. Set to false to show the button disabled with TICKET_PENDING_TEXT instead.
+ * and id, for accounts with WORK_ORDER_MANAGE. Set to false to show the button disabled with TICKET_PENDING_TEXT instead.
  */
 export const TICKETS_AVAILABLE: boolean = true
 export const TICKET_PENDING_TEXT = 'Chưa mở được phiếu công việc: chức năng phiếu sẽ có trong đợt cập nhật Phiếu công việc (FM7). Tạm thời hãy xác nhận cảnh báo và báo trực tiếp cho người phụ trách.'

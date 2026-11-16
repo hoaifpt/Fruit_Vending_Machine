@@ -1,7 +1,7 @@
 // O1 Tổng quan bước 2 (FE 9.2): revenue of today and of the last 7 days. Same source and same parameters as the report
 // screen (R1): the block loads the "7 ngày qua" report through loadRevenueReport, shows its totals and today's row, and
 // links to the report with exactly those parameters, so the numbers match the report by construction. ADMIN only
-// (REPORT_READ); refreshed with the other blocks. See overview-revenue rules in ../revenue.ts.
+// (REPORT_SALES_READ); refreshed with the other blocks. See overview-revenue rules in ../revenue.ts.
 import { Banknote } from 'lucide-react'
 import { ApiError, serverNow } from '../../api/client.ts'
 import { Button } from '../../components/ui/button.tsx'

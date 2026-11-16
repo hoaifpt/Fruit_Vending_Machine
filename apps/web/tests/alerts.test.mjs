@@ -14,7 +14,7 @@ import {
   detailFailure, freshAlerts, handledByLines, handlingSteps, machinePath, readAlertFilters, resolveBody,
 } from '../src/admin/alerts.ts'
 import { createAlertBell, notifyAlertsChanged, onAlertsChanged } from '../src/admin/alert-bell.ts'
-import { DRAFT_PERMISSIONS, PERMISSIONS, can, permissionsOf } from '../src/admin/permissions.ts'
+import { PERMISSIONS, can, permissionsOf } from '../src/admin/permissions.ts'
 import { NAV, canOpen, matchRoute, navFor } from '../src/admin/routes.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
@@ -59,14 +59,11 @@ test('the draft contract follows table alerts and records who acknowledged and c
 
 // ---- permissions (draft codes)
 
-test('ALERT_READ / ALERT_WRITE are draft codes: both roles hold them, the 15 codes of #48 are unchanged', () => {
-  assert.equal(PERMISSIONS.length, 15)
-  // FE 7.1 added the work ticket codes after the alert ones (tests/tickets.test.mjs); FE 8.1 added REFUND_RECORD.
-  assert.deepEqual(DRAFT_PERMISSIONS.slice(0, 2), ['ALERT_READ', 'ALERT_WRITE'])
-  assert.ok(DRAFT_PERMISSIONS.includes('REFUND_RECORD'))
+test('ALERT_READ / ALERT_MANAGE (V17): both roles hold them', () => {
+  assert.ok(PERMISSIONS.includes('ALERT_READ') && PERMISSIONS.includes('ALERT_MANAGE'))
   for (const role of ['ADMIN', 'STAFF']) {
     assert.equal(can([role], 'ALERT_READ'), true, role)
-    assert.equal(can([role], 'ALERT_WRITE'), true, role)
+    assert.equal(can([role], 'ALERT_MANAGE'), true, role)
   }
   // Once GET /auth/me lists permissions, an account without the alert codes sees neither the screen nor the bell.
   const subject = { roles: ['ADMIN'], permissions: ['MACHINE_READ', 'ORDER_READ'] }

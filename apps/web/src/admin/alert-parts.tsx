@@ -89,7 +89,7 @@ export function HandledBy({ alert, withNote = false, className }: { alert: Alert
 
 /**
  * "Mở phiếu" (FE 7.1): opens the create-ticket form pre-filled with the alert's machine and id (ticketFromAlert), for
- * accounts with TICKET_WRITE; others read who opens tickets. After creating, a link to the new ticket stays in place.
+ * accounts with WORK_ORDER_MANAGE; others read who opens tickets. After creating, a link to the new ticket stays in place.
  * With TICKETS_AVAILABLE off the button stays focusable but disabled (aria-disabled) with the reason next to it.
  */
 export function OpenTicketButton({ alert }: { alert: Alert }) {
@@ -98,7 +98,7 @@ export function OpenTicketButton({ alert }: { alert: Alert }) {
   const sheet = useDialog()
   const [opened, setOpened] = useState<WorkTicket | null>(null)
   if (TICKETS_AVAILABLE) {
-    if (!can('TICKET_WRITE')) return <p className="max-w-[60ch] text-xs text-muted-foreground">{TICKET_ADMIN_ONLY_TEXT}</p>
+    if (!can('WORK_ORDER_MANAGE')) return <p className="max-w-[60ch] text-xs text-muted-foreground">{TICKET_ADMIN_ONLY_TEXT}</p>
     return <div className="grid gap-2">
       <Button type="button" variant="outline" size="sm" className="w-fit max-sm:h-11" data-focus-key={`alert-ticket-${alert.id}`} onClick={() => sheet.open()}>Mở phiếu</Button>
       {opened && <p role="status" className="text-[13px]">Đã mở phiếu “{opened.title}”. <Link to={ticketPath(opened.id)} className={LINK}>Xem phiếu</Link></p>}

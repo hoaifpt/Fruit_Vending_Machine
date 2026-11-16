@@ -372,7 +372,7 @@ function SlotSheet({ machineId, slot, close, done }: { machineId: string; slot?:
     }}>
     {editing
       ? <FormField label="Mã ngăn" hint="Mã ngăn cố định để tồn kho và đơn hàng luôn trỏ đúng vị trí." className="mb-4"><Input value={slot.slotCode} readOnly className="font-mono" /></FormField>
-      : <FormField label="Mã ngăn" required error={errors.slotCode} hint={`Duy nhất trong máy này, tự chuyển thành chữ in hoa, ví dụ A1. Tối đa ${SLOT_LIMITS.slotCode} ký tự.`} className="mb-4">
+      : <FormField label="Mã ngăn" required error={errors.slotCode} hint="Máy có hai cột: A hoặc B, mỗi cột một ngăn." className="mb-4">
         <Input value={values.slotCode} maxLength={SLOT_LIMITS.slotCode} autoComplete="off" spellCheck={false} autoCapitalize="characters" className="font-mono" onChange={event => form.set('slotCode')(event.target.value)} /></FormField>}
     <FormField label="Sức chứa (số hộp)" required error={errors.capacity} hint="Số nguyên lớn hơn 0, ví dụ 6." className="mb-4">
       <Input value={values.capacity} inputMode="numeric" autoComplete="off" onChange={event => form.set('capacity')(event.target.value)} /></FormField>

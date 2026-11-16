@@ -324,7 +324,7 @@ export default function PurchasePage() {
           {products.slice(currentPage * 2, currentPage * 2 + 2).map(product => {
             const low = (product.availableQuantity ?? 0) <= 2
             // Server price of the box that would be sold now; a near-expiry box shows its original price struck and the % off (FE 7.5).
-            const price = priceView({ price: product.price, originalPrice: product.originalUnitPrice, discountPercent: product.discountPercent })
+            const price = priceView({ price: product.price, originalPrice: product.originalPrice, discountPercent: product.discountPercent })
             return <button className="buy-product" key={product.productId} onClick={() => void selectProduct(product)}>
               <div className="buy-product-top"><span>1 hộp</span>{price.discounted && <span className="buy-discount-tag">{price.tag}<span className="sr-only"> {discountReasonText(product.discountReason).toLowerCase()}</span></span>}<small data-low={low || undefined}>{low ? 'Còn ít' : 'Còn hàng'}</small></div>
               <img src={imageOf(product)} alt="" draggable={false} />

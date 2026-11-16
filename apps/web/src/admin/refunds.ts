@@ -4,7 +4,7 @@
 // reference here. API: draft contract api-contract/drafts/refunds.yaml (waiting for backend 5.1):
 // POST /orders/{orderId}/refund { transferRef, note?, paymentId } and GET /refunds. The cases to refund come from APIs
 // that already exist: GET /orders?status=DISPENSE_FAILED and GET /payments?requiresAttention=true (late payment on a
-// cancelled order, duplicate payment). ADMIN only (REFUND_RECORD, draft permission; never STAFF, BR-19/20).
+// cancelled order, duplicate payment). ADMIN only (PAYMENT_REFUND, draft permission; never STAFF, BR-19/20).
 // FE 8.3: customer reports naming a paid order (GET /incident-reports?flagged=true, draft incident-reports.yaml) are
 // listed first, as soon as they arrive. A report never makes an order refundable by itself (BR-15): an order still PAID
 // is shown for checking only; a DISPENSE_FAILED one is refunded as usual.

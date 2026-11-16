@@ -17,16 +17,19 @@ export interface PermissionGroupDef { key: string; label: string; codes: readonl
  * code added by a later migration joins the group of its prefix (PRODUCT_EXPORT → Sản phẩm) or a group of its own.
  */
 export const PERMISSION_GROUPS: readonly PermissionGroupDef[] = [
-  { key: 'users', label: 'Tài khoản & phân quyền', codes: ['USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE'], prefixes: ['USER', 'PERMISSION', 'ROLE'] },
-  { key: 'products', label: 'Sản phẩm', codes: ['PRODUCT_READ', 'PRODUCT_WRITE'], prefixes: ['PRODUCT'] },
-  { key: 'machines', label: 'Máy, ngăn & khóa kiosk', codes: ['MACHINE_READ', 'MACHINE_WRITE', 'KIOSK_CREDENTIAL_MANAGE'], prefixes: ['MACHINE', 'SLOT', 'KIOSK'] },
+  { key: 'users', label: 'Tài khoản & phân quyền', codes: ['USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE', 'AUDIT_LOG_READ'], prefixes: ['USER', 'PERMISSION', 'ROLE', 'AUDIT'] },
+  { key: 'products', label: 'Sản phẩm & giá', codes: ['PRODUCT_READ', 'PRODUCT_WRITE', 'PRICING_READ', 'PRICING_MANAGE'], prefixes: ['PRODUCT', 'PRICING'] },
+  { key: 'machines', label: 'Máy, ngăn & khóa kiosk', codes: ['MACHINE_READ', 'MACHINE_WRITE', 'KIOSK_CREDENTIAL_MANAGE', 'MACHINE_REPORT_LINK_MANAGE'], prefixes: ['MACHINE', 'SLOT', 'KIOSK'] },
   { key: 'batches', label: 'Lô hàng', codes: ['BATCH_READ', 'BATCH_CREATE'], prefixes: ['BATCH'] },
-  { key: 'inventory', label: 'Tồn kho', codes: ['INVENTORY_READ', 'INVENTORY_WRITE'], prefixes: ['INVENTORY'] },
-  { key: 'orders', label: 'Đơn hàng', codes: ['ORDER_READ'], prefixes: ['ORDER'] },
-  { key: 'payments', label: 'Thanh toán', codes: ['PAYMENT_READ', 'PAYMENT_WEBHOOK_LOG_READ'], prefixes: ['PAYMENT', 'WEBHOOK'] },
+  { key: 'inventory', label: 'Tồn kho', codes: ['INVENTORY_READ', 'INVENTORY_WRITE', 'INVENTORY_LOAD_DIRECT'], prefixes: ['INVENTORY'] },
+  { key: 'alerts', label: 'Cảnh báo & tổng quan', codes: ['ALERT_READ', 'ALERT_MANAGE', 'ALERT_NOTIFY', 'DASHBOARD_READ'], prefixes: ['ALERT', 'DASHBOARD'] },
+  { key: 'operations', label: 'Phiếu công việc, nạp hàng & bảo trì', codes: ['WORK_ORDER_READ_ALL', 'WORK_ORDER_READ_ASSIGNED', 'WORK_ORDER_MANAGE', 'WORK_ORDER_EXECUTE', 'RESTOCK_PLAN', 'RESTOCK_EXECUTE', 'MAINTENANCE_COMMAND_READ', 'MAINTENANCE_COMMAND_EXECUTE', 'MACHINE_RESET', 'MAINTENANCE_PLAN_READ', 'MAINTENANCE_PLAN_MANAGE'], prefixes: ['WORK', 'RESTOCK', 'MAINTENANCE'] },
+  { key: 'orders', label: 'Đơn hàng & báo cáo khách', codes: ['ORDER_READ', 'CUSTOMER_REPORT_READ', 'CUSTOMER_REPORT_MANAGE'], prefixes: ['ORDER', 'CUSTOMER'] },
+  { key: 'payments', label: 'Thanh toán & hoàn tiền', codes: ['PAYMENT_READ', 'PAYMENT_WEBHOOK_LOG_READ', 'PAYMENT_REFUND', 'REFUND_READ'], prefixes: ['PAYMENT', 'WEBHOOK', 'REFUND'] },
+  { key: 'reports', label: 'Báo cáo bán hàng', codes: ['REPORT_SALES_READ', 'REPORT_EXPORT'], prefixes: ['REPORT'] },
 ]
 
-/** Vietnamese names of the 15 codes of V13; unknown codes fall back to the backend description, then the code. */
+/** Vietnamese names of every backend code; unknown codes fall back to the backend description, then the code. */
 export const PERMISSION_LABELS: Readonly<Record<string, string>> = {
   USER_READ: 'Xem tài khoản',
   USER_WRITE: 'Tạo, sửa, khóa/mở tài khoản',
@@ -43,6 +46,32 @@ export const PERMISSION_LABELS: Readonly<Record<string, string>> = {
   ORDER_READ: 'Xem đơn hàng',
   PAYMENT_READ: 'Xem thanh toán',
   PAYMENT_WEBHOOK_LOG_READ: 'Xem nhật ký webhook thanh toán',
+  AUDIT_LOG_READ: 'Xem nhật ký thao tác',
+  ALERT_READ: 'Xem cảnh báo',
+  ALERT_MANAGE: 'Xác nhận và đóng cảnh báo',
+  ALERT_NOTIFY: 'Nhận thông báo khi có cảnh báo mới',
+  PRICING_READ: 'Xem cài đặt giảm giá cận hạn',
+  PRICING_MANAGE: 'Đổi cài đặt giảm giá cận hạn',
+  MAINTENANCE_COMMAND_READ: 'Xem lệnh bảo trì máy',
+  MAINTENANCE_COMMAND_EXECUTE: 'Gửi và đối soát lệnh bảo trì máy',
+  MACHINE_RESET: 'Khởi động lại bộ điều khiển máy (RESET)',
+  WORK_ORDER_READ_ALL: 'Xem mọi phiếu công việc',
+  WORK_ORDER_READ_ASSIGNED: 'Xem phiếu công việc được giao cho mình',
+  WORK_ORDER_MANAGE: 'Tạo, sửa, giao, hủy phiếu công việc',
+  WORK_ORDER_EXECUTE: 'Bắt đầu, ghi chú, hoàn tất phiếu được giao',
+  RESTOCK_PLAN: 'Lập kế hoạch nạp hàng',
+  RESTOCK_EXECUTE: 'Nạp hộp theo phiếu nạp hàng',
+  INVENTORY_LOAD_DIRECT: 'Nạp hộp không qua phiếu',
+  MAINTENANCE_PLAN_READ: 'Xem lịch bảo trì',
+  MAINTENANCE_PLAN_MANAGE: 'Tạo, sửa, tạm dừng lịch bảo trì',
+  PAYMENT_REFUND: 'Ghi nhận hoàn tiền',
+  REFUND_READ: 'Xem hoàn tiền và khoản cần hoàn',
+  CUSTOMER_REPORT_READ: 'Xem báo cáo sự cố của khách',
+  CUSTOMER_REPORT_MANAGE: 'Xử lý báo cáo sự cố của khách',
+  MACHINE_REPORT_LINK_MANAGE: 'Đổi mã QR báo sự cố của máy',
+  DASHBOARD_READ: 'Xem tổng quan vận hành',
+  REPORT_SALES_READ: 'Xem báo cáo bán hàng và doanh thu',
+  REPORT_EXPORT: 'Xuất báo cáo CSV/PDF',
 }
 
 export function permissionLabel(code: string, description?: string | null): string {

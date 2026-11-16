@@ -13,7 +13,7 @@ import {
   visibleTabs,
 } from '../src/admin/machine-detail.ts'
 
-const slot = (patch = {}) => ({ slotCode: ' a1 ', capacity: ' 6 ', ...patch })
+const slot = (patch = {}) => ({ slotCode: ' a ', capacity: ' 6 ', ...patch })
 
 test('tabs in the URL: unknown or not-allowed tab opens the overview; STAFF never gets the kiosk keys tab', () => {
   // FE 6.4 added "Cảm biến & Sự kiện" (MACHINE_READ, so STAFF too) right after the overview.
@@ -53,9 +53,10 @@ test('capacity: whole positive number of boxes up to 2147483647, never rounded',
 test('slot forms: create sends slotCode (uppercased) + capacity, edit sends capacity only', () => {
   assert.deepEqual(validateSlot(slot(), 'create'), {})
   assert.deepEqual(Object.keys(validateSlot(slot({ slotCode: ' ', capacity: '0' }), 'create')).sort(), ['capacity', 'slotCode'])
+  assert.ok(validateSlot(slot({ slotCode: 'A1' }), 'create').slotCode, 'only the two columns A and B')
   assert.ok(validateSlot(slot({ slotCode: 'x'.repeat(33) }), 'create').slotCode)
   assert.deepEqual(validateSlot(slot({ slotCode: '' }), 'edit'), {}, 'the fixed code is not checked when editing')
-  assert.deepEqual(createSlotBody(slot()), { slotCode: 'A1', capacity: 6 })
+  assert.deepEqual(createSlotBody(slot()), { slotCode: 'A', capacity: 6 })
   assert.deepEqual(updateSlotBody(slot({ capacity: '8' })), { capacity: 8 })
   assert.throws(() => createSlotBody(slot({ capacity: '1.5' })), ValidationError)
 })
@@ -156,14 +157,14 @@ test('mock: product → machine → 2 slots → key (shown once) → ACTIVE, wit
   assert.equal((await slotsApi.list(machine.id, { status: 'ACTIVE', size: 1 })).totalElements, 0)
 
   const a1 = await slotsApi.create(machine.id, createSlotBody(slot()))
-  assert.deepEqual([a1.slotCode, a1.capacity, a1.status], ['A1', 6, 'ACTIVE'])
-  await assert.rejects(slotsApi.create(machine.id, createSlotBody(slot({ slotCode: 'A1 ' }))), error => {
+  assert.deepEqual([a1.slotCode, a1.capacity, a1.status], ['A', 6, 'ACTIVE'])
+  await assert.rejects(slotsApi.create(machine.id, createSlotBody(slot({ slotCode: 'A ' }))), error => {
     assert.equal(error.status, 409)
     assert.equal(error.message, 'Slot code is already in use for this machine', 'English, as the backend sends it')
     return describeSlotError(error, 'create').fieldErrors.slotCode === SLOT_CODE_TAKEN
   })
-  await assert.rejects(slotsApi.create(machine.id, { slotCode: 'A9', capacity: 6, status: 'ACTIVE' }), error => error.status === 400)
-  await slotsApi.create(machine.id, createSlotBody(slot({ slotCode: 'a2', capacity: '4' })))
+  await assert.rejects(slotsApi.create(machine.id, { slotCode: 'B', capacity: 6, status: 'ACTIVE' }), error => error.status === 400)
+  await slotsApi.create(machine.id, createSlotBody(slot({ slotCode: 'b', capacity: '4' })))
   assert.equal((await slotsApi.list(machine.id, { status: 'ACTIVE', size: 1 })).totalElements, 2)
   const updated = await slotsApi.update(machine.id, a1.id, updateSlotBody(slot({ capacity: '8' })))
   assert.equal(updated.capacity, 8)
@@ -191,7 +192,7 @@ test('mock: product → machine → 2 slots → key (shown once) → ACTIVE, wit
 
   token = (await authApi.login({ email: MOCK_ACCOUNTS.staff, password: MOCK_PASSWORDS.staff })).accessToken
   assert.equal((await slotsApi.list(machine.id, {})).totalElements, 2, 'STAFF reads slots')
-  await assert.rejects(slotsApi.create(machine.id, { slotCode: 'B1', capacity: 2 }), error => error.status === 403)
+  await assert.rejects(slotsApi.create(machine.id, { slotCode: 'B', capacity: 2 }), error => error.status === 403)
   await assert.rejects(kioskCredentialsApi.list(machine.id), error => error.status === 403)
   await assert.rejects(machinesApi.setStatus(machine.id, 'INACTIVE'), error => error.status === 403)
 })

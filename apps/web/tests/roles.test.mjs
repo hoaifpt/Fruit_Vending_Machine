@@ -24,7 +24,7 @@ const ROLES = [
 
 // ---- pure rules
 
-test('codes of #48 match the web permission table (no rename needed) and every code has a group and a Vietnamese label', () => {
+test('codes of the backend migrations match the web permission table (no rename needed) and every code has a group and a Vietnamese label', () => {
   assert.deepEqual(SEED_PERMISSIONS.map(p => p.code).sort(), [...PERMISSIONS].sort())
   assert.deepEqual([...SEED_STAFF_PERMISSIONS].sort(), [...ROLE_PERMISSIONS.STAFF].sort())
   const grouped = PERMISSION_GROUPS.flatMap(group => group.codes)
@@ -33,11 +33,11 @@ test('codes of #48 match the web permission table (no rename needed) and every c
 })
 
 test('groupPermissions follows the #48 groups, keeps their order and places later codes by prefix', () => {
-  const groups = groupPermissions([...SEED_PERMISSIONS, { code: 'PRODUCT_EXPORT', description: 'Export products' }, { code: 'REPORT_READ', description: 'Read reports' }, { code: 'USER_READ', description: 'dup' }, { code: '' }])
-  assert.deepEqual(groups.map(group => group.label), ['Tài khoản & phân quyền', 'Sản phẩm', 'Máy, ngăn & khóa kiosk', 'Lô hàng', 'Tồn kho', 'Đơn hàng', 'Thanh toán', 'Nhóm REPORT'])
-  assert.deepEqual(groups[0].permissions.map(p => p.code), ['USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE'], 'duplicates and blanks dropped')
-  assert.deepEqual(groups[1].permissions.map(p => p.code), ['PRODUCT_READ', 'PRODUCT_WRITE', 'PRODUCT_EXPORT'])
-  assert.equal(groups[1].permissions[2].label, 'Export products', 'unknown code: backend description')
+  const groups = groupPermissions([...SEED_PERMISSIONS, { code: 'PRODUCT_EXPORT', description: 'Export products' }, { code: 'ZONE_READ', description: 'Read zones' }, { code: 'USER_READ', description: 'dup' }, { code: '' }])
+  assert.deepEqual(groups.map(group => group.label), ['Tài khoản & phân quyền', 'Sản phẩm & giá', 'Máy, ngăn & khóa kiosk', 'Lô hàng', 'Tồn kho', 'Cảnh báo & tổng quan', 'Phiếu công việc, nạp hàng & bảo trì', 'Đơn hàng & báo cáo khách', 'Thanh toán & hoàn tiền', 'Báo cáo bán hàng', 'Nhóm ZONE'])
+  assert.deepEqual(groups[0].permissions.map(p => p.code), ['USER_READ', 'USER_WRITE', 'PERMISSION_MANAGE', 'AUDIT_LOG_READ'], 'duplicates and blanks dropped')
+  assert.deepEqual(groups[1].permissions.map(p => p.code), ['PRODUCT_READ', 'PRODUCT_WRITE', 'PRICING_READ', 'PRICING_MANAGE', 'PRODUCT_EXPORT'])
+  assert.equal(groups[1].permissions[4].label, 'Export products', 'unknown code: backend description')
   assert.deepEqual(groups[3].permissions.map(p => p.code), ['BATCH_READ', 'BATCH_CREATE'])
   assert.deepEqual(groupPermissions([]), [])
 })
@@ -182,16 +182,16 @@ async function signIn(state, account) {
 }
 const failsWith = (status, check = () => true) => error => error instanceof ApiError && error.status === status && check(error)
 
-test('mock: GET /permissions and /roles follow #48 (15 codes sorted, ADMIN then STAFF with sorted codes)', async () => {
+test('mock: GET /permissions and /roles follow the migrations (41 codes sorted, ADMIN then STAFF with sorted codes)', async () => {
   const state = setup()
   await signIn(state, 'admin')
   const catalog = await rolesApi.permissions()
-  assert.equal(catalog.length, 15)
+  assert.equal(catalog.length, 41)
   assert.deepEqual(catalog.map(p => p.code), [...catalog.map(p => p.code)].sort())
   for (const item of catalog) assert.deepEqual(Object.keys(item).sort(), ['code', 'description'])
   const roles = await rolesApi.list()
   assert.deepEqual(roles.map(role => role.name), ['ADMIN', 'STAFF'])
-  assert.deepEqual(roles[1].permissions, ['BATCH_CREATE', 'BATCH_READ', 'INVENTORY_READ', 'INVENTORY_WRITE', 'MACHINE_READ', 'ORDER_READ', 'PRODUCT_READ'])
+  assert.deepEqual(roles[1].permissions, [...ROLE_PERMISSIONS.STAFF].sort())
   assert.deepEqual(Object.keys(roles[1]).sort(), ['description', 'id', 'name', 'permissions'])
   assert.equal((await rolesApi.get(STAFF)).id, STAFF)
   await assert.rejects(rolesApi.get('00000000-0000-0000-0000-00000000dead'), failsWith(404))

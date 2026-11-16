@@ -9,7 +9,7 @@ import type {
 import type { components as AuthMe } from '../drafts/auth-me'
 import { restockReconciliation } from './seed.ts'
 import { addDays, dueInstant, isDateString, nextDueDate, scheduleBase, vietnamDate, vietnamDateOf } from '../../admin/maintenance-schedules.ts'
-import { DRAFT_ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
+import { ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
 import { incidentReportRoutes } from './incident-reports.ts'
 import { refundRoutes } from './refunds.ts'
@@ -39,9 +39,9 @@ export interface KioskSimulation {
 }
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store (roles screen only for now).
- * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_WRITE of
- * drafts/alerts.yaml, TICKET_READ/TICKET_WRITE of drafts/work-tickets.yaml, MAINTENANCE_SCHEDULE_READ/_WRITE of
- * drafts/maintenance-schedules.yaml, MACHINE_MAINTENANCE of drafts/machine-maintenance.yaml); checked against the web's
+ * `{ draftPermission }`: a code proposed by a draft contract, not in the backend's table yet (ALERT_READ/ALERT_MANAGE of
+ * drafts/alerts.yaml, WORK_ORDER_READ_ASSIGNED/WORK_ORDER_MANAGE of drafts/work-tickets.yaml, MAINTENANCE_PLAN_READ/_WRITE of
+ * drafts/maintenance-schedules.yaml, MAINTENANCE_COMMAND_EXECUTE of drafts/machine-maintenance.yaml); checked against the web's
  * proposed seed DRAFT_ROLE_PERMISSIONS.
  */
 export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
@@ -90,7 +90,7 @@ const flag = (query: URLSearchParams, name: string, value: boolean) => !query.ge
 
 /** Draft codes an account holds through its roles (proposed seed of the draft contracts). */
 export function draftPermissionsOfUser(user: Pick<MockUser, 'roles'>): string[] {
-  return [...new Set(user.roles.map(role => role.replace(/^ROLE_/, '')).flatMap(role => DRAFT_ROLE_PERMISSIONS[role as Role] ?? []))].sort()
+  return [...new Set(user.roles.map(role => role.replace(/^ROLE_/, '')).flatMap(role => ROLE_PERMISSIONS[role as Role] ?? []))].sort()
 }
 
 /** Effective permissions of an account: the union of its roles' sets, read from the store on every request (like #48). */
@@ -325,9 +325,9 @@ const TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCEL
 /** Types POST /work-tickets accepts; INCIDENT tickets are opened by the server from customer reports (FE 8.3). */
 const TICKET_TYPES = ['RESTOCK', 'MAINTENANCE'] as const
 const LISTED_TICKET_TYPES = ['RESTOCK', 'MAINTENANCE', 'INCIDENT'] as const
-/** Holds TICKET_WRITE: sees every ticket, opens, assigns and cancels. Everyone else only ever gets their own. */
-const managesTickets = (user: MockUser) => draftPermissionsOfUser(user).includes('TICKET_WRITE')
-/** FE 8.3: a ticket as the caller sees it; the customer's phone number of an INCIDENT ticket only reaches TICKET_WRITE. */
+/** Holds WORK_ORDER_MANAGE: sees every ticket, opens, assigns and cancels. Everyone else only ever gets their own. */
+const managesTickets = (user: MockUser) => draftPermissionsOfUser(user).includes('WORK_ORDER_MANAGE')
+/** FE 8.3: a ticket as the caller sees it; the customer's phone number of an INCIDENT ticket only reaches WORK_ORDER_MANAGE. */
 function ticketView(ctx: HandlerContext, ticket: MockTicket): MockTicket {
   const view = { ...ticket }
   if (view.incidentReport && !managesTickets(ctx.user!)) view.incidentReport = { ...view.incidentReport, contactPhone: null }
@@ -613,7 +613,7 @@ export const routes: Route[] = [
     checkThresholdOrder(values)
     if (ctx.store.machines.some(machine => machine.code === code)) throw conflict('Machine code is already in use')
     const at = iso(ctx.now)
-    const machine = { id: newId(), code, ...values, status: 'INACTIVE' as const, lastSeenAt: null, createdAt: at, updatedAt: at }
+    const machine = { id: newId(), code, ...values, status: 'INACTIVE' as const, lastSeenAt: null, connectivity: 'NEVER_SEEN' as const, createdAt: at, updatedAt: at }
     ctx.store.machines.push(machine)
     return created(machine)
   }),
@@ -640,11 +640,11 @@ export const routes: Route[] = [
   route('POST', '/machines/:machineId/slots', 'admin', ctx => {
     const machine = findMachine(ctx)
     const form = new Form(ctx.body, ['slotCode', 'capacity'])
-    const slotCode = form.text('slotCode', 32).toUpperCase(), capacity = form.integer('capacity', 1, 2_147_483_647)
+    const slotCode = form.oneOf('slotCode', ['A', 'B'] as const), capacity = form.integer('capacity', 1, 2_147_483_647)
     form.done()
     if (ctx.store.slots.some(slot => slot.machineId === machine.id && slot.slotCode === slotCode)) throw conflict('Slot code is already in use for this machine') // MachineSlotService, English as the backend sends it
     const at = iso(ctx.now)
-    const slot = { id: newId(), machineId: machine.id, slotCode, capacity, status: 'ACTIVE' as const, createdAt: at, updatedAt: at }
+    const slot = { id: newId(), machineId: machine.id, slotCode, capacity, status: 'ACTIVE' as const, refillGateOpen: false, createdAt: at, updatedAt: at }
     ctx.store.slots.push(slot)
     return created(slot)
   }),
@@ -722,7 +722,7 @@ export const routes: Route[] = [
     const rows = ctx.store.maintenanceCommands.filter(command => command.machineId === machine.id)
     return ok(paginate(rows.map(command => ({ ...command })), ctx.query, { sorts: { createdAt: row => row.createdAt }, defaultSort: 'createdAt,desc', fixedSort: true }))
   }),
-  route('POST', '/machines/:machineId/maintenance-commands', { draftPermission: 'MACHINE_MAINTENANCE' }, ctx => created(createMaintenanceCommand(ctx))),
+  route('POST', '/machines/:machineId/maintenance-commands', { draftPermission: 'MAINTENANCE_COMMAND_EXECUTE' }, ctx => created(createMaintenanceCommand(ctx))),
 
   // ---- product batches
   route('GET', '/product-batches', 'any', ctx => {
@@ -834,14 +834,14 @@ export const routes: Route[] = [
     return ok(paginate(rows, query, { sorts: { triggeredAt: row => row.triggeredAt }, defaultSort: 'triggeredAt,desc' }))
   }),
   route('GET', '/alerts/:id', { draftPermission: 'ALERT_READ' }, ctx => ok({ ...findAlert(ctx) })),
-  route('POST', '/alerts/:id/acknowledge', { draftPermission: 'ALERT_WRITE' }, ctx => {
+  route('POST', '/alerts/:id/acknowledge', { draftPermission: 'ALERT_MANAGE' }, ctx => {
     const alert = findAlert(ctx)
     if (alert.status !== 'OPEN') throw conflict('Alert is not OPEN')
     const at = iso(ctx.now)
     Object.assign(alert, { status: 'ACKNOWLEDGED', acknowledgedAt: at, acknowledgedById: ctx.user!.id, acknowledgedByName: ctx.user!.fullName, updatedAt: at })
     return ok({ ...alert })
   }),
-  route('POST', '/alerts/:id/resolve', { draftPermission: 'ALERT_WRITE' }, ctx => {
+  route('POST', '/alerts/:id/resolve', { draftPermission: 'ALERT_MANAGE' }, ctx => {
     let note: string | null = null
     if (ctx.body !== undefined) {
       const form = new Form(ctx.body, ['note'])
@@ -857,21 +857,21 @@ export const routes: Route[] = [
   }),
 
   // ---- work tickets: draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
-  route('GET', '/work-tickets', { draftPermission: 'TICKET_READ' }, ctx => {
+  route('GET', '/work-tickets', { draftPermission: 'WORK_ORDER_READ_ASSIGNED' }, ctx => {
     const { query } = ctx
     const errors: Record<string, string> = {}
     if (query.get('status') && !(TICKET_STATUSES as readonly string[]).includes(query.get('status')!)) errors.status = `Must be one of: ${TICKET_STATUSES.join(', ')}`
     if (query.get('type') && !(LISTED_TICKET_TYPES as readonly string[]).includes(query.get('type')!)) errors.type = `Must be one of: ${LISTED_TICKET_TYPES.join(', ')}`
     for (const name of ['machineId', 'assigneeId']) if (query.get(name) && !UUID_PATTERN.test(query.get(name)!)) errors[name] = 'Must be a valid UUID'
     if (Object.keys(errors).length) throw new MockHttpError(400, 'Invalid request parameter', errors)
-    // Server-side scope: without TICKET_WRITE the assignee filter is always the caller.
+    // Server-side scope: without WORK_ORDER_MANAGE the assignee filter is always the caller.
     const assignee = managesTickets(ctx.user!) ? query.get('assigneeId') : ctx.user!.id
     const rows = ctx.store.tickets.filter(ticket => eq(query, 'status', ticket.status) && eq(query, 'type', ticket.type) && eq(query, 'machineId', ticket.machineId)
       && (!assignee || ticket.assigneeId === assignee)).map(ticket => ticketView(ctx, ticket))
     return ok(paginate(rows, query, { sorts: { createdAt: row => row.createdAt, dueAt: row => row.dueAt }, defaultSort: 'createdAt,desc' }))
   }),
-  route('GET', '/work-tickets/:id', { draftPermission: 'TICKET_READ' }, ctx => ok(ticketView(ctx, findTicket(ctx)))),
-  route('POST', '/work-tickets', { draftPermission: 'TICKET_WRITE' }, ctx => {
+  route('GET', '/work-tickets/:id', { draftPermission: 'WORK_ORDER_READ_ASSIGNED' }, ctx => ok(ticketView(ctx, findTicket(ctx)))),
+  route('POST', '/work-tickets', { draftPermission: 'WORK_ORDER_MANAGE' }, ctx => {
     const form = new Form(ctx.body, ['type', 'machineId', 'title', 'description', 'dueAt', 'alertId', 'assigneeId'])
     const data = ctx.body as Record<string, unknown>
     const type = form.oneOf('type', TICKET_TYPES)
@@ -911,7 +911,7 @@ export const routes: Route[] = [
     ctx.store.tickets.push(ticket)
     return created(ticketView(ctx, ticket))
   }),
-  route('POST', '/work-tickets/:id/assign', { draftPermission: 'TICKET_WRITE' }, ctx => {
+  route('POST', '/work-tickets/:id/assign', { draftPermission: 'WORK_ORDER_MANAGE' }, ctx => {
     const form = new Form(ctx.body, ['assigneeId'])
     const assignee = ticketAssignee(ctx, form, (ctx.body as Record<string, unknown>).assigneeId)
     form.done()
@@ -920,7 +920,7 @@ export const routes: Route[] = [
     assignTo(ticket, assignee!, ctx.user!, iso(ctx.now))
     return ok(ticketView(ctx, ticket))
   }),
-  route('POST', '/work-tickets/:id/start', { draftPermission: 'TICKET_READ' }, ctx => {
+  route('POST', '/work-tickets/:id/start', { draftPermission: 'WORK_ORDER_READ_ASSIGNED' }, ctx => {
     const ticket = findTicket(ctx)
     onlyAssignee(ctx, ticket)
     if (ticket.status !== 'ASSIGNED') throw conflict('Ticket is not ASSIGNED')
@@ -928,7 +928,7 @@ export const routes: Route[] = [
     Object.assign(ticket, { status: 'IN_PROGRESS', startedAt: at, startedById: ctx.user!.id, startedByName: ctx.user!.fullName, updatedAt: at })
     return ok(ticketView(ctx, ticket))
   }),
-  route('POST', '/work-tickets/:id/complete', { draftPermission: 'TICKET_READ' }, ctx => {
+  route('POST', '/work-tickets/:id/complete', { draftPermission: 'WORK_ORDER_READ_ASSIGNED' }, ctx => {
     let note: string | null = null
     if (ctx.body !== undefined) {
       const form = new Form(ctx.body, ['note'])
@@ -949,7 +949,7 @@ export const routes: Route[] = [
     return ok(ticketView(ctx, ticket))
   }),
   // FE 7.2: loading and removing through the lines of a RESTOCK ticket, with the rules of /inventory/load and /remove.
-  route('POST', '/work-tickets/:id/restock-lines/:lineId/load', { draftPermission: 'TICKET_READ' }, ctx => {
+  route('POST', '/work-tickets/:id/restock-lines/:lineId/load', { draftPermission: 'WORK_ORDER_READ_ASSIGNED' }, ctx => {
     const form = new Form(ctx.body, ['batchId', 'quantity'])
     const batchId = form.text('batchId'), quantity = form.integer('quantity', 1, 1000)
     form.done()
@@ -964,7 +964,7 @@ export const routes: Route[] = [
     touchRestock(ticket, ctx.now)
     return ok(ticketView(ctx, ticket))
   }),
-  route('POST', '/work-tickets/:id/restock-lines/:lineId/remove', { draftPermission: 'TICKET_READ' }, ctx => {
+  route('POST', '/work-tickets/:id/restock-lines/:lineId/remove', { draftPermission: 'WORK_ORDER_READ_ASSIGNED' }, ctx => {
     const form = new Form(ctx.body, ['inventoryItemId', 'reason'])
     const itemId = form.text('inventoryItemId')
     form.text('reason', 500)
@@ -980,7 +980,7 @@ export const routes: Route[] = [
     touchRestock(ticket, ctx.now)
     return ok(ticketView(ctx, ticket))
   }),
-  route('POST', '/work-tickets/:id/cancel', { draftPermission: 'TICKET_WRITE' }, ctx => {
+  route('POST', '/work-tickets/:id/cancel', { draftPermission: 'WORK_ORDER_MANAGE' }, ctx => {
     const form = new Form(ctx.body, ['reason'])
     const reason = form.text('reason', 500)
     form.done()
@@ -992,7 +992,7 @@ export const routes: Route[] = [
   }),
 
   // ---- maintenance schedules: draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml). Never deleted.
-  route('GET', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_SCHEDULE_READ' }, ctx => {
+  route('GET', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_PLAN_READ' }, ctx => {
     const { query } = ctx
     const errors: Record<string, string> = {}
     if (query.get('machineId') && !UUID_PATTERN.test(query.get('machineId')!)) errors.machineId = 'Must be a valid UUID'
@@ -1002,12 +1002,12 @@ export const routes: Route[] = [
     const rows = ctx.store.schedules.filter(schedule => eq(query, 'machineId', schedule.machineId) && flag(query, 'active', schedule.active)).map(schedule => scheduleView(schedule, ctx.now))
     return ok(paginate(rows, query, { sorts: { nextDueAt: row => row.nextDueAt, createdAt: row => row.createdAt }, defaultSort: 'nextDueAt,asc' }))
   }),
-  route('GET', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_SCHEDULE_READ' }, ctx => {
+  route('GET', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_PLAN_READ' }, ctx => {
     const schedule = findSchedule(ctx)
     syncSchedules(ctx.store, ctx.now)
     return ok(scheduleView(schedule, ctx.now))
   }),
-  route('POST', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+  route('POST', '/maintenance-schedules', { draftPermission: 'MAINTENANCE_PLAN_MANAGE' }, ctx => {
     const form = new Form(ctx.body, SCHEDULE_FIELDS)
     const data = ctx.body as Record<string, unknown>
     const title = form.text('title', 200)
@@ -1032,7 +1032,7 @@ export const routes: Route[] = [
     syncSchedules(ctx.store, ctx.now)
     return created(scheduleView(schedule, ctx.now))
   }),
-  route('PATCH', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+  route('PATCH', '/maintenance-schedules/:id', { draftPermission: 'MAINTENANCE_PLAN_MANAGE' }, ctx => {
     const form = new Form(ctx.body, SCHEDULE_FIELDS.filter(field => field !== 'machineId'))
     const data = ctx.body as Record<string, unknown>
     if (!Object.keys(data).length) throw new MockHttpError(400, 'At least one field is required', {})
@@ -1056,14 +1056,14 @@ export const routes: Route[] = [
     syncSchedules(ctx.store, ctx.now)
     return ok(scheduleView(schedule, ctx.now))
   }),
-  route('POST', '/maintenance-schedules/:id/deactivate', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+  route('POST', '/maintenance-schedules/:id/deactivate', { draftPermission: 'MAINTENANCE_PLAN_MANAGE' }, ctx => {
     const schedule = findSchedule(ctx)
     if (!schedule.active) throw conflict('Schedule is already inactive')
     const at = iso(ctx.now)
     Object.assign(schedule, { active: false, nextDueAt: null, deactivatedAt: at, deactivatedById: ctx.user!.id, deactivatedByName: ctx.user!.fullName, updatedAt: at })
     return ok(scheduleView(schedule, ctx.now))
   }),
-  route('POST', '/maintenance-schedules/:id/activate', { draftPermission: 'MAINTENANCE_SCHEDULE_WRITE' }, ctx => {
+  route('POST', '/maintenance-schedules/:id/activate', { draftPermission: 'MAINTENANCE_PLAN_MANAGE' }, ctx => {
     const schedule = findSchedule(ctx)
     if (schedule.active) throw conflict('Schedule is already active')
     if (duplicateTitle(ctx.store, schedule.machineId, schedule.title, schedule.id)) throw conflict('An active schedule with this title already exists for this machine')
@@ -1075,7 +1075,7 @@ export const routes: Route[] = [
 
   // ---- payments (ADMIN)
   // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml, FE 9.1/9.2).
-  route('GET', '/reports/revenue', { draftPermission: 'REPORT_READ' }, ctx => ok(revenueReport(ctx.store, ctx.query, ctx.now))),
+  route('GET', '/reports/revenue', { draftPermission: 'REPORT_SALES_READ' }, ctx => ok(revenueReport(ctx.store, ctx.query, ctx.now))),
   route('GET', '/payments', 'admin', ctx => {
     const { store, query } = ctx
     const orderOf = (payment: MockPayment) => store.orders.find(order => order.id === payment.orderId)
@@ -1122,7 +1122,7 @@ export const routes: Route[] = [
       // Draft pricing-discount.yaml (FE 7.5): price of the head POST /kiosk/orders would pick now (FEFO between heads).
       const next = heads.filter(({ head }) => head.productId === productId).map(({ head }) => head).sort((a, b) => a.expiresAt.localeCompare(b.expiresAt) || a.loadedAt.localeCompare(b.loadedAt))[0]
       const pricing = boxPrice(product.price, next?.expiresAt, now)
-      return { productId, sku: product.sku, name: product.name, description: product.description ?? undefined, price: pricing.unitPrice, originalUnitPrice: pricing.originalUnitPrice, discountPercent: pricing.discountPercent, discountReason: pricing.discountReason, imageUrl: product.imageUrl ?? undefined, availableQuantity }
+      return { productId, sku: product.sku, name: product.name, description: product.description ?? undefined, price: pricing.unitPrice, originalPrice: pricing.originalUnitPrice, discountPercent: pricing.discountPercent, discountReason: pricing.discountReason, imageUrl: product.imageUrl ?? undefined, availableQuantity }
     })
     return ok({ machineId: machine.id, machineCode: machine.code, acceptingOrders: true, products })
   }),

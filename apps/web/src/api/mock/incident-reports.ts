@@ -126,7 +126,7 @@ export function stillToCheck(store: MockStore, report: MockIncidentReport): bool
   return report.orderFlagged && !!report.orderId && store.payments.some(payment => payment.orderId === report.orderId && payment.status === 'SUCCESS')
 }
 
-/** GET /incident-reports (draft, FE 8.3): REFUND_RECORD, newest first, optional flagged / type / machineId filters. */
+/** GET /incident-reports (draft, FE 8.3): PAYMENT_REFUND, newest first, optional flagged / type / machineId filters. */
 function listReports(ctx: HandlerContext) {
   const { query, store } = ctx
   const errors: Record<string, string> = {}
@@ -154,6 +154,6 @@ function listReports(ctx: HandlerContext) {
 
 export const incidentReportRoutes: Route[] = [
   { method: 'POST', pattern: /^\/public\/incident-reports\/?$/, policy: 'public', handle: createReport },
-  // REFUND_RECORD (ADMIN only), the permission of the screen that reads it (W-12).
-  { method: 'GET', pattern: /^\/incident-reports\/?$/, policy: { draftPermission: 'REFUND_RECORD' }, handle: listReports },
+  // PAYMENT_REFUND (ADMIN only), the permission of the screen that reads it (W-12).
+  { method: 'GET', pattern: /^\/incident-reports\/?$/, policy: { draftPermission: 'CUSTOMER_REPORT_READ' }, handle: listReports },
 ]

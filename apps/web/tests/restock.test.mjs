@@ -50,7 +50,7 @@ test('draft: restock lines, reconciliation, resolvedAlertIds and the two line en
   const route = matchRoute(`/admin/tickets/${T2}/restock`)
   assert.equal(route.page, 'ticket-restock')
   assert.equal(route.id, T2)
-  assert.equal(route.permission, 'TICKET_READ')
+  assert.equal(route.permission, 'WORK_ORDER_READ_ASSIGNED')
   assert.deepEqual(breadcrumbFor(route).map(crumb => crumb.label), ['Vận hành', 'Phiếu công việc', 'Thực hiện nạp hàng'])
   assert.equal(restockPath(T2), `/admin/tickets/${T2}/restock`)
   assert.equal(hasRestockLines({ type: 'RESTOCK', restockLines: [line()] }), true)

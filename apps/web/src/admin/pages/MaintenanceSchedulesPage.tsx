@@ -1,5 +1,5 @@
 // O5 Lịch bảo trì (FE 7.3): maintenance jobs that repeat every N days at a machine, soonest due first, server-side filters
-// on the URL. Admins (MAINTENANCE_SCHEDULE_WRITE) create and change schedules in a sheet that previews "Đến hạn kế
+// on the URL. Admins (MAINTENANCE_PLAN_MANAGE) create and change schedules in a sheet that previews "Đến hạn kế
 // tiếp" with the server's rule while typing; after saving, the server's nextDueAt is shown at once. Schedules are
 // paused and resumed (with a confirmation), never deleted. Staff read them to plan their visits.
 // API: draft contract api-contract/drafts/maintenance-schedules.yaml (waiting for BE 4.5); on a backend without it
@@ -61,7 +61,7 @@ function MaintenanceSchedulesPage() {
   const { params, update } = useQueryParams()
   const filters = readScheduleFilters(params)
   const { can } = useSession()
-  const canWrite = can('MAINTENANCE_SCHEDULE_WRITE'), canMachines = can('MACHINE_READ'), canTickets = can('TICKET_READ')
+  const canWrite = can('MAINTENANCE_PLAN_MANAGE'), canMachines = can('MACHINE_READ'), canTickets = can('WORK_ORDER_READ_ASSIGNED')
   const machines = useMachineOptions()
   const query = scheduleListQuery(filters, PAGE_SIZE)
   const state = useApi(signal => maintenanceSchedulesApi.list(query, signal), JSON.stringify(query), { stopOn: isMissing })

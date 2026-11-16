@@ -94,7 +94,7 @@ function TicketDetailPage({ ticketId }: { ticketId: string }) {
         {hasRestockLines(ticket) && <RestockEntry ticket={ticket} mine={isMine(ticket, viewer)} />}
         <TicketHistory ticket={ticket} />
       </section>
-      {ticket.type === 'INCIDENT' && <IncidentReportPanel report={ticket.incidentReport ?? null} canOrders={can('ORDER_READ')} canRefund={can('REFUND_RECORD')} />}
+      {ticket.type === 'INCIDENT' && <IncidentReportPanel report={ticket.incidentReport ?? null} canOrders={can('ORDER_READ')} canRefund={can('PAYMENT_REFUND')} />}
     </div>
     <TicketActionDialog state={action.value} close={action.close} changed={state.reload} screen="detail" />
   </>

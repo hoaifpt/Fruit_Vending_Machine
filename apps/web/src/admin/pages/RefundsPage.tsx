@@ -1,4 +1,4 @@
-// T3 / W-12 Hoàn tiền (FE 8.1), ADMIN only (draft permission REFUND_RECORD; never STAFF, BR-19/20). The admin gives the
+// T3 / W-12 Hoàn tiền (FE 8.1), ADMIN only (draft permission PAYMENT_REFUND; never STAFF, BR-19/20). The admin gives the
 // money back by bank transfer, then records the transfer reference here; a payment can be recorded once only.
 // "Cần hoàn tiền" (default, `?view=pending`) lists the cases from existing APIs: paid orders the machine did not serve
 // (GET /orders?status=DISPENSE_FAILED) and late or duplicate payments (GET /payments?requiresAttention=true).
