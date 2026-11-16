@@ -21,6 +21,15 @@ import org.hibernate.type.SqlTypes;
 @Setter
 @NoArgsConstructor
 public class Machine extends UpdatedEntity {
+    /**
+     * Issue #74: token of the public report QR; set by the database default on insert (32 characters) and replaced by a direct update
+     * in MachineReportLinkService on rotation (22-character base64url). Never part of machine responses.
+     */
+    @org.hibernate.annotations.Generated(event = org.hibernate.generator.EventType.INSERT)
+    @Column(name = "report_token", length = 32, nullable = false, insertable = false, updatable = false)
+    @Setter(AccessLevel.NONE)
+    private String reportToken;
+
     @Column(name = "code", length = 64, nullable = false, unique = true)
     private String code;
 
@@ -47,8 +56,28 @@ public class Machine extends UpdatedEntity {
     @Column(name = "humidity_max", precision = 5, scale = 2, nullable = false)
     private BigDecimal humidityMax = new BigDecimal("100");
 
-    @Column(name = "last_seen_at", columnDefinition = "timestamptz")
+    // Presence and diagnostics (V2 last_seen_at, V15 the rest) are written only by MachinePresenceService with conditional SQL
+    // updates. They are not insertable/updatable here, so a configuration change never writes back a stale value.
+    @Column(name = "last_seen_at", columnDefinition = "timestamptz", insertable = false, updatable = false)
     private Instant lastSeenAt;
+
+    @Column(name = "last_heartbeat_at", columnDefinition = "timestamptz", insertable = false, updatable = false)
+    private Instant lastHeartbeatAt;
+
+    @Column(name = "last_offline_at", columnDefinition = "timestamptz", insertable = false, updatable = false)
+    private Instant lastOfflineAt;
+
+    @Column(name = "firmware_version", length = 32, insertable = false, updatable = false)
+    private String firmwareVersion;
+
+    @Column(name = "uptime_seconds", insertable = false, updatable = false)
+    private Long uptimeSeconds;
+
+    @Column(name = "wifi_rssi", insertable = false, updatable = false)
+    private Short wifiRssi;
+
+    @Column(name = "free_heap_bytes", insertable = false, updatable = false)
+    private Long freeHeapBytes;
 
     @OneToMany(mappedBy = "machine", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)

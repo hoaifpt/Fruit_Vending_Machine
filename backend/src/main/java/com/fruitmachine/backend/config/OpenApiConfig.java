@@ -8,6 +8,7 @@ import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springdoc.core.customizers.OpenApiCustomizer;
+import org.springdoc.core.customizers.OperationCustomizer;
 import io.swagger.v3.oas.models.headers.Header;
 import io.swagger.v3.oas.models.media.StringSchema;
 import java.util.Map;
@@ -15,6 +16,30 @@ import java.util.List;
 
 @Configuration(proxyBeanMethods = false)
 public class OpenApiConfig {
+    /** Permission codes named by hasAuthority('...') in a @PreAuthorize expression. */
+    private static final java.util.regex.Pattern REQUIRED_PERMISSION = java.util.regex.Pattern.compile("hasAuthority\\('([A-Z][A-Z0-9_]+)'\\)");
+
+    /**
+     * Issue #48: every protected management operation states the permission it requires as x-required-permission, read from the
+     * @PreAuthorize of the handler method (or its class), so the documentation cannot drift from the code.
+     */
+    @Bean
+    public OperationCustomizer requiredPermissionCustomizer() {
+        return (operation, handler) -> {
+            var annotation = org.springframework.core.annotation.AnnotatedElementUtils.findMergedAnnotation(handler.getMethod(),
+                    org.springframework.security.access.prepost.PreAuthorize.class);
+            if (annotation == null) {
+                annotation = org.springframework.core.annotation.AnnotatedElementUtils.findMergedAnnotation(handler.getBeanType(),
+                        org.springframework.security.access.prepost.PreAuthorize.class);
+            }
+            if (annotation != null) {
+                var matcher = REQUIRED_PERMISSION.matcher(annotation.value());
+                if (matcher.find()) operation.addExtension("x-required-permission", matcher.group(1));
+            }
+            return operation;
+        };
+    }
+
     @Bean
     public OpenApiCustomizer orderedTags() {
         return api -> {
@@ -221,7 +246,13 @@ public class OpenApiConfig {
             machine.put("maxTemperature", new java.math.BigDecimal("8.00"));
             machine.put("minHumidity", new java.math.BigDecimal("40.00"));
             machine.put("maxHumidity", new java.math.BigDecimal("80.00"));
+            machine.put("connectivity", "NEVER_SEEN");
             machine.put("lastSeenAt", null);
+            machine.put("lastHeartbeatAt", null);
+            machine.put("firmwareVersion", null);
+            machine.put("uptimeSeconds", null);
+            machine.put("wifiRssi", null);
+            machine.put("freeHeapBytes", null);
             machine.put("createdAt", "2026-10-10T00:00:00Z");
             machine.put("updatedAt", "2026-10-10T00:00:00Z");
             path.readOperations().forEach(operation -> {
@@ -286,18 +317,163 @@ public class OpenApiConfig {
         });
     }
     @Bean
+    public OpenApiCustomizer telemetryDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!List.of("/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest").contains(name)) return;
+            path.readOperations().forEach(operation -> operation.getResponses().forEach((code, response) -> {
+                Object example;
+                if (code.startsWith("2")) {
+                    response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    Object data;
+                    if (name.endsWith("/latest")) {
+                        var latest = new java.util.LinkedHashMap<String, Object>();
+                        latest.put("machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03");
+                        latest.put("recordedAt", "2026-11-10T13:05:00Z");
+                        latest.put("temperature", new java.math.BigDecimal("4.70"));
+                        latest.put("humidity", new java.math.BigDecimal("68.20"));
+                        latest.put("temperatureStatus", "NORMAL");
+                        latest.put("humidityStatus", "NORMAL");
+                        latest.put("connectivity", "ONLINE");
+                        data = latest;
+                    } else {
+                        data = Map.of("content", List.of(
+                                        Map.of("recordedAt", "2026-11-10T13:05:00Z", "temperature", new java.math.BigDecimal("4.70"), "humidity", new java.math.BigDecimal("68.20")),
+                                        Map.of("recordedAt", "2026-11-10T13:04:00Z", "temperature", new java.math.BigDecimal("4.60"), "humidity", new java.math.BigDecimal("68.00"))),
+                                "page", 0, "size", 100, "totalElements", 2, "totalPages", 1);
+                    }
+                    example = Map.of("timestamp", "2026-11-10T13:05:12Z",
+                            "message", name.endsWith("/latest") ? "Latest telemetry retrieved" : "Telemetry retrieved", "data", data);
+                } else {
+                    if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    String error = switch (code) {
+                        case "400" -> "Bad Request";
+                        case "401" -> "Unauthorized";
+                        case "403" -> "Forbidden";
+                        case "404" -> "Not Found";
+                        default -> "Internal Server Error";
+                    };
+                    String message = switch (code) {
+                        case "400" -> name.endsWith("/latest") ? "Invalid parameter" : "The time range must not exceed 31 days";
+                        case "401" -> "Authentication required or access token invalid";
+                        case "403" -> "Access denied";
+                        case "404" -> "Machine not found";
+                        default -> "An unexpected error occurred";
+                    };
+                    example = Map.of("timestamp", "2026-11-10T13:05:12Z", "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                }
+                response.getContent().get("application/json").setExample(example);
+            }));
+        });
+    }
+
+    /** Free-form JSON fields (machine event payload, audit old/new values) are documented as JSON objects, not as a Jackson type. */
+    @Bean
+    public OpenApiCustomizer historyJsonFields() {
+        return api -> {
+            var schemas = api.getComponents() == null ? null : api.getComponents().getSchemas();
+            if (schemas == null) return;
+            schemas.remove("JsonNode");
+            var event = schemas.get("MachineEventResponse");
+            if (event != null && event.getProperties() != null && event.getProperties().get("payload") != null) {
+                var payload = (io.swagger.v3.oas.models.media.Schema<?>) event.getProperties().get("payload");
+                event.getProperties().put("payload", jsonObject(java.util.Set.of("object"), payload.getDescription()));
+            }
+            var audit = schemas.get("AuditLogResponse");
+            if (audit != null && audit.getProperties() != null) {
+                for (String field : List.of("oldValue", "newValue")) {
+                    var value = (io.swagger.v3.oas.models.media.Schema<?>) audit.getProperties().get(field);
+                    if (value == null) continue;
+                    audit.getProperties().put(field, jsonObject(new java.util.LinkedHashSet<>(List.of("object", "null")), value.getDescription()));
+                }
+            }
+        };
+    }
+
+    private static io.swagger.v3.oas.models.media.Schema<Object> jsonObject(java.util.Set<String> types, String description) {
+        var schema = new io.swagger.v3.oas.models.media.Schema<Object>();
+        schema.setTypes(types);
+        schema.setAdditionalProperties(Boolean.TRUE);
+        schema.setDescription(description);
+        return schema;
+    }
+
+    @Bean
+    public OpenApiCustomizer historyDocumentation() {
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!List.of("/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}").contains(name)) return;
+            path.readOperations().forEach(operation -> operation.getResponses().forEach((code, response) -> {
+                Object example;
+                if (code.startsWith("2")) {
+                    response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                    var audit = new java.util.LinkedHashMap<String, Object>();
+                    audit.put("id", "7b0f3c2e-55a1-4f0e-9c1d-2a6b8e4f0c11");
+                    audit.put("action", "MACHINE_MAINTENANCE_AUTO");
+                    audit.put("entityType", "Machine");
+                    audit.put("entityId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03");
+                    audit.put("userId", null);
+                    audit.put("userEmail", null);
+                    audit.put("actor", "system");
+                    audit.put("oldValue", Map.of("status", "ACTIVE"));
+                    audit.put("newValue", Map.of("status", "MAINTENANCE", "reason", "NO_BOWL_DETECTED"));
+                    audit.put("ipAddress", null);
+                    audit.put("createdAt", "2026-11-11T03:20:01Z");
+                    Object data;
+                    String message;
+                    if (name.endsWith("/events")) {
+                        var machineEvent = new java.util.LinkedHashMap<String, Object>();
+                        machineEvent.put("id", "0d1e2f30-4a5b-4c6d-8e9f-a0b1c2d3e4f5");
+                        machineEvent.put("eventType", "DISPENSE_ABORTED");
+                        machineEvent.put("source", "MACHINE");
+                        machineEvent.put("messageId", "a1b2c3d4-0042");
+                        machineEvent.put("payload", Map.of("eventType", "DISPENSE_ABORTED",
+                                "details", Map.of("commandId", "D-7F3A91C2E4B05D18", "reason", "NO_BOWL_DETECTED")));
+                        machineEvent.put("createdAt", "2026-11-11T03:20:01Z");
+                        data = Map.of("content", List.of(machineEvent), "page", 0, "size", 50, "totalElements", 1, "totalPages", 1);
+                        message = "Machine events retrieved";
+                    } else if (name.endsWith("{id}")) {
+                        data = audit;
+                        message = "Audit log entry retrieved";
+                    } else {
+                        data = Map.of("content", List.of(audit), "page", 0, "size", 50, "totalElements", 1, "totalPages", 1);
+                        message = "Audit log retrieved";
+                    }
+                    example = Map.of("timestamp", "2026-11-11T03:21:00Z", "message", message, "data", data);
+                } else {
+                    if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                    String error = switch (code) {
+                        case "400" -> "Bad Request";
+                        case "401" -> "Unauthorized";
+                        case "403" -> "Forbidden";
+                        case "404" -> "Not Found";
+                        default -> "Internal Server Error";
+                    };
+                    String message = switch (code) {
+                        case "400" -> "to must be after from";
+                        case "401" -> "Authentication required or access token invalid";
+                        case "403" -> "Access denied";
+                        case "404" -> name.endsWith("/events") ? "Machine not found" : "Audit log entry not found";
+                        default -> "An unexpected error occurred";
+                    };
+                    example = Map.of("timestamp", "2026-11-11T03:21:00Z", "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                }
+                response.getContent().get("application/json").setExample(example);
+            }));
+        });
+    }
+
+    @Bean
     public OpenApiCustomizer machineSlotDocumentation() {
         return api -> api.getPaths().forEach((name, path) -> {
             if (!List.of("/api/v1/machines/{machineId}/slots", "/api/v1/machines/{machineId}/slots/{slotId}",
                     "/api/v1/machines/{machineId}/slots/{slotId}/status").contains(name)) return;
             var slot = Map.of("id", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a04",
-                    "machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", "slotCode", "A1", "capacity", 6, "status", "ACTIVE",
+                    "machineId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a03", "slotCode", "A", "capacity", 6, "status", "ACTIVE",
                     "createdAt", "2026-10-10T00:00:00Z", "updatedAt", "2026-10-10T00:00:00Z");
             path.readOperations().forEach(operation -> {
                 String id = operation.getOperationId();
                 if (operation.getRequestBody() != null) {
                     Object request = switch (id) {
-                        case "createMachineSlot" -> Map.of("slotCode", "A1", "capacity", 6);
+                        case "createMachineSlot" -> Map.of("slotCode", "A", "capacity", 6);
                         case "updateMachineSlot" -> Map.of("capacity", 8);
                         default -> Map.of("status", "INACTIVE");
                     };
@@ -401,7 +577,7 @@ public class OpenApiConfig {
             String operationId = "c6a33ea7-0c1c-4bbf-a890-3b7286d10a07", timestamp = "2026-10-10T02:00:00Z";
             var item = Map.ofEntries(Map.entry("id", itemId), Map.entry("batchId", batchId), Map.entry("batchCode", "MANGO-20261010-01"),
                     Map.entry("productId", "c6a33ea7-0c1c-4bbf-a890-3b7286d10a02"), Map.entry("productName", "Mango Fruit Box"),
-                    Map.entry("machineId", machineId), Map.entry("slotId", slotId), Map.entry("slotCode", "A1"), Map.entry("status", "AVAILABLE"),
+                    Map.entry("machineId", machineId), Map.entry("slotId", slotId), Map.entry("slotCode", "A"), Map.entry("status", "AVAILABLE"),
                     Map.entry("expiresAt", "2026-10-12T01:00:00Z"), Map.entry("expired", false), Map.entry("loadedAt", timestamp), Map.entry("createdAt", timestamp), Map.entry("updatedAt", timestamp));
             path.readOperations().forEach(operation -> {
                 String id = operation.getOperationId();
@@ -477,7 +653,7 @@ public class OpenApiConfig {
         summary.put("createdAt", timestamp); summary.put("expiresAt", "2026-10-15T04:05:00Z"); summary.put("cancelledAt", null);
         var allocation = new java.util.LinkedHashMap<String, Object>();
         allocation.put("id", "a110c000-0000-4000-8000-000000000001"); allocation.put("inventoryItemId", "1e000000-0000-4000-8000-000000000001");
-        allocation.put("slotCode", "A1"); allocation.put("batchCode", "B20261014-01"); allocation.put("batchExpiresAt", "2026-10-17T00:00:00Z");
+        allocation.put("slotCode", "A"); allocation.put("batchCode", "B20261014-01"); allocation.put("batchExpiresAt", "2026-10-17T00:00:00Z");
         allocation.put("status", "RELEASED"); allocation.put("releasedAt", "2026-10-15T04:01:00Z");
         var detailLine = new java.util.LinkedHashMap<String, Object>(line);
         detailLine.put("id", "01100000-0000-4000-8000-000000000001"); detailLine.put("allocations", List.of(allocation));
@@ -486,12 +662,13 @@ public class OpenApiConfig {
         detail.put("machineId", "9b1e0000-0000-4000-8000-000000000001"); detail.put("machineCode", "FV-HCM-001");
         detail.put("status", "CANCELLED"); detail.put("subtotal", 35000.00); detail.put("totalAmount", 35000.00);
         detail.put("createdAt", timestamp); detail.put("expiresAt", "2026-10-15T04:05:00Z"); detail.put("paidAt", null);
-        detail.put("completedAt", null); detail.put("cancelledAt", "2026-10-15T04:01:00Z"); detail.put("items", List.of(detailLine));
+        detail.put("completedAt", null); detail.put("cancelledAt", "2026-10-15T04:01:00Z"); detail.put("refundedAt", null); detail.put("items", List.of(detailLine));
         var paymentSummary = new java.util.LinkedHashMap<String, Object>();
         paymentSummary.put("id", "5d6e0000-0000-4000-8000-000000000001"); paymentSummary.put("provider", "MOCK"); paymentSummary.put("status", "EXPIRED");
         paymentSummary.put("amount", 35000.00); paymentSummary.put("createdAt", "2026-10-15T04:00:05Z"); paymentSummary.put("paidAt", null);
         paymentSummary.put("expiredAt", "2026-10-15T04:05:00Z");
         detail.put("payments", List.of(paymentSummary));
+        detail.put("refunds", List.of());
         return api -> api.getPaths().forEach((name, path) -> {
             boolean mine = name.startsWith("/api/v1/kiosk") || name.startsWith("/api/v1/orders") || name.contains("/kiosk-credentials");
             if (!mine || name.endsWith("/payments")) return;
@@ -548,6 +725,15 @@ public class OpenApiConfig {
         item.put("createdAt", "2026-10-15T04:00:05Z"); item.put("paidAt", null); item.put("expiredAt", "2026-10-15T04:05:00Z");
         var detail = new java.util.LinkedHashMap<String, Object>(item);
         detail.put("qrCode", "MOCK-QR|MOCK-8F3KQ2AB|70000.00");
+        detail.put("refund", null);
+        var refundBlock = new java.util.LinkedHashMap<String, Object>();
+        refundBlock.put("refundedAt", "2026-10-15T06:00:00Z");
+        refundBlock.put("refundedBy", Map.of("id", "a0000000-0000-4000-8000-000000000001", "fullName", "Admin Nguyen"));
+        refundBlock.put("reason", "DISPENSE_FAILED"); refundBlock.put("transferReference", "FT26317123456789");
+        refundBlock.put("note", "Chuyen khoan lai qua Vietcombank");
+        var refunded = new java.util.LinkedHashMap<String, Object>(detail);
+        refunded.put("status", "REFUNDED"); refunded.put("transactionId", "MOCKTX-0001"); refunded.put("paidAt", "2026-10-15T04:01:00Z");
+        refunded.put("qrCode", null); refunded.put("refund", refundBlock);
         return api -> api.getPaths().forEach((name, path) -> {
             if (!name.startsWith("/api/v1/payments") && !name.endsWith("/payments")) return;
             path.readOperations().forEach(operation -> {
@@ -565,13 +751,15 @@ public class OpenApiConfig {
                         Object data = switch (id) {
                             case "createKioskPayment" -> kioskPayment;
                             case "listPayments" -> Map.of("content", List.of(item), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1);
+                            case "refundPayment" -> refunded;
                             default -> detail;
                         };
                         example = Map.of("timestamp", timestamp, "message", "Success", "data", data);
                     } else {
                         String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; case "404" -> "Not Found"; case "409" -> "Conflict"; case "502" -> "Bad Gateway"; default -> "Internal Server Error"; };
                         String message = switch (code) { case "400" -> "Request validation failed"; case "401" -> "Authentication required or access token invalid";
-                            case "403" -> "Access denied"; case "404" -> "Payment not found"; case "409" -> "Maximum payment attempts reached for this order";
+                            case "403" -> "Access denied"; case "404" -> "Payment not found";
+                            case "409" -> "refundPayment".equals(id) ? "PAYMENT_ALREADY_REFUNDED: this payment was already refunded" : "Maximum payment attempts reached for this order";
                             case "502" -> "Payment provider is currently unavailable"; default -> "An unexpected error occurred"; };
                         example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
                     }
@@ -580,6 +768,59 @@ public class OpenApiConfig {
             });
         });
     }
+    @Bean
+    public OpenApiCustomizer refundExamples() {
+        String timestamp = "2026-10-15T07:00:00Z";
+        var order = new java.util.LinkedHashMap<String, Object>();
+        order.put("id", "e0f1a2b3-0000-4000-8000-000000000001"); order.put("orderCode", "ORD-20261015-7K3QF9XA");
+        order.put("status", "DISPENSE_FAILED"); order.put("machineCode", "FV-HCM-001");
+        var payer = new java.util.LinkedHashMap<String, Object>();
+        payer.put("accountName", "NGUYEN VAN A"); payer.put("accountNumber", "0123456789"); payer.put("bankId", "970436"); payer.put("bankName", "Vietcombank");
+        var candidate = new java.util.LinkedHashMap<String, Object>();
+        candidate.put("paymentId", "5d6e0000-0000-4000-8000-000000000001"); candidate.put("type", "DISPENSE_FAILED"); candidate.put("amount", 17500.00);
+        candidate.put("paidAt", "2026-10-15T04:01:00Z"); candidate.put("order", order); candidate.put("payer", payer);
+        candidate.put("waitingSince", "2026-10-15T04:01:00Z"); candidate.put("relatedWorkOrder", null);
+        candidate.put("customerReport", null);
+        var refundedOrder = new java.util.LinkedHashMap<String, Object>(order);
+        refundedOrder.put("status", "REFUNDED");
+        var refund = new java.util.LinkedHashMap<String, Object>();
+        refund.put("paymentId", "5d6e0000-0000-4000-8000-000000000001"); refund.put("amount", 17500.00); refund.put("paidAt", "2026-10-15T04:01:00Z");
+        refund.put("refundedAt", "2026-10-15T06:00:00Z");
+        refund.put("refundedBy", Map.of("id", "a0000000-0000-4000-8000-000000000001", "fullName", "Admin Nguyen"));
+        refund.put("reason", "DISPENSE_FAILED"); refund.put("transferReference", "FT26317123456789"); refund.put("note", null); refund.put("order", refundedOrder);
+        var byReason = new java.util.ArrayList<Object>();
+        for (String reason : List.of("DISPENSE_FAILED", "LATE_PAYMENT", "DUPLICATE_PAYMENT", "PRODUCT_QUALITY", "OTHER")) {
+            boolean one = reason.equals("DISPENSE_FAILED");
+            byReason.add(Map.of("reason", reason, "count", one ? 1 : 0, "totalAmount", one ? 17500.00 : 0.00));
+        }
+        var summary = new java.util.LinkedHashMap<String, Object>();
+        summary.put("from", "2026-10-15"); summary.put("to", "2026-10-15"); summary.put("machineId", null); summary.put("count", 1);
+        summary.put("totalAmount", 17500.00); summary.put("byReason", byReason);
+        return api -> api.getPaths().forEach((name, path) -> {
+            if (!name.startsWith("/api/v1/refunds")) return;
+            path.readOperations().forEach(operation -> operation.getResponses().forEach((code, response) -> {
+                if (code.startsWith("2")) response.addHeaderObject("Cache-Control", new Header().schema(new StringSchema()._const("no-store")));
+                if (code.equals("401")) response.addHeaderObject("WWW-Authenticate", new Header().schema(new StringSchema()._const("Bearer")));
+                if (response.getContent() == null || response.getContent().get("application/json") == null) return;
+                Object example;
+                if (code.startsWith("2")) {
+                    Object data = switch (operation.getOperationId()) {
+                        case "listRefundCandidates" -> Map.of("content", List.of(candidate), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1);
+                        case "listRefunds" -> Map.of("content", List.of(refund), "page", 0, "size", 20, "totalElements", 1, "totalPages", 1);
+                        default -> summary;
+                    };
+                    example = Map.of("timestamp", timestamp, "message", "Success", "data", data);
+                } else {
+                    String error = switch (code) { case "400" -> "Bad Request"; case "401" -> "Unauthorized"; case "403" -> "Forbidden"; default -> "Internal Server Error"; };
+                    String message = switch (code) { case "400" -> "Request validation failed"; case "401" -> "Authentication required or access token invalid";
+                        case "403" -> "Access denied"; default -> "An unexpected error occurred"; };
+                    example = Map.of("timestamp", timestamp, "status", Integer.parseInt(code), "error", error, "message", message, "path", name);
+                }
+                response.getContent().get("application/json").setExample(example);
+            }));
+        });
+    }
+
     @Bean
     public OpenApiCustomizer paymentWebhookExamples() {
         String timestamp = "2026-10-16T04:00:00Z";

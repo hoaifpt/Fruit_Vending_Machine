@@ -32,12 +32,13 @@ from pathlib import Path
 STATE = Path.home() / ".fruitmachine" / "payment-test-data.json"
 
 # Whole-VND prices (payOS only charges integers); the fractional one exists to exercise the 409 rule.
+# A machine has two columns, slot codes A and B (issue #52): one product per column.
+COLUMNS = ["A", "B"]
 PRODUCTS = [
     ("Test bowl 2000", "2000"),
     ("Test bowl 5000", "5000"),
-    ("Test bowl 10000", "10000"),
-    ("Fractional price (expect 409 on payOS)", "35000.50"),
 ]
+FRACTIONAL = ("Fractional price (expect 409 on payOS)", "35000.50")
 
 
 class ApiError(Exception):
@@ -112,15 +113,16 @@ def seed(args):
     # Machines are registered INACTIVE; the kiosk can only sell from an ACTIVE machine.
     call(base, "PATCH", f"/api/v1/machines/{machine['id']}/status", {"status": "ACTIVE"}, token)
     products = []
-    for index, (name, price) in enumerate(PRODUCTS, start=1):
+    catalog = [PRODUCTS[0], FRACTIONAL] if args.fractional else PRODUCTS
+    for index, (column, (name, price)) in enumerate(zip(COLUMNS, catalog), start=1):
         product = data_of(call(base, "POST", "/api/v1/products", {"sku": f"TEST-{suffix}-{index}", "name": name, "price": price}, token))
-        slot = data_of(call(base, "POST", f"/api/v1/machines/{machine['id']}/slots", {"slotCode": f"A{index}", "capacity": 10}, token))
+        slot = data_of(call(base, "POST", f"/api/v1/machines/{machine['id']}/slots", {"slotCode": column, "capacity": 10}, token))
         batch = data_of(call(base, "POST", "/api/v1/product-batches", {
             "batchCode": f"TEST-{suffix}-{index}", "productId": product["id"],
             "manufacturedAt": (now - timedelta(hours=6)).isoformat().replace("+00:00", "Z"),
             "expiresAt": (now + timedelta(days=3)).isoformat().replace("+00:00", "Z"), "quantity": 10}, token))
         call(base, "POST", "/api/v1/inventory/load", {"batchId": batch["id"], "slotId": slot["id"], "quantity": args.bowls}, token)
-        products.append({"id": product["id"], "name": name, "price": price, "slot": f"A{index}"})
+        products.append({"id": product["id"], "name": name, "price": price, "slot": column})
     credential = data_of(call(base, "POST", f"/api/v1/machines/{machine['id']}/kiosk-credentials", None, token))
     state = {"baseUrl": base, "machineId": machine["id"], "machineCode": machine["code"], "kioskKey": credential["apiKey"],
              "products": products, "lastOrderId": None}
@@ -137,7 +139,7 @@ def pick_product(state, args):
         for product in state["products"]:
             if product["id"] == args.product or product["slot"].lower() == args.product.lower():
                 return product
-        sys.exit(f"Unknown product '{args.product}'. Use a slot (A1..A{len(state['products'])}) or a product id.")
+        sys.exit(f"Unknown product '{args.product}'. Use a slot (A or B) or a product id.")
     return state["products"][0]
 
 
@@ -230,10 +232,11 @@ def main():
     p = sub.add_parser("seed", help="create an ACTIVE machine with stocked products and a kiosk key")
     p.add_argument("--base-url", default=os.environ.get("FVM_BASE_URL", "http://localhost:8080"))
     p.add_argument("--bowls", type=int, default=5, help="bowls loaded per slot (1..10)")
+    p.add_argument("--fractional", action="store_true", help="put the 35000.50 VND product in column B (payOS rejects it with 409)")
     p.set_defaults(handler=seed)
     p = sub.add_parser("order", help="create a one-bowl order and a payment attempt (REAL payOS link when the provider is PAYOS); "
                        "a slot accepts a new order only after the previous one is paid, cancelled or expired")
-    p.add_argument("--product", help="slot code (A1..) or product id; default A1 (2000 VND)")
+    p.add_argument("--product", help="slot code (A or B) or product id; default A (2000 VND)")
     p.set_defaults(handler=order)
     p = sub.add_parser("status", help="show the order as the kiosk sees it")
     p.add_argument("--order", help="order id; default the last one")

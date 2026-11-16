@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-3",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "state": "ONLINE",
+    "firmwareVersion": "0.3.0",
+    "uptimeSeconds": 12
+  }
+}

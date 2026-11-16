@@ -358,7 +358,7 @@ class UserManagementIntegrationTest {
     }
 
     String statusAsActor(User actor, User target, CyclicBarrier barrier) throws Exception {
-        var principal = new AuthenticatedUser(actor.getId(), actor.getEmail(), "", UserStatus.ACTIVE, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+        var principal = new AuthenticatedUser(actor.getId(), actor.getEmail(), "", UserStatus.ACTIVE, com.fruitmachine.backend.support.SeededAuthorities.of("ADMIN"));
         var context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
@@ -413,7 +413,7 @@ class UserManagementIntegrationTest {
 
     @Test
     void invalidExpiredAndWrongKeyTokensAreRejected() throws Exception {
-        var principal = new AuthenticatedUser(admin.getId(), admin.getEmail(), "", UserStatus.ACTIVE, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+        var principal = new AuthenticatedUser(admin.getId(), admin.getEmail(), "", UserStatus.ACTIVE, com.fruitmachine.backend.support.SeededAuthorities.of("ADMIN"));
         String expired = new JwtService(new JwtProperties(KEY, 1), Clock.offset(Clock.systemUTC(), Duration.ofSeconds(-10))).generateToken(principal);
         String wrong = new JwtService(new JwtProperties(newKey(), 3600), Clock.systemUTC()).generateToken(principal);
         for (String token : List.of("bad-token", expired, wrong)) {

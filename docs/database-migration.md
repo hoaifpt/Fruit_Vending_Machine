@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V12 hiện có (20 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V24 hiện có (32 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -92,9 +92,20 @@ erDiagram
         uuid user_id PK, FK
         uuid role_id PK, FK
     }
+    permissions {
+        uuid id PK
+        varchar code UK "CHECK ^[A-Z][A-Z0-9_]{2,63}$"
+        varchar description
+        timestamptz created_at
+    }
+    role_permissions {
+        uuid role_id PK, FK "CASCADE"
+        uuid permission_id PK, FK "RESTRICT"
+    }
     machines {
         uuid id PK
         varchar code UK
+        varchar report_token UK "public report QR token (V24)"
         varchar name
         varchar location "nullable"
         varchar status "ACTIVE, INACTIVE, MAINTENANCE"
@@ -103,15 +114,22 @@ erDiagram
         numeric humidity_min "default 0"
         numeric humidity_max "default 100"
         timestamptz last_seen_at "nullable"
+        timestamptz last_heartbeat_at "nullable (V15)"
+        timestamptz last_offline_at "nullable (V15)"
+        varchar firmware_version "nullable, not blank (V15)"
+        bigint uptime_seconds "nullable, >= 0 (V15)"
+        smallint wifi_rssi "nullable, -127..0 (V15)"
+        bigint free_heap_bytes "nullable, >= 0 (V15)"
         timestamptz created_at
         timestamptz updated_at
     }
     machine_slots {
         uuid id PK "UK (id, machine_id)"
         uuid machine_id FK "UK (machine, slot_code)"
-        varchar slot_code
+        varchar slot_code "A, B (V14)"
         int capacity "> 0"
         varchar status "ACTIVE, INACTIVE, ERROR"
+        boolean refill_gate_open "V19"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -190,6 +208,12 @@ erDiagram
         timestamptz triggered_at
         timestamptz resolved_at "nullable"
         uuid resolved_by FK "nullable"
+        uuid slot_id FK "nullable, (slot_id, machine_id) (V17)"
+        varchar error_code "nullable (V17)"
+        varchar dedupe_key "one unresolved per key (V17)"
+        timestamptz acknowledged_at "nullable (V17)"
+        uuid acknowledged_by FK "nullable (V17)"
+        varchar resolution_note "nullable (V17)"
         timestamptz created_at
         timestamptz updated_at
     }
@@ -198,22 +222,165 @@ erDiagram
         varchar order_code UK
         uuid machine_id FK
         varchar status "enum E1"
-        numeric subtotal
-        numeric total_amount
+        numeric subtotal "sum of original prices"
+        numeric discount_amount "subtotal - total_amount (V18)"
+        numeric total_amount "amount charged"
         timestamptz expires_at "nullable (V11)"
         timestamptz created_at
         timestamptz paid_at "nullable"
         timestamptz completed_at "nullable"
         timestamptz cancelled_at "nullable"
+        timestamptz refunded_at "nullable; set iff REFUNDED (V23)"
     }
     order_items {
         uuid id PK
         uuid order_id FK
         uuid product_id FK
         int quantity "> 0"
-        numeric unit_price "price snapshot"
+        numeric original_unit_price "product price at reservation (V18)"
+        numeric unit_price "price charged"
         numeric total_price "quantity x unit_price"
+        smallint discount_percent "0..90 (V18)"
+        varchar discount_reason "NONE, NEAR_EXPIRY (V18)"
         timestamptz created_at
+    }
+    customer_reports {
+        uuid id PK "V24"
+        varchar code UK "RPT-yyyyMMdd-XXXX"
+        uuid machine_id FK
+        varchar type "PAID_NOT_RECEIVED, PRODUCT_QUALITY, MACHINE_FAULT, OTHER"
+        varchar description "nullable; required except PAID_NOT_RECEIVED"
+        varchar order_code_input "nullable; required for PAID_NOT_RECEIVED"
+        uuid order_id FK "nullable (verified order)"
+        uuid batch_id FK "nullable (PRODUCT_QUALITY)"
+        varchar verdict "7 values"
+        varchar contact_name "nullable, personal data"
+        varchar contact_phone "nullable, personal data"
+        varchar contact_email "nullable, personal data"
+        varchar status "NEW, IN_REVIEW, RESOLVED, REJECTED"
+        uuid work_order_id FK "nullable"
+        varchar resolution "nullable; set iff RESOLVED/REJECTED"
+        varchar resolution_note "nullable"
+        uuid resolved_by FK "nullable"
+        timestamptz resolved_at "nullable"
+        varchar source_ip_hash "HMAC-SHA256, never the raw IP"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    customer_report_photos {
+        uuid id PK "V24"
+        uuid report_id FK "ON DELETE CASCADE"
+        varchar content_type "image/jpeg, image/png"
+        int size_bytes "1..2097152"
+        bytea data "re-encoded, no metadata"
+        timestamptz created_at
+    }
+    maintenance_plans {
+        uuid id PK "V22"
+        uuid machine_id FK
+        varchar title
+        varchar instructions "nullable"
+        int interval_days "1..365"
+        int lead_days "0..30, < interval_days"
+        time due_time "local time, default 17:00"
+        varchar priority "LOW, NORMAL, HIGH, URGENT"
+        uuid default_assignee_id FK "nullable"
+        date next_due_date "business-zone date"
+        boolean active
+        timestamptz last_completed_at "nullable"
+        uuid created_by FK
+        bigint version
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    restock_lines {
+        uuid id PK "V21"
+        uuid work_order_id FK
+        uuid machine_id "with slot_id: FK to machine_slots"
+        uuid slot_id FK
+        uuid product_id FK
+        int planned_quantity "0..1000"
+        int loaded_quantity "0..1000, = LOAD rows of the line"
+        varchar variance_reason "nullable"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    work_orders {
+        uuid id PK "V20"
+        varchar code UK "WO-yyyyMMdd-XXXX"
+        varchar type "RESTOCK, MAINTENANCE, INCIDENT"
+        varchar source "MANUAL, ALERT, SCHEDULE, CUSTOMER_REPORT"
+        uuid machine_id FK
+        varchar title
+        varchar description "nullable"
+        varchar priority "LOW, NORMAL, HIGH, URGENT"
+        varchar status "OPEN, ASSIGNED, IN_PROGRESS, DONE, CANCELLED"
+        uuid assignee_id FK "nullable"
+        timestamptz due_at "nullable"
+        uuid created_by FK "nullable = system"
+        timestamptz started_at "nullable"
+        timestamptz completed_at "nullable"
+        uuid completed_by FK "nullable"
+        varchar result_note "nullable; required for DONE"
+        timestamptz cancelled_at "nullable"
+        uuid cancelled_by FK "nullable"
+        varchar cancel_reason "nullable; required for CANCELLED"
+        timestamptz overdue_notified_at "nullable"
+        uuid maintenance_plan_id FK "nullable (V22)"
+        date scheduled_for "nullable (V22)"
+        bigint version
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    work_order_alerts {
+        uuid work_order_id PK,FK
+        uuid alert_id PK,FK
+        timestamptz created_at
+    }
+    work_order_events {
+        uuid id PK "append-only (trigger)"
+        uuid work_order_id FK
+        varchar type "CREATED..OVERDUE"
+        varchar status_before "nullable"
+        varchar status_after "nullable"
+        uuid actor_id FK "nullable = system"
+        varchar note "nullable"
+        jsonb details "nullable"
+        timestamptz created_at
+    }
+    maintenance_commands {
+        uuid id PK "V19"
+        varchar command_code UK "MC-<32 hex>"
+        uuid machine_id FK
+        uuid slot_id FK "nullable, (slot_id, machine_id); null for RESET"
+        varchar operation "REMOVE_ITEM, EMPTY_COLUMN, OPEN_REFILL, CLOSE_REFILL, RESET"
+        varchar status "PENDING..RECONCILED; one unfinished per machine"
+        varchar reason "nullable; required to remove bowls"
+        varchar note "nullable"
+        uuid target_inventory_item_id FK "REMOVE_ITEM only"
+        uuid requested_by FK
+        uuid work_order_id FK "nullable (V21)"
+        varchar idempotency_key "UK with requested_by"
+        int attempt_count
+        timestamptz sent_at "nullable"
+        timestamptz accepted_at "nullable"
+        timestamptz finished_at "nullable"
+        varchar failure_reason "nullable"
+        int removed_count "nullable"
+        uuid reconciled_by FK "nullable"
+        timestamptz reconciled_at "nullable"
+        varchar reconciliation_outcome "DONE, NOT_DONE"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    pricing_settings {
+        uuid id PK "singleton (V18)"
+        boolean near_expiry_enabled
+        smallint near_expiry_percent "1..90"
+        bigint version
+        timestamptz updated_at
+        uuid updated_by FK "nullable"
+        boolean singleton "UNIQUE, CHECK true"
     }
     order_item_allocations {
         uuid id PK
@@ -236,6 +403,11 @@ erDiagram
         timestamptz created_at
         timestamptz paid_at "nullable"
         timestamptz expired_at "nullable"
+        timestamptz refunded_at "nullable (V23)"
+        uuid refunded_by FK "nullable (V23)"
+        varchar refund_reason "nullable (V23)"
+        varchar refund_transfer_ref "nullable; partial UK (V23)"
+        varchar refund_note "nullable (V23)"
     }
     payment_webhook_logs {
         uuid id PK
@@ -259,14 +431,17 @@ erDiagram
         timestamptz sent_at "nullable"
         timestamptz acknowledged_at "nullable"
         timestamptz completed_at "nullable"
+        varchar failure_reason "nullable, set iff FAILED/TIMEOUT (V14)"
         timestamptz created_at
         timestamptz updated_at
     }
     machine_events {
         uuid id PK
-        uuid machine_id FK
+        uuid machine_id FK "UK (machine, message_id) partial"
         varchar event_type
         jsonb payload
+        varchar source "MACHINE, BACKEND (V16)"
+        varchar message_id "required for MACHINE (V16)"
         timestamptz created_at
     }
     audit_logs {
@@ -280,14 +455,58 @@ erDiagram
         varchar ip_address "nullable"
         timestamptz created_at
     }
+    notifications {
+        uuid id PK
+        uuid user_id FK
+        uuid alert_id FK "nullable"
+        uuid work_order_id FK "nullable (V20)"
+        varchar title
+        varchar message "nullable"
+        varchar severity "INFO, WARNING, CRITICAL"
+        timestamptz read_at "nullable"
+        timestamptz created_at
+    }
 
     users ||--o{ user_roles : "has"
     roles ||--o{ user_roles : "granted in"
+    roles ||--o{ role_permissions : "grants"
+    permissions ||--o{ role_permissions : "granted by"
     users |o--o{ kiosk_credentials : "created_by"
     users |o--o{ kiosk_credentials : "revoked_by"
     users |o--o{ product_batches : "created_by"
     users |o--o{ inventory_transactions : "performed_by"
     users |o--o{ alerts : "resolved_by"
+    users |o--o{ alerts : "acknowledged_by"
+    users |o--o{ pricing_settings : "updated_by"
+    users ||--o{ maintenance_commands : "requested_by"
+    machines ||--o{ work_orders : "work on"
+    work_orders ||--o{ restock_lines : "plans"
+    machines ||--o{ maintenance_plans : "maintained by"
+    users |o--o{ maintenance_plans : "default_assignee, created_by"
+    maintenance_plans |o--o{ work_orders : "maintenance_plan_id (V22)"
+    machines ||--o{ customer_reports : "reported at (V24)"
+    orders |o--o{ customer_reports : "order_id (V24)"
+    product_batches |o--o{ customer_reports : "batch_id (V24)"
+    work_orders |o--o{ customer_reports : "work_order_id (V24)"
+    users |o--o{ customer_reports : "resolved_by (V24)"
+    customer_reports ||--o{ customer_report_photos : "photos (V24)"
+    users |o--o{ payments : "refunded_by (V23)"
+    machine_slots ||--o{ restock_lines : "slot"
+    products ||--o{ restock_lines : "product"
+    work_orders |o--o{ maintenance_commands : "work_order_id (V21)"
+    users |o--o{ work_orders : "assignee, created_by, completed_by, cancelled_by"
+    work_orders ||--o{ work_order_alerts : "handles"
+    alerts ||--o{ work_order_alerts : "handled by"
+    work_orders ||--o{ work_order_events : "history"
+    users |o--o{ work_order_events : "actor"
+    work_orders |o--o{ notifications : "work_order_id"
+    users |o--o{ maintenance_commands : "reconciled_by"
+    machines ||--o{ maintenance_commands : "maintains"
+    machine_slots |o--o{ maintenance_commands : "slot_id"
+    inventory_items |o--o{ maintenance_commands : "target"
+    users ||--o{ notifications : "receives"
+    alerts |o--o{ notifications : "announced by"
+    machine_slots |o--o{ alerts : "slot_id"
     users |o--o{ audit_logs : "user_id"
 
     machines ||--o{ machine_slots : "has"
@@ -322,7 +541,7 @@ Các cột trạng thái dài được ghi mã E1–E6 trong sơ đồ; giá tr�
 | E2 | dispense_commands.status | PENDING, SENT, ACKNOWLEDGED, SUCCESS, FAILED, TIMEOUT |
 | E3 | inventory_items.status | AVAILABLE, RESERVED, SOLD, EXPIRED, REMOVED, DISPENSE_FAILED |
 | E4 | inventory_transactions.type | LOAD, RESERVE, SALE, EXPIRE, REMOVE, RETURN, ADJUSTMENT |
-| E5 | alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK |
+| E5 | alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK, HARDWARE_FAULT (V17) |
 | E6 | payments.status | PENDING, SUCCESS, FAILED, EXPIRED, REFUNDED |
 
 Webhook logs độc lập với payment/order ở cấp FK: đối soát bằng provider, order_code và
@@ -341,23 +560,35 @@ PK/UNIQUE tự có index PostgreSQL, không tạo lại bằng CREATE INDEX.
 | users — tài khoản quản trị | id | email UNIQUE lowercase/trim; hash/name không rỗng; ACTIVE/INACTIVE/LOCKED | email đã có UNIQUE index |
 | roles — quyền | id | name UNIQUE uppercase/trim; ADMIN/STAFF khởi tạo, cho phép quyền mới | name đã có UNIQUE index |
 | user_roles — membership | (user_id, role_id); users, roles | không lặp membership; cascade chỉ từ user | role_id; PK hỗ trợ user_id |
-| machines — máy và ngưỡng | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền | code đã có UNIQUE index |
-| machine_slots — slot vật lý | id; machine_id → machines | UNIQUE(machine_id, slot_code), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
+| permissions — quyền hạn (V13) | id | code UNIQUE, CHECK chữ hoa/số/gạch dưới, không bắt đầu bằng ROLE_; seed 15 code với UUID cố định | code đã có UNIQUE index |
+| role_permissions — role → permission (V13) | (role_id, permission_id); roles CASCADE, permissions RESTRICT | không lặp; xóa permission đang được cấp bị chặn | ix_role_permissions_permission; PK hỗ trợ role_id |
+| machines — máy, ngưỡng và presence | id | code UNIQUE; ACTIVE/INACTIVE/MAINTENANCE; min/max đúng miền; presence/chẩn đoán do hệ thống ghi (V15: uptime >= 0, RSSI -127..0, heap >= 0, firmware không rỗng) | code đã có UNIQUE index |
+| machine_slots — slot vật lý = một cột | id; machine_id → machines | UNIQUE(machine_id, slot_code), slot_code A/B (V14), capacity > 0; ACTIVE/INACTIVE/ERROR; UNIQUE(id, machine_id) cho FK | UNIQUE(machine_id, slot_code) hỗ trợ lọc máy |
 | kiosk_credentials — khóa API của kiosk (V10) | id; machine_id → machines; created_by, revoked_by → users nullable | key_prefix UNIQUE 12 ký tự; secret_hash SHA-256 hex; ACTIVE/REVOKED; REVOKED cần revoked_at ≥ created_at | partial UNIQUE một ACTIVE/máy, machine/time |
 | products — danh mục, giá hiện tại | id | sku UNIQUE; giá không âm hợp lệ; ACTIVE/INACTIVE | sku đã có UNIQUE index |
 | product_batches — lô sản xuất | id; product_id → products; created_by → users nullable | batch_code UNIQUE; quantity > 0; finite expires_at > manufactured_at | product_id, expires_at, creator partial |
 | inventory_items — từng tô | id; batch_id → batches; slot_id → slots nullable | status CHECK; loaded/reserved/sold/removed timestamps cơ bản; UNIQUE(id, slot_id) cho FK | (slot_id, status), batch_id, status |
 | sensor_readings — chuỗi thời gian | BIGINT identity id; machine_id → machines | ít nhất một reading; giá trị trong miền; finite recorded_at | (machine_id, recorded_at DESC), BRIN(recorded_at) |
-| alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at | machine/time, status/time, triggered_at, resolver partial |
-| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
-| order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price | order_id, product_id |
+| alerts — cảnh báo | id; machine_id → machines; resolved_by → users nullable | type/severity/status CHECK; RESOLVED cần resolved_at ≥ triggered_at; error_code CHECK, slot thuộc đúng máy (V17) | machine/time, status/time, triggered_at, resolver partial, partial UNIQUE dedupe_key khi chưa RESOLVED, slot, acknowledger (V17) |
+| orders — đơn tại máy | id; machine_id → machines | order_code UNIQUE; status CHECK; tiền hợp lệ; thứ tự thời gian; expires_at > created_at (V11); UNIQUE(id, machine_id) cho FK; 0 ≤ discount_amount ≤ subtotal, total_amount = subtotal − discount_amount (V18); REFUNDED ⇔ refunded_at (V23) | machine/time, status/time, created_at, partial expires_at khi PENDING_PAYMENT |
+| order_items — dòng đơn, giá chốt | id; order_id → orders; product_id → products | quantity > 0; giá không âm; total_price = quantity × unit_price; unit_price ≤ original_unit_price, discount_percent 0–90, discount_reason NONE/NEAR_EXPIRY nhất quán (V18) | order_id, product_id |
+| customer_reports — phản ánh của khách (V24) | id; machine_id → machines; order_id → orders; batch_id → product_batches; work_order_id → work_orders; resolved_by → users | code UNIQUE; type, status, verdict, resolution CHECK; PAID_NOT_RECEIVED cần order_code_input; loại khác cần description không rỗng; RESOLVED/REJECTED ⇔ resolution + resolved_at | (status, created_at), (machine, created_at), partial order_id, work_order_id |
+| customer_report_photos — ảnh phản ánh (V24) | id; report_id → customer_reports (CASCADE) | content_type JPEG/PNG; size 1..2 MB | report_id |
+| maintenance_plans — kế hoạch bảo trì (V22) | id; machine_id → machines; default_assignee_id, created_by → users | title không rỗng; interval 1–365; lead 0–30 < interval; priority CHECK | next_due_date partial khi active, machine, assignee partial, created_by |
+| restock_lines — dòng nạp hàng (V21) | id; work_order_id → work_orders; (slot_id, machine_id) → machine_slots; product_id → products | UNIQUE (work_order, slot, product); planned/loaded 0–1000; variance_reason không rỗng | work_order, slot, product |
+| work_orders — việc tại máy (V20) | id; machine_id → machines; assignee/created_by/completed_by/cancelled_by → users | type/source/priority/status CHECK; OPEN không người nhận, các trạng thái khác (trừ CANCELLED) có; DONE cần completed_at/by + result_note; CANCELLED cần cancelled_at + cancel_reason; mã WO-… | assignee/status/due, machine/time, partial status/due khi chưa xong, created_by, completed_by, cancelled_by |
+| work_order_alerts — cảnh báo do WO xử lý (V20) | PK (work_order_id, alert_id) | một WO chưa xong mỗi cảnh báo (service, khóa dòng cảnh báo) | alert_id |
+| work_order_events — lịch sử WO (V20) | id; work_order_id → work_orders; actor_id → users nullable | type/status CHECK; append-only trigger | work_order/time, actor partial |
+| maintenance_commands — lệnh bảo trì từ xa (V19) | id; machine_id → machines; (slot_id, machine_id) → machine_slots; target → inventory_items; requested_by, reconciled_by → users | operation/status/reason/outcome CHECK; RESET không có slot, thao tác khác có slot; REMOVE_ITEM có target; OTHER cần note; command_code `MC-…`; UNIQUE (requested_by, idempotency_key) | partial UNIQUE machine_id khi PENDING/SENT/ACCEPTED, machine/time, status partial, slot, target, reconciler |
+| pricing_settings — giảm giá sắp hết hạn (V18) | id; updated_by → users nullable | một dòng (singleton UNIQUE + CHECK); percent 1–90 | updated_by partial |
 | order_item_allocations — phân bổ tô và lịch sử release | id; order_item_id → order_items; inventory_item_id → inventory_items | RESERVED/DISPENSED/RELEASED; RELEASED cần released_at; một live allocation/tô | order_item_id, inventory_item_id, partial UNIQUE live inventory |
-| payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12) |
+| payments — mỗi lần thử | id; order_id → orders | provider mở; status CHECK; amount không âm; SUCCESS/REFUNDED cần transaction_id, paid_at; refunded_by → users (V23); REFUNDED ⇔ đủ refunded_at/by, reason, transfer_ref; reason CHECK; mã chuyển khoản theo mẫu; OTHER cần note; refunded_at ≥ paid_at (V23) | order/time, status, partial UNIQUE(provider, transaction_id), partial UNIQUE(provider, payment_reference) (V12), partial UNIQUE(refund_transfer_ref), partial refunded_at khi REFUNDED (V23) |
 | payment_webhook_logs — callback thô kể cả lỗi | id; không FK order | provider không rỗng; raw_body bắt buộc; JSONB nullable; is_verified mặc định false | order_code/time, provider/time |
-| dispense_commands — lệnh có retry | id; composite FK orders/machine_slots/inventory_items | command_code UNIQUE; status CHECK; SUCCESS cần completed_at; một active/success command/tô | machine/time, order_id, slot_id, status, inventory_item_id, partial UNIQUE live inventory |
+| dispense_commands — lệnh có retry | id; composite FK orders/machine_slots/inventory_items | command_code UNIQUE; status CHECK; SUCCESS cần completed_at; failure_reason có đúng khi FAILED/TIMEOUT (V14); một active/success command/tô | machine/time, order_id, slot_id, status, inventory_item_id, partial UNIQUE live inventory, partial machine in-flight (V14) |
 | inventory_transactions — lịch sử bất biến | id; inventory_item_id → inventory_items; (slot_id, machine_id) → slots; performed_by → users nullable | type CHECK; MATCH FULL snapshot vị trí; append-only trigger | item/time, machine/time, slot_id, created_at, actor partial |
-| machine_events — sự kiện thiết bị | id; machine_id → machines | event_type mở không rỗng; payload JSONB | machine/time, created_at |
+| machine_events — lịch sử máy | id; machine_id → machines | event_type mở không rỗng; payload JSONB; source MACHINE/BACKEND, message_id bắt buộc với MACHINE (V16) | machine/time, created_at, machine/type/time (V16), partial UNIQUE (machine_id, message_id) (V16) |
 | audit_logs — lịch sử thay đổi | id; user_id → users nullable; entity_id đa hình | action/entity_type không rỗng; old/new JSONB | user/time, entity_type/entity_id/time, created_at |
+| notifications — thông báo portal (V17) | id; user_id → users (CASCADE); alert_id → alerts nullable | title không rỗng; severity CHECK; read_at ≥ created_at | user/time, user unread partial, alert partial |
 
 Các index prefix khác nhau không thay thế nhau: machine/time không phục vụ tốt lọc status
 toàn hệ thống; index thời gian riêng phục vụ báo cáo/retention toàn hệ thống. Index transaction
@@ -382,6 +613,18 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V10 | kiosk_credentials: khóa API gắn một máy, tối đa một khóa ACTIVE mỗi máy |
 | V11 | orders.expires_at và partial index cho đơn PENDING_PAYMENT |
 | V12 | partial UNIQUE payments(provider, payment_reference) |
+| V13 | permissions, role_permissions và seed mapping ADMIN/STAFF (issue #48, [permission-authorization.md](permission-authorization.md)) |
+| V14 | machine_slots: đổi `A1`/`B1` → `A`/`B` khi không mơ hồ (mơ hồ thì dừng, không đổi gì), CHECK slot_code A/B; dispense_commands.failure_reason (+ CHECK, backfill `LEGACY_UNKNOWN`), index lệnh đang chạy theo máy (issue #52, [mqtt-dispense.md](mqtt-dispense.md)) |
+| V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
+| V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
+| V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V24 | machines.report_token (backfill ngẫu nhiên, UNIQUE, CHECK); customer_reports; customer_report_photos; quyền CUSTOMER_REPORT_READ → ADMIN, STAFF, CUSTOMER_REPORT_MANAGE, MACHINE_REPORT_LINK_MANAGE → ADMIN (issue #74, [customer-reports.md](customer-reports.md)) |
+| V23 | payments: refunded_at, refunded_by, refund_reason, refund_transfer_ref, refund_note (+ CHECK, unique mã chuyển khoản, chỉ mục refunded_at); orders.refunded_at (CHECK REFUNDED ⇔ refunded_at); quyền PAYMENT_REFUND, REFUND_READ → ADMIN (issue #72, [refunds.md](refunds.md)) |
+| V22 | maintenance_plans; work_orders.maintenance_plan_id + scheduled_for (CHECK SCHEDULE ⇔ có kế hoạch và ngày; chỉ MAINTENANCE; unique theo lần và một việc chưa xong mỗi kế hoạch); quyền MAINTENANCE_PLAN_READ → ADMIN, STAFF, MAINTENANCE_PLAN_MANAGE → ADMIN (issue #70, [maintenance-plans.md](maintenance-plans.md)) |
+| V21 | restock_lines, maintenance_commands.work_order_id, index inventory_transactions.reference_id; quyền RESTOCK_PLAN, INVENTORY_LOAD_DIRECT → ADMIN, RESTOCK_EXECUTE → ADMIN, STAFF (issue #68, [restock.md](restock.md)) |
+| V20 | work_orders, work_order_alerts, work_order_events (append-only trigger), notifications.work_order_id; quyền WORK_ORDER_READ_ALL, WORK_ORDER_MANAGE → ADMIN, WORK_ORDER_READ_ASSIGNED, WORK_ORDER_EXECUTE → ADMIN, STAFF (issue #66, [work-orders.md](work-orders.md)) |
+| V19 | maintenance_commands (+ một lệnh chưa xong mỗi máy), machine_slots.refill_gate_open; quyền MAINTENANCE_COMMAND_READ, MAINTENANCE_COMMAND_EXECUTE → ADMIN, STAFF, MACHINE_RESET → ADMIN (issue #64, [maintenance-commands.md](maintenance-commands.md)) |
+| V18 | pricing_settings (singleton, seed bật / 50 %); orders.discount_amount + CHECK total = subtotal − discount; order_items.original_unit_price (backfill = unit_price), discount_percent, discount_reason + CHECK; dừng nếu có đơn total ≠ subtotal; index đơn có giảm giá; quyền PRICING_READ → ADMIN, STAFF, PRICING_MANAGE → ADMIN (issue #61, [near-expiry-pricing.md](near-expiry-pricing.md)) |
 
 PostgreSQL 18 và image Flyway pin `redgate/flyway:11.20.1`.
 [Tài liệu Flyway PostgreSQL](https://documentation.red-gate.com/flyway/reference/database-driver-reference/postgresql-database)
@@ -420,7 +663,7 @@ dev/migration; production tách migration owner và runtime user quyền tối t
 Flyway clean bị vô hiệu hóa. Dừng container bằng `docker compose --env-file .env -f backend/db/compose.yaml stop`;
 volume giữ dữ liệu. Không reset/xóa volume database đang dùng để sửa checksum.
 
-Migration mới dùng V13 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
+Migration mới dùng V17 trở đi; không sửa migration đã áp dụng, không dùng repair che lỗi.
 Flyway chạy trước ứng dụng. Sau này Maven/Spring Boot dùng flyway-core và module
 flyway-database-postgresql với phiên bản tương thích. Module JPA hiện có pom Java 21,
 Spring Boot 3.5.14 và Flyway 11.20.1 cùng phiên bản đã kiểm chứng bằng Docker.
@@ -432,8 +675,8 @@ docker compose --env-file .env -f backend/db/compose.yaml exec -T postgres sh -c
 ```
 
 Script ngoài classpath migrations, chạy thủ công sau Flyway, không tự chạy production.
-Tạo ADMIN/STAFF nếu thiếu, máy DEV-MACHINE-01, ba slot A1/A2/B1 capacity 10,
-hai sản phẩm giá 35000.00 và 25000.00. Chạy lại không nhân đôi hay ghi đè dữ liệu đã sửa.
+Tạo máy DEV-MACHINE-01 (ACTIVE, cột A/B capacity 10) và DEV-MACHINE-02 (MAINTENANCE, cột B có đầu cột hết hạn),
+các sản phẩm mẫu, lô hàng và tồn kho. Chạy lại không nhân đôi hay ghi đè dữ liệu đã sửa.
 Không tạo account, plaintext password hoặc hash giả.
 
 ## 6. Kiểm chứng

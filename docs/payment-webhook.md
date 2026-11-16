@@ -144,8 +144,8 @@ Script Python (chỉ thư viện chuẩn) gọi API của backend **đang chạy
 `~/.fruitmachine/payment-test-data.json`, **ngoài repo** nên không thể bị commit. Đặt `FVM_ADMIN_EMAIL`/`FVM_ADMIN_PASSWORD` (hoặc để script hỏi, mật khẩu không hiện, không lưu).
 
 ```bash
-python scripts/payment_test_data.py seed            # máy ACTIVE, slot A1..A4, sản phẩm 2000/5000/10000/35000.50 VND, lô hàng, tồn kho, kiosk key
-python scripts/payment_test_data.py order           # đơn mới (mặc định A1 = 2000 VND) + payment attempt, in QR payload
+python scripts/payment_test_data.py seed            # máy ACTIVE, cột A/B, sản phẩm 2000/5000 VND (--fractional: B = 35000.50), lô hàng, tồn kho, kiosk key
+python scripts/payment_test_data.py order           # đơn mới (mặc định cột A = 2000 VND) + payment attempt, in QR payload
 python scripts/payment_test_data.py status --watch  # poll như kiosk mỗi 3 giây đến khi PAID/CANCELLED
 python scripts/payment_test_data.py cancel          # kiosk hủy đơn gần nhất
 python scripts/payment_test_data.py mock-pay        # chỉ với MOCK: gửi webhook đã ký cho attempt mới nhất

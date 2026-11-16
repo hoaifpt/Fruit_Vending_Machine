@@ -3,6 +3,7 @@ package com.fruitmachine.backend.machine.controller;
 import com.fruitmachine.backend.common.response.ApiErrorResponse;
 import com.fruitmachine.backend.common.response.ApiResponse;
 import com.fruitmachine.backend.machine.dto.*;
+import com.fruitmachine.backend.machine.enums.MachineConnectivity;
 import com.fruitmachine.backend.machine.enums.MachineStatus;
 import com.fruitmachine.backend.machine.service.MachineService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -18,6 +19,7 @@ import java.net.URI;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -36,9 +38,9 @@ public class MachineController {
     private final MachineService machines;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     @Operation(operationId = "listMachines", summary = "List/search machines",
-            description = "ADMIN or STAFF. Database pagination with combined optional status and case-insensitive literal substring search on code/name/location. "
+            description = "ADMIN or STAFF. Database pagination with combined optional status, connectivity and case-insensitive literal substring search on code/name/location. "
                     + "Default page 0, size 20; maximum size 100. One sort field/direction using Spring conventions, default createdAt,desc; UUID ascending tie-break. "
                     + "All three statuses are visible by default; out-of-range pages are empty.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Paginated machines")
@@ -46,14 +48,15 @@ public class MachineController {
             @RequestParam(defaultValue = "0") @Min(0) @Parameter(description = "Zero-based page index.") int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) @Parameter(description = "Page size, 1 to 100.") int size,
             @RequestParam(required = false) @Parameter(description = "Optional ACTIVE, INACTIVE or MAINTENANCE filter.") MachineStatus status,
+            @RequestParam(required = false) @Parameter(description = "Optional ONLINE, WARNING, OFFLINE or NEVER_SEEN filter, evaluated in SQL with the same rules as the connectivity field.") MachineConnectivity connectivity,
             @RequestParam(required = false) @Size(max = 200) @Parameter(description = "Optional literal substring of code/name/location, case-insensitive, stripped; blank means no filter. Maximum 200 characters.") String search,
             @RequestParam(defaultValue = "createdAt,desc") @Parameter(description = "One approved field: id, code, name, location, status, createdAt, updatedAt; optional asc/desc (asc when omitted). Example name,asc.") String sort) {
         return ResponseEntity.ok().header("Cache-Control", "no-store")
-                .body(ApiResponse.success("Machines retrieved", machines.listMachines(page, size, status, search, sort)));
+                .body(ApiResponse.success("Machines retrieved", machines.listMachines(page, size, status, connectivity, search, sort)));
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_MACHINE_READ)
     @Operation(operationId = "getMachine", summary = "Get machine details",
             description = "ADMIN or STAFF. Returns machine configuration fields for an existing UUID, including INACTIVE machines; no slot/inventory/sensor collections.")
     @ApiResponses({
@@ -65,7 +68,7 @@ public class MachineController {
     }
 
     @PostMapping(consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "createMachine", summary = "Register machine",
             description = "ADMIN only. Creates INACTIVE machine with stripped/uppercased unique code and null lastSeenAt. "
                     + "Only code/name/location/minTemperature/maxTemperature/minHumidity/maxHumidity are accepted. Status/id/lastSeenAt/timestamps/slot fields are rejected. "
@@ -81,7 +84,7 @@ public class MachineController {
     }
 
     @PutMapping(value = "/{id}", consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "updateMachine", summary = "Replace machine configuration",
             description = "ADMIN only. Replaces required name/location and four environmental thresholds. Minimum must be strictly below maximum; schema bounds and two decimal places enforced. "
                     + "code/status/id/lastSeenAt/timestamps are rejected. Preserves slots, sensor history and all related records.")
@@ -95,7 +98,7 @@ public class MachineController {
     }
 
     @PatchMapping(value = "/{id}/status", consumes = "application/json")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize(Permissions.HAS_MACHINE_WRITE)
     @Operation(operationId = "updateMachineStatus", summary = "Change administrative machine status",
             description = "ADMIN only. Sets ACTIVE, INACTIVE or MAINTENANCE, preserving identity and all related history. INACTIVE disables future operational use, not deletion. "
                     + "Same-status requests are idempotent. No slot/inventory/IoT changes or hard deletion.")

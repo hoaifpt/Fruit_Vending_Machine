@@ -83,3 +83,7 @@ Tạo thất bại ồn ào nếu dữ liệu cũ vi phạm (không sửa/xóa d
 (gồm race tạo attempt với hủy đơn), `PaymentManagementIntegrationTest`, `PaymentSchemaIntegrationTest`, `PaymentConfigurationTest`,
 `PaymentServiceDocumentationTest`. Test dùng `ControllableGateway` (provider `TESTPAY`, điều khiển thành công/lỗi/timeout/hook giữa lúc gọi, đo số session
 "idle in transaction" khi gọi provider) và `OffsetClock` chỉ chạy tiến. Bản `ProductionDocumentationTest` dùng `TESTPAY` vì prod cấm MOCK.
+
+## Hoàn tiền (issue #72)
+
+`SUCCESS → REFUNDED` chỉ qua `PaymentTransitions.refund` do `RefundService` gọi; chi tiết payment có khối `refund`. Xem [refunds.md](refunds.md).

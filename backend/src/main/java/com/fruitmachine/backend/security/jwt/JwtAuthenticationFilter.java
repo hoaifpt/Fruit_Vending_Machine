@@ -24,6 +24,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final CustomUserDetailsService users;
     private final SecurityErrorHandler errors;
 
+    /** Issue #74: the public report form ignores credentials, so a stale token in a browser never blocks a customer. */
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+        return path.startsWith("/api/v1/public/");
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {

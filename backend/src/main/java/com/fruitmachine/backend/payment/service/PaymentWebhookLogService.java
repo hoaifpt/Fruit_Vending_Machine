@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,7 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 /** ADMIN read access to webhook evidence. The signature column is never exposed. */
 @Service
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize(Permissions.HAS_PAYMENT_WEBHOOK_LOG_READ)
 public class PaymentWebhookLogService {
     private static final Set<String> SORT_FIELDS = Set.of("receivedAt", "provider");
     private final PaymentWebhookLogRepository logs;

@@ -19,15 +19,17 @@ unavailable account -> 401; insufficient role -> 403. No public kiosk endpoint.
 
 ## Identity, capacity and status
 
-POST accepts only slotCode and capacity. Code is stripped/uppercase with Locale.ROOT
-before validation, nonblank, maximum 32 characters, immutable and unique per machine.
-Different machines may reuse A1; no hardware naming pattern is imposed.
+POST accepts only slotCode and capacity. A slot is one physical column of the machine (issue #52):
+the code is stripped/uppercased with Locale.ROOT before validation and must then be `A` or `B`
+(anything else -> 400; DB CHECK ck_machine_slots_column since V14). It is immutable and unique
+per machine, so a machine has at most two slots; different machines reuse A and B. Dispense
+commands send it to the machine as `columnCode`.
 Duplicate normalized code -> 409; DB UNIQUE(machine_id,slot_code) is the final concurrency
 guard, returning safe 409 without exposing constraint contents.
 
 Capacity is a required positive 32-bit JSON integer token (1..2147483647). Fractional
 numbers, decimal tokens such as 6.0, numeric strings, booleans and overflow are rejected
-with 400 rather than coerced. No fixed number of slots or fixed capacity is enforced.
+with 400 rather than coerced. No fixed capacity is enforced.
 Capacity is maximum physical storage, not stock. Inventory occupancy validation is
 deliberately deferred to Inventory Management; no fake inventory check is introduced.
 

@@ -30,6 +30,23 @@ public class PaymentMapper {
         var order = payment.getOrder();
         return new PaymentDetailResponse(payment.getId(), order.getId(), order.getOrderCode(), order.getMachine().getCode(), payment.getProvider(),
                 payment.getStatus(), payment.getAmount(), payment.getPaymentReference(), payment.getTransactionId(),
-                payment.getCreatedAt(), payment.getPaidAt(), payment.getExpiredAt(), payment.getQrCode());
+                payment.getCreatedAt(), payment.getPaidAt(), payment.getExpiredAt(), payment.getQrCode(), refund(payment));
+    }
+
+    /** The refund block of a REFUNDED payment, otherwise null. */
+    public RefundInfoResponse refund(Payment payment) {
+        if (payment.getStatus() != PaymentStatus.REFUNDED) return null;
+        return new RefundInfoResponse(payment.getRefundedAt(), actor(payment), payment.getRefundReason(), payment.getRefundTransferRef(),
+                payment.getRefundNote());
+    }
+
+    public OrderRefundResponse orderRefund(Payment payment) {
+        return new OrderRefundResponse(payment.getId(), payment.getAmount(), payment.getRefundedAt(), actor(payment), payment.getRefundReason(),
+                payment.getRefundTransferRef(), payment.getRefundNote());
+    }
+
+    private static RefundActorResponse actor(Payment payment) {
+        var by = payment.getRefundedBy();
+        return by == null ? null : new RefundActorResponse(by.getId(), by.getFullName());
     }
 }

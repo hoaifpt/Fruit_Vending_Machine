@@ -1,18 +1,20 @@
-# Chat handoff - Issue #35, 2026-10-18
+# Chat handoff - Issue #74, 2026-11-14
 
 Repository C:/Users/north/Documents/School/9/FruitMachine/backend, Spring module backend/.
-Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/35, [BE] Update orders (one bowl per order, slot-head reservation).
-Branch feature/35-single-bowl-orders from origin/dev 903b4af (includes #33 via PR#34).
+Issue https://github.com/hoaifpt/Fruit_Vending_Machine/issues/74, [BE] Implement Customer Incident Reporting.
+Branch feature/74-customer-reports from origin/dev f582fc3 (includes #72).
 Git delivery: see the final report; do not assume commit/push/PR/merge happened.
 
-Delivered: kiosk order request is `{ "productId" }` only (breaking, strict DTO; CreateOrderItemRequest and OrderQuantityDeserializer deleted), one item of quantity 1 per order;
-reservation of the sellable slot head only (locks Product share -> Machine share -> candidate Slots FOR UPDATE by id -> head item FOR UPDATE), FEFO between heads
-(head expiry, head loaded_at, slot_code, slot id), at most one RESERVED bowl per slot; catalog via one DISTINCT ON aggregate listing only products with a sellable head;
-`app.order.max-total-quantity` / ORDER_MAX_TOTAL_QUANTITY / catalog maxTotalQuantity removed; optional section 9 done: inventory summary headStatus/headExpired
-(REPEATABLE READ). Management order APIs unchanged; historical multi-line orders readable. No schema change, migrations untouched.
-Docs: .ai PROJECT/ARCHITECTURE/DATABASE, docs/order-management.md, Swagger (tag changelog) and api-contract/api.yaml; scripts/payment_test_data.py sends the new body.
+Delivered: V24 (machines.report_token, customer_reports, customer_report_photos, CUSTOMER_REPORT_READ / CUSTOMER_REPORT_MANAGE /
+MACHINE_REPORT_LINK_MANAGE), customerreport package (PublicReportService, ReportOrderVerifier, ReportPhotoSanitizer, ReportSupport,
+CustomerReportAdminService, MachineReportLinkService, CustomerReportLinks, rate limiting: SlidingWindowRateLimiter, ClientIpResolver,
+PublicReportRateLimitInterceptor; controllers PublicReportController, CustomerReportController, KioskReportLinkController), refund
+candidates CUSTOMER_REPORT + PaymentRefundedEvent auto-close, WorkOrderService.recordSystemNote + linkedReports, SecurityConfig public
+rules / CORS, JwtAuthenticationFilter skip for /api/v1/public/**, 429 handler, multipart 7 MB.
+Docs: docs/customer-reports.md, api.yaml, database-migration.md (ERD +2 tables), permission-authorization.md, refunds.md, work-orders.md,
+.ai/DATABASE.md §27, README, .env.example (PUBLIC_REPORT_*, REPORT_*).
 
-Verification: `mvn clean verify` 628 tests, 0 failures, Flyway validated 12 migrations, no real payOS call (JDK 21.0.10, PostgreSQL 18.6 Testcontainers).
-After that run only a test-only assertion block (summary head fields) was added to KioskCatalogIntegrationTest; that class and InventoryManagementIntegrationTest were rerun (43 tests, 0 failures).
-Open: hardware team must confirm the head assumption (columns refilled from the top, earlier loaded_at = lower position); kiosk developer must switch to the new request shape.
-Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, always `mvn clean ...`.
+Verification: `mvn clean verify` 855 tests, 0 failures, BUILD SUCCESS.
+Environment: JAVA_HOME=C:/Program Files/Java/jdk-21.0.10, Docker Desktop running, use `mvn` (no wrapper), always `mvn clean ...`.
+Deploy note: set REPORT_IP_HASH_SECRET, PUBLIC_REPORT_BASE_URL, PUBLIC_REPORT_ALLOWED_ORIGINS and REPORT_TRUSTED_PROXIES on staging.
+Frontend owner still needs to be told: public form page /report/{token} (?order=) and the kiosk QR screens.

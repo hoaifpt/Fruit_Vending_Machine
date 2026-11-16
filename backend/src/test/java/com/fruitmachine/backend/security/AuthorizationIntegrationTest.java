@@ -143,8 +143,8 @@ class AuthorizationIntegrationTest {
         String token = login(admin);
         request("/admin", token).andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(admin.getId().toString()))
-                .andExpect(jsonPath("$.principalAuthorities", contains("ROLE_ADMIN")))
-                .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_ADMIN")))
+                .andExpect(jsonPath("$.principalAuthorities", contains(authorities("ADMIN"))))
+                .andExpect(jsonPath("$.contextAuthorities", contains(authorities("ADMIN"))))
                 .andExpect(header().doesNotExist("Set-Cookie"));
         request("/shared", token).andExpect(status().isOk());
         request("/staff", token).andExpect(status().isForbidden());
@@ -156,8 +156,8 @@ class AuthorizationIntegrationTest {
         User staff = account("STAFF");
         String token = login(staff);
         request("/staff", token).andExpect(status().isOk())
-                .andExpect(jsonPath("$.principalAuthorities", contains("ROLE_STAFF")))
-                .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_STAFF")));
+                .andExpect(jsonPath("$.principalAuthorities", contains(authorities("STAFF"))))
+                .andExpect(jsonPath("$.contextAuthorities", contains(authorities("STAFF"))));
         request("/shared", token).andExpect(status().isOk());
         int before = operations.invocationCount();
         var denied = request("/admin", token).andExpect(status().isForbidden())
@@ -183,8 +183,8 @@ class AuthorizationIntegrationTest {
         String token = login(user);
         for (String path : List.of("/admin", "/staff", "/shared")) {
             request(path, token).andExpect(status().isOk())
-                    .andExpect(jsonPath("$.principalAuthorities", contains("ROLE_ADMIN", "ROLE_STAFF")))
-                    .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_ADMIN", "ROLE_STAFF")));
+                    .andExpect(jsonPath("$.principalAuthorities", contains(authorities("ADMIN", "STAFF"))))
+                    .andExpect(jsonPath("$.contextAuthorities", contains(authorities("ADMIN", "STAFF"))));
         }
     }
 
@@ -238,7 +238,7 @@ class AuthorizationIntegrationTest {
         addRole(user, "STAFF");
         request("/admin", token).andExpect(status().isForbidden());
         request("/staff", token).andExpect(status().isOk())
-                .andExpect(jsonPath("$.contextAuthorities", contains("ROLE_STAFF")));
+                .andExpect(jsonPath("$.contextAuthorities", contains(authorities("STAFF"))));
         jdbc.update("DELETE FROM user_roles WHERE user_id = ?", user.getId());
         request("/shared", token).andExpect(status().isForbidden());
         request("/any", token).andExpect(status().isOk());
@@ -319,7 +319,29 @@ class AuthorizationIntegrationTest {
                 "/api/v1/machines/{machineId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory", "/api/v1/machines/{machineId}/slots/{slotId}/inventory/summary", "/api/v1/machines/{machineId}/kiosk-credentials", "/api/v1/machines/{machineId}/kiosk-credentials/{credentialId}/revoke",
                 "/api/v1/kiosk/me", "/api/v1/kiosk/catalog", "/api/v1/kiosk/orders", "/api/v1/kiosk/orders/{orderId}",
                 "/api/v1/kiosk/orders/{orderId}/cancel", "/api/v1/orders", "/api/v1/orders/{id}", "/api/v1/kiosk/orders/{orderId}/payments", "/api/v1/payments", "/api/v1/payments/{id}",
-                "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}");
+                "/api/v1/webhooks/payments/{provider}", "/api/v1/payment-webhook-logs", "/api/v1/payment-webhook-logs/{id}",
+                "/api/v1/permissions", "/api/v1/roles", "/api/v1/roles/{id}", "/api/v1/roles/{id}/permissions",
+                "/api/v1/machines/{machineId}/telemetry", "/api/v1/machines/{machineId}/telemetry/latest",
+                "/api/v1/machines/{machineId}/events", "/api/v1/audit-logs", "/api/v1/audit-logs/{id}",
+                "/api/v1/alerts", "/api/v1/alerts/{id}", "/api/v1/alerts/{id}/acknowledge", "/api/v1/alerts/{id}/resolve",
+                "/api/v1/notifications/me", "/api/v1/notifications/me/unread-count", "/api/v1/notifications/{id}/read",
+                "/api/v1/notifications/me/read-all", "/api/v1/pricing/near-expiry-discount",
+                "/api/v1/machines/{machineId}/slots/{slotId}/maintenance-commands", "/api/v1/machines/{machineId}/reset",
+                "/api/v1/maintenance-commands", "/api/v1/maintenance-commands/{id}", "/api/v1/maintenance-commands/{id}/reconcile",
+                "/api/v1/work-orders", "/api/v1/work-orders/me", "/api/v1/work-orders/{id}", "/api/v1/work-orders/{id}/events",
+                "/api/v1/work-orders/{id}/assign", "/api/v1/work-orders/{id}/unassign", "/api/v1/work-orders/{id}/start",
+                "/api/v1/work-orders/{id}/notes", "/api/v1/work-orders/{id}/complete", "/api/v1/work-orders/{id}/cancel",
+                "/api/v1/work-orders/{id}/alerts", "/api/v1/work-orders/{id}/alerts/{alertId}", "/api/v1/alerts/{alertId}/work-orders",
+                "/api/v1/machines/{machineId}/restock-suggestions", "/api/v1/machines/{machineId}/restock-work-orders",
+                "/api/v1/work-orders/{id}/restock-lines", "/api/v1/work-orders/{id}/restock-lines/{lineId}",
+                "/api/v1/work-orders/{id}/restock-lines/{lineId}/loads", "/api/v1/work-orders/{id}/restock",
+                "/api/v1/maintenance-plans", "/api/v1/maintenance-plans/upcoming", "/api/v1/maintenance-plans/{id}",
+                "/api/v1/maintenance-plans/{id}/work-orders", "/api/v1/maintenance-plans/{id}/activate", "/api/v1/maintenance-plans/{id}/deactivate",
+                "/api/v1/maintenance-plans/{id}/generate-now", "/api/v1/payments/{paymentId}/refund", "/api/v1/refunds",
+                "/api/v1/refunds/candidates", "/api/v1/refunds/summary", "/api/v1/kiosk/incident-report-link",
+                "/api/v1/public/report-forms/{reportToken}", "/api/v1/public/report-forms/{reportToken}/reports", "/api/v1/customer-reports",
+                "/api/v1/customer-reports/{id}", "/api/v1/customer-reports/{id}/photos/{photoId}", "/api/v1/customer-reports/{id}/review",
+                "/api/v1/customer-reports/{id}/resolve", "/api/v1/customer-reports/{id}/reject", "/api/v1/machines/{id}/report-token/rotate");
         assertThat(result.getResponse().getContentAsString()).doesNotContain("test-only", KEY);
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
@@ -329,6 +351,20 @@ class AuthorizationIntegrationTest {
     static class RbacTestConfiguration {
         @Bean RbacOperations rbacOperations() { return new RbacOperations(); }
         @Bean RbacTestController rbacTestController(RbacOperations operations) { return new RbacTestController(operations); }
+    }
+
+    /** Issue #48: ROLE_* plus the roles' permission codes as seeded by V13, sorted by name like Spring's User. */
+    static String[] authorities(String... roles) {
+        var permissions = new java.util.TreeSet<String>();
+        for (String role : roles) {
+            permissions.add("ROLE_" + role);
+            permissions.addAll(role.equals("ADMIN") ? com.fruitmachine.backend.security.permission.Permissions.ALL
+                    : List.of("PRODUCT_READ", "MACHINE_READ", "BATCH_READ", "BATCH_CREATE", "INVENTORY_READ", "INVENTORY_WRITE", "ORDER_READ",
+                            "ALERT_READ", "ALERT_MANAGE", "PRICING_READ", "MAINTENANCE_COMMAND_READ", "MAINTENANCE_COMMAND_EXECUTE",
+                            "WORK_ORDER_READ_ASSIGNED", "WORK_ORDER_EXECUTE", "RESTOCK_EXECUTE",
+                            "MAINTENANCE_PLAN_READ", "CUSTOMER_REPORT_READ"));
+        }
+        return permissions.toArray(String[]::new);
     }
 
     public record Snapshot(UUID id, List<String> principalAuthorities, List<String> contextAuthorities) { }

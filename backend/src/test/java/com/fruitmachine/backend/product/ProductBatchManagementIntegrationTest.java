@@ -215,9 +215,9 @@ class ProductBatchManagementIntegrationTest {
         jdbc.update("UPDATE products SET status='INACTIVE' WHERE id=?", product.getId());
         doReturn(NOW.plus(Duration.ofDays(4))).when(clock).instant();
         // Mint fresh signed tokens under the advanced clock; old access tokens are expired.
-        var principal = new AuthenticatedUser(adminId, "test@example.invalid", "", UserStatus.ACTIVE, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+        var principal = new AuthenticatedUser(adminId, "test@example.invalid", "", UserStatus.ACTIVE, com.fruitmachine.backend.support.SeededAuthorities.of("ADMIN"));
         String currentToken = tokens.generateToken(principal);
-        var staffPrincipal = new AuthenticatedUser(staffId, "staff@example.invalid", "", UserStatus.ACTIVE, List.of(new SimpleGrantedAuthority("ROLE_STAFF")));
+        var staffPrincipal = new AuthenticatedUser(staffId, "staff@example.invalid", "", UserStatus.ACTIVE, com.fruitmachine.backend.support.SeededAuthorities.of("STAFF"));
         for (String token : List.of(currentToken, tokens.generateToken(staffPrincipal))) {
             mvc.perform(auth(get(PATH + "/" + id), token)).andExpect(status().isOk()).andExpect(jsonPath("$.data.createdBy").value(staffId.toString()));
             mvc.perform(auth(get(PATH), token)).andExpect(status().isOk()).andExpect(jsonPath("$.data.totalElements").value(1));
@@ -241,7 +241,7 @@ class ProductBatchManagementIntegrationTest {
     @Test void noUpdateOrDeleteRoutesAndNoParentOrInventoryModification() throws Exception {
         UUID machine = UUID.randomUUID(), slot = UUID.randomUUID();
         jdbc.update("INSERT INTO machines(id,code,name) VALUES (?,'FIXTURE','Fixture')", machine);
-        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A1',6)", slot, machine);
+        jdbc.update("INSERT INTO machine_slots(id,machine_id,slot_code,capacity) VALUES (?,?,'A',6)", slot, machine);
         var slotBefore = jdbc.queryForList("SELECT * FROM machine_slots");
         UUID id = create("IMMUTABLE", adminToken);
         var batchBefore = jdbc.queryForList("SELECT * FROM product_batches");
@@ -302,7 +302,7 @@ class ProductBatchManagementIntegrationTest {
         assertThatThrownBy(() -> service.listBatches(0, 20, null, null)).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> service.getBatch(UUID.randomUUID())).isInstanceOf(AccessDeniedException.class);
         assertThatThrownBy(() -> service.createBatch(null)).isInstanceOf(AccessDeniedException.class);
-        var principal = new AuthenticatedUser(staffId, "test@example.invalid", "", UserStatus.ACTIVE, List.of(new SimpleGrantedAuthority("ROLE_STAFF")));
+        var principal = new AuthenticatedUser(staffId, "test@example.invalid", "", UserStatus.ACTIVE, com.fruitmachine.backend.support.SeededAuthorities.of("STAFF"));
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         assertThatThrownBy(() -> service.createBatch(new CreateProductBatchRequest("BAD", product.getId(), NOW, NOW.plusSeconds(60), 0))).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
         assertThatThrownBy(() -> service.createBatch(new CreateProductBatchRequest("BAD", product.getId(), NOW, NOW, 1))).isInstanceOf(com.fruitmachine.backend.common.exception.BadRequestException.class);

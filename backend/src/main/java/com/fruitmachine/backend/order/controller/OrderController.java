@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -29,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping(produces = "application/json")
-@PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+@PreAuthorize(Permissions.HAS_ORDER_READ)
 @SecurityRequirement(name = "bearerAuth")
 @Tag(name = "Orders", description = "Read-only order management for ADMIN and STAFF. There is no write, delete or status endpoint; order status is produced only by backend workflows.")
 @ApiResponses({
@@ -43,7 +44,7 @@ public class OrderController {
 
     @GetMapping("/api/v1/orders")
     @Operation(operationId = "listOrders", summary = "List and filter orders",
-            description = "ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode). "
+            description = "ADMIN or STAFF. Database pagination page0/size20/max100. Filters combine: status, machineId, createdFrom (inclusive), createdTo (exclusive), search (literal case-insensitive substring of orderCode), discounted (issue #61). "
                     + "Approved sorts createdAt (default desc), totalAmount, orderCode, each with a UUID tie-break.")
     @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Database page of order summaries")
     public ResponseEntity<ApiResponse<OrderPageResponse>> list(
@@ -54,8 +55,9 @@ public class OrderController {
             @RequestParam(required = false) @Parameter(description = "ISO-8601 instant, inclusive lower bound of createdAt.") Instant createdFrom,
             @RequestParam(required = false) @Parameter(description = "ISO-8601 instant, exclusive upper bound of createdAt.") Instant createdTo,
             @RequestParam(required = false) @Parameter(description = "Literal case-insensitive substring of orderCode.") String search,
-            @RequestParam(defaultValue = "createdAt,desc") @Parameter(description = "One of createdAt, totalAmount, orderCode with optional asc/desc.") String sort) {
-        return ok("Orders retrieved", orders.list(page, size, status, machineId, createdFrom, createdTo, search, sort));
+            @RequestParam(defaultValue = "createdAt,desc") @Parameter(description = "One of createdAt, totalAmount, orderCode with optional asc/desc.") String sort,
+            @RequestParam(required = false) @Parameter(description = "true: only orders with a discount (discountAmount > 0); false: only full-price orders.") Boolean discounted) {
+        return ok("Orders retrieved", orders.list(page, size, status, machineId, createdFrom, createdTo, search, sort, discounted));
     }
 
     @GetMapping("/api/v1/orders/{id}")

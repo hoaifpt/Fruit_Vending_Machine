@@ -18,11 +18,31 @@ springdoc:
     enabled: false
 
 app:
+  # Issue #74: tests build report links and hash client addresses with fixed test-only values.
+  public-report:
+    base-url: https://report.test.invalid/report
+    allowed-origins: https://report.test.invalid
+    ip-hash-secret: test-only-report-ip-hash-secret
+    trusted-proxies: 10.9.9.9
   order:
     expiry-sweep:
       # The sweep is invoked directly by tests with a controlled clock.
+      enabled: false
+  maintenance-schedule:
+    # Tests call MaintenancePlanScheduler.runOnce directly.
+    enabled: false
+  work-order:
+    overdue:
+      # Tests call WorkOrderOverdueJob.runOnce directly with a controlled time.
+      enabled: false
+  maintenance-command:
+    dispatcher:
+      # Tests call MaintenanceCommandService.expireOrResend directly with a controlled clock.
       enabled: false
   dispense:
     sweep:
       # Tests call DispenseService.expireOrResend directly.
       enabled: false
+  health-check:
+    # Tests call MachineHealthCheckRunner.runOnce directly with a controlled clock.
+    enabled: false

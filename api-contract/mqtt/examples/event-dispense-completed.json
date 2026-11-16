@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-18",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "eventType": "DISPENSE_COMPLETED",
+    "details": {
+      "commandId": "D-7F3A91C2E4B05D18",
+      "columnCode": "B"
+    }
+  }
+}

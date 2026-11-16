@@ -157,3 +157,62 @@ Chạy `mvn clean verify` trong module backend/ với Java21, Maven và Docker. 
 PostgreSQL18 Testcontainers riêng, kiểm toàn bộ M1 management, Flyway/JPA/JWT/RBAC và
 atomicity/concurrency của inventory. [Hướng dẫn testing/CI](docs/core-integration-testing.md)
 mô tả hạ tầng dùng chung, isolation, reports và GitHub Actions backend workflow.
+
+## Staging: MQTT qua TLS — Issue #59
+
+Trên staging broker chỉ nhận MQTT qua TLS 1.2+ ở cổng 8883 (`mqtt.<staging-domain>`, chứng chỉ Let's Encrypt); 1883 không mở ra ngoài.
+Cách dựng broker, cấp/gia hạn chứng chỉ, firewall và tài khoản máy: [infra/mosquitto/README.md](infra/mosquitto/README.md).
+Quy tắc kết nối cho backend và ESP32: [api-contract/mqtt-contract.md](api-contract/mqtt-contract.md) §8.1.
+
+Biến môi trường của backend trên staging (giá trị bí mật chỉ nằm trong `.env`, không commit):
+
+```text
+SPRING_PROFILES_ACTIVE=prod,staging
+MQTT_ENABLED=true
+MQTT_BROKER_URL=ssl://mqtt.<staging-domain>:8883
+MQTT_REQUIRE_TLS=true
+MQTT_USERNAME=backend
+MQTT_PASSWORD=<secret>
+MQTT_TRUSTSTORE_PATH=          # chỉ khi dùng CA riêng (PKCS12)
+MQTT_TRUSTSTORE_PASSWORD=
+```
+
+Local vẫn dùng `tcp://127.0.0.1:1883` không TLS (`docker compose -f infra/docker-compose.yml up -d`).
+
+## Giảm giá hàng sắp hết hạn — Issue #61
+
+Bát thuộc lô hết hạn trong ngày (giờ Việt Nam) được bán giảm giá theo setting Admin (mặc định 50 %), giá chốt khi tạo đơn.
+Mọi "ngày kinh doanh" (mã đơn, giảm giá) dùng `BUSINESS_ZONE` (mặc định `Asia/Ho_Chi_Minh`).
+Xem [docs/near-expiry-pricing.md](docs/near-expiry-pricing.md).
+
+## Lệnh bảo trì từ xa — Issue #64
+
+Khi máy ở MAINTENANCE, Staff/Admin bỏ hộp đầu cột, xả cột, mở/đóng cổng nạp qua portal; Admin gửi RESET. Tồn kho chỉ đổi khi máy
+báo COMPLETED (hoặc Staff đối soát DONE). Xem [docs/maintenance-commands.md](docs/maintenance-commands.md).
+
+## Work order — Issue #66
+
+Việc nạp hàng, bảo trì, sự cố tại máy: Admin tạo/giao (hoặc tạo từ cảnh báo), Staff bắt đầu (máy dừng bán) và hoàn thành với kết quả,
+cảnh báo liên kết được đóng, lịch sử đầy đủ và thông báo trên portal. Xem [docs/work-orders.md](docs/work-orders.md).
+
+## Nạp hàng — Issue #68
+
+Admin xem gợi ý nạp từng cột và lập work order RESTOCK có dòng; Staff xả tô cũ bằng lệnh bảo trì, nạp tô theo dòng (giữ đúng FIFO và
+hạn dùng) rồi hoàn thành với đối soát planned/loaded; cảnh báo tồn kho đóng ngay. Nạp trực tiếp chỉ còn cho ADMIN.
+Xem [docs/restock.md](docs/restock.md).
+
+## Lịch bảo trì định kỳ — Issue #70
+
+Admin lập kế hoạch bảo trì theo máy (mỗi N ngày, báo trước, giờ hạn, người nhận); hệ thống tự tạo work order MAINTENANCE khi tới hạn
+và tính hạn kế tiếp khi hoàn thành. Mọi ngày theo giờ Việt Nam. Xem [docs/maintenance-plans.md](docs/maintenance-plans.md).
+
+## Hoàn tiền thủ công — Issue #72
+
+Admin xem danh sách cần hoàn (nhả lỗi, trả trễ, trả trùng) kèm tài khoản người trả từ webhook đã xác thực, tự chuyển khoản rồi ghi nhận
+mã giao dịch; payment (và order khi phù hợp) thành `REFUNDED`, có audit, danh sách và tổng hợp cho báo cáo. Xem [docs/refunds.md](docs/refunds.md).
+
+## Phản ánh sự cố của khách — Issue #74
+
+Kiosk hiển thị QR "Báo sự cố" (theo máy, có thể kèm mã đơn); khách gửi form công khai không cần tài khoản (giới hạn 5 lần / phút,
+honeypot, ảnh được kiểm tra và xóa metadata). Backend đối chiếu đơn, tạo hoặc gắn work order INCIDENT, báo Admin và đưa ca cần hoàn tiền
+vào danh sách hoàn tiền; hoàn tiền xong thì phản ánh tự đóng. Xem [docs/customer-reports.md](docs/customer-reports.md).

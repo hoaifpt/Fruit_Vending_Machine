@@ -1,5 +1,8 @@
 package com.fruitmachine.backend.inventory.service;
 
+import com.fruitmachine.backend.pricing.model.NearExpiryWindow;
+import com.fruitmachine.backend.pricing.service.PricingService;
+import com.fruitmachine.backend.pricing.service.PricingSettingsService;
 import com.fruitmachine.backend.common.exception.*;
 import com.fruitmachine.backend.inventory.dto.*;
 import com.fruitmachine.backend.inventory.entity.*;
@@ -21,6 +24,7 @@ import java.util.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -28,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 
 @Service @RequiredArgsConstructor @Validated
-@PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
 public class InventoryService {
     private static final Set<InventoryStatus> PHYSICAL = Set.of(InventoryStatus.AVAILABLE, InventoryStatus.RESERVED, InventoryStatus.EXPIRED, InventoryStatus.DISPENSE_FAILED);
     private final InventoryItemRepository items;
@@ -39,9 +42,14 @@ public class InventoryService {
     private final MachineSlotRepository slots;
     private final UserRepository users;
     private final InventoryMapper mapper;
+    private final InventoryLoader loader;
+    private final PricingService pricing;
+    private final PricingSettingsService pricingSettings;
     private final Clock clock;
 
     @Transactional
+    // Issue #68: direct loading (outside a restock work order) is ADMIN only.
+    @PreAuthorize(Permissions.HAS_INVENTORY_LOAD_DIRECT)
     public InventoryLoadResponse loadInventory(@Valid LoadInventoryRequest request) {
         // Scalar lookup avoids managed stale snapshots before acquiring locks.
         UUID productId = batches.findProductIdById(request.batchId()).orElseThrow(() -> missing("Product batch"));
@@ -56,21 +64,13 @@ public class InventoryService {
         if (!batch.getExpiresAt().isAfter(now)) throw new ConflictException("Batch is expired");
         if (machine.getStatus() == MachineStatus.INACTIVE) throw new ConflictException("Machine must be ACTIVE or MAINTENANCE for loading");
         if (slot.getStatus() != SlotStatus.ACTIVE) throw new ConflictException("Slot must be ACTIVE for loading");
-        long occupied = items.countBySlotIdAndStatusIn(slot.getId(), PHYSICAL);
-        if (occupied + request.quantity() > slot.getCapacity()) throw new ConflictException("Slot capacity exceeded");
-        if (items.countByBatchId(batch.getId()) + request.quantity() > batch.getQuantity()) throw new ConflictException("Batch declared quantity exceeded");
         User actor = actor(); UUID operation = UUID.randomUUID();
-        var loaded = new ArrayList<InventoryItem>();
-        for (int n = 0; n < request.quantity(); n++) {
-            var item = new InventoryItem(); item.setBatch(batch); item.setSlot(slot);
-            item.setStatus(InventoryStatus.AVAILABLE); item.setLoadedAt(now); loaded.add(item);
-        }
-        items.saveAllAndFlush(loaded);
-        for (var item : loaded) append(item, machineId, slot.getId(), InventoryTransactionType.LOAD, operation, actor, null, null, InventoryStatus.AVAILABLE);
-        history.flush();
-        return new InventoryLoadResponse(operation, loaded.size(), loaded.stream().map(item -> mapper.item(item, now)).toList());
+        var loaded = loader.load(batch, slot, machineId, request.quantity(), actor, operation, null, now, false);
+        var window = discountWindow(now);
+        return new InventoryLoadResponse(operation, loaded.size(), loaded.stream().map(item -> mapper.item(item, now, window)).toList());
     }
     @Transactional
+    @PreAuthorize(Permissions.HAS_INVENTORY_WRITE)
     public InventoryItemResponse removeInventoryItem(UUID id, @Valid RemoveInventoryRequest request) {
         UUID slotId = items.findSlotIdById(id);
         // Removal only takes Slot -> Item locks; it cannot form a cycle with loading.
@@ -85,11 +85,15 @@ public class InventoryService {
         append(item, slot == null ? null : slot.getMachine().getId(), slotId, InventoryTransactionType.REMOVE,
                 UUID.randomUUID(), actor, request.reason(), before, InventoryStatus.REMOVED);
         items.flush(); history.flush();
-        return mapper.item(item, now);
+        return mapper.item(item, now, discountWindow(now));
     }
     private User actor() {
         var principal = (AuthenticatedUser) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         return users.findById(principal.getId()).orElseThrow(() -> missing("Actor"));
+    }
+    /** Issue #61: the near-expiry window with the current setting, read once per request. */
+    private NearExpiryWindow discountWindow(Instant now) {
+        return pricing.window(now, pricingSettings.current());
     }
     private void append(InventoryItem item, UUID machineId, UUID slotId, InventoryTransactionType type, UUID reference,
             User actor, String reason, InventoryStatus before, InventoryStatus after) {
@@ -98,10 +102,13 @@ public class InventoryService {
         event.setReason(reason); event.setStatusBefore(before); event.setStatusAfter(after); history.save(event);
     }
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryItemResponse getInventoryItem(UUID id) {
-        return mapper.item(items.findById(id).orElseThrow(() -> missing("Inventory item")), clock.instant());
+        Instant now = clock.instant();
+        return mapper.item(items.findById(id).orElseThrow(() -> missing("Inventory item")), now, discountWindow(now));
     }
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryPageResponse listInventory(int page, int size, UUID machineId, UUID slotId, UUID batchId, InventoryStatus status, Boolean expired, String sort) {
         Instant now = clock.instant();
         Specification<InventoryItem> filter = (root, query, cb) -> {
@@ -114,20 +121,24 @@ public class InventoryService {
             return cb.and(predicates.toArray(jakarta.persistence.criteria.Predicate[]::new));
         };
         var result = items.findAll(filter, page(page, size, sort, Set.of("id", "status", "loadedAt", "createdAt", "updatedAt")));
-        return new InventoryPageResponse(result.getContent().stream().map(item -> mapper.item(item, now)).toList(), page, size, result.getTotalElements(), result.getTotalPages());
+        var window = discountWindow(now);
+        return new InventoryPageResponse(result.getContent().stream().map(item -> mapper.item(item, now, window)).toList(), page, size, result.getTotalElements(), result.getTotalPages());
     }
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryPageResponse getMachineInventory(UUID machineId, int page, int size, InventoryStatus status, Boolean expired) {
         if (!machines.existsById(machineId)) throw missing("Machine");
         return listInventory(page, size, machineId, null, null, status, expired, null);
     }
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryPageResponse getSlotInventory(UUID machineId, UUID slotId, int page, int size, InventoryStatus status, Boolean expired) {
         requireSlot(machineId, slotId);
         return listInventory(page, size, machineId, slotId, null, status, expired, null);
     }
     /** REPEATABLE READ so the counts and the head come from one snapshot. */
     @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventorySummaryResponse getInventorySummary(UUID machineId, UUID slotId) {
         requireSlot(machineId, slotId); Instant now = clock.instant();
         var head = items.findHeadCandidates(slotId, PHYSICAL, PageRequest.of(0, 1)).stream().findFirst().orElse(null);
@@ -144,6 +155,7 @@ public class InventoryService {
         return slots.findByIdAndMachineId(slotId, machineId).orElseThrow(() -> missing("Slot in specified machine"));
     }
     @Transactional(readOnly = true)
+    @PreAuthorize(Permissions.HAS_INVENTORY_READ)
     public InventoryTransactionPageResponse listInventoryTransactions(int page, int size, UUID itemId, UUID machineId, UUID slotId, UUID referenceId, InventoryTransactionType type) {
         Specification<InventoryTransaction> filter = (root, query, cb) -> {
             var predicates = new ArrayList<jakarta.persistence.criteria.Predicate>();

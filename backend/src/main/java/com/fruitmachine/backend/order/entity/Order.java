@@ -43,6 +43,11 @@ public class Order extends CreatedEntity {
     @Column(name = "subtotal", precision = 12, scale = 2, nullable = false)
     private BigDecimal subtotal;
 
+    /** subtotal - totalAmount (issue #61, CHECK in V18); 0 for orders without a discount. */
+    @Column(name = "discount_amount", precision = 12, scale = 2, nullable = false)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+
+    /** Amount charged: the payment amount. */
     @Column(name = "total_amount", precision = 12, scale = 2, nullable = false)
     private BigDecimal totalAmount;
 
@@ -57,6 +62,10 @@ public class Order extends CreatedEntity {
 
     @Column(name = "expires_at", columnDefinition = "timestamptz")
     private Instant expiresAt;
+
+    /** Set only together with status REFUNDED (issue #72, CHECK ck_orders_refunded). */
+    @Column(name = "refunded_at", columnDefinition = "timestamptz")
+    private Instant refundedAt;
 
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY)
     @Setter(AccessLevel.NONE)

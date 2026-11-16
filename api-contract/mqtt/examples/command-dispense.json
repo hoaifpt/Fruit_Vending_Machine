@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "messageId": "3f6c1d2a-8b4e-4c71-9a05-2e7d6b1f0c11",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "type": "DISPENSE",
+    "commandId": "D-7F3A91C2E4B05D18",
+    "columnCode": "B"
+  }
+}

@@ -1,6 +1,9 @@
 # ESP32 firmware (fruit)
 
-Two channels (see [docs/mqtt-dispense.md](../../docs/mqtt-dispense.md)):
+Two channels. Every MQTT topic, message, field, timing and error code is defined in the contract
+[api-contract/mqtt-contract.md](../../api-contract/mqtt-contract.md) (examples: `api-contract/mqtt/examples/`, usable as
+test fixtures; implementation status of each message: contract §1, §3, §4). The purchase flow is explained in
+[docs/mqtt-dispense.md](../../docs/mqtt-dispense.md).
 
 - **Dispense over MQTT** (purchase flow): the backend publishes `{"type":"DISPENSE","commandId":"D-…"}` to
   `vending/{MACHINE_CODE}/commands`; the board answers on `vending/{MACHINE_CODE}/events` with `DISPENSE_ACCEPTED`,
@@ -68,7 +71,14 @@ Send one command per line (`\n`). Lines starting with `# ` are logs. At boot the
 ## MQTT test (optional)
 
 Backend repo: create machine `FV-DEV-001`, start the broker (`infra/mosquitto`, reachable from the LAN) and the backend with
-`MQTT_ENABLED=true` (see `docs/mqtt-integration.md`). In `secrets.h` set Wi-Fi, `APP_MQTT_HOST` (computer IP), `APP_MACHINE_CODE`
+`MQTT_ENABLED=true` (see `docs/mqtt-dispense.md`). In `secrets.h` set Wi-Fi, `APP_MQTT_HOST` (computer IP), `APP_MACHINE_CODE`
 and the machine broker password. Expected: `# MQTT connected as FV-DEV-001`; the backend receives `status` ONLINE at every connect,
 `events` DISPENSE_COMPLETED / DISPENSE_ABORTED / BOWL_SENSOR_TRIGGERED, and `status` OFFLINE (Last Will) when the board loses power.
 Telemetry starts once a temperature/humidity sensor is added (`MqttService::publishTelemetry`).
+
+## Differences from the MQTT contract (v1.0.0)
+
+- `DISPENSE` reads the column from `payload.column` (`1`/`2`) or `payload.slot` (`"B"`/`"2"` → column 2); the contract field is
+  `columnCode` (`"A"`/`"B"`), FIRMWARE_PENDING. Without a column the firmware uses column 1 (A).
+- No `heartbeat` and no maintenance commands in this firmware yet (FIRMWARE_PENDING; implemented on the unmerged branch
+  `feature/firmware-staff-refill-and-maintenance`).

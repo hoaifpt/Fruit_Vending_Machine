@@ -3,6 +3,8 @@ package com.fruitmachine.backend.payment.entity;
 import com.fruitmachine.backend.common.entity.CreatedEntity;
 import com.fruitmachine.backend.order.entity.Order;
 import com.fruitmachine.backend.payment.enums.PaymentStatus;
+import com.fruitmachine.backend.payment.enums.RefundReason;
+import com.fruitmachine.backend.user.entity.User;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
@@ -48,4 +50,23 @@ public class Payment extends CreatedEntity {
 
     @Column(name = "expired_at", columnDefinition = "timestamptz")
     private Instant expiredAt;
+
+    // Refund fields (issue #72): all set together when the payment becomes REFUNDED (CHECK ck_payments_refund).
+    @Column(name = "refunded_at", columnDefinition = "timestamptz")
+    private Instant refundedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "refunded_by")
+    private User refundedBy;
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "refund_reason", length = 24)
+    private RefundReason refundReason;
+
+    @Column(name = "refund_transfer_ref", length = 64)
+    private String refundTransferRef;
+
+    @Column(name = "refund_note", length = 500)
+    private String refundNote;
 }

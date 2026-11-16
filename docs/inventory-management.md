@@ -101,3 +101,8 @@ kiểm tra atomicity, capacity/batch concurrency, expiry, role guards, query và
 InventoryHistoryMigrationTest kiểm nâng V8 -> V9 với lịch sử cũ;
 InventoryManagementDocumentationTest so sánh Swagger với contract cho 8 operations/13 schemas.
 Browser Try it out chưa được xác minh trong môi trường agent vì browser kernel không khởi tạo.
+
+## Nạp trực tiếp chỉ còn cho ADMIN (issue #68)
+
+`POST /api/v1/inventory/load` cần `INVENTORY_LOAD_DIRECT` (chỉ ADMIN). STAFF nạp hàng qua work order RESTOCK
+(`POST /api/v1/work-orders/{id}/restock-lines/{lineId}/loads`, [restock.md](restock.md)); STAFF vẫn gỡ tô (`/inventory/{id}/remove`).

@@ -18,7 +18,7 @@ class OrderExpirySchedulerIntegrationTest extends AbstractCoreIntegrationTest {
         UUID machine = fixtures.machine(admin.token());
         UUID slot = fixtures.slot(machine, 5, admin.token());
         UUID product = fixtures.product(admin.token());
-        fixtures.api("POST", "/api/v1/inventory/load", Map.of("batchId", fixtures.batch(product, 2, staff.token()), "slotId", slot, "quantity", 2), staff.token(), 201);
+        fixtures.api("POST", "/api/v1/inventory/load", Map.of("batchId", fixtures.batch(product, 2, staff.token()), "slotId", slot, "quantity", 2), admin.token(), 201);
         String key = fixtures.api("POST", "/api/v1/machines/" + machine + "/kiosk-credentials", null, admin.token(), 201).path("apiKey").asText();
         var request = org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/api/v1/kiosk/orders")
                 .header("X-Kiosk-Key", key).contentType("application/json")

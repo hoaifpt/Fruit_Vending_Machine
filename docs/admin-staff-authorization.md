@@ -1,5 +1,8 @@
 # ADMIN/STAFF authorization — issue #10
 
+> Đã được thay bằng phân quyền theo permission ở issue #48: xem [permission-authorization.md](permission-authorization.md).
+> Nội dung dưới đây mô tả nền tảng role ban đầu và được giữ lại làm lịch sử.
+
 Backend đã có nền RBAC bằng Spring Security method authorization. Issue này **không**
 thêm User Management, `/api/v1/users`, permission API hay endpoint nghiệp vụ/demo.
 Issue #12 bổ sung [User Management](user-management.md), tái sử dụng nền RBAC này

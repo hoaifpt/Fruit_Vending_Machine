@@ -46,7 +46,15 @@ services:
       PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
       PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-}
       PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-}
-      MQTT_ENABLED: "false"
+      # Staging (issue #59): SPRING_PROFILES_ACTIVE=prod,staging, MQTT_ENABLED=true, MQTT_BROKER_URL=ssl://mqtt.<staging-domain>:8883.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      MQTT_ENABLED: ${MQTT_ENABLED:-false}
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-tcp://127.0.0.1:1883}
+      MQTT_REQUIRE_TLS: ${MQTT_REQUIRE_TLS:-false}
+      MQTT_USERNAME: ${MQTT_USERNAME:-backend}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TRUSTSTORE_PATH: ${MQTT_TRUSTSTORE_PATH:-}
+      MQTT_TRUSTSTORE_PASSWORD: ${MQTT_TRUSTSTORE_PASSWORD:-}
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
       # Trust X-Forwarded-* from Caddy so generated URLs (Swagger) use the public https origin.
       SERVER_FORWARD_HEADERS_STRATEGY: framework

@@ -24,6 +24,11 @@ spring:
   sql:
     init:
       mode: never
+  # Issue #74: public report form uploads (3 photos x 2 MB + JSON); larger requests are 413.
+  servlet:
+    multipart:
+      max-file-size: 7MB
+      max-request-size: 7MB
 
 server:
   port: ${SERVER_PORT:8080}
@@ -47,6 +52,8 @@ management:
       show-components: never
 
 app:
+  # Issue #61: business day of order codes, the near-expiry discount and reports. Database and JDBC stay UTC.
+  business-zone: ${BUSINESS_ZONE:Asia/Ho_Chi_Minh}
   bootstrap:
     admin:
       email: ${INITIAL_ADMIN_EMAIL:}
@@ -81,7 +88,7 @@ app:
       enabled: ${ORDER_EXPIRY_SWEEP_ENABLED:true}
       interval: ${ORDER_EXPIRY_SWEEP_INTERVAL:PT30S}
       batch-size: ${ORDER_EXPIRY_SWEEP_BATCH_SIZE:50}
-  # Dispense commands to machines over MQTT (docs/mqtt-dispense.md). Disabled: commands stay PENDING and time out.
+  # Dispense commands to machines over MQTT (api-contract/mqtt-contract.md). Disabled: commands stay PENDING until pending-timeout.
   mqtt:
     enabled: ${MQTT_ENABLED:false}
     broker-url: ${MQTT_BROKER_URL:tcp://127.0.0.1:1883}
@@ -89,9 +96,61 @@ app:
     username: ${MQTT_USERNAME:}
     password: ${MQTT_PASSWORD:}
     topic-root: ${MQTT_TOPIC_ROOT:vending}
+    # Issue #59: staging sets ssl://mqtt.<staging-domain>:8883 and MQTT_REQUIRE_TLS=true (startup fails on tcp://).
+    require-tls: ${MQTT_REQUIRE_TLS:false}
+    # Only for a private CA: PKCS12 truststore; empty = JVM trust store (Let's Encrypt). Never log the password.
+    truststore-path: ${MQTT_TRUSTSTORE_PATH:}
+    truststore-password: ${MQTT_TRUSTSTORE_PASSWORD:}
+  # Issue #74: public customer report form (kiosk QR -> web form). base-url is the web route, e.g. https://staging.freshvend.vn/report.
+  public-report:
+    base-url: ${PUBLIC_REPORT_BASE_URL:}
+    # Comma-separated web origins allowed to call /api/v1/public/** from a browser (CORS); empty = none.
+    allowed-origins: ${PUBLIC_REPORT_ALLOWED_ORIGINS:}
+    rate-limit-per-minute: ${REPORT_RATE_LIMIT_PER_MINUTE:5}
+    rate-limit-per-machine-per-hour: ${REPORT_RATE_LIMIT_PER_MACHINE_HOUR:60}
+    form-rate-limit-per-minute: ${REPORT_FORM_RATE_LIMIT_PER_MINUTE:30}
+    # X-Forwarded-For is honoured only when the remote address is one of these (comma-separated exact addresses).
+    trusted-proxies: ${REPORT_TRUSTED_PROXIES:}
+    # HMAC secret for customer_reports.source_ip_hash; never logged. Unset = a random secret per start (warning).
+    ip-hash-secret: ${REPORT_IP_HASH_SECRET:}
+  # Issue #70: due maintenance plans become work orders (checked every hour and shortly after startup).
+  maintenance-schedule:
+    enabled: ${MAINTENANCE_SCHEDULE_ENABLED:true}
+    interval: ${MAINTENANCE_SCHEDULE_INTERVAL:PT1H}
+  # Issue #66: overdue work orders are announced once, checked every 5 minutes.
+  work-order:
+    overdue:
+      enabled: ${WORK_ORDER_OVERDUE_ENABLED:true}
+      interval: ${WORK_ORDER_OVERDUE_INTERVAL:PT5M}
+  # Issue #64: maintenance commands (re-send, accept and completion timeouts, dispatcher tick).
+  maintenance-command:
+    resend-interval: ${MAINT_CMD_RESEND:PT5S}
+    accept-timeout: ${MAINT_CMD_ACCEPT_TIMEOUT:PT30S}
+    complete-timeout: ${MAINT_CMD_COMPLETE_TIMEOUT:PT90S}
+    dispatcher:
+      enabled: ${MAINT_CMD_DISPATCHER_ENABLED:true}
+      interval: ${MAINT_CMD_DISPATCHER_INTERVAL:PT1S}
   dispense:
     resend-after: ${DISPENSE_RESEND_AFTER:PT5S}
+    # Published command without a result, counted from its first delivery: outcome unknown, bowl blocked, machine MAINTENANCE.
     timeout: ${DISPENSE_TIMEOUT:PT60S}
+    # Command that could never be published, counted from its creation: nothing moved, the bowl is available again.
+    pending-timeout: ${DISPENSE_PENDING_TIMEOUT:PT120S}
+  # Connectivity from machines.last_seen_at: 2 missed heartbeats (30 s each) = WARNING, 180 s = OFFLINE (MQTT contract §7).
+  machine-health:
+    warning-after: ${MACHINE_WARNING_AFTER:PT60S}
+    offline-after: ${MACHINE_OFFLINE_AFTER:PT180S}
+  # Machine health check (issue #58): state-based alerts every interval for ACTIVE and MAINTENANCE machines.
+  health-check:
+    enabled: ${HEALTH_CHECK_ENABLED:true}
+    interval: ${HEALTH_CHECK_INTERVAL:PT60S}
+    low-stock-threshold: ${ALERT_LOW_STOCK_THRESHOLD:2}
+    expiring-within: ${ALERT_EXPIRING_WITHIN:PT12H}
+    environment-grace: ${ALERT_ENVIRONMENT_GRACE:PT5M}
+  # Telemetry intake (in memory, one backend instance): readings closer than min-interval and repeated messageIds are dropped.
+  telemetry:
+    min-interval: ${TELEMETRY_MIN_INTERVAL:PT10S}
+    duplicate-window: ${TELEMETRY_DUPLICATE_WINDOW:PT10M}
     sweep:
       enabled: ${DISPENSE_SWEEP_ENABLED:true}
       interval: ${DISPENSE_SWEEP_INTERVAL:PT2S}

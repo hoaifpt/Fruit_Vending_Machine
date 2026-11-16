@@ -1,5 +1,8 @@
 package com.fruitmachine.backend.inventory.service;
 
+import com.fruitmachine.backend.pricing.enums.DiscountReason;
+import com.fruitmachine.backend.pricing.service.PricingService;
+import com.fruitmachine.backend.pricing.service.PricingSettingsService;
 import com.fruitmachine.backend.common.exception.ResourceNotFoundException;
 import com.fruitmachine.backend.config.properties.OrderProperties;
 import com.fruitmachine.backend.inventory.dto.KioskCatalogProductResponse;
@@ -26,6 +29,8 @@ public class KioskCatalogService {
     private final InventoryItemRepository items;
     private final MachineRepository machines;
     private final OrderProperties properties;
+    private final PricingService pricing;
+    private final PricingSettingsService pricingSettings;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -33,12 +38,18 @@ public class KioskCatalogService {
         var machine = machines.findById(kiosk.machineId()).orElseThrow(() -> new ResourceNotFoundException("Machine not found"));
         boolean accepting = machine.getStatus() == MachineStatus.ACTIVE;
         // Same rule as reservation: only a sellable slot head that outlives the hold deadline makes a product orderable.
-        Instant holdDeadline = clock.instant().plus(properties.reservationTtl()).truncatedTo(ChronoUnit.MICROS);
-        List<KioskCatalogProductResponse> products = !accepting ? List.of()
-                : items.findCatalog(machine.getId(), holdDeadline).stream()
-                        .map(row -> new KioskCatalogProductResponse(row.getProductId(), row.getSku(), row.getName(),
-                                row.getDescription(), row.getPrice(), row.getImageUrl(), row.getAvailableQuantity()))
-                        .toList();
+        Instant now = clock.instant();
+        Instant holdDeadline = now.plus(properties.reservationTtl()).truncatedTo(ChronoUnit.MICROS);
+        List<KioskCatalogProductResponse> products = List.of();
+        if (accepting) {
+            // Issue #61: setting read once per request; today's bounds in the business zone are query parameters.
+            var window = pricing.window(now, pricingSettings.current());
+            products = items.findCatalog(machine.getId(), holdDeadline, window.enabled(), window.percent(), window.dayStart(), window.dayEnd()).stream()
+                    .map(row -> new KioskCatalogProductResponse(row.getProductId(), row.getSku(), row.getName(), row.getDescription(),
+                            row.getPrice(), row.getOriginalPrice(), row.getDiscountPercent(), DiscountReason.valueOf(row.getDiscountReason()),
+                            row.getImageUrl(), row.getAvailableQuantity()))
+                    .toList();
+        }
         return new KioskCatalogResponse(machine.getId(), machine.getCode(), accepting, products);
     }
 }

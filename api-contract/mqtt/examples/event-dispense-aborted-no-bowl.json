@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-19",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "eventType": "DISPENSE_ABORTED",
+    "details": {
+      "commandId": "D-0C4E8A2B6D1F3957",
+      "columnCode": "A",
+      "reason": "NO_BOWL_DETECTED"
+    }
+  }
+}

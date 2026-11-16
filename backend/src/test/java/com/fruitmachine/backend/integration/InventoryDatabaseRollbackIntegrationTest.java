@@ -22,7 +22,7 @@ class InventoryDatabaseRollbackIntegrationTest extends AbstractCoreIntegrationTe
         try {
             jdbc.execute("CREATE TRIGGER " + name + " BEFORE INSERT ON inventory_transactions FOR EACH ROW EXECUTE FUNCTION " + name + "()");
             var error = fixtures.response("POST", "/api/v1/inventory/load",
-                    TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 4), staff.token(), httpStatus);
+                    TestDataFactory.loadBody(stock.batchId(), stock.slotId(), 4), admin.token(), httpStatus);
             assertThat(error.path("status").asInt()).isEqualTo(httpStatus);
             assertThat(error.path("path").asText()).isEqualTo("/api/v1/inventory/load");
             assertThat(error.path("message").asText()).isNotBlank();
@@ -37,7 +37,7 @@ class InventoryDatabaseRollbackIntegrationTest extends AbstractCoreIntegrationTe
             jdbc.execute("DROP FUNCTION " + name + "() CASCADE");
         }
         // Recovery commits normally after the injected fault is removed.
-        fixtures.load(stock, 4, staff.token());
+        fixtures.load(stock, 4, admin.token());
         assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_items WHERE batch_id=?", Long.class, stock.batchId())).isEqualTo(4);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM inventory_transactions WHERE machine_id=?", Long.class, stock.machineId())).isEqualTo(4);
     }

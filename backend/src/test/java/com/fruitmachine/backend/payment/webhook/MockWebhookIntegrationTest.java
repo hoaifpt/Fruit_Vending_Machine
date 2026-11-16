@@ -21,7 +21,7 @@ class MockWebhookIntegrationTest extends AbstractOrderIntegrationTest {
     @Test
     void aSignedMockWebhookMarksTheMockPaymentSuccessfulAndTheOrderPaid() throws Exception {
         UUID machine = fixtures.machine(admin.token());
-        UUID slot = createSlot(machine, "M1", 10), product = createProduct("Mock bowl", "35000");
+        UUID slot = createSlot(machine, "A", 10), product = createProduct("Mock bowl", "35000");
         load(fixtures.batch(product, 3, staff.token()), slot, 3);
         String key = issueKey(machine);
         UUID orderId = UUID.fromString(kioskData("POST", "/api/v1/kiosk/orders", key, orderBody(product), 201).path("id").asText());

@@ -1,0 +1,12 @@
+# Staging override (issue #59): TLS-only broker. Run from the repository root:
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.staging.yml up -d
+# Needs /etc/fruit-mqtt/certs/{fullchain,privkey}.pem (see infra/mosquitto/README.md) and infra/mosquitto/passwd.
+services:
+  mosquitto:
+    restart: unless-stopped
+    # !override replaces the base port list: 1883 must not be published on staging (Docker Compose 2.24+).
+    ports: !override
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/mosquitto.staging.conf:/mosquitto/config/mosquitto.conf:ro
+      - /etc/fruit-mqtt/certs:/mosquitto/certs:ro

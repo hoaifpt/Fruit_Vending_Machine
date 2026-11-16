@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-4",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "state": "ONLINE",
+    "uptimeSeconds": 12345,
+    "wifiRssi": -55,
+    "freeHeap": 18240,
+    "firmwareVersion": "0.3.0"
+  }
+}

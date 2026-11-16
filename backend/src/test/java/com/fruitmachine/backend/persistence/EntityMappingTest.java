@@ -107,10 +107,10 @@ class EntityMappingTest {
         assertThat(environment.getProperty("spring.jpa.hibernate.ddl-auto")).isEqualTo("validate");
         assertThat(environment.getProperty("spring.jpa.generate-ddl")).isEqualTo("false");
         assertThat(jdbc.queryForObject("SELECT count(*) FROM flyway_schema_history WHERE success", Integer.class))
-                .isEqualTo(12);
+                .isEqualTo(24);
 
         var entities = entityManagerFactory.getMetamodel().getEntities();
-        assertThat(entities).hasSize(20);
+        assertThat(entities).hasSize(32);
         Set<String> tables = jdbc.queryForList("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
@@ -122,6 +122,7 @@ class EntityMappingTest {
         var sessionFactory = entityManagerFactory.unwrap(SessionFactoryImplementor.class);
         Map<String, String> tableFeatures = Map.ofEntries(
                 Map.entry("users", "user"), Map.entry("roles", "user"), Map.entry("user_roles", "user"),
+                Map.entry("permissions", "user"), Map.entry("role_permissions", "user"),
                 Map.entry("machines", "machine"), Map.entry("machine_slots", "machine"),
                 Map.entry("machine_events", "machine"), Map.entry("products", "product"),
                 Map.entry("product_batches", "product"), Map.entry("inventory_items", "inventory"),
@@ -129,7 +130,12 @@ class EntityMappingTest {
                 Map.entry("alerts", "alert"), Map.entry("orders", "order"), Map.entry("order_items", "order"),
                 Map.entry("order_item_allocations", "order"), Map.entry("payments", "payment"),
                 Map.entry("payment_webhook_logs", "payment"), Map.entry("dispense_commands", "dispense"),
-                Map.entry("audit_logs", "audit"), Map.entry("kiosk_credentials", "machine.kiosk"));
+                Map.entry("audit_logs", "audit"), Map.entry("kiosk_credentials", "machine.kiosk"),
+                Map.entry("notifications", "notification"), Map.entry("pricing_settings", "pricing"),
+                Map.entry("maintenance_commands", "maintenance"), Map.entry("work_orders", "workorder"),
+                Map.entry("work_order_alerts", "workorder"), Map.entry("work_order_events", "workorder"),
+                Map.entry("restock_lines", "restock"), Map.entry("maintenance_plans", "maintenanceplan"),
+                Map.entry("customer_reports", "customerreport"), Map.entry("customer_report_photos", "customerreport"));
         for (var entity : entities) {
             String table = entity.getJavaType().getAnnotation(Table.class).name();
             assertThat(entity.getJavaType().getPackageName()).as("Feature owner of %s", table)
@@ -170,7 +176,7 @@ class EntityMappingTest {
         entityManager.persist(machine);
         MachineSlot slot = new MachineSlot();
         slot.setMachine(machine);
-        slot.setSlotCode("A1");
+        slot.setSlotCode("A");
         slot.setCapacity(10);
         entityManager.persist(slot);
 
@@ -208,6 +214,7 @@ class EntityMappingTest {
         alert.setType(AlertType.LOW_STOCK);
         alert.setSeverity(AlertSeverity.WARNING);
         alert.setTitle("Low stock");
+        alert.setDedupeKey("ENTITY_TEST:" + java.util.UUID.randomUUID());
         entityManager.persist(alert);
 
         Order order = new Order();
@@ -230,6 +237,7 @@ class EntityMappingTest {
         line.setOrder(order);
         line.setProduct(product);
         line.setQuantity(2);
+        line.setOriginalUnitPrice(new BigDecimal("35000.00"));
         line.setUnitPrice(new BigDecimal("35000.00"));
         line.setTotalPrice(new BigDecimal("70000.00"));
         entityManager.persist(line);
@@ -277,6 +285,8 @@ class EntityMappingTest {
         event.setMachine(machine);
         event.setEventType("BOOT");
         event.setPayload(JsonNodeFactory.instance.objectNode().put("firmware", "test"));
+        // V16: a MACHINE row carries the envelope messageId.
+        event.setMessageId("entity-test-1");
         entityManager.persist(event);
         AuditLog audit = new AuditLog();
         audit.setUser(user);
@@ -304,6 +314,14 @@ class EntityMappingTest {
         assertThat(loaded.getInventoryItem().getBatch().getProduct().getId()).isEqualTo(product.getId());
         assertThat(loaded.getStatus()).isEqualTo(DispenseStatus.PENDING);
         assertThat(entityManager.find(UserRole.class, membershipId).getRole().getName()).isEqualTo("ADMIN");
+        // Issue #48: Role.permissions through the RolePermission join entity (seeded by V13, read only here).
+        Role reloadedAdmin = entityManager.find(Role.class, membership.getRole().getId());
+        assertThat(reloadedAdmin.getPermissions()).extracting(com.fruitmachine.backend.user.entity.Permission::getCode)
+                .containsExactlyInAnyOrderElementsOf(com.fruitmachine.backend.security.permission.Permissions.ALL);
+        var grant = reloadedAdmin.getPermissionGrants().iterator().next();
+        assertThat(grant.getId().getRoleId()).isEqualTo(reloadedAdmin.getId());
+        assertThat(grant.getId().getPermissionId()).isEqualTo(grant.getPermission().getId());
+        assertThat(entityManager.find(com.fruitmachine.backend.user.entity.Permission.class, grant.getPermission().getId()).getCreatedAt()).isNotNull();
         assertThat(entityManager.find(User.class, user.getId()).getRoleMemberships()).hasSize(1);
         var reloadedCredential = entityManager.find(com.fruitmachine.backend.machine.kiosk.entity.KioskCredential.class, credentialId);
         assertThat(reloadedCredential.getMachine().getId()).isEqualTo(machine.getId());

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "messageId": "9a1e5c7b-2d34-4f8a-b6c0-1e2f3a4b5c6d",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "type": "MAINTENANCE_REMOVE_ITEM",
+    "commandId": "MC-1A2B3C4D5E6F7081",
+    "columnCode": "A"
+  }
+}

@@ -12,6 +12,10 @@ import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+/**
+ * Who changed what, and when. Append-only by application policy: inserted by the deciding service, never changed or deleted;
+ * AuditLogRepository has no update or delete method. (Hibernate @Immutable is not used: existing writers then failed with "Lock mode not supported".)
+ */
 @Entity
 @Table(name = "audit_logs")
 @Getter

@@ -32,6 +32,12 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .body(response(401, "Unauthorized", "Invalid email or password", Map.of(), request));
     }
 
+    @ExceptionHandler(com.fruitmachine.backend.customerreport.ratelimit.TooManyRequestsException.class)
+    public ResponseEntity<Object> handleTooManyRequests(com.fruitmachine.backend.customerreport.ratelimit.TooManyRequestsException ex, WebRequest request) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).header("Retry-After", Long.toString(ex.retryAfterSeconds()))
+                .body(response(HttpStatus.TOO_MANY_REQUESTS.value(), "Too Many Requests", ex.getMessage(), Map.of(), request));
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Object> handleNotFound(ResourceNotFoundException ex, WebRequest request) {
         return error(HttpStatus.NOT_FOUND, "Not Found", ex.getMessage(), Map.of(), request);
@@ -44,7 +50,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<Object> handleBadRequest(BadRequestException ex, WebRequest request) {
-        return error(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), Map.of(), request);
+        return error(HttpStatus.BAD_REQUEST, "Bad Request", ex.getMessage(), ex.getFieldErrors(), request);
     }
 
     @ExceptionHandler(ConflictException.class)

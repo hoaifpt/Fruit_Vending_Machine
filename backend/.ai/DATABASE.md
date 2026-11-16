@@ -38,21 +38,31 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | users | id, email, password_hash, full_name, phone, status, created_at, updated_at |
 | roles | id, name, description, created_at |
 | user_roles | user_id, role_id |
-| machines | id, code, name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, created_at, updated_at |
+| machines | id, code, report_token (V24), name, location, status, temperature_min, temperature_max, humidity_min, humidity_max, last_seen_at, last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes, created_at, updated_at |
 | machine_slots | id, machine_id, slot_code, capacity, status, created_at, updated_at |
 | products | id, sku, name, description, price, image_url, status, created_at, updated_at |
 | product_batches | id, batch_code, product_id, manufactured_at, expires_at, quantity, created_by, created_at |
 | inventory_items | id, batch_id, slot_id, status, loaded_at, reserved_at, sold_at, removed_at, created_at, updated_at |
 | sensor_readings | id, machine_id, temperature, humidity, recorded_at |
-| alerts | id, machine_id, type, severity, title, message, status, triggered_at, resolved_at, resolved_by, created_at, updated_at |
-| orders | id, order_code, machine_id, status, subtotal, total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline) |
-| order_items | id, order_id, product_id, quantity, unit_price, total_price, created_at |
+| alerts | id, machine_id, slot_id, type, severity, error_code, dedupe_key, title, message, status, triggered_at, acknowledged_at, acknowledged_by, resolved_at, resolved_by, resolution_note, created_at, updated_at |
+| notifications | id, user_id, alert_id, title, message, severity, read_at, created_at |
+| orders | id, order_code, machine_id, status, subtotal, discount_amount (V18), total_amount, created_at, paid_at, completed_at, cancelled_at, expires_at (V11, nullable reservation deadline), refunded_at (V23) |
+| order_items | id, order_id, product_id, quantity, original_unit_price, unit_price, total_price, discount_percent, discount_reason, created_at |
+| pricing_settings | id, near_expiry_enabled, near_expiry_percent, version, updated_at, updated_by, singleton |
+| customer_reports | id, code, machine_id, type, description, order_code_input, order_id, batch_id, verdict, contact_name, contact_phone, contact_email, status, work_order_id, resolution, resolution_note, resolved_by, resolved_at, source_ip_hash, created_at, updated_at |
+| customer_report_photos | id, report_id, content_type, size_bytes, data, created_at |
+| maintenance_plans | id, machine_id, title, instructions, interval_days, lead_days, due_time, priority, default_assignee_id, next_due_date, active, last_completed_at, created_by, version, created_at, updated_at |
+| restock_lines | id, work_order_id, machine_id, slot_id, product_id, planned_quantity, loaded_quantity, variance_reason, created_at, updated_at |
+| work_orders | id, code, type, source, machine_id, title, description, priority, status, assignee_id, due_at, created_by, started_at, completed_at, completed_by, result_note, cancelled_at, cancelled_by, cancel_reason, overdue_notified_at, version, created_at, updated_at |
+| work_order_alerts | work_order_id, alert_id, created_at |
+| work_order_events | id, work_order_id, type, status_before, status_after, actor_id, note, details, created_at |
+| maintenance_commands | id, command_code, machine_id, slot_id, operation, status, reason, note, target_inventory_item_id, requested_by, idempotency_key, attempt_count, sent_at, accepted_at, finished_at, failure_reason, removed_count, reconciled_by, reconciled_at, reconciliation_outcome, created_at, updated_at |
 | order_item_allocations | id, order_item_id, inventory_item_id, status, created_at, updated_at, released_at |
-| payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at |
+| payments | id, order_id, provider, transaction_id, payment_reference, amount, status, qr_code, created_at, paid_at, expired_at, refunded_at, refunded_by, refund_reason, refund_transfer_ref, refund_note (V23) |
 | payment_webhook_logs | id, provider, event_type, order_code, raw_payload, raw_body, signature, is_verified, received_at |
-| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, created_at, updated_at |
+| dispense_commands | id, command_code, order_id, machine_id, slot_id, inventory_item_id, status, sent_at, acknowledged_at, completed_at, failure_reason, created_at, updated_at |
 | inventory_transactions | id, inventory_item_id, machine_id, slot_id, type, reference_id, performed_by, created_at, reason, status_before, status_after |
-| machine_events | id, machine_id, event_type, payload, created_at |
+| machine_events | id, machine_id, event_type, payload, source, message_id, created_at |
 | kiosk_credentials | id, machine_id, key_prefix, secret_hash, status, created_by, created_at, revoked_by, revoked_at |
 | audit_logs | id, user_id, action, entity_type, entity_id, old_value, new_value, ip_address, created_at |
 
@@ -62,7 +72,8 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
   level; role deletion is RESTRICT. Prefer deactivation. JPA does not cascade REMOVE/ALL.
   Seed V8 contains ADMIN/STAFF reference roles only, no accounts or passwords.
 - Machine -> MachineSlot, SensorReading, Alert, MachineEvent and Order.
-  Slots have UNIQUE(machine_id, slot_code), capacity > 0 and UNIQUE(id, machine_id).
+  Slots have UNIQUE(machine_id, slot_code), capacity > 0 and UNIQUE(id, machine_id). Since V14 a slot is a physical
+  column: slot_code IN ('A','B') (ck_machine_slots_column), so a machine has at most two slots.
 - Product -> ProductBatch -> InventoryItem. Batch quantity > 0 and finite
   expires_at > manufactured_at. created_by -> users is nullable.
 - InventoryItem.slot_id -> MachineSlot is nullable before loading. Keep the last slot
@@ -98,7 +109,7 @@ The lists below are actual columns. Nullable links/timestamps are clarified afte
 | products.status | ACTIVE, INACTIVE |
 | inventory_items.status | AVAILABLE, RESERVED, SOLD, EXPIRED, REMOVED, DISPENSE_FAILED |
 | inventory_transactions.type | LOAD, RESERVE, SALE, EXPIRE, REMOVE, RETURN, ADJUSTMENT |
-| alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK |
+| alerts.type | HIGH_TEMPERATURE, LOW_TEMPERATURE, HIGH_HUMIDITY, MACHINE_OFFLINE, PRODUCT_EXPIRED, PRODUCT_EXPIRING, DISPENSE_FAILED, LOW_STOCK, HARDWARE_FAULT |
 | alerts.severity | INFO, WARNING, CRITICAL |
 | alerts.status | OPEN, ACKNOWLEDGED, RESOLVED |
 | orders.status | PENDING_PAYMENT, PAID, DISPENSING, COMPLETED, CANCELLED, PAYMENT_FAILED, DISPENSE_FAILED, REFUNDED |
@@ -297,3 +308,165 @@ the request DTO and OrderService, deliberately without a CHECK quantity = 1.
   InventoryItem (FOR UPDATE, rechecked). Loading = Product -> Batch -> Machine -> Slot; removal = Slot -> Item; release = Order -> Payment ->
   InventoryItem. Loads of the same product or into the same machine wait on the shared Product/Machine locks; removal waits on the slot lock.
 - Queries: `findSlotIdsHoldingProduct` (unlocked discovery), `findSellableHeadId` and `findCatalog` (DISTINCT ON over the present items).
+
+## 16. Issue #48 — V13 permissions
+
+- `permissions`: id UUID PK, `code` VARCHAR(64) UNIQUE with CHECK `^[A-Z][A-Z0-9_]{2,63}$` (never `ROLE_...`), `description` NOT NULL,
+  `created_at`. Seeded with fixed UUIDs `20000000-0000-0000-0000-0000000000NN` (01 USER_READ ... 15 PAYMENT_WEBHOOK_LOG_READ).
+- `role_permissions`: PK (role_id, permission_id); `role_id` -> roles ON DELETE CASCADE, `permission_id` -> permissions ON DELETE RESTRICT
+  (a referenced permission cannot be deleted); index `ix_role_permissions_permission`.
+- Seed mapping (reproduces the former role checks): ADMIN = all 15; STAFF = PRODUCT_READ, MACHINE_READ, BATCH_READ, BATCH_CREATE,
+  INVENTORY_READ, INVENTORY_WRITE, ORDER_READ.
+- Mapped by `Permission` and `RolePermission` (EmbeddedId `RolePermissionId`, like `UserRole`); `Role.permissionGrants` without cascade.
+- Role permission replacement locks the `roles` row (PESSIMISTIC_WRITE) and writes `audit_logs` (action ROLE_PERMISSIONS_CHANGED,
+  entity_type Role, old/new `{"permissions":[sorted codes]}`, user_id = actor). V1-V12 untouched. ERD: 2 new tables.
+
+## 17. Issue #52 — V14 dispense hardening
+
+- `machine_slots.slot_code` is the physical column: CHECK `slot_code IN ('A','B')`. V14 renamed only unambiguous legacy codes
+  (`A1`/`B1`, any case or spaces -> `A`/`B`) and stops with "V14 stopped ..." (changing nothing) when a code names no column or two
+  slots of a machine would become the same column. Slots keep their ids, so history is unchanged.
+- `dispense_commands.failure_reason` VARCHAR(48): CHECK `(status IN ('FAILED','TIMEOUT')) = (failure_reason IS NOT NULL)` and not blank.
+  Extensible string validated in Java (`DispenseFailureReason`): machine reasons of the MQTT contract §6.1, `ABORTED_UNSPECIFIED`,
+  `RESULT_TIMEOUT`, `NOT_DELIVERED`; rows failed before V14 were backfilled with `LEGACY_UNKNOWN`.
+- Index `ix_dispense_commands_machine_in_flight` (machine_id) WHERE status IN ('SENT','ACKNOWLEDGED').
+- **Lock order for dispense**: machine command advisory lock (`pg_advisory_xact_lock(0x46564D03, hashtext(machine_id))`,
+  `MachineCommandLockRepository`; first delivery uses the try variant and leaves the command to the sweep) -> Machine row (FOR SHARE
+  to publish, FOR UPDATE when the step may put the machine in MAINTENANCE) -> Order -> DispenseCommand -> InventoryItem.
+  The payment webhook creates commands without the machine lock and never publishes. Maintenance commands (4.2) must take the same lock.
+- System maintenance (`MachineService.enterMaintenanceBySystem`) writes `audit_logs` action `MACHINE_MAINTENANCE_AUTO`, user_id NULL.
+  Late dispense results write `DISPENSE_SUCCESS_AFTER_REFUND` / `DISPENSE_LATE_RESULT_CONFLICT` (entity_type DispenseCommand).
+
+## 18. Issue #53 — V15 machine presence
+
+- `machines` gains system-managed `last_heartbeat_at`, `last_offline_at`, `firmware_version` VARCHAR(32), `uptime_seconds` BIGINT,
+  `wifi_rssi` SMALLINT, `free_heap_bytes` BIGINT, with CHECKs (uptime >= 0, RSSI -127..0, heap >= 0, firmware not blank). Missing
+  diagnostics are NULL, never 0.
+- Written only by `MachinePresenceService` with one conditional, forward-only UPDATE per MQTT message (JdbcTemplate,
+  `RETURNING old.*` for reboot detection); `updated_at` is never changed by presence. `Machine` maps all presence columns
+  (including `last_seen_at`) `insertable = false, updatable = false`, so configuration writes never write them back.
+- Lock order: presence touches only the `machines` row (and inserts `sensor_readings` after it in the telemetry path), so it
+  serializes with configuration updates (`findForUpdateById`) without deadlock.
+- Connectivity (ONLINE / WARNING / OFFLINE / NEVER_SEEN) is derived from last_seen_at / last_offline_at with `app.machine-health`
+  thresholds and never stored; the list filter uses the same rules as SQL predicates.
+- `sensor_readings` rows come from MQTT telemetry (receive time, 2 decimals, -40..85 °C, 0..100 %RH); reads use
+  `ix_sensor_readings_machine_time`. Machines with readings cannot be deleted (RESTRICT, unchanged).
+
+## 19. Issue #56 — V16 machine event logging
+
+- `machine_events.source` VARCHAR(16) NOT NULL DEFAULT 'MACHINE', CHECK MACHINE/BACKEND; `message_id` VARCHAR(64), CHECK: required and
+  not blank for MACHINE, optional (NULL) for BACKEND. Pre-V16 rows (none expected) are marked BACKEND.
+- Partial UNIQUE `uq_machine_events_machine_message (machine_id, message_id) WHERE message_id IS NOT NULL`: one row per machine
+  message (insert with ON CONFLICT DO NOTHING). Index `ix_machine_events_machine_type_time (machine_id, event_type, created_at DESC)`.
+- Writes only through `MachineEventWriter` (JdbcTemplate INSERT), in a transaction of its own (`MachineEventRecorder`, REQUIRES_NEW);
+  backend events are written AFTER_COMMIT of the deciding transaction. `MachineEvent` and `AuditLog` are `@Immutable`;
+  `MachineEventRepository` and `AuditLogRepository` are plain Repositories without update/delete methods (append-only by policy).
+- Permission `AUDIT_LOG_READ` (20000000-0000-0000-0000-000000000016) granted to ADMIN only.
+
+## 20. Issue #58 — V17 alerts and notifications
+
+- `alerts`: slot_id with composite FK (slot_id, machine_id) → machine_slots, error_code (CHECK `^[A-Z][A-Z0-9_]{1,63}$`),
+  dedupe_key NOT NULL (pre-V17 rows backfilled `LEGACY:{id}`), acknowledged_at/acknowledged_by (CHECK both NULL or at >= triggered_at),
+  resolution_note (not blank). Type HARDWARE_FAULT added.
+- Partial UNIQUE `uq_alerts_open_dedupe (dedupe_key) WHERE status <> 'RESOLVED'`: at most one unresolved alert per problem. Writes go
+  through `AlertWriter` (INSERT ON CONFLICT DO NOTHING RETURNING id; system resolve UPDATE … WHERE status <> 'RESOLVED', resolved_by NULL).
+  Manual acknowledge/resolve lock the row (PESSIMISTIC_WRITE); a resolved alert is 409.
+- `notifications` (user_id → users ON DELETE CASCADE, alert_id → alerts RESTRICT, severity CHECK, read_at >= created_at); one row per
+  ACTIVE ALERT_NOTIFY user per new alert, inserted AFTER_COMMIT of the alert in its own transaction.
+- Permissions ALERT_READ (…017), ALERT_MANAGE (…018) → ADMIN and STAFF; ALERT_NOTIFY (…019) → ADMIN.
+- Health check (`app.health-check.*`) holds `pg_try_advisory_xact_lock(0x46564D, 4)` for the run; each machine in REQUIRES_NEW.
+
+## 21. Issue #61 — V18 near-expiry discount pricing
+
+- `pricing_settings`: exactly one row (singleton UNIQUE + CHECK), seeded enabled / 50; percent CHECK 1..90; `version` is the
+  optimistic value the Admin sends back (409 when stale; the row is also locked PESSIMISTIC_WRITE while updating); `updated_by` → users.
+  Changes write audit_logs action PRICING_NEAR_EXPIRY_UPDATED, entity_type PRICING_SETTINGS, old/new {enabled, percent}, user, ip.
+- `orders.discount_amount` NUMERIC(12,2) NOT NULL DEFAULT 0, CHECK 0 <= discount_amount <= subtotal AND total_amount = subtotal - discount_amount.
+  Meaning: subtotal = sum of original prices, total_amount = amount charged (payment amount, unchanged).
+- `order_items.original_unit_price` NOT NULL (backfilled = unit_price), `discount_percent` SMALLINT 0..90, `discount_reason` NONE/NEAR_EXPIRY,
+  CHECK unit_price <= original_unit_price and NONE <=> percent 0 and unit = original.
+- V18 stops with a clear error if any existing order has total_amount <> subtotal (never rewrites charged amounts).
+- Price decided in `OrderService.createOrder` from the bowl locked by `selectHead` (NearExpiryPricingService, business day in
+  `app.business-zone`); never recalculated. Catalog SQL applies the same rule with dayStart/dayEnd/percent parameters.
+- Permissions PRICING_READ (…020) → ADMIN, STAFF; PRICING_MANAGE (…021) → ADMIN. Partial index ix_orders_discounted_time.
+
+## 22. Issue #64 — V19 maintenance commands
+
+- `maintenance_commands` (see table list): command_code `MC-<32 hex>` (CHECK, firmware limit 39), operation REMOVE_ITEM / EMPTY_COLUMN /
+  OPEN_REFILL / CLOSE_REFILL / RESET (RESET has no slot, the others do; composite FK (slot_id, machine_id)), status PENDING / SENT /
+  ACCEPTED / COMPLETED / FAILED / NEEDS_RECONCILIATION / RECONCILED, reason required to remove bowls (OTHER needs a non-blank note),
+  REMOVE_ITEM stores the head bowl at creation (target_inventory_item_id), UNIQUE (requested_by, idempotency_key), RECONCILED <=>
+  outcome + reconciled_at + reconciled_by.
+- Partial UNIQUE `uq_maintenance_commands_open (machine_id) WHERE status IN (PENDING, SENT, ACCEPTED)`: one unfinished command per machine.
+- `machine_slots.refill_gate_open` BOOLEAN NOT NULL DEFAULT FALSE: set/cleared by completed OPEN/CLOSE_REFILL; such a slot is excluded
+  from the catalog and head selection and cannot be set ACTIVE.
+- Effects only on COMPLETED or reconciliation DONE, under the machine command advisory lock (shared with dispense), then Slot, command
+  row, InventoryItems in id order: bowls become REMOVED (removed_at) with one inventory_transactions REMOVE row each (reference_id =
+  command id, performed_by = requester, reason "MAINTENANCE_<OP> <REASON>[: note]"). Batch quantities and machine/slot status never change.
+- Reconciliation writes audit_logs MAINTENANCE_COMMAND_RECONCILED. Dispense publishing waits while a maintenance command is unfinished.
+- Permissions MAINTENANCE_COMMAND_READ (…022), MAINTENANCE_COMMAND_EXECUTE (…023) → ADMIN, STAFF; MACHINE_RESET (…024) → ADMIN.
+
+## 23. Issue #66 — V20 work orders
+
+- `work_orders`: code `WO-yyyyMMdd-XXXX` (business-zone date, 4 Crockford base32, CHECK), type RESTOCK / MAINTENANCE / INCIDENT, source
+  MANUAL / ALERT / SCHEDULE / CUSTOMER_REPORT, priority LOW..URGENT, status OPEN / ASSIGNED / IN_PROGRESS / DONE / CANCELLED. CHECKs: OPEN
+  has no assignee and every other unfinished/done status has one; started_at set exactly for IN_PROGRESS/DONE; DONE needs completed_at,
+  completed_by and a non-blank result_note; CANCELLED needs cancelled_at and a non-blank cancel_reason (COALESCE so NULL fails); times
+  ordered. `version` (@Version) is the optimistic value sent back on edit / assign / unassign / cancel.
+- `work_order_alerts` (PK work_order_id, alert_id): kept as history; "one unfinished work order per alert" is enforced by WorkOrderService
+  under the alert row lock (findActiveLinks).
+- `work_order_events`: append-only (trigger `work_order_events_append_only`, like inventory_transactions); one row per action, actor NULL = system.
+- `notifications.work_order_id` (nullable FK): work order notifications, created AFTER_COMMIT in their own transaction.
+- Start locks: machine command advisory lock, Machine row, WorkOrder row; RESTOCK/MAINTENANCE (INCIDENT on request) call
+  MachineService.enterMaintenanceBySystem with reason `WORK_ORDER <code>`. Machine reactivation is refused while a work order is IN_PROGRESS.
+- Permissions WORK_ORDER_READ_ALL (…025) → ADMIN, WORK_ORDER_READ_ASSIGNED (…026) → ADMIN, STAFF, WORK_ORDER_MANAGE (…027) → ADMIN,
+  WORK_ORDER_EXECUTE (…028) → ADMIN, STAFF.
+
+## 24. Issue #68 — V21 restock workflow
+
+- `restock_lines`: one per (work order, slot, product) (UNIQUE), composite FK (slot_id, machine_id) → machine_slots (machine_id must equal the
+  work order's machine: service), planned/loaded 0..1000, variance_reason non-blank when set. `loaded_quantity` is a cached counter equal to
+  the LOAD inventory_transactions with reference_id = line id; it is never decreased.
+- `maintenance_commands.work_order_id` (nullable FK): the IN_PROGRESS work order a command serves; REMOVE history keeps reference_id = command id.
+- Partial index `ix_inventory_transactions_reference (reference_id)`.
+- Loading core `InventoryLoader` (shared by direct loading and restock): caller holds Product -> Batch -> Machine -> Slot; capacity and batch
+  declared quantity checked under those locks; restock bowls get loaded_at = now + i µs (strict FIFO).
+- Permissions RESTOCK_PLAN (…029) → ADMIN, RESTOCK_EXECUTE (…030) → ADMIN, STAFF, INVENTORY_LOAD_DIRECT (…031) → ADMIN; POST
+  /api/v1/inventory/load now needs INVENTORY_LOAD_DIRECT (STAFF keeps INVENTORY_WRITE for removals).
+
+## 25. Issue #70 — V22 maintenance plans
+
+- `maintenance_plans`: interval 1..365, lead 0..30 and < interval, due_time TIME (local time in the business zone, default 17:00),
+  next_due_date DATE (business-zone date), active, last_completed_at, created_by, version (optimistic, sent back on PATCH). Never deleted.
+- `work_orders.maintenance_plan_id` + `scheduled_for`: CHECK source = SCHEDULE <=> both set; plan only on MAINTENANCE; partial UNIQUE
+  (plan, scheduled_for) and (plan) while OPEN / ASSIGNED / IN_PROGRESS -> generation is idempotent.
+- Generation (MaintenancePlanScheduler): pg_try_advisory_xact_lock(0x46564D, 5) for the run, each plan REQUIRES_NEW under its row lock;
+  WorkOrderService.createScheduled (created_by NULL). Missed runs create only the current occurrence.
+- Next due (MaintenancePlanWorkOrderListener, AFTER_COMMIT + REQUIRES_NEW): DONE -> completion date + interval and last_completed_at;
+  CANCELLED -> scheduled_for + interval; a later date already set is kept.
+- Permissions MAINTENANCE_PLAN_READ (…032) -> ADMIN, STAFF; MAINTENANCE_PLAN_MANAGE (…033) -> ADMIN. Plan changes audited (MAINTENANCE_PLAN_*).
+
+## 26. Issue #72 — V23 manual refunds
+
+- No refund table: `payments` gets refunded_at, refunded_by (-> users), refund_reason (DISPENSE_FAILED, LATE_PAYMENT, DUPLICATE_PAYMENT,
+  PRODUCT_QUALITY, OTHER), refund_transfer_ref (^[A-Za-z0-9._/-]{4,64}$, partial UNIQUE), refund_note (OTHER needs one, NULL-safe CHECK).
+  CHECK status = REFUNDED <=> refunded_at/by, reason, transfer_ref all set; refunded_at >= paid_at; partial index on refunded_at.
+- `orders.refunded_at`, CHECK status = REFUNDED <=> refunded_at IS NOT NULL. REFUNDED is final for payment and order.
+- RefundService (payment.refund): lock Order -> Payments (-> DispenseCommand read -> WorkOrder); PaymentTransitions.refund (SUCCESS only),
+  OrderTransitions.refund (DISPENSE_FAILED / COMPLETED only) when the refunded payment is the paying one (earliest paid_at, then id).
+  One audit_logs row PAYMENT_REFUNDED (user, ip, old/new). Transfer ref / payer never logged.
+- Candidates and refund views are dynamic JPQL with fetch joins; payer from verified payment_webhook_logs (order_code = payment_reference).
+- Permissions PAYMENT_REFUND (…034), REFUND_READ (…035) -> ADMIN.
+
+## 27. Issue #74 — V24 customer incident reports
+
+- `machines.report_token`: DB default replace(gen_random_uuid()::text,'-','') (32 hex, no pgcrypto), backfilled, UNIQUE, CHECK
+  ^[A-Za-z0-9_-]{22,32}$; mapped insertable/updatable=false, rotation is a JPQL update with a 22-char base64url token.
+- `customer_reports`: CHECKs on type / status / verdict / resolution values; PAID_NOT_RECEIVED needs order_code_input; other types need a
+  non-blank description; (status RESOLVED/REJECTED) = (resolution and resolved_at set). source_ip_hash = HMAC-SHA256(ip, REPORT_IP_HASH_SECRET).
+  Contact columns are personal data: masked in lists, full only for CUSTOMER_REPORT_MANAGE, never in work orders / notifications / logs.
+- `customer_report_photos`: bytea, JPEG/PNG only, 1..2 MB, re-encoded on upload (no EXIF/GPS), CASCADE with the report.
+- Public submit: one transaction (report, photos, work order create or join with a system NOTE); rate limits in memory (interceptor).
+- Refund link: RefundService publishes PaymentRefundedEvent; CustomerReportLinks closes open reports of the order (RESOLVED/REFUNDED) in the
+  same transaction. Refund candidates type CUSTOMER_REPORT = open report with verdict REFUND_ELIGIBLE or DELIVERED_PER_MACHINE.
+- Permissions CUSTOMER_REPORT_READ (…036) -> ADMIN, STAFF; CUSTOMER_REPORT_MANAGE (…037), MACHINE_REPORT_LINK_MANAGE (…038) -> ADMIN.

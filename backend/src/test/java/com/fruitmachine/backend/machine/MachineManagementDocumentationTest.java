@@ -76,7 +76,8 @@ class MachineManagementDocumentationTest {
                 mapper.getNodeFactory().textNode("ACTIVE"), mapper.getNodeFactory().textNode("INACTIVE"), mapper.getNodeFactory().textNode("MAINTENANCE"));
         assertThat(actual.at("/components/schemas/MachineResponse/properties").fieldNames()).toIterable()
                 .containsExactlyInAnyOrder("id", "code", "name", "location", "status", "minTemperature", "maxTemperature",
-                        "minHumidity", "maxHumidity", "lastSeenAt", "createdAt", "updatedAt");
+                        "minHumidity", "maxHumidity", "connectivity", "lastSeenAt", "lastHeartbeatAt", "firmwareVersion", "uptimeSeconds",
+                        "wifiRssi", "freeHeapBytes", "createdAt", "updatedAt");
         validateReferences(expected, expected);
         assertThat(body).doesNotContain(KEY, "passwordHash", "/test-only/");
     }

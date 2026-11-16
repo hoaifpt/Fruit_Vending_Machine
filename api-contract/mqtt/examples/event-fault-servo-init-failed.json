@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "messageId": "a1b2c3d4-2",
+  "machineCode": "FV-DEV-001",
+  "payload": {
+    "eventType": "FAULT",
+    "details": {
+      "code": "SERVO_INIT_FAILED",
+      "state": "FAULT"
+    }
+  }
+}

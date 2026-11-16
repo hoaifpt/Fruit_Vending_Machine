@@ -6,16 +6,19 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
  * Dispense command delivery. Unfinished commands are re-sent with the same command code (the firmware answers a repeated code
- * without moving), and give up after {@code timeout}.
+ * without moving). A published command gives up {@code timeout} after its first delivery (outcome unknown); a command that
+ * could never be published gives up {@code pendingTimeout} after it was created (nothing reached the machine).
  */
 @ConfigurationProperties("app.dispense")
 public record DispenseProperties(
         @DefaultValue("PT5S") Duration resendAfter,
         @DefaultValue("PT60S") Duration timeout,
+        @DefaultValue("PT120S") Duration pendingTimeout,
         @DefaultValue Sweep sweep) {
     public DispenseProperties {
         positive(resendAfter, "app.dispense.resend-after");
         positive(timeout, "app.dispense.timeout");
+        positive(pendingTimeout, "app.dispense.pending-timeout");
     }
 
     public record Sweep(@DefaultValue("true") boolean enabled, @DefaultValue("PT2S") Duration interval) {

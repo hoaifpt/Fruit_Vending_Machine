@@ -16,8 +16,14 @@ import com.fruitmachine.backend.order.repository.OrderItemAllocationRepository;
 import com.fruitmachine.backend.order.repository.OrderItemRepository;
 import com.fruitmachine.backend.order.repository.OrderRepository;
 import com.fruitmachine.backend.payment.dto.KioskPaymentResponse;
+import com.fruitmachine.backend.payment.dto.OrderRefundResponse;
+import com.fruitmachine.backend.payment.enums.PaymentStatus;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.fruitmachine.backend.payment.mapper.PaymentMapper;
 import com.fruitmachine.backend.payment.repository.PaymentRepository;
+import com.fruitmachine.backend.pricing.model.BowlPrice;
+import com.fruitmachine.backend.pricing.service.PricingService;
+import com.fruitmachine.backend.pricing.service.PricingSettingsService;
 import com.fruitmachine.backend.product.entity.Product;
 import com.fruitmachine.backend.product.enums.ProductStatus;
 import com.fruitmachine.backend.product.repository.ProductRepository;
@@ -40,6 +46,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import com.fruitmachine.backend.security.permission.Permissions;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,6 +71,8 @@ public class OrderService {
     private final PaymentRepository paymentRepository;
     private final PaymentMapper paymentMapper;
     private final OrderProperties properties;
+    private final PricingService pricing;
+    private final PricingSettingsService pricingSettings;
     private final Clock clock;
 
     /**
@@ -83,22 +92,29 @@ public class OrderService {
         var machine = machines.findForShareById(kiosk.machineId()).orElseThrow(() -> new ResourceNotFoundException("Machine not found"));
         if (machine.getStatus() != MachineStatus.ACTIVE) throw new ConflictException("Machine is not accepting orders");
         var bowl = reservations.selectHead(machine.getId(), product.getId(), expiresAt);
+        // Issue #61: priced from the bowl actually reserved (under its row lock) with the setting read in this transaction; locked
+        // here and never recalculated (payment, retry, expiry, webhook). The catalog price may differ; the kiosk shows totalAmount.
+        BowlPrice price = pricing.priceFor(product, bowl.getBatch(), now, pricingSettings.current());
 
         var order = new Order();
         order.setMachine(machine);
         order.setStatus(OrderStatus.PENDING_PAYMENT);
         order.setOrderCode(newOrderCode());
         order.setExpiresAt(expiresAt);
-        // One purchase = one bowl; immutable price snapshot, later product price changes never alter an existing order.
-        order.setSubtotal(product.getPrice());
-        order.setTotalAmount(product.getPrice());
+        // One purchase = one bowl; immutable price snapshot, later product price or discount changes never alter an existing order.
+        order.setSubtotal(price.originalPrice());
+        order.setDiscountAmount(price.discountAmount());
+        order.setTotalAmount(price.unitPrice());
         orders.saveAndFlush(order);
         var item = new OrderItem();
         item.setOrder(order);
         item.setProduct(product);
         item.setQuantity(1);
-        item.setUnitPrice(product.getPrice());
-        item.setTotalPrice(product.getPrice());
+        item.setOriginalUnitPrice(price.originalPrice());
+        item.setUnitPrice(price.unitPrice());
+        item.setTotalPrice(price.unitPrice());
+        item.setDiscountPercent((short) price.discountPercent());
+        item.setDiscountReason(price.reason());
         orderItems.saveAndFlush(item);
         order.getItems().add(item);
         reservations.reserve(order, item, bowl, now);
@@ -128,15 +144,17 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_ORDER_READ)
     public OrderPageResponse list(int page, int size, OrderStatus status, UUID machineId, Instant createdFrom, Instant createdTo,
-            String search, String sort) {
+            String search, String sort, Boolean discounted) {
         Specification<Order> filter = (root, query, cb) -> {
             var predicates = new ArrayList<Predicate>();
             if (status != null) predicates.add(cb.equal(root.get("status"), status));
             if (machineId != null) predicates.add(cb.equal(root.get("machine").get("id"), machineId));
             if (createdFrom != null) predicates.add(cb.greaterThanOrEqualTo(root.get("createdAt"), createdFrom));
             if (createdTo != null) predicates.add(cb.lessThan(root.get("createdAt"), createdTo));
+            if (discounted != null) predicates.add(discounted ? cb.greaterThan(root.get("discountAmount"), java.math.BigDecimal.ZERO)
+                    : cb.equal(root.get("discountAmount"), java.math.BigDecimal.ZERO));
             if (search != null && !search.isBlank()) {
                 String literal = search.strip().toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
                 predicates.add(cb.like(cb.lower(root.get("orderCode")), "%" + literal + "%", '\\'));
@@ -155,13 +173,22 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize(Permissions.HAS_ORDER_READ)
     public OrderDetailResponse getDetail(UUID id) {
         Order order = orders.findWithDetailsById(id).orElseThrow(OrderService::missing);
         Map<UUID, List<OrderItemAllocation>> byLine = allocations.findDetailsByOrderId(id).stream()
                 .collect(Collectors.groupingBy(a -> a.getOrderItem().getId()));
         var payments = paymentRepository.findByOrderIdOrderByCreatedAtAscIdAsc(id).stream().map(paymentMapper::summary).toList();
-        return mapper.detail(order, byLine, payments);
+        // Refund details (transfer reference) are payment data: only REFUND_READ holders see them (STAFF reads orders, not payments).
+        var refunds = canReadRefunds() ? paymentRepository.findByOrderIdAndStatusOrderByRefundedAtAscIdAsc(id, PaymentStatus.REFUNDED).stream()
+                .map(paymentMapper::orderRefund).toList() : List.<OrderRefundResponse>of();
+        return mapper.detail(order, byLine, payments, refunds);
+    }
+
+    private static boolean canReadRefunds() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(authority -> Permissions.REFUND_READ.equals(authority.getAuthority()));
     }
 
     private KioskPaymentResponse currentPayment(Order order) {

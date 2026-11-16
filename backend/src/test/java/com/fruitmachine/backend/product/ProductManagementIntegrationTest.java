@@ -345,7 +345,7 @@ class ProductManagementIntegrationTest {
         jdbc.update("INSERT INTO inventory_items(id,batch_id) VALUES (?, ?)", inventory, batch);
         jdbc.update("INSERT INTO machines(id,code,name) VALUES (?, 'TEST-VM', 'Fixture')", machine);
         jdbc.update("INSERT INTO orders(id,order_code,machine_id,subtotal,total_amount) VALUES (?, 'TEST-ORDER', ?, 35000.15, 35000.15)", order, machine);
-        jdbc.update("INSERT INTO order_items(id,order_id,product_id,quantity,unit_price,total_price) VALUES (?, ?, ?, 1, 35000.15, 35000.15)", item, order, mango.getId());
+        jdbc.update("INSERT INTO order_items(id,order_id,product_id,quantity,original_unit_price,unit_price,total_price) VALUES (?, ?, ?, 1, 35000.15, 35000.15, 35000.15)", item, order, mango.getId());
         jdbc.update("INSERT INTO payments(id,order_id,provider,amount) VALUES (?, ?, 'TEST', 35000.15)", payment, order);
         var tables = List.of("product_batches", "inventory_items", "order_items", "orders", "payments");
         var before = tables.stream().map(table -> jdbc.queryForList("SELECT * FROM " + table)).toList();
@@ -430,7 +430,7 @@ class ProductManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "ADMIN", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_ADMIN", "PRODUCT_READ", "PRODUCT_WRITE"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceValidatesPositivePriceAndStrictMoneyPrecisionOutsideMvc() {
         assertThatThrownBy(() -> service.createProduct(new CreateProductRequest("BAD", "Name", null, BigDecimal.ZERO, null)))
                 .isInstanceOf(jakarta.validation.ConstraintViolationException.class);
@@ -442,7 +442,7 @@ class ProductManagementIntegrationTest {
     }
 
     @Test
-    @WithMockUser(roles = "STAFF", setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
+    @WithMockUser(authorities = {"ROLE_STAFF", "PRODUCT_READ"}, setupBefore = org.springframework.security.test.context.support.TestExecutionEvent.TEST_EXECUTION)
     void serviceWriteBoundaryAlsoEnforcesAdminWhenNotInvokedThroughController() {
         assertThatThrownBy(() -> service.createProduct(new CreateProductRequest("DENIED", "Name", null, BigDecimal.ONE, null)))
                 .isInstanceOf(AccessDeniedException.class);
