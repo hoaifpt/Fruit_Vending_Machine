@@ -64,7 +64,7 @@ theo yêu cầu không xây workflow trigger.
 
 ## 2. ERD cuối cùng
 
-ERD vật lý theo đúng các migration V1–V24 hiện có (32 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
+ERD vật lý theo đúng các migration V1–V25 hiện có (32 bảng nghiệp vụ, đủ mọi cột). Ký hiệu
 Crow's Foot: `||` đúng một, `|o` không hoặc một (FK nullable), `o{` không hoặc nhiều.
 `dispense_commands.machine_id` và `inventory_transactions.machine_id` không có FK trực tiếp tới
 `machines`: máy được kiểm qua composite FK tới `orders (id, machine_id)` và
@@ -618,6 +618,7 @@ và FK checks của terminal/released rows. JSONB chưa có GIN vì chưa có pr
 | V15 | machines: last_heartbeat_at, last_offline_at, firmware_version, uptime_seconds, wifi_rssi, free_heap_bytes + CHECK (issue #53, [machine-health.md](machine-health.md)) |
 | V16 | machine_events.source, message_id + CHECK, partial UNIQUE (machine_id, message_id), index (machine_id, event_type, created_at DESC); quyền AUDIT_LOG_READ → ADMIN (issue #56, [machine-event-logging.md](machine-event-logging.md)) |
 | V17 | alerts: slot_id (FK ghép), error_code, dedupe_key (backfill `LEGACY:{id}`) + partial UNIQUE khi chưa RESOLVED, acknowledged_at/by, resolution_note, loại HARDWARE_FAULT; bảng notifications; quyền ALERT_READ, ALERT_MANAGE → ADMIN, STAFF, ALERT_NOTIFY → ADMIN (issue #58, [alerts.md](alerts.md)) |
+| V25 | chỉ mục báo cáo ix_orders_completed_at, ix_orders_machine_completed, ix_payments_paid_at; quyền DASHBOARD_READ → ADMIN, STAFF, REPORT_SALES_READ, REPORT_EXPORT → ADMIN; không có bảng mới (issue #76, [reports.md](reports.md)) |
 | V24 | machines.report_token (backfill ngẫu nhiên, UNIQUE, CHECK); customer_reports; customer_report_photos; quyền CUSTOMER_REPORT_READ → ADMIN, STAFF, CUSTOMER_REPORT_MANAGE, MACHINE_REPORT_LINK_MANAGE → ADMIN (issue #74, [customer-reports.md](customer-reports.md)) |
 | V23 | payments: refunded_at, refunded_by, refund_reason, refund_transfer_ref, refund_note (+ CHECK, unique mã chuyển khoản, chỉ mục refunded_at); orders.refunded_at (CHECK REFUNDED ⇔ refunded_at); quyền PAYMENT_REFUND, REFUND_READ → ADMIN (issue #72, [refunds.md](refunds.md)) |
 | V22 | maintenance_plans; work_orders.maintenance_plan_id + scheduled_for (CHECK SCHEDULE ⇔ có kế hoạch và ngày; chỉ MAINTENANCE; unique theo lần và một việc chưa xong mỗi kế hoạch); quyền MAINTENANCE_PLAN_READ → ADMIN, STAFF, MAINTENANCE_PLAN_MANAGE → ADMIN (issue #70, [maintenance-plans.md](maintenance-plans.md)) |

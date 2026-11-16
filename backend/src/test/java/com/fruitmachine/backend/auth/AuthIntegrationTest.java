@@ -256,7 +256,9 @@ class AuthIntegrationTest {
                 "/api/v1/refunds/candidates", "/api/v1/refunds/summary", "/api/v1/kiosk/incident-report-link",
                 "/api/v1/public/report-forms/{reportToken}", "/api/v1/public/report-forms/{reportToken}/reports", "/api/v1/customer-reports",
                 "/api/v1/customer-reports/{id}", "/api/v1/customer-reports/{id}/photos/{photoId}", "/api/v1/customer-reports/{id}/review",
-                "/api/v1/customer-reports/{id}/resolve", "/api/v1/customer-reports/{id}/reject", "/api/v1/machines/{id}/report-token/rotate");
+                "/api/v1/customer-reports/{id}/resolve", "/api/v1/customer-reports/{id}/reject", "/api/v1/machines/{id}/report-token/rotate",
+                "/api/v1/dashboard/overview", "/api/v1/reports/sales/summary", "/api/v1/reports/sales/timeseries", "/api/v1/reports/sales/peak-hours",
+                "/api/v1/reports/sales/products", "/api/v1/reports/sales/machines", "/api/v1/reports/sales/export");
         var operation = actual.at("/paths/~1api~1v1~1auth~1login/post");
         var expected = contract.at("/paths/~1api~1v1~1auth~1login/post");
         assertThat(operation.get("operationId")).isEqualTo(expected.get("operationId"));

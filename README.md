@@ -216,3 +216,9 @@ mã giao dịch; payment (và order khi phù hợp) thành `REFUNDED`, có audit
 Kiosk hiển thị QR "Báo sự cố" (theo máy, có thể kèm mã đơn); khách gửi form công khai không cần tài khoản (giới hạn 5 lần / phút,
 honeypot, ảnh được kiểm tra và xóa metadata). Backend đối chiếu đơn, tạo hoặc gắn work order INCIDENT, báo Admin và đưa ca cần hoàn tiền
 vào danh sách hoàn tiền; hoàn tiền xong thì phản ánh tự đóng. Xem [docs/customer-reports.md](docs/customer-reports.md).
+
+## Dashboard và báo cáo bán hàng — Issue #76
+
+Dashboard vận hành cho Admin / Staff (máy, cảnh báo, công việc, tồn kho; tiền chỉ cho Admin) và báo cáo bán hàng cho Admin (tổng quan,
+chuỗi thời gian, giờ cao điểm, sản phẩm, máy) theo giờ Việt Nam; xuất CSV / PDF cùng số liệu (PDF dùng font Noto Sans, OFL). Xem
+[docs/reports.md](docs/reports.md).

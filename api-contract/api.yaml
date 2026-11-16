@@ -14,6 +14,8 @@ tags:
     description: Management authentication. Login remains public; ADMIN/STAFF roles are independent.
   - name: "Customer Reports"
     description: "Review of customer incident reports (issue #74). ADMIN sees everything with full contact data; STAFF only reports of work orders assigned to them, contact masked."
+  - name: "Dashboard"
+    description: "Operations dashboard (issue #76) for ADMIN and STAFF; money only for REPORT_SALES_READ holders."
   - name: Inventory
     description: Management of individual physical boxes. ACTIVE ADMIN/STAFF read/load/remove confirmed stock. No order/payment/reservation/dispense workflows.
   - name: Kiosk
@@ -56,6 +58,8 @@ tags:
     description: "Customer incident reports from the public web form (issue #74, WF-02). No authentication: the machine is identified by the report token in its kiosk QR. Rate limited per client address (429 + Retry-After)."
   - name: "Refunds"
     description: "Manual refunds (issue #72): the administrator transfers the money in the banking app and records it here; no provider refund API is called. ADMIN only (PAYMENT_REFUND, REFUND_READ); STAFF has no access to payments."
+  - name: "Reports"
+    description: "Sales reports (issue #76), ADMIN only. Amounts in whole VND; days and hours in the business zone (Asia/Ho_Chi_Minh). A sale is a delivered order, attributed to completed_at; refunds are attributed to refunded_at; discounts and refunds are shown separately. Definitions: docs/reports.md. Common filters: from, to (inclusive dates, at most 366 days), machineId and productId (repeatable, at most 20; unknown id is 400)."
   - name: "Restock"
     description: "Restock workflow on RESTOCK work orders: Admin (RESTOCK_PLAN) gets per-slot suggestions and plans lines; the assignee (RESTOCK_EXECUTE) loads bowls against a line of the IN_PROGRESS work order (history references the line); completion compares planned and loaded. Direct POST /api/v1/inventory/load is ADMIN only. 409 messages start with a code: RESTOCK_WITHOUT_LINES, LINE_ALREADY_LOADED, DUPLICATE_LINE, SLOT_INACTIVE, PRODUCT_INACTIVE, NOTHING_TO_RESTOCK, WORK_ORDER_NOT_IN_PROGRESS, BATCH_PRODUCT_MISMATCH, BATCH_EXPIRED, EXPIRY_INVERSION, SLOT_CAPACITY_EXCEEDED, BATCH_QUANTITY_EXCEEDED, RESTOCK_VARIANCE_REASON_REQUIRED, REFILL_GATE_OPEN."
   - name: Roles & Permissions
@@ -11416,6 +11420,587 @@ paths:
         -
           "bearerAuth": []
       "x-required-permission": "MACHINE_REPORT_LINK_MANAGE"
+  "/api/v1/dashboard/overview":
+    "get":
+      "tags":
+        - "Dashboard"
+      "summary": "Home screen overview"
+      "description": "DASHBOARD_READ (ADMIN, STAFF). Machines (status, connectivity, latest temperature, sellable bowls, open alerts), alerts by severity, work orders (open, in progress, overdue, assigned to me), stock (low-stock and blocked slots, bowls expiring today; health-check predicates). today (orders and net sales of the business day, yesterday's net sales) and refunds (pending candidates) only with REPORT_SALES_READ: the fields are absent for STAFF. At most 7 SQL statements; poll every 30 s."
+      "operationId": "getDashboardOverview"
+      "responses":
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing DASHBOARD_READ"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Overview"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseDashboardOverviewResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "DASHBOARD_READ"
+  "/api/v1/reports/sales/summary":
+    "get":
+      "tags":
+        - "Reports"
+      "summary": "Sales summary"
+      "description": "REPORT_SALES_READ. ordersSold, grossSales, discounts, netSales (sales by completed_at); deliveredRefunds (PRODUCT_QUALITY / OTHER refunds of delivered orders by refunded_at); netRevenue = netSales - deliveredRefunds; averageOrderValue = netSales / ordersSold rounded down; moneyCollected (payments SUCCESS / REFUNDED by paid_at); moneyRefunded (all refunds by refunded_at, by reason); pendingRefunds (current refund candidates, ignores the filters); failedDispenses (orders paid in range that failed to dispense)."
+      "operationId": "getSalesSummary"
+      "parameters":
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Product filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+      "responses":
+        "400":
+          "description": "Missing / invalid range, too many or unknown ids"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the report permission (STAFF has no access to revenue)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Summary"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseSalesSummary"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "REPORT_SALES_READ"
+  "/api/v1/reports/sales/timeseries":
+    "get":
+      "tags":
+        - "Reports"
+      "summary": "Sales time series"
+      "description": "REPORT_SALES_READ. One bucket per DAY, ISO WEEK (Monday start) or calendar MONTH in the business zone, zero-filled; start / end are clipped to the range. Per bucket: ordersSold, grossSales, discounts, netSales, deliveredRefunds (by refunded_at), netRevenue."
+      "operationId": "getSalesTimeseries"
+      "parameters":
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Product filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "granularity"
+          "in": "query"
+          "description": "DAY, WEEK or MONTH."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "DAY"
+            "enum":
+              - "DAY"
+              - "WEEK"
+              - "MONTH"
+      "responses":
+        "400":
+          "description": "Missing / invalid range, too many or unknown ids"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the report permission (STAFF has no access to revenue)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Time series"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseSalesSeries"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "REPORT_SALES_READ"
+  "/api/v1/reports/sales/peak-hours":
+    "get":
+      "tags":
+        - "Reports"
+      "summary": "Sales by hour of day"
+      "description": "REPORT_SALES_READ. 24 entries (hour of completed_at in the business zone) with ordersSold and netSales, plus a 7 x 24 matrix of ordersSold (Monday first)."
+      "operationId": "getSalesPeakHours"
+      "parameters":
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Product filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+      "responses":
+        "400":
+          "description": "Missing / invalid range, too many or unknown ids"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the report permission (STAFF has no access to revenue)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Peak hours"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponsePeakHours"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "REPORT_SALES_READ"
+  "/api/v1/reports/sales/products":
+    "get":
+      "tags":
+        - "Reports"
+      "summary": "Top products"
+      "description": "REPORT_SALES_READ. Products with sales or delivered refunds in range (inactive products included): quantity, grossSales, discounts, netSales, deliveredRefunds, sharePercent (netSales / total netSales, 1 decimal, 0 when the total is 0). Sorted by QUANTITY or NET_SALES descending, ties by name then id; limit 1..100."
+      "operationId": "getSalesByProduct"
+      "parameters":
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Product filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "sortBy"
+          "in": "query"
+          "description": "QUANTITY or NET_SALES."
+          "required": false
+          "schema":
+            "type": "string"
+            "default": "NET_SALES"
+            "enum":
+              - "QUANTITY"
+              - "NET_SALES"
+        -
+          "name": "limit"
+          "in": "query"
+          "description": "1..100."
+          "required": false
+          "schema":
+            "type": "integer"
+            "format": "int32"
+            "default": 10
+      "responses":
+        "400":
+          "description": "Missing / invalid range, too many or unknown ids"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the report permission (STAFF has no access to revenue)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Products"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseProductReport"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "REPORT_SALES_READ"
+  "/api/v1/reports/sales/machines":
+    "get":
+      "tags":
+        - "Reports"
+      "summary": "Sales by machine"
+      "description": "REPORT_SALES_READ. Every machine (or the filtered ones) with ordersSold, netSales, deliveredRefunds and netRevenue; zeros when nothing was sold."
+      "operationId": "getSalesByMachine"
+      "parameters":
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Product filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+      "responses":
+        "400":
+          "description": "Missing / invalid range, too many or unknown ids"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the report permission (STAFF has no access to revenue)"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "200":
+          "description": "Machines"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiResponseMachineReport"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "REPORT_SALES_READ"
+  "/api/v1/reports/sales/export":
+    "get":
+      "tags":
+        - "Reports"
+      "summary": "Export the sales report as CSV or PDF"
+      "description": "REPORT_EXPORT. One report (summary, DAY series, peak hours, all products, machines) rendered as CSV (UTF-8 with BOM, sections, RFC 4180, formula-injection guard) or PDF (A4, Noto Sans, amounts 1.234.567 ₫); both carry exactly the same numbers. Attachment freshvend-sales_<from>_<to>.<csv|pdf>, Cache-Control no-store. One audit_logs row REPORT_EXPORTED per export."
+      "operationId": "exportSalesReport"
+      "parameters":
+        -
+          "name": "format"
+          "in": "query"
+          "description": "CSV or PDF."
+          "required": true
+          "schema":
+            "type": "string"
+            "enum":
+              - "CSV"
+              - "PDF"
+        -
+          "name": "from"
+          "in": "query"
+          "description": "First day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "to"
+          "in": "query"
+          "description": "Last day (inclusive)."
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "date"
+        -
+          "name": "machineId"
+          "in": "query"
+          "description": "Machine filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+        -
+          "name": "productId"
+          "in": "query"
+          "description": "Product filter, repeatable."
+          "required": false
+          "schema":
+            "type": "array"
+            "items":
+              "type": "string"
+              "format": "uuid"
+      "responses":
+        "200":
+          "description": "The file"
+          "content":
+            "text/csv":
+              "schema":
+                "type": "string"
+                "format": "binary"
+            "application/pdf":
+              "schema":
+                "type": "string"
+                "format": "binary"
+        "400":
+          "description": "Missing / invalid range, too many or unknown ids"
+          "content":
+            "text/csv":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/pdf":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "401":
+          "description": "Missing/invalid/expired Bearer token"
+          "content":
+            "text/csv":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/pdf":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "403":
+          "description": "Missing the report permission (STAFF has no access to revenue)"
+          "content":
+            "text/csv":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/pdf":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+        "500":
+          "description": "Unexpected server error; no internal details"
+          "content":
+            "text/csv":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/pdf":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ApiErrorResponse"
+      "security":
+        -
+          "bearerAuth": []
+      "x-required-permission": "REPORT_EXPORT"
 
 components:
   securitySchemes:
@@ -16440,3 +17025,476 @@ components:
           "type": "string"
         "status":
           "type": "string"
+    "ApiResponseDashboardOverviewResponse":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/DashboardOverviewResponse"
+    "DashboardOverviewResponse":
+      "type": "object"
+      "properties":
+        "generatedAt":
+          "type": "string"
+          "format": "date-time"
+        "today":
+          "$ref": "#/components/schemas/Today"
+          "description": "Only with REPORT_SALES_READ; absent otherwise (not zero)."
+        "machines":
+          "$ref": "#/components/schemas/Machines"
+        "alerts":
+          "$ref": "#/components/schemas/Alerts"
+        "workOrders":
+          "$ref": "#/components/schemas/WorkOrders"
+        "stock":
+          "$ref": "#/components/schemas/Stock"
+        "refunds":
+          "$ref": "#/components/schemas/Refunds"
+          "description": "Only with REPORT_SALES_READ; absent otherwise (not zero)."
+        "machinesDetail":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MachineDetail"
+    "Today":
+      "type": "object"
+      "description": "Sales of the current business day (completed_at) and of yesterday, as in the sales report definitions."
+      "properties":
+        "date":
+          "type": "string"
+          "format": "date"
+        "ordersSold":
+          "type": "integer"
+          "format": "int64"
+        "netSales":
+          "type": "integer"
+          "format": "int64"
+        "yesterdayNetSales":
+          "type": "integer"
+          "format": "int64"
+    "Machines":
+      "type": "object"
+      "description": "Machine statuses and connectivity (ONLINE, WARNING, OFFLINE, NEVER_SEEN, same rules as the machine API)."
+      "properties":
+        "total":
+          "type": "integer"
+          "format": "int64"
+        "active":
+          "type": "integer"
+          "format": "int64"
+        "maintenance":
+          "type": "integer"
+          "format": "int64"
+        "inactive":
+          "type": "integer"
+          "format": "int64"
+        "online":
+          "type": "integer"
+          "format": "int64"
+        "warning":
+          "type": "integer"
+          "format": "int64"
+        "offline":
+          "type": "integer"
+          "format": "int64"
+        "neverSeen":
+          "type": "integer"
+          "format": "int64"
+    "Alerts":
+      "type": "object"
+      "description": "Alerts not RESOLVED, by severity."
+      "properties":
+        "open":
+          "type": "integer"
+          "format": "int64"
+        "critical":
+          "type": "integer"
+          "format": "int64"
+        "warning":
+          "type": "integer"
+          "format": "int64"
+        "info":
+          "type": "integer"
+          "format": "int64"
+    "WorkOrders":
+      "type": "object"
+      "description": "open = OPEN or ASSIGNED, inProgress = IN_PROGRESS, overdue = unfinished past due, assignedToMe = unfinished assigned to the caller."
+      "properties":
+        "open":
+          "type": "integer"
+          "format": "int64"
+        "inProgress":
+          "type": "integer"
+          "format": "int64"
+        "overdue":
+          "type": "integer"
+          "format": "int64"
+        "assignedToMe":
+          "type": "integer"
+          "format": "int64"
+    "Stock":
+      "type": "object"
+      "description": "Machines not INACTIVE, health-check predicates: lowStockSlots = ACTIVE slots with sellable bowls <= the low-stock threshold; blockedSlots = slots in ERROR or whose head bowl is DISPENSE_FAILED; bowlsExpiringToday = physical unexpired bowls that expire before the end of today."
+      "properties":
+        "lowStockSlots":
+          "type": "integer"
+          "format": "int64"
+        "blockedSlots":
+          "type": "integer"
+          "format": "int64"
+        "bowlsExpiringToday":
+          "type": "integer"
+          "format": "int64"
+    "Refunds":
+      "type": "object"
+      "description": "Current refund candidates (count and amount)."
+      "properties":
+        "pendingCount":
+          "type": "integer"
+          "format": "int64"
+        "pendingAmount":
+          "type": "integer"
+          "format": "int64"
+    "MachineDetail":
+      "type": "object"
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "name":
+          "type": "string"
+        "status":
+          "type": "string"
+          "enum":
+            - "ACTIVE"
+            - "INACTIVE"
+            - "MAINTENANCE"
+        "connectivity":
+          "type": "string"
+          "enum":
+            - "ONLINE"
+            - "WARNING"
+            - "OFFLINE"
+            - "NEVER_SEEN"
+        "lastSeenAt":
+          "type": "string"
+          "format": "date-time"
+        "temperature":
+          "type": "number"
+          "description": "Latest temperature reading; null without one."
+        "sellableBowls":
+          "type": "integer"
+          "format": "int64"
+          "description": "Bowls the kiosk can sell now (catalog rule)."
+        "openAlerts":
+          "type": "integer"
+          "format": "int64"
+          "description": "Alerts of the machine not RESOLVED."
+    "ApiResponseSalesSummary":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/SalesSummary"
+    "SalesSummary":
+      "type": "object"
+      "description": "Sales summary (issue #76). Amounts in whole VND. Sales = orders delivered (completed_at in range); refunds by refunded_at."
+      "properties":
+        "filters":
+          "$ref": "#/components/schemas/FiltersEcho"
+        "ordersSold":
+          "type": "integer"
+          "format": "int64"
+          "description": "Orders with completed_at in range (COMPLETED, or REFUNDED after completion)."
+        "grossSales":
+          "type": "integer"
+          "format": "int64"
+          "description": "Sum of subtotal of sold orders."
+        "discounts":
+          "type": "integer"
+          "format": "int64"
+          "description": "Sum of discount_amount of sold orders."
+        "netSales":
+          "type": "integer"
+          "format": "int64"
+          "description": "Sum of total_amount of sold orders (gross - discounts)."
+        "deliveredRefunds":
+          "type": "integer"
+          "format": "int64"
+          "description": "Refunds of delivered orders (PRODUCT_QUALITY / OTHER on completed orders) by refunded_at in range."
+        "netRevenue":
+          "type": "integer"
+          "format": "int64"
+          "description": "netSales - deliveredRefunds."
+        "averageOrderValue":
+          "type": "integer"
+          "format": "int64"
+          "description": "netSales / ordersSold rounded down; 0 without sales."
+        "moneyCollected":
+          "type": "integer"
+          "format": "int64"
+          "description": "Payments SUCCESS or REFUNDED by paid_at in range (cash view)."
+        "moneyRefunded":
+          "$ref": "#/components/schemas/MoneyRefunded"
+        "pendingRefunds":
+          "$ref": "#/components/schemas/PendingRefunds"
+          "description": "Current refund candidates (point in time; ignores the range and filters)."
+        "failedDispenses":
+          "type": "integer"
+          "format": "int64"
+          "description": "Orders paid in range that failed to dispense (DISPENSE_FAILED, refunded without delivery, or with a FAILED/TIMEOUT dispense command)."
+        "generatedAt":
+          "type": "string"
+          "format": "date-time"
+    "FiltersEcho":
+      "type": "object"
+      "properties":
+        "from":
+          "type": "string"
+          "format": "date"
+        "to":
+          "type": "string"
+          "format": "date"
+        "machineIds":
+          "type": "array"
+          "items":
+            "type": "string"
+            "format": "uuid"
+        "productIds":
+          "type": "array"
+          "items":
+            "type": "string"
+            "format": "uuid"
+        "zone":
+          "type": "string"
+    "MoneyRefunded":
+      "type": "object"
+      "description": "REFUNDED payments by refunded_at in range, by refund reason (every reason listed)."
+      "properties":
+        "total":
+          "type": "integer"
+          "format": "int64"
+        "byReason":
+          "type": "object"
+          "additionalProperties":
+            "type": "integer"
+            "format": "int64"
+    "PendingRefunds":
+      "type": "object"
+      "properties":
+        "count":
+          "type": "integer"
+          "format": "int64"
+        "amount":
+          "type": "integer"
+          "format": "int64"
+    "ApiResponseSalesSeries":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/SalesSeries"
+    "SalesSeries":
+      "type": "object"
+      "properties":
+        "filters":
+          "$ref": "#/components/schemas/FiltersEcho"
+        "granularity":
+          "type": "string"
+          "enum":
+            - "DAY"
+            - "WEEK"
+            - "MONTH"
+        "buckets":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/SalesBucket"
+        "generatedAt":
+          "type": "string"
+          "format": "date-time"
+    "SalesBucket":
+      "type": "object"
+      "properties":
+        "start":
+          "type": "string"
+          "format": "date"
+        "end":
+          "type": "string"
+          "format": "date"
+        "ordersSold":
+          "type": "integer"
+          "format": "int64"
+        "grossSales":
+          "type": "integer"
+          "format": "int64"
+        "discounts":
+          "type": "integer"
+          "format": "int64"
+        "netSales":
+          "type": "integer"
+          "format": "int64"
+        "deliveredRefunds":
+          "type": "integer"
+          "format": "int64"
+        "netRevenue":
+          "type": "integer"
+          "format": "int64"
+    "ApiResponsePeakHours":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/PeakHours"
+    "PeakHours":
+      "type": "object"
+      "properties":
+        "filters":
+          "$ref": "#/components/schemas/FiltersEcho"
+        "hours":
+          "type": "array"
+          "description": "24 entries, hour 0..23 of completed_at in the business zone."
+          "items":
+            "$ref": "#/components/schemas/PeakHour"
+        "weekdayHours":
+          "type": "array"
+          "description": "7 x 24 ordersSold: index 0 = Monday ... 6 = Sunday, then hour 0..23."
+          "items":
+            "type": "array"
+            "items":
+              "type": "integer"
+              "format": "int64"
+        "generatedAt":
+          "type": "string"
+          "format": "date-time"
+    "PeakHour":
+      "type": "object"
+      "properties":
+        "hour":
+          "type": "integer"
+          "format": "int32"
+        "ordersSold":
+          "type": "integer"
+          "format": "int64"
+        "netSales":
+          "type": "integer"
+          "format": "int64"
+    "ApiResponseProductReport":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/ProductReport"
+    "ProductReport":
+      "type": "object"
+      "properties":
+        "filters":
+          "$ref": "#/components/schemas/FiltersEcho"
+        "sortBy":
+          "type": "string"
+          "enum":
+            - "QUANTITY"
+            - "NET_SALES"
+        "limit":
+          "type": "integer"
+          "format": "int32"
+        "products":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ProductSales"
+        "generatedAt":
+          "type": "string"
+          "format": "date-time"
+    "ProductSales":
+      "type": "object"
+      "properties":
+        "productId":
+          "type": "string"
+          "format": "uuid"
+        "sku":
+          "type": "string"
+        "name":
+          "type": "string"
+        "status":
+          "type": "string"
+        "quantity":
+          "type": "integer"
+          "format": "int64"
+        "grossSales":
+          "type": "integer"
+          "format": "int64"
+        "discounts":
+          "type": "integer"
+          "format": "int64"
+        "netSales":
+          "type": "integer"
+          "format": "int64"
+        "deliveredRefunds":
+          "type": "integer"
+          "format": "int64"
+        "sharePercent":
+          "type": "number"
+    "ApiResponseMachineReport":
+      "type": "object"
+      "properties":
+        "timestamp":
+          "type": "string"
+          "format": "date-time"
+        "message":
+          "type": "string"
+        "data":
+          "$ref": "#/components/schemas/MachineReport"
+    "MachineReport":
+      "type": "object"
+      "properties":
+        "filters":
+          "$ref": "#/components/schemas/FiltersEcho"
+        "machines":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/MachineSales"
+        "generatedAt":
+          "type": "string"
+          "format": "date-time"
+    "MachineSales":
+      "type": "object"
+      "properties":
+        "machineId":
+          "type": "string"
+          "format": "uuid"
+        "code":
+          "type": "string"
+        "name":
+          "type": "string"
+        "ordersSold":
+          "type": "integer"
+          "format": "int64"
+        "netSales":
+          "type": "integer"
+          "format": "int64"
+        "deliveredRefunds":
+          "type": "integer"
+          "format": "int64"
+        "netRevenue":
+          "type": "integer"
+          "format": "int64"
