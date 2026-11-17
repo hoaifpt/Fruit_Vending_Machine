@@ -11,7 +11,7 @@ import type {
   CompleteWorkOrderBody, InventorySummary, LineVariance, LinkedMaintenanceCommand, MaintenanceOperation, RestockLine, RestockLineInput, Slot, SlotSuggestion,
   UpdateRestockLineBody, WorkOrder,
 } from '../api/resources.ts'
-import { ValidationError, errorCode } from './form-error.ts'
+import { ValidationError, errorCode, listFieldOf } from './form-error.ts'
 import type { LoadRoom } from './inventory-load.ts'
 import { LOAD_MAX_PER_REQUEST, QUANTITY_INVALID, fitConflictText, loadMax, parseBoxCount, quantityProblem } from './inventory-load.ts'
 import type { FitConflict } from './inventory-load.ts'
@@ -264,11 +264,24 @@ export function describeLineLoadError(error: unknown, quantity: number | undefin
   return { error, refresh: false }
 }
 
-/** A failed completion: field errors on the result or the lines, known blockers explained, 409/404 reload the screen. */
-export function describeCompleteError(error: unknown, rows: readonly ReconcileRow[]): { error: unknown; stale: boolean } {
+/**
+ * A failed completion: field errors on the result or the lines, known blockers explained, 409/404 reload the screen.
+ * `sent` is the `lineVariances` of the body that failed: a 400 on `lineVariances[i].reason` (also as the backend's
+ * path `complete.request.lineVariances[i].reason`) lands under the reason of that line.
+ */
+export function describeCompleteError(error: unknown, rows: readonly ReconcileRow[], sent: readonly Pick<LineVariance, 'lineId'>[] = []): { error: unknown; stale: boolean } {
   if (!(error instanceof ApiError)) return { error, stale: false }
   const code = errorCode(error)
-  if (error.status === 400 && error.fieldErrors.resultNote) return { error: new ValidationError({ resultNote: RESULT_REQUIRED }), stale: false }
+  if (error.status === 400) {
+    const fields: Record<string, string> = {}
+    for (const [key, message] of Object.entries(error.fieldErrors)) {
+      if (key === 'resultNote') fields.resultNote = /size|max|2000/i.test(message) ? `Tối đa ${TICKET_LIMITS.note} ký tự.` : RESULT_REQUIRED
+      const item = listFieldOf(key)
+      const lineId = item?.list === 'lineVariances' ? sent[item.index]?.lineId : undefined
+      if (lineId && rows.some(row => row.lineId === lineId)) fields[varianceField(lineId)] = /size|max|500/i.test(message) ? 'Tối đa 500 ký tự.' : VARIANCE_REQUIRED
+    }
+    if (Object.keys(fields).length) return { error: new ValidationError(fields), stale: false }
+  }
   if (code === 'RESTOCK_VARIANCE_REASON_REQUIRED') {
     return { error: new ValidationError(Object.fromEntries(rows.filter(row => row.difference !== 0 && !row.savedReason).map(row => [varianceField(row.lineId), VARIANCE_REQUIRED]))), stale: false }
   }
@@ -332,6 +345,14 @@ const PLAN_CONFLICTS: Readonly<Record<string, string>> = {
 export function describePlanError(error: unknown): { error: unknown; stale: boolean } {
   if (!(error instanceof ApiError)) return { error, stale: false }
   const code = errorCode(error)
+  if (error.status === 400) {
+    // `addLine.input.plannedQuantity`, `updateLine.request.plannedQuantity` reach here as `plannedQuantity`.
+    const fields: Record<string, string> = {}
+    if (error.fieldErrors.slotId) fields.slotId = 'Ngăn đã chọn không hợp lệ. Chọn lại ngăn.'
+    if (error.fieldErrors.productId) fields.productId = 'Sản phẩm đã chọn không hợp lệ. Chọn lại sản phẩm.'
+    if (error.fieldErrors.plannedQuantity) fields.plannedQuantity = `Số hộp dự kiến phải là số nguyên từ 1 đến ${PLAN_LINE_MAX} và không vượt sức chứa của ngăn.`
+    if (Object.keys(fields).length) return { error: new ValidationError(fields), stale: false }
+  }
   if (error.status === 409) return { error: new ApiError(409, (code && PLAN_CONFLICTS[code]) || 'Kế hoạch vừa thay đổi ở nơi khác. Trang đã tải lại; kiểm tra rồi thử lại.'), stale: true }
   if (error.status === 404) return { error: new ApiError(404, 'Không tìm thấy dòng hoặc phiếu này nữa. Trang đã tải lại.'), stale: true }
   return { error, stale: false }

@@ -33,7 +33,7 @@ test('rejects tokens without a usable role', async () => {
 
 test('login error messages never expose raw bodies', () => {
   assert.match(loginErrorMessage(new ApiError(500, 'Hệ thống đang gặp sự cố. Vui lòng thử lại.')), /sự cố/)
-  assert.match(loginErrorMessage(new ApiError(400, 'x', { email: 'must be a well-formed email address' })), /well-formed/)
+  assert.equal(loginErrorMessage(new ApiError(400, 'x', { email: 'must be a well-formed email address' })), 'Email chưa đúng định dạng.')
   assert.match(loginErrorMessage(new ApiError(429, 'x')), /quá nhiều/)
 })
 

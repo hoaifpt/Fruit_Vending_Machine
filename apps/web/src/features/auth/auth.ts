@@ -1,4 +1,5 @@
 import { ApiError } from '../../api/client.ts'
+import { fieldMessageVi } from '../../api/field-errors.ts'
 import { authApi } from '../../api/resources.ts'
 import { safeNext, startSession } from '../../api/session.ts'
 import type { Session } from '../../api/session.ts'
@@ -38,7 +39,7 @@ export function loginErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     // The contract returns one generic 401 for unknown email, wrong password, INACTIVE and LOCKED accounts.
     if (error.status === 401 || error.status === 403) return 'Email hoặc mật khẩu không đúng, hoặc tài khoản không còn hoạt động.'
-    if (error.status === 400) return Object.values(error.fieldErrors)[0] ?? 'Thông tin đăng nhập không hợp lệ.'
+    if (error.status === 400) { const first = Object.values(error.fieldErrors)[0]; return first ? fieldMessageVi(first) : 'Thông tin đăng nhập không hợp lệ.' }
     if (error.status === 429) return 'Bạn đã thử đăng nhập quá nhiều lần. Vui lòng chờ một lúc rồi thử lại.'
     if (error.status === 0 || error.status >= 500) return error.message
     return 'Hệ thống chưa thể xử lý đăng nhập. Vui lòng thử lại sau.'

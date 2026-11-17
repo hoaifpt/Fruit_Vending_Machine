@@ -2,7 +2,7 @@
 // client-side checks, when the lock button is refused and Vietnamese wording of the backend conflicts. Unit-tested.
 // Contract: api-contract/api.yaml (listUsers, createStaff, updateUser, updateUserStatus); rules: docs/user-management.md.
 import { ApiError } from '../api/client.ts'
-import { ValidationError } from './form-error.ts'
+import { fieldMessageVi, ValidationError } from './form-error.ts'
 import type { components } from '../api/schema'
 import { oneOf } from '../lib/table-query.ts'
 
@@ -91,11 +91,16 @@ export interface CreateUserValues { email: string; password: string; fullName: s
 export interface UpdateUserValues { fullName: string; phone: string }
 
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length
+/** Unicode code points, as the backend counts PASSWORD_MIN_LENGTH (an emoji is one, not two UTF-16 units). */
+const codePoints = (text: string) => [...text].length
+
+export const PASSWORD_TOO_SHORT = `Mật khẩu tối thiểu ${LIMITS.passwordMinDefault} ký tự.`
+export const PASSWORD_TOO_LONG = `Mật khẩu quá dài (tối đa ${LIMITS.passwordBytes} byte, chữ có dấu tính 2–3 byte).`
 
 /**
  * Checks the backend would also make, so the user sees them beside the fields without a round trip.
- * The password minimum is a server setting (PASSWORD_MIN_LENGTH, 8–72, default 12), so only "not empty" and the
- * 72-byte BCrypt limit are checked here; a shorter password comes back as a 400 under the field.
+ * The password must have at least `passwordMinDefault` code points (PASSWORD_MIN_LENGTH, default 12) and at most
+ * 72 UTF-8 bytes (BCrypt). A server configured differently still answers with a 400, worded by `describeCreateError`.
  */
 export function validateCreateUser(values: CreateUserValues): Record<string, string> {
   const errors: Record<string, string> = {}
@@ -105,7 +110,8 @@ export function validateCreateUser(values: CreateUserValues): Record<string, str
   else if (!/^[^\s@]+@[^\s@]+$/.test(email)) errors.email = 'Email chưa đúng định dạng, ví dụ ten@congty.vn.'
   if (!values.password) errors.password = 'Vui lòng nhập mật khẩu.'
   else if (!values.password.trim()) errors.password = 'Mật khẩu không được chỉ gồm khoảng trắng.'
-  else if (utf8Bytes(values.password) > LIMITS.passwordBytes) errors.password = `Mật khẩu quá dài (tối đa ${LIMITS.passwordBytes} byte, chữ có dấu tính 2–3 byte).`
+  else if (codePoints(values.password) < LIMITS.passwordMinDefault) errors.password = PASSWORD_TOO_SHORT
+  else if (utf8Bytes(values.password) > LIMITS.passwordBytes) errors.password = PASSWORD_TOO_LONG
   Object.assign(errors, validateProfile(values))
   return errors
 }
@@ -162,8 +168,26 @@ export function describeStatusError(error: unknown): unknown {
  * `email` is the only unique column of `users` the form fills (V1 migration; the role link is set by the server), so
  * both the service check ("Email is already in use") and the constraint hit by two simultaneous creates ("Request
  * conflicts with existing data") mean the same thing, as for SKU (products.ts) and machine code (machines.ts).
+ * A 400 about the password (the policy message without fieldErrors, or fieldErrors.password) marks the password field
+ * with the rule in Vietnamese; the English text never reaches the screen.
  */
 export function describeCreateError(error: unknown): unknown {
-  if (!(error instanceof ApiError) || error.status !== 409) return error
-  return new ValidationError({ email: EMAIL_TAKEN })
+  if (!(error instanceof ApiError)) return error
+  if (error.status === 409) return new ValidationError({ email: EMAIL_TAKEN })
+  if (error.status === 400) {
+    // The password policy answers with a message only (no fieldErrors.password), in English:
+    // "Password must contain at least 8 characters and at most 72 UTF-8 bytes". Mark the field, in Vietnamese.
+    const policy = !Object.keys(error.fieldErrors).length && /password/i.test(error.message)
+    if (policy) return new ValidationError({ password: passwordPolicyText(Number(/at least (\d+)/i.exec(error.message)?.[1]) || undefined) })
+    if (error.fieldErrors.password) {
+      const fields = Object.fromEntries(Object.entries(error.fieldErrors).map(([field, message]) => [field, fieldMessageVi(message)]))
+      return new ValidationError({ ...fields, password: passwordPolicyText(undefined) })
+    }
+  }
+  return error
+}
+
+/** The server's password rule in Vietnamese; `min` is the minimum it names (its PASSWORD_MIN_LENGTH), when it does. */
+export function passwordPolicyText(min: number | undefined): string {
+  return `Mật khẩu chưa đạt yêu cầu của hệ thống: tối thiểu ${min ?? LIMITS.passwordMinDefault} ký tự và tối đa ${LIMITS.passwordBytes} byte (chữ có dấu tính 2–3 byte).`
 }

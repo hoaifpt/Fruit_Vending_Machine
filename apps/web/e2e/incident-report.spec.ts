@@ -2,6 +2,7 @@
 // /report/{reportToken}[?order=]. The machine comes from the token; required fields per type (contact for money and
 // quality, consent always), a wrong or rotated token, the rate limit with Retry-After, and screenshots + axe in light
 // and dark.
+import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { auditScreen, useThemeChoice } from './support.ts'
@@ -113,7 +114,37 @@ test('Gửi quá 5 lần trong một phút: thông báo thời gian chờ, nút 
   await noHorizontalScroll(page)
 })
 
+/** Five reports in a row, then the sixth is refused with 429 (the mock's window, like the backend's). */
+async function hitRateLimit(page: Page) {
+  await radio(page, /Máy lỗi/).check()
+  await descriptionInput(page).fill('Màn hình đen.')
+  await consent(page).check()
+  for (let n = 0; n < 5; n += 1) {
+    await submit(page).click()
+    await expect(page.getByRole('heading', { level: 1, name: 'Đã gửi báo cáo' })).toBeVisible()
+    await page.getByRole('button', { name: 'Gửi báo cáo khác' }).click()
+    await radio(page, /Máy lỗi/).check()
+    await descriptionInput(page).fill('Màn hình đen.')
+    await consent(page).check()
+  }
+  await submit(page).click()
+  await expect(page.locator('#incident-form-error')).toContainText(/Bạn gửi quá nhiều báo cáo/)
+}
+
 for (const theme of ['light', 'dark'] as const) {
+  test(`Câu lỗi 429 cấp form đạt tương phản ≥ 4.5:1, không mờ khi hiện (${theme})`, async ({ page }) => {
+    // Animations on (no reduced motion): the alert must never be faded, also while it slides in.
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'no-preference' })
+    await page.addInitScript(value => { try { localStorage.setItem('fruit-vending-theme', value) } catch { /* storage blocked */ } }, theme)
+    await page.goto(FORM)
+    await hitRateLimit(page)
+    const alert = page.locator('#incident-form-error')
+    expect(await alert.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+    const result = await new AxeBuilder({ page }).include('#incident-form-error').withRules(['color-contrast']).analyze()
+    expect(result.violations).toEqual([])
+    expect(result.passes.length).toBeGreaterThan(0)
+  })
+
   test(`Ảnh chụp, tràn ngang và axe ở 390px (${theme})`, async ({ page }, testInfo) => {
     await useThemeChoice(page, theme)
     await page.goto(FORM)

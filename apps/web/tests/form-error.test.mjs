@@ -8,11 +8,12 @@ test('409 keeps the business message at form level (never replaced by the generi
   // Even if a 409 ever carried field errors, the conflict message stays and the fields are still marked.
   const failure = describeFormFailure(new ApiError(409, 'Slot is full', { quantity: 'too many' }))
   assert.equal(failure.message, 'Slot is full')
-  assert.deepEqual(failure.fieldErrors, { quantity: 'too many' })
+  // Beside the field: Vietnamese only (an unknown English line becomes the neutral sentence).
+  assert.deepEqual(failure.fieldErrors, { quantity: 'Giá trị chưa hợp lệ.' })
 })
 test('400 with field errors marks the fields and shows the generic line; 400 without them shows its message', () => {
   assert.deepEqual(describeFormFailure(new ApiError(400, 'Request validation failed', { email: 'must be a well-formed email address' })),
-    { message: CHECK_FIELDS, fieldErrors: { email: 'must be a well-formed email address' } })
+    { message: CHECK_FIELDS, fieldErrors: { email: 'Email chưa đúng định dạng.' } })
   assert.deepEqual(describeFormFailure(new ApiError(400, 'Batch already expired')), { message: 'Batch already expired' })
 })
 test('client-side validation and other failures', () => {

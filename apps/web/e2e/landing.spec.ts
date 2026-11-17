@@ -59,7 +59,8 @@ test('landing 390px: menu mở/đóng bằng bàn phím, Escape trả focus về
   const close = page.getByRole('button', { name: 'Đóng menu' })
   await expect(close).toHaveAttribute('aria-expanded', 'true')
   const mobileNav = page.getByRole('navigation', { name: 'Điều hướng điện thoại' })
-  await expect(mobileNav.getByRole('link')).toHaveCount(3)
+  await expect(mobileNav.getByRole('link')).toHaveCount(4)
+  await expect(mobileNav.getByRole('link', { name: 'Mua trái cây' })).toHaveAttribute('href', '/buy')
   await page.keyboard.press('Escape')
   await expect(mobileNav).toBeHidden()
   await expect(page.getByRole('button', { name: 'Mở menu' })).toBeFocused()
@@ -69,4 +70,50 @@ test('landing 390px: menu mở/đóng bằng bàn phím, Escape trả focus về
   await mobileNav.getByRole('link', { name: 'Hợp tác' }).click()
   await expect(mobileNav).toBeHidden()
   await expect(page).toHaveURL(/#hop-tac$/)
+})
+
+test('landing: đường dẫn "Mua trái cây" tới /buy ở hero, menu và cuối trang', async ({ page }) => {
+  await useThemeChoice(page, 'light')
+  await page.goto('/')
+  await expect(page.getByRole('heading', { level: 1, name: /Trái cây tươi/ })).toBeVisible()
+  const hero = page.locator('section[aria-labelledby="hero-title"]').getByRole('link', { name: 'Mua trái cây' })
+  const desktopNav = page.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('link', { name: 'Mua trái cây' })
+  const footer = page.getByRole('navigation', { name: 'Điều hướng cuối trang' }).getByRole('link', { name: 'Mua trái cây' })
+  for (const link of [hero, desktopNav, footer]) {
+    await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', '/buy')
+    const box = await link.boundingBox()
+    expect(box && box.height >= 44).toBe(true)
+  }
+  // Secondary to the main CTA: it follows "Hợp tác đặt máy" in the hero.
+  const heroLinks = await page.locator('section[aria-labelledby="hero-title"] a').allTextContents()
+  expect(heroLinks.map(text => text.trim()).slice(0, 2)).toEqual(['Hợp tác đặt máy', 'Mua trái cây'])
+  await hero.focus()
+  const outline = await hero.evaluate(element => { const style = getComputedStyle(element); return { width: style.outlineWidth, style: style.outlineStyle } })
+  expect(outline).toEqual({ width: '3px', style: 'solid' })
+
+  await hero.click()
+  await expect(page).toHaveURL(/\/buy$/)
+  await expect(page.getByRole('heading', { level: 1, name: /Trái cây tươi/ })).toHaveCount(0)
+
+  for (const name of ['Điều hướng chính', 'Điều hướng cuối trang']) {
+    await page.goto('/')
+    await page.getByRole('navigation', { name }).getByRole('link', { name: 'Mua trái cây' }).click()
+    await expect(page).toHaveURL(/\/buy$/)
+  }
+})
+
+test('landing 390px: mục "Mua trái cây" trong menu điện thoại đóng menu và tới /buy', async ({ page }) => {
+  await useThemeChoice(page, 'light')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  const hero = page.locator('section[aria-labelledby="hero-title"]').getByRole('link', { name: 'Mua trái cây' })
+  await expect(hero).toBeVisible()
+  const box = await hero.boundingBox()
+  expect(box && box.height >= 44 && box.x >= 0 && box.x + box.width <= 390).toBe(true)
+  await page.getByRole('button', { name: 'Mở menu' }).click()
+  const mobileNav = page.getByRole('navigation', { name: 'Điều hướng điện thoại' })
+  await mobileNav.getByRole('link', { name: 'Mua trái cây' }).click()
+  await expect(page).toHaveURL(/\/buy$/)
+  await expect(mobileNav).toHaveCount(0)
 })

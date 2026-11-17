@@ -6,7 +6,7 @@ import { authApi, usersApi } from '../src/api/resources.ts'
 import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import {
-  ACTIVE_ADMIN_QUERY, EMAIL_TAKEN, LOCK_BLOCK_TEXT, STATUS_CONFLICT_TEXT, createUserBody, describeCreateError, describeStatusError, isSelf,
+  ACTIVE_ADMIN_QUERY, EMAIL_TAKEN, LOCK_BLOCK_TEXT, PASSWORD_TOO_LONG, PASSWORD_TOO_SHORT, STATUS_CONFLICT_TEXT, passwordPolicyText, createUserBody, describeCreateError, describeStatusError, isSelf,
   lockBlockReason, lockBlocks, readUserFilters, statusAction, updateUserBody, userListQuery, validateCreateUser, validateUpdateUser,
 } from '../src/admin/users.ts'
 
@@ -66,6 +66,41 @@ test('client checks follow the contract limits', () => {
   assert.ok(validateCreateUser({ email: 'a@b.c', password: 'ệ'.repeat(25), fullName: 'A', phone: '' }).password, '75 UTF-8 bytes > 72')
   assert.equal(validateCreateUser({ email: 'a@b.c', password: 'a'.repeat(72), fullName: 'A', phone: '' }).password, undefined)
   assert.ok(validateUpdateUser({ fullName: 'a'.repeat(201), phone: '' }).fullName)
+  assert.ok(validateUpdateUser({ fullName: 'A', phone: '1'.repeat(33) }).phone)
+})
+
+test('password: at least 12 code points and at most 72 UTF-8 bytes, checked before sending', () => {
+  const password = value => validateCreateUser({ email: 'a@b.c', password: value, fullName: 'A', phone: '' }).password
+  assert.equal(password('abcdefg'), PASSWORD_TOO_SHORT, '7 characters')
+  assert.equal(password('a'.repeat(11)), PASSWORD_TOO_SHORT)
+  assert.equal(password('a'.repeat(12)), undefined)
+  // Code points, not UTF-16 units: 6 emoji are 12 units but 6 characters.
+  assert.equal(password('🍊'.repeat(6)), PASSWORD_TOO_SHORT)
+  assert.equal(password('🍊'.repeat(12)), undefined, '12 code points, 48 bytes')
+  assert.equal(password('ă'.repeat(40)), PASSWORD_TOO_LONG, '80 UTF-8 bytes')
+  assert.equal(password('a'.repeat(73)), PASSWORD_TOO_LONG)
+  assert.equal(password('ệ'.repeat(24)), undefined, '72 bytes exactly')
+})
+
+test('400 password policy without fieldErrors marks the password field in Vietnamese', () => {
+  const policy = new ApiError(400, 'Password must contain at least 8 characters and at most 72 UTF-8 bytes')
+  const failure = describeFormFailure(describeCreateError(policy))
+  assert.equal(failure.message, CHECK_FIELDS)
+  assert.deepEqual(failure.fieldErrors, { password: passwordPolicyText(8) })
+  assert.match(failure.fieldErrors.password, /tối thiểu 8 ký tự/)
+  const field = describeFormFailure(describeCreateError(new ApiError(400, 'Request validation failed', { password: 'size must be between 1 and 72', fullName: 'must not be blank' })))
+  assert.deepEqual(field.fieldErrors, { password: passwordPolicyText(undefined), fullName: 'Không được để trống.' })
+})
+
+test('mock flow: a short password sent anyway gets the policy 400 (message only) and lands on the password field', async () => {
+  await mockAdmin()
+  await assert.rejects(usersApi.create({ email: 'short@freshvend.test', password: 'abcdefg', fullName: 'Ngắn' }), error => {
+    assert.equal(error.status, 400)
+    assert.deepEqual(error.fieldErrors, {})
+    const failure = describeFormFailure(describeCreateError(error))
+    assert.deepEqual(failure, { message: CHECK_FIELDS, fieldErrors: { password: passwordPolicyText(12) } })
+    return true
+  })
   assert.ok(validateUpdateUser({ fullName: 'A', phone: '1'.repeat(33) }).phone)
   assert.deepEqual(validateUpdateUser({ fullName: 'A', phone: '' }), {})
 })

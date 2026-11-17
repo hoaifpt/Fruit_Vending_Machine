@@ -57,6 +57,28 @@ test('K1: danh mục và màn thanh toán QR ở 1280×800', async ({ page }, te
   await expectTouchTargets(page, 'màn đã hủy')
 })
 
+test('K1: sản phẩm không có ảnh dùng hình trung tính, không mượn ảnh trái cây khác; đồng hồ không vượt thời hạn giữ', async ({ page }) => {
+  // Seed products have no imageUrl (src/api/mock/seed.ts): every card shows the same neutral placeholder.
+  await openKiosk(page)
+  const sources = await page.locator('.buy-product img').evaluateAll(images => images.map(image => image.getAttribute('src') ?? ''))
+  expect(sources.length).toBeGreaterThan(0)
+  // The small SVG is inlined by Vite as a data URI (or served as product-placeholder*.svg): one and the same image.
+  const placeholder = /^data:image\/svg\+xml|product-placeholder/
+  for (const src of sources) {
+    expect(src).toMatch(placeholder)
+    expect(src).not.toMatch(/orange-mark|fruit-still-life|\.webp/)
+  }
+  expect(new Set(sources).size).toBe(1)
+  await buyFirst(page)
+  await expect(page.locator('.buy-pay-product img')).toHaveAttribute('src', sources[0])
+  // The mock holds 5 minutes: the countdown starts at 5:00 at most, never 5:01.
+  const shown = (await page.getByRole('timer').locator('strong').innerText()).trim()
+  const [minutes, seconds] = shown.split(':').map(Number)
+  expect(minutes * 60 + seconds).toBeLessThanOrEqual(300)
+  // No Mock Pay button without VITE_DEV_MOCK_WEBHOOK_SECRET (and never for the mock layer's own QR).
+  await expect(page.getByRole('button', { name: /Mock Pay/ })).toHaveCount(0)
+})
+
 test('K1: chọn món chỉ bằng bàn phím', async ({ page }) => {
   await openKiosk(page, '?scenario=pending')
   await page.locator('.buy-product').first().focus()

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent, ReactNode, RefObject } from 'react'
 import { ApiError } from '../api/client.ts'
 import { ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
@@ -18,7 +18,7 @@ import { linkHandler } from '../lib/router.ts'
 import { STATUS_CATALOG, statusMeta } from '../lib/status.ts'
 import type { StatusDomain } from '../lib/status.ts'
 import type { SortState } from '../lib/table-query.ts'
-import { describeFormFailure, ValidationError } from './form-error.ts'
+import { CHECK_FIELDS, describeFormFailure, INVALID_REQUEST, ValidationError } from './form-error.ts'
 import { rolesWith } from './permissions.ts'
 import type { Permission } from './permissions.ts'
 import { homeFor } from './routes.ts'
@@ -215,6 +215,8 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
   const id = useId()
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
+  const formRef = useRef<HTMLFormElement>(null)
+  const unmatched = useUnmatchedFieldErrors(formRef, setMessage)
   const { restore } = useReturnFocus()
   // Opened from state, not from a trigger: give focus back to the opener when the dialog goes away.
   useEffect(() => { const dialog = ref.current; dialog?.showModal(); return () => { dialog?.close(); restore() } }, [restore])
@@ -227,11 +229,12 @@ export function FormDialog({ title, submitLabel = 'Lưu', close, onSubmit, child
       if (failure.fieldErrors) onFieldErrors?.(failure.fieldErrors)
       setMessage(failure.message)
       setPending(false)
+      unmatched.check(error, failure.message)
     }
   }
   return <dialog ref={ref} aria-labelledby={id} onCancel={event => { if (pending) event.preventDefault(); else close() }}
     className={cn('m-auto max-h-[calc(100dvh-32px)] rounded-[14px] border bg-popover p-0 text-foreground shadow-2xl open:animate-in open:fade-in-0 open:zoom-in-95 backdrop:bg-black/40 motion-reduce:animate-none!', wide ? 'w-[min(820px,calc(100vw-24px))]' : 'w-[min(560px,calc(100vw-24px))]')}>
-    <form onSubmit={submit} noValidate aria-busy={pending}>
+    <form ref={formRef} onSubmit={submit} noValidate aria-busy={pending}>
       <header className="flex items-center justify-between gap-3 border-b px-5 py-4 max-[680px]:px-4 max-[680px]:py-3.5">
         <h2 id={id}>{title}</h2>
         <Button type="button" variant="ghost" size="icon-sm" className="text-xl font-normal text-muted-foreground" aria-label="Đóng" disabled={pending} onClick={close}>×</Button>
@@ -272,6 +275,7 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
   const messageRef = useRef<HTMLParagraphElement>(null)
   const formRef = useRef<HTMLFormElement>(null)
   const [failures, setFailures] = useState(0)
+  const unmatched = useUnmatchedFieldErrors(formRef, setMessage)
   const { onCloseAutoFocus } = useReturnFocus()
   // After a failed submit has rendered its errors, move focus to the first marked field (else the form-level alert),
   // so keyboard and screen-reader users land on what needs fixing.
@@ -293,6 +297,7 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
       setMessage(failure.message)
       setPending(false)
       setFailures(count => count + 1)
+      unmatched.check(error, failure.message)
     }
   }
   const block = (event: Event) => { if (pending) event.preventDefault() }
@@ -321,6 +326,23 @@ export function FormSheet({ title, description, submitLabel = 'Lưu', successMes
 }
 
 export { ValidationError }
+
+/**
+ * A server 400 whose field errors name no field this form shows (no control ended up `aria-invalid`) must not say
+ * "check the marked fields": once the errors have rendered, the form-level line becomes `INVALID_REQUEST`.
+ */
+function useUnmatchedFieldErrors(formRef: RefObject<HTMLFormElement | null>, setMessage: (message: string) => void) {
+  const [pendingCheck, setPendingCheck] = useState(0)
+  useEffect(() => {
+    if (!pendingCheck) return
+    if (!formRef.current?.querySelector('[aria-invalid="true"]')) setMessage(INVALID_REQUEST)
+  }, [pendingCheck, formRef, setMessage])
+  return {
+    check(error: unknown, message: string) {
+      if (!(error instanceof ValidationError) && message === CHECK_FIELDS) setPendingCheck(count => count + 1)
+    },
+  }
+}
 
 /** Toast options of a success: the given description, else the dialog title; `null` shows none. */
 function toastDetail(description: string | null | undefined, title: string) {

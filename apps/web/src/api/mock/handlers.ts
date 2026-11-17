@@ -340,9 +340,11 @@ export const routes: Route[] = [
   }),
   route('POST', '/users', 'admin', ctx => {
     const form = new Form(ctx.body, ['email', 'password', 'fullName', 'phone'])
-    const email = form.email('email'), password = form.password('password', 12), fullName = form.text('fullName', 200), phone = form.optionalText('phone', 32)
+    const email = form.email('email'), password = form.password('password'), fullName = form.text('fullName', 200), phone = form.optionalText('phone', 32)
     if (password && new TextEncoder().encode(password).length > 72) form.reject('password', 'Tối đa 72 byte.')
     form.done()
+    // Like the backend's PASSWORD_MIN_LENGTH policy (default 12 code points): a 400 with a message and no fieldErrors.
+    if ([...password].length < 12) throw new MockHttpError(400, 'Password must contain at least 12 characters and at most 72 UTF-8 bytes')
     if (ctx.store.users.some(user => user.email === email)) throw conflict('Email này đã được sử dụng.')
     const at = iso(ctx.now)
     const user: MockUser = { id: newId(), email, password, fullName, phone, status: 'ACTIVE', roles: ['STAFF'], createdAt: at, updatedAt: at }

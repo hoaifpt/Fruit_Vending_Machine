@@ -1,14 +1,10 @@
 // How a failed form submit is shown: errors beside the fields and/or one form-level message. Pure, so it is unit-tested.
 import { ApiError } from '../api/client.ts'
+import { fieldMessageVi, INVALID_REQUEST } from '../api/field-errors.ts'
 
-export { listFieldOf, normalizeFieldErrors, normalizeFieldKey } from '../api/field-errors.ts'
+export { fieldMessageVi, INVALID_REQUEST, listFieldOf, normalizeFieldErrors, normalizeFieldKey } from '../api/field-errors.ts'
 
 export const CHECK_FIELDS = 'Vui lòng kiểm tra các trường được đánh dấu.'
-/**
- * Form-level line of a 400 that names no field the form shows (an unknown key, or only the backend's generic English
- * "Request validation failed"): said in Vietnamese with the next step, never the English text.
- */
-export const INVALID_REQUEST = 'Dữ liệu gửi lên chưa hợp lệ. Kiểm tra lại các ô rồi gửi lại; nếu vẫn lỗi, hãy tải lại trang.'
 
 /** Generic English messages of the backend's 400 handlers: they explain nothing on their own. */
 const GENERIC_BAD_REQUEST = /^(request )?validation failed\.?$|missing or malformed|^malformed\b|^bad request\.?$|^invalid request\.?$/i
@@ -41,7 +37,8 @@ export function describeFormFailure(error: unknown, fields?: readonly string[]):
   if (error instanceof ApiError) {
     const all = Object.entries(error.fieldErrors)
     const shown = fields ? all.filter(([field]) => fields.includes(field)) : all
-    const fieldErrors = shown.length ? Object.fromEntries(shown) : undefined
+    // Beside the field the message is always Vietnamese (the backend's bean-validation lines are English).
+    const fieldErrors = shown.length ? Object.fromEntries(shown.map(([field, message]) => [field, fieldMessageVi(message)])) : undefined
     if (error.status === 409) return { message: error.message, fieldErrors }
     if (fieldErrors) return { message: CHECK_FIELDS, fieldErrors }
     if (error.status === 400 && (all.length || isGenericBadRequest(error.message))) return { message: INVALID_REQUEST }

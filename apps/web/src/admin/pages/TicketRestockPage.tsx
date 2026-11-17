@@ -25,7 +25,7 @@ import { alertPath, alertTypeLabel, machinePath } from '../alerts.ts'
 import { countLoaded } from '../batches.ts'
 import type { LoadedCount } from '../batches.ts'
 import { CONNECTION_POLL_MS } from '../connection.ts'
-import { ValidationError } from '../form-error.ts'
+import { CHECK_FIELDS, INVALID_REQUEST, ValidationError } from '../form-error.ts'
 import { fitConflictText, parseBoxCount, quantityHint, roomLines } from '../inventory-load.ts'
 import type { FitConflict, LoadRoom, Reload } from '../inventory-load.ts'
 import { ConfirmDialog, ErrorState, Link, Loading, PageHead, useForm } from '../kit.tsx'
@@ -595,7 +595,7 @@ function ReconcileStep({ ticket, lines, readOnly, back, completed, stale }: {
       toast.success('Đã hoàn tất phiếu nạp hàng', { description: 'Cảnh báo liên kết đã được đóng; cảnh báo tồn kho của ngăn đã nạp tự đóng khi đủ hàng.' })
       completed()
     } catch (error) {
-      const shown = describeCompleteError(error, result.rows)
+      const shown = describeCompleteError(error, result.rows, body.lineVariances)
       if (shown.error instanceof ValidationError) { setErrors(shown.error.fieldErrors); focusFirst() } else setFailure(errorMessage(shown.error))
       if (shown.stale) stale()
       setPending(false)
@@ -708,7 +708,7 @@ function PlanLine({ ticketId, line, capacity, changed, remove }: { ticketId: str
       changed()
     } catch (failure) {
       const shown = describePlanError(failure)
-      setError(errorMessage(shown.error))
+      setError(shown.error instanceof ValidationError ? shown.error.fieldErrors.plannedQuantity ?? INVALID_REQUEST : errorMessage(shown.error))
       if (shown.stale) changed()
     } finally { setPending(false) }
   }
@@ -747,9 +747,8 @@ function AddLine({ ticketId, machineId, slots, close, changed }: { ticketId: str
       toast.success('Đã thêm dòng nạp')
       changed(); close()
     } catch (error) {
-      if (error instanceof ApiError && Object.keys(error.fieldErrors).length) form.setErrors(error.fieldErrors)
       const shown = describePlanError(error)
-      setFailure(errorMessage(shown.error))
+      if (shown.error instanceof ValidationError) { form.setErrors(shown.error.fieldErrors); setFailure(CHECK_FIELDS) } else setFailure(errorMessage(shown.error))
       if (shown.stale) changed()
       setPending(false)
     }

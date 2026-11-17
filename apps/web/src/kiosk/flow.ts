@@ -59,9 +59,20 @@ function earliest(a: number | undefined, b: number | undefined) {
   return a === undefined ? b : b === undefined ? a : Math.min(a, b)
 }
 
-/** Whole seconds left until `deadline` on the server clock; 0 once passed. */
-export function secondsLeft(deadline: number | undefined, serverNow: number): number | undefined {
-  return deadline === undefined ? undefined : Math.max(0, Math.ceil((deadline - serverNow) / 1000))
+/**
+ * Whole seconds left until `deadline` on the server clock; 0 once passed. `maxSeconds` (the hold of the order) caps it,
+ * so rounding up and a clock offset measured a little late never show more than the hold (600 s → `10:00`, not `10:01`).
+ */
+export function secondsLeft(deadline: number | undefined, serverNow: number, maxSeconds?: number): number | undefined {
+  if (deadline === undefined) return undefined
+  const left = Math.max(0, Math.ceil((deadline - serverNow) / 1000))
+  return maxSeconds !== undefined && maxSeconds >= 0 ? Math.min(left, maxSeconds) : left
+}
+
+/** Hold of an order in whole seconds (expiresAt − createdAt, both server times), or undefined when one is missing. */
+export function holdSeconds(order: Pick<KioskOrder, 'createdAt' | 'expiresAt'>): number | undefined {
+  const created = time(order.createdAt), expires = time(order.expiresAt)
+  return created === undefined || expires === undefined || expires < created ? undefined : Math.round((expires - created) / 1000)
 }
 
 /** Server-minus-client offset measured from the envelope timestamp at receipt time. */
@@ -134,4 +145,9 @@ export const MACHINE_STATE_COPY: Record<MachineState, { title: string; text: str
 export function configuredSeconds(raw: string | undefined, fallback: number): number {
   const value = Number(raw)
   return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+/** Image of a catalog card: the product's own `imageUrl`, else the neutral placeholder (never another product's photo). */
+export function productImage(imageUrl: string | null | undefined, placeholder: string): string {
+  return imageUrl?.trim() || placeholder
 }

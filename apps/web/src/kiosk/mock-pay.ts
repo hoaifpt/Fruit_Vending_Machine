@@ -1,8 +1,18 @@
 // Demo helper kept from the purchase-dispense work: when the local backend runs PAYMENT_PROVIDER=MOCK (QR text
 // "MOCK-QR|<reference>|<amount>"), it posts a signed MOCK webhook and asks the hardware bridge to move the servo.
 // Only reachable from a MOCK-QR code; real payOS QR codes never show the button.
+// The webhook secret is never in the source: it comes from VITE_DEV_MOCK_WEBHOOK_SECRET (apps/web/.env.local, the
+// same value as the local backend's MOCK webhook secret), and only in `npm run dev`. Without it there is no button.
+
+/** The MOCK webhook secret: only in a dev server (`DEV`), and only when VITE_DEV_MOCK_WEBHOOK_SECRET is set. */
+export function mockWebhookSecret(env: { DEV?: boolean; VITE_DEV_MOCK_WEBHOOK_SECRET?: string }): string {
+  return env.DEV ? (env.VITE_DEV_MOCK_WEBHOOK_SECRET ?? '').trim() : ''
+}
 
 export async function simulateMockPayment(qrCode: string, orderCode?: string, column: number = 1) {
+  // `import.meta.env.DEV` is false in a production build, so the minifier drops the variable and its value.
+  const secret = import.meta.env.DEV ? mockWebhookSecret({ DEV: true, VITE_DEV_MOCK_WEBHOOK_SECRET: import.meta.env.VITE_DEV_MOCK_WEBHOOK_SECRET }) : ''
+  if (!secret) return false
   const parts = qrCode.split('|')
   if (parts.length < 3) return false
   const paymentReference = parts[1]
@@ -10,7 +20,6 @@ export async function simulateMockPayment(qrCode: string, orderCode?: string, co
   const transactionId = 'MOCK-TXN-' + Math.random().toString(36).substring(2, 9).toUpperCase()
   const rawBody = `{"paymentReference":"${paymentReference}","transactionId":"${transactionId}","amount":${amount},"status":"SUCCESS"}`
 
-  const secret = 'fvm_mock_webhook_secret_key_2026'
   const enc = new TextEncoder()
   const key = await window.crypto.subtle.importKey(
     'raw',

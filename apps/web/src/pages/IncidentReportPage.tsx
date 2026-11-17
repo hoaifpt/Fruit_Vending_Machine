@@ -345,8 +345,10 @@ function ReportFormView({ token, form, onGone }: { token: string; form: ReportFo
         <input id="incident-website" name="website" type="text" tabIndex={-1} autoComplete="off" value={draft.website} onChange={event => update('website', event.target.value)} />
       </div>
 
+      {/* Opaque pair, never faded: ≥ 4.5:1 in light (dark red on pale red) and dark (pale red on dark red) from the first
+          frame. Only the position animates (no fade-in), so a screenshot or a glance mid-animation is never washed out. */}
       {formError && <div key={attempt} ref={feedbackRef} id="incident-form-error" tabIndex={-1} role="alert"
-        className={`${ALERT} border-destructive bg-status-danger text-status-danger-foreground outline-none animate-in fade-in-0 slide-in-from-bottom-1 duration-200 motion-reduce:animate-none ${FOCUS}`}>
+        className={`${ALERT} border-destructive bg-status-danger font-medium text-[oklch(0.4_0.16_27)] outline-none animate-in slide-in-from-bottom-1 duration-200 motion-reduce:animate-none dark:text-[oklch(0.93_0.04_27)] ${FOCUS}`}>
         <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <span>{formError}{waiting ? ' Thông tin bạn đã nhập vẫn được giữ.' : ''}</span>
       </div>}

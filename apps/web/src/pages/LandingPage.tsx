@@ -17,6 +17,10 @@ import spaceImage from '../assets/partnership-space.webp'
 import orangeImage from '../assets/orange-mark.webp'
 
 const sections = [['#giai-phap', 'Giải pháp'], ['#cach-hoat-dong', 'Cách hoạt động'], ['#hop-tac', 'Hợp tác']] as const
+/** The kiosk purchase screen (`/buy`, PurchasePage): linked from the hero, both navigations and the footer. */
+const PURCHASE_HREF = '/buy'
+const PURCHASE_LABEL = 'Mua trái cây'
+const navigation = [...sections, [PURCHASE_HREF, PURCHASE_LABEL]] as const
 const steps: readonly { icon: LucideIcon; title: string; text: string }[] = [
   { icon: Apple, title: 'Chọn trái cây', text: 'Tìm món yêu thích và lựa chọn ngay trên màn hình của máy.' },
   { icon: QrCode, title: 'Thanh toán QR', text: 'Quét mã thanh toán cho sản phẩm bạn vừa chọn.' },
@@ -84,7 +88,7 @@ export default function LandingPage() {
       <div className="mx-auto flex min-h-[72px] w-[calc(100%-32px)] items-center justify-between gap-2 max-[359px]:w-[calc(100%-24px)] min-[641px]:min-h-[76px] min-[641px]:w-[calc(100%-48px)] min-[641px]:gap-6 min-[961px]:min-h-[88px] min-[961px]:justify-start min-[1181px]:w-[min(1320px,calc(100%-80px))] min-[1181px]:gap-10">
         <Brand iconClassName="text-(--brand)" />
         <nav className="ml-auto hidden gap-[18px] min-[961px]:flex min-[1181px]:gap-7" aria-label="Điều hướng chính">
-          {sections.map(([href, label]) => <a key={href} className={cn('inline-flex min-h-11 items-center text-sm font-[550]', LINK, FOCUS)} href={href}>{label}</a>)}
+          {navigation.map(([href, label]) => <a key={href} className={cn('inline-flex min-h-11 items-center text-sm font-[550]', LINK, FOCUS)} href={href}>{label}</a>)}
         </nav>
         <div className="flex items-center gap-1 min-[641px]:gap-5 min-[961px]:gap-[18px] min-[1181px]:gap-6">
           <a className={cn('inline-flex min-h-11 items-center px-1.5 text-xs font-[550] max-[359px]:px-[3px] max-[359px]:text-[11px] min-[641px]:px-0 min-[641px]:text-sm', LINK, FOCUS)} href="/login">Đăng nhập<span className="hidden min-[641px]:inline">&nbsp;quản lý</span></a>
@@ -98,7 +102,7 @@ export default function LandingPage() {
         </div>
       </div>
       <nav className="border-t border-(--landing-line) px-6 pt-3 pb-5 min-[961px]:hidden" id="mobile-navigation" aria-label="Điều hướng điện thoại" hidden={!menuOpen}>
-        {sections.map(([href, label]) => <a key={href} className={cn('flex items-center justify-between py-3.5 text-[17px]', LINK, FOCUS)} href={href} onClick={() => setMenuOpen(false)}>{label}<ArrowRight className="size-6" strokeWidth={1.6} aria-hidden="true" /></a>)}
+        {navigation.map(([href, label]) => <a key={href} className={cn('flex min-h-11 items-center justify-between py-3.5 text-[17px]', LINK, FOCUS)} href={href} onClick={() => setMenuOpen(false)}>{label}<ArrowRight className="size-6" strokeWidth={1.6} aria-hidden="true" /></a>)}
       </nav>
     </header>
 
@@ -110,6 +114,7 @@ export default function LandingPage() {
           <p className={cn('max-w-[36ch] pt-[22px] text-base text-(--muted) min-[641px]:pt-7 min-[641px]:text-[17px] min-[961px]:text-[19px]', TEXT)}>Giải pháp máy bán trái cây tự động cho không gian làm việc và sinh hoạt.</p>
           <div className="mt-6 flex flex-wrap items-center gap-3 max-[359px]:flex-col max-[359px]:items-start max-[359px]:gap-2 min-[641px]:mt-[30px] min-[641px]:flex-col min-[641px]:items-start min-[641px]:gap-2 min-[961px]:flex-row min-[961px]:items-center min-[961px]:gap-3 min-[1181px]:gap-5">
             <Button asChild className={CTA}><a href="#hop-tac">Hợp tác đặt máy <ArrowRight className={CTA_ARROW} strokeWidth={1.6} aria-hidden="true" /></a></Button>
+            <a className={cn(TEXT_LINK, 'text-[13px] text-(--brand) min-[641px]:text-sm')} href={PURCHASE_HREF}>{PURCHASE_LABEL} <ArrowRight className="size-[18px] transition-transform duration-200 group-hover:translate-x-[3px] motion-reduce:transition-none" strokeWidth={1.6} aria-hidden="true" /></a>
             <a className={cn(TEXT_LINK, 'text-[13px] min-[641px]:text-sm')} href="#giai-phap">Khám phá giải pháp <ArrowUpRight className="size-[18px]" strokeWidth={1.6} aria-hidden="true" /></a>
           </div>
           <p className={cn(SERIF, 'hidden pt-7 text-base font-normal tracking-normal text-(--muted) italic min-[641px]:block min-[961px]:pt-12 min-[961px]:text-lg', TEXT)}>Một khoảng nghỉ nhỏ.<br />Một chút tươi mới cho ngày dài.</p>
@@ -220,8 +225,8 @@ export default function LandingPage() {
           <p className={cn('pt-3.5 text-sm text-[oklch(0.87_0.02_153)]', TEXT)}>Trái cây tươi. Gần bạn hơn.</p>
         </div>
         <nav className="flex flex-col gap-1 min-[641px]:flex-row min-[641px]:gap-5 min-[961px]:gap-8" aria-label="Điều hướng cuối trang">
-          {[['#giai-phap', 'Giải pháp'], ['#hop-tac', 'Hợp tác đặt máy'], ['/login', 'Đăng nhập quản lý']].map(([href, label]) => <a key={href} className={cn('inline-flex min-h-11 items-center gap-3 text-sm transition-colors duration-180 ease-out hover:text-[oklch(0.85_0.06_150)] motion-reduce:transition-none', FOCUS, ON_DARK)} href={href}>
-            {label}{href === '/login' && <ArrowRight className="size-[18px]" strokeWidth={1.6} aria-hidden="true" />}
+          {[['#giai-phap', 'Giải pháp'], ['#hop-tac', 'Hợp tác đặt máy'], [PURCHASE_HREF, PURCHASE_LABEL], ['/login', 'Đăng nhập quản lý']].map(([href, label]) => <a key={href} className={cn('inline-flex min-h-11 items-center gap-3 text-sm transition-colors duration-180 ease-out hover:text-[oklch(0.85_0.06_150)] motion-reduce:transition-none', FOCUS, ON_DARK)} href={href}>
+            {label}{href.startsWith('/') && <ArrowRight className="size-[18px]" strokeWidth={1.6} aria-hidden="true" />}
           </a>)}
         </nav>
       </div>

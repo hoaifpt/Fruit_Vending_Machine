@@ -5,7 +5,8 @@ import { ApiError, configureClient } from '../src/api/client.ts'
 import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
 import { createStore } from '../src/api/mock/seed.ts'
 import { createKioskApi } from '../src/kiosk/api.ts'
-import { MACHINE_STATE_COPY, chargeOutcome, clockOffset, configuredSeconds, formatCountdown, machineStateOf, pollDelay, secondsLeft, viewForOrder } from '../src/kiosk/flow.ts'
+import { MACHINE_STATE_COPY, chargeOutcome, clockOffset, configuredSeconds, formatCountdown, holdSeconds, machineStateOf, pollDelay, productImage, secondsLeft, viewForOrder } from '../src/kiosk/flow.ts'
+import { mockWebhookSecret } from '../src/kiosk/mock-pay.ts'
 import { incidentReportConfig, reportLinkProblem, safeReportUrl } from '../src/kiosk/incident.ts'
 import { resolvePage } from '../src/routing.ts'
 import { jsonResponse } from './helpers.mjs'
@@ -87,6 +88,39 @@ test('countdown uses server time corrected by clock skew', () => {
   assert.equal(secondsLeft(now - 1, now), 0)
   assert.equal(secondsLeft(undefined, now), undefined)
   assert.equal(formatCountdown(65), '1:05')
+})
+
+test('countdown never shows more than the hold: 600 s → 10:00, not 10:01', () => {
+  const order = { createdAt: '2026-10-18T07:00:00Z', expiresAt: '2026-10-18T07:10:00Z' }
+  assert.equal(holdSeconds(order), 600)
+  const deadline = Date.parse(order.expiresAt)
+  // Clock offset measured a little late (server time read 0.4 s before the order was created) and ceil rounding.
+  const left = secondsLeft(deadline, Date.parse(order.createdAt) - 400, holdSeconds(order))
+  assert.equal(left, 600)
+  assert.equal(formatCountdown(left), '10:00')
+  assert.equal(secondsLeft(deadline, Date.parse(order.createdAt) - 400), 601, 'uncapped it would read 10:01')
+  assert.equal(secondsLeft(deadline, deadline - 59_500, 600), 60)
+  assert.equal(holdSeconds({ createdAt: undefined, expiresAt: order.expiresAt }), undefined)
+})
+
+test('a product without imageUrl gets the neutral placeholder, never another product photo', () => {
+  assert.equal(productImage('https://cdn.test/tao.webp', '/placeholder.svg'), 'https://cdn.test/tao.webp')
+  assert.equal(productImage(undefined, '/placeholder.svg'), '/placeholder.svg')
+  assert.equal(productImage('  ', '/placeholder.svg'), '/placeholder.svg')
+  const page = readFileSync(new URL('../src/pages/PurchasePage.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(page, /orange-mark|fruit-still-life|productIndex/, 'no photo picked by position')
+})
+
+test('Mock Pay: no secret in the source; read from VITE_DEV_MOCK_WEBHOOK_SECRET only in a dev server', () => {
+  const source = readFileSync(new URL('../src/kiosk/mock-pay.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /secret\s*=\s*['"`][^'"`]+['"`]/, 'no hard-coded secret')
+  assert.doesNotMatch(source, /fvm_mock_webhook/)
+  assert.equal(mockWebhookSecret({ DEV: true, VITE_DEV_MOCK_WEBHOOK_SECRET: ' s3cret ' }), 's3cret')
+  assert.equal(mockWebhookSecret({ DEV: true }), '', 'missing: no button')
+  assert.equal(mockWebhookSecret({ DEV: false, VITE_DEV_MOCK_WEBHOOK_SECRET: 's3cret' }), '', 'production build: never')
+  const page = readFileSync(new URL('../src/pages/PurchasePage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /BACKEND_MOCK_PAY = import\.meta\.env\.DEV \? !!import\.meta\.env\.VITE_DEV_MOCK_WEBHOOK_SECRET/)
+  assert.match(readFileSync(new URL('../.env.example', import.meta.url), 'utf8'), /^VITE_DEV_MOCK_WEBHOOK_SECRET=$/m)
 })
 
 test('polling backs off on failures up to 10 s', () => {

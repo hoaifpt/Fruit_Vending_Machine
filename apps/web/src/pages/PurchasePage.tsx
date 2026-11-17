@@ -9,20 +9,26 @@ import { configuredKioskKey, createKioskApi } from '../kiosk/api'
 import type { KioskApi, KioskIdentity, KioskOrder, KioskProduct } from '../kiosk/api'
 import {
   CATALOG_REFRESH_MS, COUNTDOWN_WARN_SECONDS, DISPENSE_FAILED_RETURN_MS, DISPENSE_SLOW_MS, DISPENSE_STUCK_MS, ENDED_RETURN_MS, MACHINE_STATE_COPY, PAID_RETURN_MS,
-  SERVICE_RETRY_MS, chargeOutcome, clockOffset, configuredSeconds, formatCountdown, machineStateOf, pollDelay, secondsLeft, viewForOrder,
+  SERVICE_RETRY_MS, chargeOutcome, clockOffset, configuredSeconds, formatCountdown, holdSeconds, machineStateOf, pollDelay, productImage, secondsLeft, viewForOrder,
 } from '../kiosk/flow'
 import type { MachineState, OrderView } from '../kiosk/flow'
 import { incidentReportConfig, reportLinkProblem, safeReportUrl } from '../kiosk/incident'
 import { formatDateTime, formatMoney as money } from '../lib/format'
 import { discountReasonText, lineView, orderDiscount, priceView } from '../lib/price'
-import orange from '../assets/orange-mark.webp'
-import mix from '../assets/fruit-still-life.webp'
+// Neutral box drawing for a product without imageUrl: never another product's photo (a "Táo" card must not show oranges).
+import placeholderImage from '../assets/product-placeholder.svg'
 
-const env = import.meta.env
+// Only the variables this screen reads, each by its full name: the whole `import.meta.env` object would carry every
+// VITE_* value (also VITE_DEV_MOCK_WEBHOOK_SECRET) into the bundle.
+const env: Record<string, string | undefined> = {
+  VITE_KIOSK_PAYMENT_IDLE_SECONDS: import.meta.env.VITE_KIOSK_PAYMENT_IDLE_SECONDS,
+  VITE_KIOSK_INCIDENT_REPORT: import.meta.env.VITE_KIOSK_INCIDENT_REPORT,
+  VITE_API_MOCK: import.meta.env.VITE_API_MOCK,
+}
 const IDLE_SECONDS = configuredSeconds(env.VITE_KIOSK_PAYMENT_IDLE_SECONDS, 120)
-const fallbackImage = (index: number) => (index % 2 ? mix : orange)
-/** Demo button for the local backend's MOCK provider. Dev server only: `vite build` drops it and its webhook secret. */
-const BACKEND_MOCK_PAY = import.meta.env.DEV
+// Demo button for the local backend's MOCK provider (PAYMENT_PROVIDER=MOCK): only in a dev server that has the MOCK webhook secret in
+// VITE_DEV_MOCK_WEBHOOK_SECRET (.env.local); never in a production build, never with the value in the bundle.
+const BACKEND_MOCK_PAY = import.meta.env.DEV ? !!import.meta.env.VITE_DEV_MOCK_WEBHOOK_SECRET?.trim() : false
 
 type Screen =
   | { kind: 'booting' }
@@ -292,8 +298,7 @@ export default function PurchasePage() {
     return () => clearTimeout(timer)
   }, [screen.kind, dialog, currentPage, pageCount])
 
-  const productIndex = (product: KioskProduct) => Math.max(0, products.findIndex(item => item.productId === product.productId))
-  const imageOf = (product: KioskProduct) => product.imageUrl || fallbackImage(productIndex(product))
+  const imageOf = (product: KioskProduct) => productImage(product.imageUrl, placeholderImage)
   const orderCode = 'order' in screen ? screen.order.orderCode : undefined
   const slowDispense = screen.kind === 'dispensing' && clock - enteredAt.current >= DISPENSE_SLOW_MS
   // K-07 (FE 8.3): after a paid order the machine did not serve, the incident QR also carries the order code.
@@ -509,7 +514,7 @@ function PaymentPanel({ screen, problem, creating, reconnecting, serverNow, onRe
 function Countdown({ screen, serverNow }: { screen: Screen; serverNow: number }) {
   if (screen.kind !== 'order') return <div className="buy-countdown" aria-hidden="true"><span>Thời gian giữ hàng</span><strong>…</strong></div>
   const deadline = screen.view.kind === 'qr' ? screen.view.deadline : (screen.order.expiresAt ? Date.parse(screen.order.expiresAt) : undefined)
-  const left = secondsLeft(deadline, serverNow)
+  const left = secondsLeft(deadline, serverNow, holdSeconds(screen.order))
   if (left === undefined) return <div className="buy-countdown" />
   const minutes = Math.floor(left / 60), seconds = left % 60
   return <div className="buy-countdown" data-warn={left <= COUNTDOWN_WARN_SECONDS || undefined} role="timer" aria-label={`Còn ${minutes} phút ${seconds} giây để thanh toán`}>

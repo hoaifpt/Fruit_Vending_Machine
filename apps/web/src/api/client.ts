@@ -1,6 +1,6 @@
 // Single HTTP client for the management API. Contract: api-contract/api.yaml (types in ./schema.d.ts).
 import { beginProgress } from '../lib/progress.ts'
-import { normalizeFieldErrors } from './field-errors.ts'
+import { INVALID_REQUEST, isValidationFailedMessage, normalizeFieldErrors } from './field-errors.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -50,9 +50,11 @@ export interface ClientConfig {
 const API_PREFIX = '/api/v1'
 const TIMEOUT_MS = 20_000
 
+// Each variable is read by its full name (`import.meta.env.VITE_…`) so Vite inlines only that value: reading the whole
+// `import.meta.env` object would put every VITE_* variable (also dev-only secrets) into the bundle. Outside Vite (node
+// tests) `import.meta.env` is undefined, hence the try.
 function envBaseUrl(): string {
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env
-  return (env?.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '')
+  try { return (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/+$/, '') } catch { return '' }
 }
 
 const config: ClientConfig = {
@@ -95,8 +97,9 @@ async function readError(response: Response): Promise<ApiError> {
   const fields = normalizeFieldErrors(fieldErrors)
   const { status } = response
   // Only 400/409 messages are business messages from the contract; everything else is generic.
-  const backendMessage = (status === 400 || status === 409) && typeof body.message === 'string' && body.message.trim() ? body.message : ''
-  const message = backendMessage || GENERIC_MESSAGES[status] || (status >= 500 ? 'Hệ thống đang gặp sự cố. Vui lòng thử lại.' : 'Yêu cầu không hợp lệ.')
+  // The backend's generic "Request validation failed" says nothing: a 400 then gets one Vietnamese line with the next step.
+  const backendMessage = (status === 400 || status === 409) && typeof body.message === 'string' && body.message.trim() && !isValidationFailedMessage(body.message) ? body.message : ''
+  const message = backendMessage || GENERIC_MESSAGES[status] || (status >= 500 ? 'Hệ thống đang gặp sự cố. Vui lòng thử lại.' : status === 400 ? INVALID_REQUEST : 'Yêu cầu không hợp lệ.')
   return new ApiError(status, message, fields, status === 429 ? retryAfterOf(response.headers.get('Retry-After')) : undefined)
 }
 

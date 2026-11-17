@@ -13,6 +13,7 @@ import type { ReactNode, Ref } from 'react'
 import { Lock as LockIcon, RotateCcw, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '../../api/client.ts'
+import { fieldMessageVi } from '../../api/field-errors.ts'
 import { maintenanceCommandsApi, slotsApi } from '../../api/resources.ts'
 import type { InventorySummary, Machine, MaintenanceCommand, MaintenanceOperation, MaintenanceReason, Page } from '../../api/resources.ts'
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogTitle } from '../../components/ui/alert-dialog.tsx'
@@ -274,7 +275,7 @@ function CommandDialog({ machine, operation, slotCode, plan, close, send }: {
     setPending(true); setFailure(''); setErrors({})
     try { await send(reason, note); close() } catch (error) {
       const fields = error instanceof ApiError ? error.fieldErrors : {}
-      if (fields.reason || fields.note) { setErrors({ reason: fields.reason ?? '', note: fields.note ?? '' }); (fields.reason ? reasonRef : noteRef).current?.focus() }
+      if (fields.reason || fields.note) { setErrors({ reason: fields.reason ? fieldMessageVi(fields.reason) : '', note: fields.note ? fieldMessageVi(fields.note) : '' }); (fields.reason ? reasonRef : noteRef).current?.focus() }
       setFailure(errorMessage(error)); setPending(false)
     }
   }

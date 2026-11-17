@@ -18,8 +18,8 @@ export type KioskPayment = S['KioskPaymentResponse']
 export type KioskReportLink = S['ReportLinkResponse']
 
 export function configuredKioskKey(): string {
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env
-  return (env?.VITE_KIOSK_API_KEY ?? '').trim()
+  // By its full name, so Vite inlines only this value (never the whole env object); undefined outside Vite.
+  try { return (import.meta.env.VITE_KIOSK_API_KEY ?? '').trim() } catch { return '' }
 }
 
 export interface KioskApi {

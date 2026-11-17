@@ -39,6 +39,23 @@ export function findMockMarkers(dir) {
   return found
 }
 
+/**
+ * Dev-only secrets that must never reach a production bundle (the kiosk's Mock Pay webhook secret, read only when
+ * `import.meta.env.DEV`). `[file, variable]` pairs where the value of one of `values` appears under `dir`; values
+ * shorter than 6 characters are ignored (they would match by chance).
+ */
+export const DEV_SECRET_VARIABLES = ['VITE_DEV_MOCK_WEBHOOK_SECRET']
+export function findDevSecrets(dir, values) {
+  const found = []
+  const secrets = Object.entries(values).filter(([, value]) => typeof value === 'string' && value.trim().length >= 6)
+  if (!secrets.length) return found
+  for (const path of files(dir, /\.(js|mjs|html|css|map|json)$/)) {
+    const text = readFileSync(path, 'utf8')
+    for (const [name, value] of secrets) if (text.includes(value.trim())) found.push([relative(dir, path).split(sep).join('/'), name])
+  }
+  return found
+}
+
 /** `[file, marker]` pairs of legacy CSS under `dir`: a legacy file name, or a legacy rule inside any CSS file. */
 export function findLegacyCss(dir) {
   const found = []
@@ -65,5 +82,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     for (const [file, marker] of legacy) console.error(`  ${file}: ${marker}`)
     process.exit(1)
   }
-  console.log('check-dist: dist không chứa mã mock và không còn CSS cũ.')
+  // The values Vite would have seen at build time: .env files of the production mode, then the process environment.
+  const { loadEnv } = await import('vite')
+  const env = { ...loadEnv('production', fileURLToPath(new URL('..', import.meta.url)), 'VITE_DEV_'), ...process.env }
+  const secrets = findDevSecrets(dir, Object.fromEntries(DEV_SECRET_VARIABLES.map(name => [name, env[name]])))
+  if (secrets.length) {
+    console.error('dist chứa giá trị bí mật chỉ dành cho dev, không được triển khai bản build này:')
+    for (const [file, name] of secrets) console.error(`  ${file}: ${name}`)
+    process.exit(1)
+  }
+  console.log('check-dist: dist không chứa mã mock, không còn CSS cũ, không chứa bí mật dev.')
 }

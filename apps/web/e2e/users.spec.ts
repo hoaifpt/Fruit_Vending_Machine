@@ -107,7 +107,7 @@ test.describe('màn Tài khoản', () => {
     await expect(status).toBeFocused()
   })
 
-  test('400 từ máy chủ (mật khẩu ngắn): lỗi dưới ô Mật khẩu, ô đó nhận focus, một câu chung cấp form', async ({ page }) => {
+  test('Mật khẩu dưới 12 ký tự bị chặn trước khi gửi: lỗi dưới ô Mật khẩu, ô đó nhận focus, một câu chung cấp form', async ({ page }) => {
     await page.getByRole('button', { name: 'Tạo tài khoản nhân viên' }).click()
     const sheet = page.getByRole('dialog', { name: 'Tạo tài khoản nhân viên' })
     await sheet.getByRole('textbox', { name: 'Họ tên' }).fill('Nhân viên Mới')
@@ -116,9 +116,16 @@ test.describe('màn Tài khoản', () => {
     await password.fill('ngan')
     await sheet.getByRole('button', { name: 'Tạo tài khoản' }).click()
     await expect(password).toHaveAttribute('aria-invalid', 'true')
-    await expect(password).toHaveAccessibleDescription('Tối thiểu 12 ký tự.')
+    await expect(password).toHaveAccessibleDescription('Mật khẩu tối thiểu 12 ký tự.')
     await expect(password).toBeFocused()
     await expect(sheet.getByRole('alert')).toHaveText('Vui lòng kiểm tra các trường được đánh dấu.')
+    // 80 UTF-8 bytes (40 × "ă") is refused too, before any request.
+    await password.fill('ă'.repeat(40))
+    await sheet.getByRole('button', { name: 'Tạo tài khoản' }).click()
+    await expect(password).toHaveAccessibleDescription(/Mật khẩu quá dài \(tối đa 72 byte/)
+    await expect(password).toHaveAttribute('aria-invalid', 'true')
+    // The mock API runs in the page: its request log shows no POST /users at all.
+    expect(await page.evaluate(() => (window as unknown as { __fvMock: { requests: (p: string) => { method: string; path?: string }[] } }).__fvMock.requests('/users').filter(call => call.method === 'POST').length)).toBe(0)
   })
 
   test('Email trùng (409): báo một lần dưới ô Email, cấp form là câu chung', async ({ page }) => {
