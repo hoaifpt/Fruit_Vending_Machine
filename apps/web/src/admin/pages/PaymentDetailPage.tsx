@@ -20,7 +20,7 @@ import type { AmountCheck } from '../payments.ts'
 import { useApi } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
-import { refundEntry, refundPathFor } from '../refunds.ts'
+import { refundEntry, refundPathFor, refundReasonLabel } from '../refunds.ts'
 
 const BACK = { to: '/admin/payments', label: 'Danh sách thanh toán' }
 /** Webhooks read for one payment (a payment normally has one to three). */
@@ -84,7 +84,7 @@ function PaymentDetailPage({ paymentId }: { paymentId: string }) {
     {can('PAYMENT_REFUND') && order.data && refundEntry(order.data, data.id) && <p data-refund-entry className="mb-4! text-[14px]">
       {refundEntry(order.data, data.id) === 'record'
         ? <>Khoản này cần hoàn cho khách. <Link to={refundPathFor(data.orderId)} className={LINK}>Ghi nhận hoàn tiền</Link></>
-        : <>Khoản này đã được hoàn tiền. <Link to={refundPathFor(data.orderId)} className={LINK}>Xem mã chuyển khoản và người ghi nhận</Link></>}
+        : <>Khoản này đã được hoàn tiền (xem mục Hoàn tiền bên dưới). <Link to={refundPathFor(data.orderId)} className={LINK}>Mở màn Hoàn tiền của đơn</Link></>}
     </p>}
     {orderUnknown && data.status === 'SUCCESS' && <p role="status" className="mb-4! text-[13px] text-muted-foreground">Chưa đọc được đơn hàng nên chưa kiểm tra được thanh toán muộn hoặc trùng (xem mục Đơn hàng bên dưới).</p>}
     <div className="grid gap-x-5 lg:grid-cols-2">
@@ -101,6 +101,17 @@ function PaymentDetailPage({ paymentId }: { paymentId: string }) {
           <dt>Mã QR hết hạn lúc</dt><dd>{formatDateTime(data.expiredAt)}</dd>
           <dt>Nội dung mã QR</dt><dd><Mono value={data.qrCode} empty="— (chỉ có khi đang chờ thanh toán)" /></dd>
         </dl>
+        {/* Backend #72: the manual refund of a REFUNDED payment. */}
+        {data.refund && <>
+          <h3 className="mt-4! mb-2! text-[14px] font-semibold">Hoàn tiền</h3>
+          <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-[14px] [&_dt]:text-muted-foreground">
+            <dt>Lý do</dt><dd>{refundReasonLabel(data.refund.reason)}</dd>
+            <dt>Hoàn lúc</dt><dd>{formatDateTime(data.refund.refundedAt)}</dd>
+            <dt>Mã chuyển khoản</dt><dd><Mono value={data.refund.transferReference} /></dd>
+            <dt>Người ghi nhận</dt><dd>{data.refund.refundedBy?.fullName?.trim() || '—'}</dd>
+            <dt>Ghi chú</dt><dd className="break-words whitespace-pre-wrap">{data.refund.note?.trim() || '—'}</dd>
+          </dl>
+        </>}
       </section>
       <OrderPanel payment={data} state={order} allowed={canOrders} />
     </div>

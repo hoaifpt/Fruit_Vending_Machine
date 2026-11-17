@@ -6,8 +6,8 @@ import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, Moc
 import type { components as AuthMe } from '../drafts/auth-me'
 import { ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
 import type { Role } from '../session.ts'
-import { incidentReportRoutes } from './incident-reports.ts'
-import { refundRoutes } from './refunds.ts'
+import { customerReportRoutes } from './customer-reports.ts'
+import { orderRefundedAt, orderRefunds, paymentDetail, refundRoutes } from './refunds.ts'
 import { boxPrice, eligibleToday, lineDiscount, linePricing, pricingView, updatePricing } from './pricing.ts'
 import { revenueReport } from './revenue.ts'
 import { activeWorkOrderOf, workOrderFromAlert, workOrderRoutes } from './work-orders.ts'
@@ -37,7 +37,7 @@ export interface KioskSimulation {
 }
 /**
  * `{ permission }`: backend #48 style check against the role → permission table in the store.
- * `{ draftPermission }`: the code of a draft contract still mocked (refunds, incident reports, revenue), checked against the
+ * `{ draftPermission }`: the code of a draft contract still mocked (revenue), checked against the
  * web's role table ROLE_PERMISSIONS.
  */
 export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
@@ -635,7 +635,9 @@ export const routes: Route[] = [
     // Backend #61: lines without a discount carry the list price, percent 0 and reason NONE; the order its discountAmount.
     const order = { ...stored, discountAmount: stored.discountAmount ?? 0, items: stored.items.map(line => ({ ...line, originalUnitPrice: line.originalUnitPrice ?? line.unitPrice, discountPercent: line.discountPercent ?? 0, discountReason: line.discountReason ?? 'NONE' })) }
     const payments = ctx.store.payments.filter(payment => payment.orderId === order.id).map(({ id, provider, status, amount, createdAt, paidAt, expiredAt }) => ({ id, provider, status, amount, createdAt, paidAt, expiredAt }))
-    return ok({ ...order, payments })
+    // Backend #72: refundedAt when the order itself was refunded; refunds[] only for callers holding REFUND_READ.
+    const refunds = permissionsOfUser(ctx.store, ctx.user!).includes('REFUND_READ') ? orderRefunds(ctx.store, order.id) : []
+    return ok({ ...order, refundedAt: orderRefundedAt(ctx.store, stored), payments, refunds })
   }),
 
   // ---- alerts (backend #58, api.yaml). Messages in English as the backend sends them.
@@ -702,8 +704,8 @@ export const routes: Route[] = [
     return ok(paginate(rows.map(payment => paymentRow(ctx, payment)), query, { sorts: { createdAt: row => row.createdAt, amount: row => row.amount, paidAt: row => row.paidAt }, defaultSort: 'createdAt,desc' }))
   }),
   route('GET', '/payments/:id', 'admin', ctx => {
-    const payment = byId(ctx.store.payments, ctx.params.id, 'Không tìm thấy thanh toán.')
-    return ok({ ...paymentRow(ctx, payment), qrCode: payment.qrCode })
+    // Backend #72: with the refund block (null unless REFUNDED).
+    return ok(paymentDetail(ctx.store, byId(ctx.store.payments, ctx.params.id, 'Không tìm thấy thanh toán.')))
   }),
 
   // ---- webhook logs (ADMIN)
@@ -792,10 +794,10 @@ export const routes: Route[] = [
     return created(kioskPaymentView(payment))
   }),
 
-  // ---- public incident report (FE 8.2, draft api-contract/drafts/incident-reports.yaml)
-  ...incidentReportRoutes,
+  // ---- customer reports: public form, kiosk link, management, report token (backend #74)
+  ...customerReportRoutes,
 
-  // ---- manual refunds (FE 8.1, draft api-contract/drafts/refunds.yaml)
+  // ---- manual refunds (backend #72)
   ...refundRoutes,
 ]
 

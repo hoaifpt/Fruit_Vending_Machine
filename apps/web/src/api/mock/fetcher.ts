@@ -9,7 +9,7 @@ import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'pricing', 'incident-reports', 'refunds', 'reports'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'pricing', 'customer-reports', 'refunds', 'reports'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -28,12 +28,12 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   roles: 'roles', permissions: 'roles',
   // Alerts of backend #58 (api.yaml); POST /alerts/{id}/work-orders belongs here too.
   alerts: 'alerts',
-  // Draft of backend 5.1 (api-contract/drafts/refunds.yaml, FE 8.1).
+  // Refunds of backend #72 (api.yaml): candidates, list, summary; POST /payments/{id}/refund belongs here too.
   refunds: 'refunds',
   // Work orders of backend #66/#68 (api.yaml): list, detail, actions, restock lines and loads.
   'work-orders': 'tickets',
-  // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): admin read of reports for W-12 (FE 8.3).
-  'incident-reports': 'incident-reports',
+  // Customer reports of backend #74 (api.yaml): list, detail, photos, review / resolve / reject.
+  'customer-reports': 'customer-reports',
   // Maintenance plans of backend #70 (api.yaml); the group keeps the name of the screen.
   'maintenance-plans': 'maintenance-schedules',
   // Maintenance commands of backend #64 (history, detail, reconcile).
@@ -51,12 +51,15 @@ export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/(restock-suggestions|restock-work-orders)\/?$/.test(path)) return 'tickets'
   if (/^\/machines\/[^/]+\/kiosk-credentials(\/|$)/.test(path)) return 'kiosk-credentials'
   if (/^\/machines\/[^/]+\/slots(\/|$)/.test(path)) return 'slots'
-  // Draft of backend 5.1 (api-contract/drafts/refunds.yaml): recording a refund belongs with GET /refunds, not orders.
-  if (/^\/orders\/[^/]+\/refund\/?$/.test(path)) return 'refunds'
+  // Backend #72: recording a refund belongs with GET /refunds, not with the payments.
+  if (/^\/payments\/[^/]+\/refund\/?$/.test(path)) return 'refunds'
+  // Backend #74: rotating the public report token of a machine goes with the customer reports.
+  if (/^\/machines\/[^/]+\/report-token\/rotate\/?$/.test(path)) return 'customer-reports'
   // Telemetry and events of backend #53/#56 (api.yaml): their own group, so they can be mocked while machines are real.
   if (/^\/machines\/[^/]+\/(telemetry|events)(\/|$)/.test(path)) return 'telemetry'
-  // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): public report form of FE 8.2.
-  if (/^\/public\/incident-reports(\/|$)/.test(path)) return 'incident-reports'
+  // Backend #74: the public report form (no account) and the kiosk's report link.
+  if (/^\/public\/report-forms(\/|$)/.test(path)) return 'customer-reports'
+  if (/^\/kiosk\/incident-report-link\/?$/.test(path)) return 'customer-reports'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
 }
 
@@ -106,10 +109,19 @@ function wait(ms: number, signal?: AbortSignal | null): Promise<void> {
   })
 }
 
-function parseBody(init?: RequestInit): unknown {
-  // multipart/form-data (FE 8.2 incident report): plain fields as strings, file parts as { name, type, size } only.
+/**
+ * multipart/form-data (the public customer report): plain fields as strings, file parts as { name, type, size, bytes }
+ * (the mock checks magic bytes and dimensions like the backend). A repeated part (`photos`) becomes an array.
+ */
+async function parseBody(init?: RequestInit): Promise<unknown> {
   if (typeof FormData !== 'undefined' && init?.body instanceof FormData) {
-    return Object.fromEntries([...init.body.entries()].map(([key, value]) => [key, typeof value === 'string' ? value : { name: value.name, type: value.type, size: value.size }]))
+    const parts: Record<string, unknown> = {}
+    for (const [key, value] of init.body.entries()) {
+      const part = typeof value === 'string' ? value : { name: value.name, type: value.type, size: value.size, bytes: new Uint8Array(await value.arrayBuffer()) }
+      const previous = parts[key]
+      parts[key] = previous === undefined ? part : Array.isArray(previous) ? [...previous, part] : [previous, part]
+    }
+    return parts
   }
   if (typeof init?.body !== 'string') return undefined
   try { return JSON.parse(init.body) } catch { throw new MockHttpError(400, 'Nội dung yêu cầu không phải JSON hợp lệ.') }
@@ -268,7 +280,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
 
     const now = options.now()
     try {
-      const body = parseBody(init)
+      const body = await parseBody(init)
       const simulated = scenario ? SCENARIO_ERRORS[scenario.name] : undefined
       if (simulated) {
         // Like GlobalExceptionHandler: only validation (400) carries fieldErrors; handleConflict (409) sends the message alone.
@@ -279,7 +291,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       const reply = dispatch(method, path, url.searchParams, new Headers(init?.headers), body, kioskSimulation(options, current))
       return successResponse(scenario?.name === 'empty' && method === 'GET' ? { ...reply, data: emptied(reply.data) } : reply, now)
     } catch (error) {
-      if (error instanceof MockHttpError) return errorResponse(error.status, error.message, fullPath, now, error.fieldErrors)
+      if (error instanceof MockHttpError) return errorResponse(error.status, error.message, fullPath, now, error.fieldErrors, error.headers)
       console.error('[mock] handler failed', error)
       return errorResponse(500, 'An unexpected error occurred', fullPath, now)
     }

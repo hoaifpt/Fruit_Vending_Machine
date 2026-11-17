@@ -30,6 +30,7 @@ const JAVA_SOURCES = {
   allocation: ['order/enums/AllocationStatus.java', 'AllocationStatus'],
   inventoryTransactionType: ['inventory/enums/InventoryTransactionType.java', 'InventoryTransactionType'],
   maintenanceCommand: ['maintenance/enums/MaintenanceCommandStatus.java', 'MaintenanceCommandStatus'],
+  customerReport: ['customerreport/enums/ReportStatus.java', 'ReportStatus'],
 }
 const keys = domain => Object.keys(STATUS_CATALOG[domain])
 

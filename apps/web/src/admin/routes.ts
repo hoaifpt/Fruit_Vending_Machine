@@ -8,7 +8,7 @@ export type PageKey =
   | 'overview' | 'users' | 'products' | 'machines' | 'machine-detail' | 'batches' | 'inventory' | 'inventory-history'
   | 'orders' | 'order-detail' | 'payments' | 'payment-detail' | 'webhook-logs' | 'webhook-log-detail' | 'roles'
   | 'alerts' | 'alert-detail' | 'tickets' | 'ticket-detail' | 'ticket-restock' | 'maintenance-schedules' | 'refunds'
-  | 'revenue-report'
+  | 'revenue-report' | 'customer-reports' | 'customer-report-detail'
 
 /** `roles` lists the roles that hold `permission` today (derived, for display and older callers). */
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
@@ -31,13 +31,16 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/tickets\/([^/]+)$/, page: 'ticket-detail', permission: 'WORK_ORDER_READ_ASSIGNED' },
   // O4 (FE 7.2): carrying out a RESTOCK ticket on a phone; the server only discloses the ticket to its assignee/admins.
   { pattern: /^\/admin\/tickets\/([^/]+)\/restock$/, page: 'ticket-restock', permission: 'WORK_ORDER_READ_ASSIGNED' },
+  // Customer reports (backend #74): STAFF only sees the reports of their own work orders (server-side, 404 otherwise).
+  { pattern: /^\/admin\/customer-reports$/, page: 'customer-reports', permission: 'CUSTOMER_REPORT_READ' },
+  { pattern: /^\/admin\/customer-reports\/([^/]+)$/, page: 'customer-report-detail', permission: 'CUSTOMER_REPORT_READ' },
   // O5 (FE 7.3): /maintenance-plans of api.yaml (backend #70); changes need MAINTENANCE_PLAN_MANAGE.
   { pattern: /^\/admin\/maintenance-schedules$/, page: 'maintenance-schedules', permission: 'MAINTENANCE_PLAN_READ' },
   { pattern: /^\/admin\/orders$/, page: 'orders', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/orders\/([^/]+)$/, page: 'order-detail', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/payments$/, page: 'payments', permission: 'PAYMENT_READ' },
   { pattern: /^\/admin\/payments\/([^/]+)$/, page: 'payment-detail', permission: 'PAYMENT_READ' },
-  // T3 / W-12 (FE 8.1): draft permission PAYMENT_REFUND, ADMIN only (api-contract/drafts/refunds.yaml, BE 5.1).
+  // T3 / W-12 (FE 8.1): refunds of backend #72, REFUND_READ (ADMIN only); recording needs PAYMENT_REFUND.
   { pattern: /^\/admin\/refunds$/, page: 'refunds', permission: 'REFUND_READ' },
   { pattern: /^\/admin\/webhook-logs$/, page: 'webhook-logs', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   { pattern: /^\/admin\/webhook-logs\/([^/]+)$/, page: 'webhook-log-detail', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
@@ -68,11 +71,13 @@ export const NAV: NavItem[] = [
   { to: '/admin/alerts', label: 'Cảnh báo', group: 'Vận hành', permission: 'ALERT_READ', match: ['alerts', 'alert-detail'] },
   // Work orders of backend #66.
   { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'WORK_ORDER_READ_ASSIGNED', match: ['tickets', 'ticket-detail', 'ticket-restock'] },
+  // Customer reports of backend #74 (ADMIN all, STAFF those of their work orders).
+  { to: '/admin/customer-reports', label: 'Phản ánh của khách', group: 'Vận hành', permission: 'CUSTOMER_REPORT_READ', match: ['customer-reports', 'customer-report-detail'] },
   // Maintenance plans of backend #70.
   { to: '/admin/maintenance-schedules', label: 'Lịch bảo trì', group: 'Vận hành', permission: 'MAINTENANCE_PLAN_READ', match: ['maintenance-schedules'] },
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },
-  // Draft permission (api-contract/drafts/refunds.yaml, BE 5.1), ADMIN only: see DRAFT_PERMISSIONS in permissions.ts.
+  // Refunds of backend #72, ADMIN only.
   { to: '/admin/refunds', label: 'Hoàn tiền', group: 'Giao dịch', permission: 'REFUND_READ', match: ['refunds'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },
   // Draft permission (api-contract/drafts/revenue-reports.yaml, BE 6.1).

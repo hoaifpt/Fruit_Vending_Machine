@@ -9,10 +9,12 @@
 //   history; locked with the reason while the machine is not in MAINTENANCE or OFFLINE; draft API waiting for BE 4.2.
 // - Ngăn: slots with server paging/sort/status filter in the URL; add a slot, change its capacity or status.
 // - Khóa kiosk (ADMIN, KIOSK_CREDENTIAL_MANAGE): key history by prefix; issue a key (shown once, with a copy button, and
-//   never stored anywhere), revoke with a confirmation.
+//   never stored anywhere), revoke with a confirmation. With MACHINE_REPORT_LINK_MANAGE also "Đổi mã QR báo sự cố"
+//   (POST /machines/{id}/report-token/rotate, backend #74) after a confirmation: the old QR stops working at once.
 // No delete anywhere. STAFF (MACHINE_READ) sees the overview and the slots, read only.
 import { useEffect, useId, useRef, useState } from 'react'
-import { CircleCheck, CircleDashed, CircleX, Copy, KeyRound, Pencil, Plus, Power, ShieldOff } from 'lucide-react'
+import { CircleCheck, CircleDashed, CircleX, Copy, KeyRound, Pencil, Plus, Power, QrCode, ShieldOff } from 'lucide-react'
+import QRCode from 'qrcode'
 import { toast } from 'sonner'
 import { ApiError } from '../../api/client.ts'
 import { kioskCredentialsApi, machinesApi, slotsApi } from '../../api/resources.ts'
@@ -54,7 +56,7 @@ const number = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 })
 
 function MachineDetailPage({ machineId }: { machineId: string }) {
   const { can } = useSession()
-  const canWrite = can('MACHINE_WRITE'), canKeys = can('KIOSK_CREDENTIAL_MANAGE'), canInventory = can('INVENTORY_READ')
+  const canWrite = can('MACHINE_WRITE'), canKeys = can('KIOSK_CREDENTIAL_MANAGE'), canInventory = can('INVENTORY_READ'), canReportLink = can('MACHINE_REPORT_LINK_MANAGE')
   const { pathname, params, update } = useQueryParams()
   const tab = readDetailTab(params, canKeys)
   const rawTab = params.get('tab')
@@ -131,7 +133,7 @@ function MachineDetailPage({ machineId }: { machineId: string }) {
       <TabsContent value="maintenance"><MachineMaintenanceTab machine={data} connection={machine} reloadMachine={machine.reload}
         openStatusChange={canWrite && data.status !== 'MAINTENANCE' ? () => jumpTo('overview', 'machine-status-MAINTENANCE') : undefined} /></TabsContent>
       <TabsContent value="slots"><SlotsTab machine={data} canWrite={canWrite} canKeys={canKeys} canInventory={canInventory} jumpTo={jumpTo} /></TabsContent>
-      {canKeys && <TabsContent value="kiosk"><KioskTab machine={data} /></TabsContent>}
+      {canKeys && <TabsContent value="kiosk"><KioskTab machine={data} />{canReportLink && <ReportLinkPanel machine={data} />}</TabsContent>}
     </Tabs>
     {editing && <MachineSheet machine={data} close={() => setEditing(false)} done={machine.reload} />}
   </>
@@ -461,6 +463,47 @@ function KioskTab({ machine }: { machine: Machine }) {
         state.reload()
       }} />}
   </section>
+}
+
+// ---- Mã QR báo sự cố (backend #74)
+
+/** The new link after a rotation; the backend has no read of the current one (the kiosk asks for it itself). */
+function ReportLinkPanel({ machine }: { machine: Machine }) {
+  const [confirming, setConfirming] = useState(false)
+  const [link, setLink] = useState<{ url: string; qr: string } | null>(null)
+  return <section aria-labelledby="report-link-title" className={cn(PANEL, 'mt-6')}>
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <div>
+        <h2 id="report-link-title" className="text-base font-semibold">Mã QR báo sự cố</h2>
+        <p className="mt-1! max-w-[70ch] text-[13px] text-muted-foreground">Khách quét mã QR (dán trên máy hoặc hiện ở nút “Báo sự cố” của kiosk) để gửi phản ánh cho đúng máy này. Đổi mã khi mã cũ bị lộ hoặc bị lạm dụng: mã cũ ngừng hoạt động ngay, kiosk tự hiện mã mới, còn mã đã in phải in và dán lại.</p>
+      </div>
+      <Button type="button" variant="outline" className="text-destructive" data-focus-key="report-link-rotate" onClick={() => setConfirming(true)}><QrCode aria-hidden="true" />Đổi mã QR báo sự cố</Button>
+    </div>
+    {link && <div className="mt-4 flex flex-wrap items-start gap-4 rounded-lg border bg-muted/40 p-3" role="status">
+      {link.qr && <img src={link.qr} alt={`Mã QR báo sự cố mới của máy ${machine.code}`} width={160} height={160} className="rounded-md border bg-white" />}
+      <div className="grid min-w-0 gap-1.5 text-[14px]">
+        <p className="font-medium">Mã QR mới đã có hiệu lực.</p>
+        <p className="font-mono text-[13px] break-all">{link.url}</p>
+        <p className="text-[13px] text-muted-foreground">In mã này và dán thay mã cũ trên máy. Đường dẫn chỉ hiện lúc này; hệ thống không cho xem lại.</p>
+      </div>
+    </div>}
+    {confirming && <ConfirmDialog title={`Đổi mã QR báo sự cố của máy ${machine.code}?`} confirmLabel="Đổi mã QR" danger close={() => setConfirming(false)}
+      successDescription={`Mã QR cũ của máy ${machine.code} không còn dùng được.`}
+      message={<>Mã QR đang dán trên máy <strong className="font-medium text-foreground">{machine.code}</strong> sẽ <strong className="font-medium text-foreground">ngừng hoạt động ngay</strong>: khách quét mã cũ sẽ thấy báo mã không còn dùng được. Kiosk tự hiện mã mới; mã in sẵn cần in lại. Phản ánh đã gửi không bị ảnh hưởng.</>}
+      onConfirm={async () => {
+        let result
+        try { result = await machinesApi.rotateReportToken(machine.id) } catch (error) { throw reportLinkError(error) }
+        const url = result.url ?? ''
+        const qr = url ? await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 2, width: 320 }).catch(() => '') : ''
+        setLink({ url, qr })
+      }} />}
+  </section>
+}
+
+function reportLinkError(error: unknown): unknown {
+  if (error instanceof ApiError && error.status === 409) return new ApiError(409, 'Máy chủ chưa cấu hình địa chỉ trang báo sự cố (PUBLIC_REPORT_BASE_URL) nên chưa đổi được mã. Báo bộ phận kỹ thuật cấu hình rồi thử lại.')
+  if (error instanceof ApiError && error.status === 404) return new ApiError(404, 'Không tìm thấy máy này. Tải lại trang rồi thử lại.')
+  return error
 }
 
 /**

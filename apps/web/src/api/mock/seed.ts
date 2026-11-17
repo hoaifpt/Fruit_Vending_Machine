@@ -2,7 +2,8 @@
 // no accounts, kiosk keys, orders or payments, so those rows are invented here to exercise the screens.
 // MOCK_PASSWORDS are fake values for the mock only; they exist nowhere else.
 import type { components } from '../schema'
-import type { MockIncidentReport } from './incident-reports.ts'
+import { seedReportToken } from './customer-reports.ts'
+import type { MockCustomerReport } from './customer-reports.ts'
 import { seedRefunds } from './refunds.ts'
 import type { MockRefund } from './refunds.ts'
 import { boxPrice, lineDiscount, linePricing } from './pricing.ts'
@@ -84,11 +85,14 @@ export interface MockStore {
   readings: MockReading[]
   machineEvents: MockMachineEvent[]
   webhookLogs: MockWebhookLog[]
-  /** FE 8.1 (draft refunds.yaml): manual refunds recorded by an admin. */
+  /** Backend #72: the refund columns of the REFUNDED payments (one row per refunded payment). */
   refunds: MockRefund[]
-  /** FE 8.2 (draft incident-reports.yaml): public reports, and when the last POSTs arrived (5 per minute, BR-32). */
-  incidentReports: MockIncidentReport[]
-  incidentRequestLog: number[]
+  /** Backend #74: customer reports, the report token of each machine (machines.report_token, never in a response) and the rate-limit windows. */
+  customerReports: MockCustomerReport[]
+  reportTokens: Record<string, string>
+  reportRequestLog: number[]
+  formRequestLog: number[]
+  machineReportLog: Record<string, number[]>
   /** Backend #48 reference data (V8 roles, V13 permissions and their seed mapping); only a role's set can change. */
   permissions: MockPermission[]
   roles: MockRole[]
@@ -396,7 +400,9 @@ export function createStore(nowMs: number): MockStore {
   return {
     users, products, machines, slots, credentials, batches, items, transactions, orders, payments, alerts, workOrders, workOrderEvents, restockLines, maintenancePlans,
     pricing, webhookLogs, heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, users, slots, items }),
-    incidentReports: [], incidentRequestLog: [], refunds: seedRefunds(payments, users[0]),
+    refunds: seedRefunds(payments, users[0]),
+    customerReports: [], reportTokens: Object.fromEntries(machines.map(machine => [machine.id!, seedReportToken(machine.code!)])),
+    reportRequestLog: [], formRequestLog: [], machineReportLog: {},
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),
   }
 }

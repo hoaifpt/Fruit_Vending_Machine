@@ -1,27 +1,25 @@
-// FE 8.3 on the mock API: a customer report (public form P1, opened from the kiosk QR) shows at once in W-12 "Cần hoàn
-// tiền" and opens an INCIDENT work ticket (O3). Done criterion: a "đã trả nhưng không nhận hàng" report is listed in
-// "Cần hoàn tiền" right away. Also: an order still PAID is shown for checking only (no refund action), a DISPENSE_FAILED
-// one keeps its refund action and is marked "Khách báo sự cố INC-…", the ticket shows the report, STAFF only see the
-// INCIDENT tickets given to them (without the customer's phone), the missing-endpoint state, screenshots + axe.
+// FE 8.3 on the mock of the real API (backend #74, #72): a customer report (public form P1 at /report/{token}, opened
+// from the kiosk QR) is listed at once in "Phản ánh của khách" and, when the order was paid and not served, in W-12
+// "Cần hoàn tiền" (CUSTOMER_REPORT candidate with the masked contact and the INCIDENT work order). Recording the refund
+// from there resolves the report. Also: the report detail (escaped description, full contact for ADMIN, review /
+// resolve / reject), the INCIDENT work order lists its reports, STAFF only see the reports of work orders given to them
+// (masked contact, read only), screenshots + axe.
 // The mock store lives in the page: the customer form and the admin screens are reached by in-app navigation (no reload).
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { ACCOUNTS, auditScreen, loginAs, THEMES, typeLogin, useThemeChoice } from './support.ts'
 
 const id = (prefix: string, n: number) => `${prefix}-0000-0000-0000-${String(n).padStart(12, '0')}`
-const ORDER_PAID = id('90000000', 6)
 const ORDER_FAILED = id('90000000', 8)
 const HOUR = 3_600_000
 /** Seed order codes (src/api/mock/seed.ts): `ORD-<UTC date of creation>-<n>`, order n created n×3 hours before the mock started. */
 const dateAgo = (ms: number) => new Date(Date.now() - ms).toISOString().slice(0, 10).replaceAll('-', '')
-const PAID_CODE = () => `ORD-${dateAgo(18 * HOUR)}-00000006`
-const REPORT_CODE = /INC-\d{8}-[A-Z0-9]{4}/
+const FAILED_CODE = () => `ORD-${dateAgo(24 * HOUR)}-00000008`
+const FORM = '/report/mock-report-token-dev-machine-01'
+const REPORT_CODE = /RPT-\d{8}-[A-Z0-9]{4}/
 
-const reportTable = (page: Page) => page.getByRole('table', { name: 'Báo cáo sự cố của khách cần kiểm tra hoàn tiền' })
-const reportRow = (page: Page, code: string) => reportTable(page).locator('tbody tr').filter({ hasText: code })
-const failedRow = (page: Page, orderId: string) => page.getByRole('table', { name: 'Đơn nhả hàng thất bại cần hoàn tiền' }).locator('tbody tr').filter({ has: page.locator(`a[href="/admin/orders/${orderId}"]`) })
-const ticketTable = (page: Page) => page.getByRole('table', { name: 'Danh sách phiếu công việc' })
-const reportPanel = (page: Page) => page.getByRole('region', { name: 'Báo cáo của khách' })
+const reportTable = (page: Page) => page.getByRole('table', { name: 'Phản ánh của khách' })
+const candidateTable = (page: Page) => page.getByRole('table', { name: 'Các khoản thanh toán cần hoàn tiền' })
 
 /** Same-document navigation (the router listens to popstate), so the in-memory mock keeps the reports. */
 async function go(page: Page, path: string) {
@@ -30,12 +28,12 @@ async function go(page: Page, path: string) {
 }
 
 /** The customer sends a report on the public form (reached as from the kiosk QR); returns the report code. */
-async function sendReport(page: Page, query: string, fill?: () => Promise<void>) {
-  // A second report starts on a fresh form, as a new scan of the QR would (leave the page first).
-  if (new URL(page.url()).pathname === '/bao-su-co') await go(page, '/')
-  await go(page, `/bao-su-co?${query}`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Báo sự cố' })).toBeVisible()
-  if (fill) await fill()
+async function sendReport(page: Page, query: string, fill: () => Promise<void>) {
+  if (new URL(page.url()).pathname.startsWith('/report')) await go(page, '/')
+  await go(page, `${FORM}${query}`)
+  await expect(page.getByRole('heading', { level: 1, name: 'Báo sự cố' })).toBeVisible({ timeout: 10_000 })
+  await fill()
+  await page.getByRole('checkbox', { name: /Tôi đồng ý/ }).check()
   await page.getByRole('button', { name: 'Gửi báo cáo' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Đã gửi báo cáo' })).toBeVisible({ timeout: 15_000 })
   const text = await page.getByText(/^Cảm ơn bạn\. Mã báo cáo của bạn là /).innerText()
@@ -51,119 +49,113 @@ async function switchInPlace(page: Page, role: 'ADMIN' | 'STAFF') {
   await expect(page.locator('#admin-main')).toBeVisible()
 }
 
-test('Tiêu chí xong: báo cáo "đã trả nhưng không nhận hàng" hiện ngay trong "Cần hoàn tiền" và mở phiếu INCIDENT', async ({ page }) => {
+test('Tiêu chí xong: phản ánh "đã trả nhưng không nhận hàng" hiện ngay trong "Cần hoàn tiền", hoàn tiền xong thì phản ánh được giải quyết', async ({ page }) => {
   await loginAs(page, 'ADMIN')
-  await page.getByRole('navigation').getByRole('link', { name: 'Hoàn tiền' }).first().click()
-  await expect(page.getByRole('heading', { level: 2, name: 'Khách báo sự cố về đơn đã trả tiền' })).toBeVisible()
-  await expect(page.getByText('Không có báo cáo nào của khách đang chờ kiểm tra hoàn tiền.')).toBeVisible()
-  const failedCode = (await failedRow(page, ORDER_FAILED).getByRole('link').first().innerText()).trim()
+  await go(page, '/admin/refunds?type=CUSTOMER_REPORT')
+  await expect(page.getByText('Không có khoản nào khớp bộ lọc. Hãy đổi hoặc xóa bộ lọc.')).toBeVisible()
 
-  // 1. An order still PAID: the QR of the failed-dispense screen pre-fills the type and the order code.
-  const paidCode = PAID_CODE()
-  const paidReport = await sendReport(page, `machine=DEV-MACHINE-01&order=${paidCode}`, async () => {
+  const code = await sendReport(page, `?order=${FAILED_CODE()}`, async () => {
     await expect(page.getByRole('radio', { name: /Đã trả tiền nhưng không nhận hàng/ })).toBeChecked()
-    await expect(page.getByRole('textbox', { name: /^Mã đơn/ })).toHaveValue(paidCode)
-    await page.getByRole('textbox', { name: /^Số điện thoại/ }).fill('0912 345 678')
     await page.getByRole('textbox', { name: /^Mô tả/ }).fill('Đã trả tiền nhưng cửa không mở <b>gấp</b>')
+    await page.getByRole('textbox', { name: /^Số điện thoại/ }).fill('0912 345 678')
   })
-  await go(page, '/admin/refunds')
-  const paidRow = reportRow(page, paidReport)
-  await expect(paidRow).toHaveCount(1)
-  await expect(paidRow).toContainText(paidCode)
-  await expect(paidRow).toContainText('Đã trả tiền nhưng không nhận hàng')
-  await expect(paidRow).toContainText('Đơn chưa ở trạng thái nhả thất bại; kiểm tra máy trước.')
-  await expect(paidRow.getByRole('button')).toHaveCount(0)
-  await expect(paidRow.getByRole('link', { name: `Mở đơn ${paidCode}` })).toHaveAttribute('href', `/admin/orders/${ORDER_PAID}`)
 
-  // 2. A DISPENSE_FAILED order: refundable as usual, and its row in "Đơn nhả hàng thất bại" is marked.
-  const failedReport = await sendReport(page, 'machine=DEV-MACHINE-01', async () => {
-    await page.getByRole('radio', { name: /Đã trả tiền nhưng không nhận hàng/ }).check()
-    await page.getByRole('textbox', { name: /^Mã đơn/ }).fill(failedCode)
-  })
-  await go(page, '/admin/refunds')
-  await expect(reportRow(page, failedReport).getByRole('button', { name: /^Ghi nhận hoàn tiền đơn/ })).toBeVisible()
-  const mark = failedRow(page, ORDER_FAILED).getByRole('link', { name: `Khách báo sự cố ${failedReport}` })
-  await expect(mark).toBeVisible()
+  // "Cần hoàn tiền": the order's case, the report (masked) and its INCIDENT work order.
+  await go(page, '/admin/refunds?type=CUSTOMER_REPORT')
+  const row = candidateTable(page).locator('tbody tr').filter({ hasText: FAILED_CODE() })
+  await expect(row).toHaveCount(1)
+  await expect(row).toContainText(`Phản ánh ${code}`)
+  await expect(row.getByRole('link', { name: /^Phiếu WO-/ })).toBeVisible()
 
-  // 3. The INCIDENT ticket carries the report (admin sees the phone; customer text shown as text).
-  await reportRow(page, paidReport).getByRole('link', { name: `${paidReport}, mở phiếu sự cố` }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Sự cố: Đã trả tiền nhưng không nhận hàng · máy DEV-MACHINE-01' })).toBeVisible()
-  const panel = reportPanel(page)
-  await expect(panel).toContainText(paidReport)
-  await expect(panel).toContainText('Đã trả tiền nhưng không nhận hàng')
-  await expect(panel).toContainText('Đã trả tiền nhưng cửa không mở <b>gấp</b>')
-  await expect(panel.locator('b')).toHaveCount(0)
-  await expect(panel.getByRole('link', { name: '0912345678' })).toHaveAttribute('href', 'tel:0912345678')
-  await expect(panel.getByRole('link', { name: `Mở đơn ${paidCode}` })).toBeVisible()
-  await expect(panel.getByRole('link', { name: 'Mở hoàn tiền của đơn' })).toHaveAttribute('href', `/admin/refunds?orderId=${ORDER_PAID}`)
-  await expect(page.getByRole('region', { name: 'Tiến trình' })).toContainText('Hệ thống')
-  await expect(page.getByRole('button', { name: /^Phân công/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
+  // The report detail: escaped description, full contact for ADMIN, refund link with the work order.
+  await row.getByRole('link', { name: `Mở phản ánh ${code}` }).click()
+  await expect(page.getByRole('heading', { level: 1, name: `Phản ánh ${code}` })).toBeVisible()
+  await expect(page.getByText('Đã trả tiền nhưng cửa không mở <b>gấp</b>')).toBeVisible()
+  await expect(page.locator('#admin-main b')).toHaveCount(0)
+  await expect(page.getByText('0912345678')).toBeVisible()
+  await expect(page.getByText('Cần hoàn tiền', { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: `Ghi nhận hoàn tiền cho đơn ${FAILED_CODE()}` }).click()
+  await expect(page).toHaveURL(new RegExp(`/admin/refunds\\?orderId=${ORDER_FAILED}&workOrderId=`))
+  await page.getByRole('button', { name: /^Ghi nhận hoàn tiền thanh toán/ }).click()
+  const dialog = page.getByRole('dialog', { name: 'Ghi nhận hoàn tiền' })
+  await expect(dialog.getByRole('radio', { name: /Nhả hàng thất bại/ })).toBeChecked()
+  await dialog.getByRole('textbox', { name: /Mã giao dịch chuyển khoản/ }).fill('FT26317000000001')
+  await dialog.getByRole('button', { name: 'Ghi nhận hoàn tiền' }).click()
+  await expect(dialog).toBeHidden()
 
-  // 4. The ticket list filters by "Sự cố"; there is no way to create an INCIDENT ticket by hand.
-  await page.getByRole('link', { name: '← Danh sách phiếu công việc' }).click()
-  await page.getByLabel('Loại', { exact: true }).selectOption({ label: 'Sự cố' })
-  await expect(page).toHaveURL(/type=INCIDENT/)
-  await expect(ticketTable(page).locator('tbody tr')).toHaveCount(2)
-  await expect(ticketTable(page)).toContainText(`Sự cố · từ báo cáo ${paidReport}`)
-  await page.getByRole('button', { name: 'Tạo phiếu' }).click()
-  const create = page.getByRole('dialog', { name: 'Tạo phiếu công việc' })
-  await expect(create.getByLabel('Loại phiếu').locator('option')).toHaveText(['Chọn loại…', 'Nạp hàng', 'Bảo trì'])
+  await go(page, '/admin/customer-reports')
+  const reportRow = reportTable(page).locator('tbody tr').filter({ hasText: code })
+  await expect(reportRow).toContainText('Đã giải quyết')
+  await expect(reportRow).toContainText('Đã hoàn tiền')
+  await expect(reportRow).toContainText('091****678')
 })
 
-test('STAFF chỉ thấy phiếu INCIDENT được giao cho mình, không thấy số điện thoại của khách', async ({ page }) => {
+test('Nhận xử lý rồi từ chối phản ánh; phiếu INCIDENT liệt kê phản ánh của nó; không có nút xóa', async ({ page }) => {
   await loginAs(page, 'ADMIN')
-  const mine = await sendReport(page, 'machine=DEV-MACHINE-01', async () => {
+  const code = await sendReport(page, '', async () => {
+    await page.getByRole('radio', { name: /^Khác/ }).check()
+    await page.getByRole('textbox', { name: /^Mô tả/ }).fill('Quảng cáo không liên quan')
+  })
+  await go(page, '/admin/customer-reports')
+  await reportTable(page).getByRole('link', { name: `Mở phản ánh ${code}` }).click()
+  await page.getByRole('button', { name: 'Nhận xử lý' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Nhận xử lý' }).click()
+  await expect(page.getByText('Đang xử lý').first()).toBeVisible()
+  await page.getByRole('button', { name: 'Từ chối' }).click()
+  const reject = page.getByRole('dialog', { name: `Từ chối phản ánh ${code}` })
+  await reject.getByRole('radio', { name: 'Tin rác' }).check()
+  await reject.getByRole('button', { name: 'Từ chối' }).click()
+  await expect(page.getByText('Đã từ chối: tin rác.')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Giải quyết|Từ chối|Nhận xử lý/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
+  await page.getByRole('link', { name: /^WO-/ }).first().click()
+  await expect(page.getByRole('region', { name: 'Phản ánh của khách' })).toContainText(code)
+})
+
+test('STAFF chỉ thấy phản ánh thuộc phiếu được giao cho mình, liên hệ bị che, không có thao tác', async ({ page }) => {
+  await loginAs(page, 'ADMIN')
+  const mine = await sendReport(page, '', async () => {
     await page.getByRole('radio', { name: /Máy lỗi/ }).check()
     await page.getByRole('textbox', { name: /^Mô tả/ }).fill('Màn hình đen, không chạm được')
     await page.getByRole('textbox', { name: /^Số điện thoại/ }).fill('0987654321')
   })
-  const notMine = await sendReport(page, 'machine=DEV-MACHINE-02', async () => {
-    await page.getByRole('radio', { name: /^Khác/ }).check()
-    await page.getByRole('textbox', { name: /^Mô tả/ }).fill('Khay lấy hàng bẩn')
-  })
-  await go(page, '/admin/tickets?type=INCIDENT')
-  const rows = ticketTable(page).locator('tbody tr')
-  await expect(rows).toHaveCount(2)
-  await rows.filter({ hasText: mine }).getByRole('button', { name: /^Phân công/ }).click()
+  await go(page, '/admin/customer-reports')
+  await reportTable(page).getByRole('link', { name: `Mở phản ánh ${mine}` }).click()
+  await page.getByRole('link', { name: /^WO-/ }).first().click()
+  await page.getByRole('button', { name: /^Phân công/ }).click()
   const assign = page.getByRole('dialog', { name: 'Phân công phiếu' })
   await assign.getByLabel('Nhân viên phụ trách').selectOption({ label: 'Nhân viên vận hành (staff@freshvend.test)' })
   await assign.getByRole('button', { name: 'Phân công' }).click()
   await expect(assign).toBeHidden()
-  await expect(rows.filter({ hasText: mine })).toContainText('Đã phân công')
+  const notMine = await sendReport(page, `?order=${FAILED_CODE()}`, async () => {
+    await page.getByRole('textbox', { name: /^Số điện thoại/ }).fill('0912345678')
+  })
 
   await switchInPlace(page, 'STAFF')
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Hoàn tiền' })).toHaveCount(0)
-  await go(page, '/admin/tickets?type=INCIDENT')
-  await expect(rows).toHaveCount(1)
-  await expect(rows).toContainText(mine)
-  await expect(ticketTable(page)).not.toContainText(notMine)
-  await rows.getByRole('link').first().click()
-  const panel = reportPanel(page)
-  await expect(panel).toContainText('Màn hình đen, không chạm được')
-  await expect(panel).toContainText('Máy lỗi')
-  await expect(panel).not.toContainText('0987654321')
-  await expect(panel.getByText('Số điện thoại')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: /^Bắt đầu/ })).toBeVisible()
-})
-
-test('W-12 khi máy chủ chưa có danh sách báo cáo: các mục khác vẫn chạy', async ({ page }) => {
-  await loginAs(page, 'ADMIN', '?scenario=missing:incident-reports')
-  await page.getByRole('navigation').getByRole('link', { name: 'Hoàn tiền' }).first().click()
-  await expect(page.getByText(/^Chưa có dữ liệu báo cáo của khách/)).toBeVisible()
-  await expect(failedRow(page, ORDER_FAILED)).toHaveCount(1)
+  await page.getByRole('navigation').getByRole('link', { name: 'Phản ánh của khách' }).first().click()
+  await expect(reportTable(page).locator('tbody tr')).toHaveCount(1)
+  await expect(reportTable(page)).not.toContainText(notMine)
+  await reportTable(page).getByRole('link', { name: `Mở phản ánh ${mine}` }).click()
+  await expect(page.getByText('Màn hình đen, không chạm được')).toBeVisible()
+  await expect(page.getByText('0987654321')).toHaveCount(0)
+  await expect(page.getByText('098****321')).toBeVisible()
+  await expect(page.getByRole('button', { name: /Giải quyết|Từ chối|Nhận xử lý/ })).toHaveCount(0)
 })
 
 for (const theme of THEMES) {
-  test(`Ảnh + axe: refunds-reports, ticket-incident (${theme})`, async ({ page }, testInfo) => {
+  test(`Ảnh + axe: customer-reports, customer-report-detail, refunds-candidates (${theme})`, async ({ page }, testInfo) => {
     await useThemeChoice(page, theme)
     await loginAs(page, 'ADMIN')
-    const code = await sendReport(page, `machine=DEV-MACHINE-01&order=${PAID_CODE()}`, async () => {
+    const code = await sendReport(page, `?order=${FAILED_CODE()}`, async () => {
       await page.getByRole('textbox', { name: /^Mô tả/ }).fill('Đã quét mã và trả tiền nhưng không có hộp nào rơi xuống.')
+      await page.getByRole('textbox', { name: /^Số điện thoại/ }).fill('0912345678')
     })
+    await go(page, '/admin/customer-reports')
+    await auditScreen(page, testInfo, 'customer-reports', theme, () => expect(reportTable(page).locator('tbody tr').filter({ hasText: code })).toHaveCount(1))
+    await reportTable(page).getByRole('link', { name: `Mở phản ánh ${code}` }).click()
+    await auditScreen(page, testInfo, 'customer-report-detail', theme, () => expect(page.getByRole('heading', { level: 1, name: `Phản ánh ${code}` })).toBeVisible())
     await go(page, '/admin/refunds')
-    await auditScreen(page, testInfo, 'refunds-reports', theme, () => expect(reportRow(page, code)).toHaveCount(1))
-    await reportRow(page, code).getByRole('link', { name: `${code}, mở phiếu sự cố` }).click()
-    await auditScreen(page, testInfo, 'ticket-incident', theme, () => expect(reportPanel(page)).toBeVisible())
+    await auditScreen(page, testInfo, 'refunds-candidates', theme, () => expect(candidateTable(page)).toContainText(`Phản ánh ${code}`))
   })
 }

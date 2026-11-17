@@ -15,7 +15,7 @@ import { formatDateTime, localDateTimeToInstant } from '../lib/format.ts'
 import { oneOf, uuidParam } from '../lib/table-query.ts'
 import { errorCode } from './form-error.ts'
 import { alertTypeHint, alertTypeLabel } from './alerts.ts'
-import { INCIDENT_TYPES } from '../features/incident/incident.ts'
+import { reportTypeLabel } from '../features/incident/incident.ts'
 
 /** Same order as the `ticket` domain of STATUS_CATALOG (and the lifecycle). */
 export const TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const satisfies readonly WorkOrderStatus[]
@@ -241,9 +241,9 @@ export function ticketSteps(events: readonly WorkOrderEvent[]): TicketStep[] {
 
 // ---- customer reports of an INCIDENT work order (FE 8.3, linkedReports)
 
-/** Vietnamese label of a customer report type (same labels as the public form, SRS 3.6.4). */
+/** Vietnamese label of a customer report type (same labels as the public form). */
 export function incidentTypeLabel(type: string | undefined | null): string {
-  return INCIDENT_TYPES.find(option => option.value === type)?.label ?? (type || 'Sự cố khác')
+  return reportTypeLabel(type)
 }
 /** Small line under a title in the list: where the work order came from. */
 export function ticketOrigin(ticket: Pick<WorkOrder, 'source' | 'code'>): string {

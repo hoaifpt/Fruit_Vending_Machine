@@ -6,13 +6,13 @@ import QRCode from 'qrcode'
 import { ApiError } from '../api/client'
 import { Icon } from '../components/Icon'
 import { configuredKioskKey, createKioskApi } from '../kiosk/api'
-import type { KioskIdentity, KioskOrder, KioskProduct } from '../kiosk/api'
+import type { KioskApi, KioskIdentity, KioskOrder, KioskProduct } from '../kiosk/api'
 import {
   CATALOG_REFRESH_MS, COUNTDOWN_WARN_SECONDS, DISPENSE_FAILED_RETURN_MS, DISPENSE_SLOW_MS, DISPENSE_STUCK_MS, ENDED_RETURN_MS, MACHINE_STATE_COPY, PAID_RETURN_MS,
   SERVICE_RETRY_MS, chargeOutcome, clockOffset, configuredSeconds, formatCountdown, machineStateOf, pollDelay, secondsLeft, viewForOrder,
 } from '../kiosk/flow'
 import type { MachineState, OrderView } from '../kiosk/flow'
-import { incidentReportConfig, incidentReportUrl } from '../kiosk/incident'
+import { incidentReportConfig, reportLinkProblem, safeReportUrl } from '../kiosk/incident'
 import { formatDateTime, formatMoney as money } from '../lib/format'
 import { discountReasonText, lineView, orderDiscount, priceView } from '../lib/price'
 import orange from '../assets/orange-mark.webp'
@@ -43,7 +43,7 @@ const RETRYING: MachineState[] = ['offline', 'paused', 'sold-out', 'maintenance'
 export default function PurchasePage() {
   const key = useMemo(configuredKioskKey, [])
   const api = useMemo(() => createKioskApi(key), [key])
-  const incident = useMemo(() => incidentReportConfig(env, window.location.origin, new URLSearchParams(window.location.search).get('incident')), [])
+  const incident = useMemo(() => incidentReportConfig(env, new URLSearchParams(window.location.search).get('incident')), [])
   const [screen, setScreenState] = useState<Screen>(() => (key ? { kind: 'booting' } : { kind: 'service', state: 'unconfigured' }))
   const screenRef = useRef(screen)
   /** When the current screen kind was entered (client clock): drives the slow-dispense notice and the auto return. */
@@ -413,7 +413,7 @@ export default function PurchasePage() {
         <h3>Đã thanh toán nhưng màn hình chưa xác nhận?</h3><p>Không thanh toán lại. Chờ thêm ít giây; nếu vẫn chưa xác nhận, hãy báo nhân viên mã đơn và mã máy.</p>
         {orderCode && <p><strong>Mã đơn {orderCode}</strong></p>}
         {machine && <p><strong>Máy {machine.machineCode}</strong> · {machine.machineName}</p>}</>}
-      {dialog === 'incident' && <IncidentPanel url={incidentReportUrl(incident.baseUrl, machine?.machineCode, failedOrderCode)} machine={machine} orderCode={failedOrderCode} />}
+      {dialog === 'incident' && <IncidentPanel api={api} machine={machine} orderCode={failedOrderCode} />}
     </dialog>
   </div>
 }
@@ -517,13 +517,35 @@ function Countdown({ screen, serverNow }: { screen: Screen; serverNow: number })
   </div>
 }
 
-function IncidentPanel({ url, machine, orderCode }: { url: string; machine: KioskIdentity | null; orderCode?: string }) {
+/**
+ * The report QR of this machine: the URL comes from GET /kiosk/incident-report-link (the machine's report token, plus
+ * the order code after a failed dispense when the order is this machine's), read each time the dialog opens so a
+ * rotated token shows at once. Never built by the kiosk.
+ */
+function IncidentPanel({ api, machine, orderCode }: { api: KioskApi; machine: KioskIdentity | null; orderCode?: string }) {
+  const [link, setLink] = useState<{ url: string | null; problem: string } | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    const controller = new AbortController()
+    api.incidentReportLink(orderCode, controller.signal).then(
+      result => {
+        if (controller.signal.aborted) return
+        const url = safeReportUrl(result.data?.url)
+        setLink(url ? { url, problem: '' } : { url: null, problem: reportLinkProblem(undefined) })
+      },
+      error => { if (!controller.signal.aborted) setLink({ url: null, problem: reportLinkProblem(error) }) },
+    )
+    return () => controller.abort()
+  }, [api, orderCode, attempt])
   return <div className="buy-incident-panel">
     {orderCode
-      ? <p>Quét mã bằng điện thoại để báo <strong>đã trả tiền nhưng không nhận hàng</strong>. Trang báo sự cố điền sẵn mã máy{machine ? <> <strong>{machine.machineCode}</strong></> : null} và mã đơn <strong>{orderCode}</strong>; bạn không cần nhập lại.</p>
+      ? <p>Quét mã bằng điện thoại để báo <strong>đã trả tiền nhưng không nhận hàng</strong>. Trang báo sự cố mở đúng máy{machine ? <> <strong>{machine.machineCode}</strong></> : null} và điền sẵn mã đơn <strong>{orderCode}</strong>; bạn không cần nhập lại.</p>
       : <p>Quét mã bằng điện thoại để báo sự cố{machine ? <> với máy <strong>{machine.machineCode}</strong></> : null}: máy không nhả hàng, đã trừ tiền nhưng không nhận hàng, hàng hư hỏng…</p>}
-    <QrImage text={url} alt="Mã QR mở trang báo sự cố của máy này" label="Mã QR báo sự cố" />
-    <p className="buy-incident-url">{url}</p>
+    {link?.url
+      ? <><QrImage text={link.url} alt="Mã QR mở trang báo sự cố của máy này" label="Mã QR báo sự cố" /><p className="buy-incident-url">{link.url}</p></>
+      : link
+        ? <><p role="alert" className="buy-error">{link.problem}</p><div className="buy-dialog-actions"><button className="buy-primary" onClick={() => { setLink(null); setAttempt(value => value + 1) }}>Thử lại</button></div></>
+        : <div className="buy-qr-sample" role="status" aria-label="Đang tạo mã QR báo sự cố"><span className="buy-spinner" /></div>}
   </div>
 }
 

@@ -120,6 +120,13 @@ export const STATUS_CATALOG = {
     NEEDS_RECONCILIATION: { label: 'Cần đối soát', tone: 'danger', icon: 'hourglass', description: 'Máy đã nhận lệnh nhưng không báo kết quả. Kiểm tra tại máy rồi bấm Đối soát để ghi lại đã làm hay chưa.' },
     RECONCILED: { label: 'Đã đối soát', tone: 'neutral', icon: 'received', description: 'Nhân viên đã xác nhận kết quả của lệnh tại máy.' },
   },
+  // ReportStatus of customer reports (docs/customer-reports.md): RESOLVED and REJECTED are final.
+  customerReport: {
+    NEW: { label: 'Mới', tone: 'warning', icon: 'pending', description: 'Phản ánh vừa gửi, chưa ai nhận xử lý. Quản trị viên bấm Nhận xử lý rồi kiểm tra đơn và máy.' },
+    IN_REVIEW: { label: 'Đang xử lý', tone: 'info', icon: 'received', description: 'Phản ánh đang được kiểm tra; giải quyết hoặc từ chối khi có kết quả.' },
+    RESOLVED: { label: 'Đã giải quyết', tone: 'success', icon: 'active', description: 'Phản ánh đã được giải quyết (đã sửa, không cần xử lý hoặc đã hoàn tiền).' },
+    REJECTED: { label: 'Đã từ chối', tone: 'neutral', icon: 'ban', description: 'Phản ánh bị từ chối vì là tin rác hoặc trùng với phản ánh khác.' },
+  },
 } as const satisfies Record<string, Record<string, StatusMeta>>
 
 export type StatusDomain = keyof typeof STATUS_CATALOG

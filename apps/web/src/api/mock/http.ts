@@ -2,14 +2,21 @@
 export class MockHttpError extends Error {
   readonly status: number
   readonly fieldErrors?: Record<string, string>
-  constructor(status: number, message: string, fieldErrors?: Record<string, string>) {
+  /** Extra response headers (Retry-After of a 429). */
+  readonly headers?: Record<string, string>
+  constructor(status: number, message: string, fieldErrors?: Record<string, string>, headers?: Record<string, string>) {
     super(message)
     this.status = status
     this.fieldErrors = fieldErrors
+    this.headers = headers
   }
 }
 
-export interface Reply { status: number; data: unknown }
+/**
+ * `data` goes in the JSON envelope; `raw` is a non-JSON body sent as is (a customer report photo with its stored
+ * Content-Type and the backend's headers).
+ */
+export interface Reply { status: number; data: unknown; raw?: { body: Uint8Array; headers: Record<string, string> } }
 export const ok = (data: unknown): Reply => ({ status: 200, data })
 export const created = (data: unknown): Reply => ({ status: 201, data })
 
@@ -24,6 +31,7 @@ const REASONS: Record<number, string> = {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
 export function successResponse(reply: Reply, nowMs: number): Response {
+  if (reply.raw) return new Response(reply.raw.body as BodyInit, { status: reply.status, headers: reply.raw.headers })
   return json(reply.status, { timestamp: new Date(nowMs).toISOString(), message: 'Request completed successfully', data: reply.data })
 }
 
@@ -31,10 +39,12 @@ export function successResponse(reply: Reply, nowMs: number): Response {
  * ApiErrorResponse as GlobalExceptionHandler builds it: `fieldErrors` only when not empty (@JsonInclude NON_EMPTY), and a
  * 400 with field errors is a bean-validation failure, reported as "Validation Failed".
  */
-export function errorResponse(status: number, message: string, path: string, nowMs: number, fieldErrors?: Record<string, string>): Response {
+export function errorResponse(status: number, message: string, path: string, nowMs: number, fieldErrors?: Record<string, string>, headers?: Record<string, string>): Response {
   const hasFields = !!fieldErrors && Object.keys(fieldErrors).length > 0
   const error = status === 400 && hasFields ? 'Validation Failed' : REASONS[status] ?? 'Error'
-  return json(status, { timestamp: new Date(nowMs).toISOString(), status, error, message, path, ...(hasFields ? { fieldErrors } : {}) })
+  const response = json(status, { timestamp: new Date(nowMs).toISOString(), status, error, message, path, ...(hasFields ? { fieldErrors } : {}) })
+  for (const [name, value] of Object.entries(headers ?? {})) response.headers.set(name, value)
+  return response
 }
 
 type Sortable = string | number | null | undefined

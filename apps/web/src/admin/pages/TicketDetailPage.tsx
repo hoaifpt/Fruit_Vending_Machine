@@ -3,7 +3,8 @@
 // The header only offers the valid next steps for this account and status, plus "Sửa phiếu" (WORK_ORDER_MANAGE) and
 // "Thêm ghi chú" (assignee or manager) while unfinished. API: GET /work-orders/{id} of api.yaml (backend #66); someone
 // else's work order without WORK_ORDER_READ_ALL is a 404, shown as "not found". An INCIDENT work order lists the
-// customer reports attached to it (linkedReports: code, type, verdict, status; never the reporter's contact).
+// customer reports attached to it (linkedReports: code, type, verdict, status; never the reporter's contact), each one
+// click away from its detail (CUSTOMER_REPORT_READ), where the refund of its order is recorded.
 import { workOrdersApi } from '../../api/resources.ts'
 import type { WorkOrder } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
@@ -24,13 +25,14 @@ import { useApi } from '../useApi.ts'
 import { TicketUnavailable, loadTicket } from '../work-order-load.ts'
 import { useSession } from '../useSession.ts'
 import { useTicketViewer } from '../useTicketViewer.ts'
+import { customerReportPath, verdictLabel } from '../customer-reports.ts'
 
 const BACK = { to: TICKETS_PATH, label: 'Danh sách phiếu công việc' }
 
 function TicketDetailPage({ ticketId }: { ticketId: string }) {
   const viewer = useTicketViewer()
   const { can } = useSession()
-  const canMachines = can('MACHINE_READ'), canAlerts = can('ALERT_READ'), canPlans = can('MAINTENANCE_PLAN_READ')
+  const canMachines = can('MACHINE_READ'), canAlerts = can('ALERT_READ'), canPlans = can('MAINTENANCE_PLAN_READ'), canReports = can('CUSTOMER_REPORT_READ')
   const state = useApi(signal => loadTicket(ticketId, signal), ticketId)
   const ticket = state.data
   const events = useApi(signal => ticket ? workOrdersApi.events(ticketId, signal) : Promise.resolve(undefined), `${ticketId}|events|${ticket?.version ?? ''}|${ticket?.updatedAt ?? ''}`)
@@ -104,11 +106,13 @@ function TicketDetailPage({ ticketId }: { ticketId: string }) {
       {(ticket.linkedReports?.length ?? 0) > 0 && <section className={PANEL} aria-labelledby="ticket-reports">
         <h2 id="ticket-reports" className={HEADING}>Phản ánh của khách</h2>
         <ul className="grid gap-2 text-[14px]">
-          {ticket.linkedReports!.map(report => <li key={report.id ?? report.code}>
-            <span className="font-mono">{report.code}</span> · {incidentTypeLabel(report.type)}{report.status ? ` · ${report.status}` : ''}{report.verdict ? ` · ${report.verdict}` : ''}
+          {ticket.linkedReports!.map(report => <li key={report.id ?? report.code} className="flex flex-wrap items-center gap-2">
+            {report.status && <Badge domain="customerReport" value={report.status} />}
+            {canReports && report.id ? <Link to={customerReportPath(report.id)} className={`${LINK} font-mono`} label={`Mở phản ánh ${report.code ?? ''}`}>{report.code}</Link> : <span className="font-mono">{report.code}</span>}
+            <span>· {incidentTypeLabel(report.type)}{report.verdict ? ` · ${verdictLabel(report.verdict)}` : ''}</span>
           </li>)}
         </ul>
-        <p className={`${HINT} mt-3!`}>Hoàn tất phiếu không tự hoàn tiền và không đổi trạng thái đơn; hoàn tiền ghi ở màn Hoàn tiền.</p>
+        <p className={`${HINT} mt-3!`}>Hoàn tất phiếu không tự hoàn tiền và không đổi trạng thái đơn. Mở phản ánh để xem chi tiết; quản trị viên ghi nhận hoàn tiền từ đó (lần hoàn tiền được ghi chú vào phiếu này).</p>
       </section>}
     </div>
     <TicketActionDialog state={action.value} close={action.close} changed={changed} screen="detail" />

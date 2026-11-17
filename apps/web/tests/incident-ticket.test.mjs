@@ -1,31 +1,40 @@
-// FE 8.3: kiosk QR with the order code, INCIDENT work orders opened from customer reports (real /work-orders of api.yaml,
-// source CUSTOMER_REPORT, linkedReports), and the flagged reports of W-12 "Cần hoàn tiền" (drafts incident-reports.yaml,
-// refunds.yaml, still FM8) on the mock API.
+// FE 8.3 on the real API of backend #74 (docs/customer-reports.md): a customer report opens or joins an INCIDENT work
+// order (source CUSTOMER_REPORT, linkedReports, no contact data), shows in "Cần hoàn tiền" (CUSTOMER_REPORT candidates)
+// and is closed by the refund; the management screens of customer reports (rules, filters, review / resolve / reject,
+// photos read with the token, masked contact) and the visibility rule: STAFF hold CUSTOMER_REPORT_READ but only see
+// the reports of work orders assigned to them. Also the rotation of a machine's report QR.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ApiError, configureClient } from '../src/api/client.ts'
-import { authApi, incidentReportsApi, refundsApi, workOrdersApi } from '../src/api/resources.ts'
-import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
+import { authApi, customerReportsApi, machinesApi, ordersApi, publicReportsApi, refundsApi, workOrdersApi } from '../src/api/resources.ts'
+import { createMockFetcher, parseSelection } from '../src/api/mock/fetcher.ts'
+import { seedReportToken } from '../src/api/mock/customer-reports.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
-import { buildIncidentForm, draftFromSearch, emptyDraft } from '../src/features/incident/incident.ts'
+import { buildReportForm, emptyDraft } from '../src/features/incident/incident.ts'
+import { can } from '../src/admin/permissions.ts'
+import { NAV, canOpen, matchRoute, navFor } from '../src/admin/routes.ts'
 import {
   CREATABLE_TICKET_TYPES, NEW_TICKET, TICKET_TYPES, TICKET_TYPE_OPTIONS, incidentTypeLabel, nextActions, nextStepText, readTicketFilters, safePhotoUrl,
   ticketOrigin, ticketTypeLabel, validateTicket,
 } from '../src/admin/tickets.ts'
-import { REPORT_CHECK_MACHINE, flaggedReportsQuery, readRefundFilters, reportMark, reportRowAction, reportsByOrder } from '../src/admin/refunds.ts'
+import {
+  REPORT_CLOSED, REPORT_NOT_NEW, contactText, customerReportPath, decisionBody, readReportFilters, refundLinkOf, reportActionError, reportActions, reportListQuery,
+  reportNextStep, resolutionLabel, sizeText, validateDecision, verdictHelp, verdictLabel,
+} from '../src/admin/customer-reports.ts'
+import { describeFormFailure } from '../src/admin/form-error.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const id = (prefix, n) => `${prefix}-0000-0000-0000-${String(n).padStart(12, '0')}`
 const MACHINE_1 = id('20000000', 1)
-const ORDER_PAID = id('90000000', 6)
+const TOKEN_1 = seedReportToken('DEV-MACHINE-01')
 const ORDER_FAILED = id('90000000', 8), PAY_FAILED = id('a0000000', 8)
-const ORDER_COMPLETED = id('90000000', 2)
-const STAFF = id('11000000', 2)
+const ORDER_COMPLETED = id('90000000', 2), PAY_COMPLETED = id('a0000000', 2)
+const STAFF = id('11000000', 2), OTHER_STAFF = id('11000000', 7)
 
 function setup() {
-  const state = { token: null, clock: Date.now() }
+  const state = { token: null, clock: Date.parse('2026-11-30T03:00:00Z') }
   const fetcher = createMockFetcher(parseSelection('all'), { now: () => state.clock, getSearch: () => '' })
   configureClient({ baseUrl: '', fetcher, getToken: () => state.token, onUnauthorized: () => {} })
   return state
@@ -36,31 +45,20 @@ async function signIn(state, account) {
 async function rejects(promise, status, check = () => true) {
   await assert.rejects(promise, error => error instanceof ApiError && error.status === status && check(error))
 }
-async function codeOf(orderId) {
-  const { ordersApi } = await import('../src/api/resources.ts')
-  return (await ordersApi.get(orderId)).orderCode
-}
-/** The customer sends a report from the phone (no account). */
-async function report(state, patch) {
+const codeOf = async orderId => (await ordersApi.get(orderId)).orderCode
+/** The customer sends a report from the phone (no account); a minute apart so the 5/minute limit never interferes. */
+async function report(state, patch, photos = []) {
   const token = state.token
   state.token = null
-  try { return await incidentReportsApi.create(buildIncidentForm({ ...emptyDraft('DEV-MACHINE-01'), ...patch })) } finally { state.token = token }
+  state.clock += 15_000
+  try {
+    const form = buildReportForm({ ...emptyDraft(), consent: true, ...patch })
+    for (const photo of photos) form.append('photos', photo)
+    return await publicReportsApi.submit(TOKEN_1, form)
+  } finally { state.token = token }
 }
-
-// ---- kiosk QR → form
-
-test('the form opened from K-07 pre-selects "Đã trả tiền nhưng không nhận hàng" with the order code; a bad code is ignored', () => {
-  assert.deepEqual(draftFromSearch('?machine=dev-machine-01&order=ord-20261109-ab12cd34'), {
-    ...emptyDraft('DEV-MACHINE-01'), type: 'PAID_NOT_RECEIVED', orderCode: 'ORD-20261109-AB12CD34',
-  })
-  assert.deepEqual(draftFromSearch('?machine=DEV-MACHINE-01'), emptyDraft('DEV-MACHINE-01'))
-  for (const bad of ['?machine=DEV-MACHINE-01&order=<script>', '?machine=DEV-MACHINE-01&order=', '?machine=DEV-MACHINE-01&order=ORD-1']) {
-    assert.deepEqual(draftFromSearch(bad), emptyDraft('DEV-MACHINE-01'), bad)
-  }
-  // Without a machine the form still asks for it, but keeps the order.
-  assert.equal(draftFromSearch('?order=ORD-20261109-AB12CD34').machineCode, '')
-  assert.equal(draftFromSearch('?order=ORD-20261109-AB12CD34').orderCode, 'ORD-20261109-AB12CD34')
-})
+const findReport = async code => (await customerReportsApi.list({ page: 0, size: 100 })).content.find(row => row.code === code)
+const png = () => { const bytes = new Uint8Array(40); bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 1, 0, 0, 0, 1, 0]); return new File([bytes], 'hop.png', { type: 'image/png' }) }
 
 // ---- ticket vocabulary
 
@@ -77,6 +75,7 @@ test('INCIDENT is a listed work order type "Sự cố"; the real API also lets a
 
 test('incident labels, list origin, next step and photo links', () => {
   assert.equal(incidentTypeLabel('PAID_NOT_RECEIVED'), 'Đã trả tiền nhưng không nhận hàng')
+  assert.equal(incidentTypeLabel('PRODUCT_QUALITY'), 'Trái cây không đạt chất lượng')
   assert.equal(incidentTypeLabel('MACHINE_FAULT'), 'Máy lỗi')
   assert.equal(incidentTypeLabel('NEW_KIND'), 'NEW_KIND')
   assert.equal(ticketOrigin({ source: 'CUSTOMER_REPORT' }), 'từ phản ánh của khách')
@@ -90,99 +89,208 @@ test('incident labels, list origin, next step and photo links', () => {
   assert.deepEqual(nextActions(working, staff), ['complete'])
   assert.match(nextStepText(working, staff), /không hoàn tiền/)
   assert.equal(safePhotoUrl('https://files.example/p.jpg?sig=1'), 'https://files.example/p.jpg?sig=1')
-  assert.equal(safePhotoUrl('http://localhost:9000/p.jpg'), 'http://localhost:9000/p.jpg')
   for (const bad of ['javascript:alert(1)', 'data:image/png;base64,AAAA', '/p.jpg', 'http://evil.example/p.jpg', '', null, undefined]) assert.equal(safePhotoUrl(bad), null, String(bad))
 })
 
-// ---- W-12 rules
+// ---- customer report screens: permissions and rules
 
-test('flagged report rows: refund only a DISPENSE_FAILED (or cancelled) order, check the machine while PAID; query is contract only', () => {
-  assert.equal(reportRowAction({ orderId: 'o', orderStatus: 'DISPENSE_FAILED' }), 'record')
-  assert.equal(reportRowAction({ orderId: 'o', orderStatus: 'CANCELLED' }), 'record')
-  assert.equal(reportRowAction({ orderId: 'o', orderStatus: 'PAID' }), 'check-machine')
-  assert.equal(reportRowAction({ orderId: 'o', orderStatus: 'DISPENSING' }), 'check-machine')
-  assert.equal(reportRowAction({ orderId: 'o', orderStatus: 'REFUNDED' }), 'none')
-  assert.equal(reportRowAction({ orderId: null, orderStatus: null }), 'none')
-  assert.equal(REPORT_CHECK_MACHINE, 'Đơn chưa ở trạng thái nhả thất bại; kiểm tra máy trước.')
-  assert.equal(reportMark({ reportCode: 'INC-20261109-7KQ2' }), 'Khách báo sự cố INC-20261109-7KQ2')
-  const map = reportsByOrder([{ id: '1', orderId: 'a', reportCode: 'INC-2' }, { id: '2', orderId: 'a', reportCode: 'INC-1' }, { id: '3', orderId: null }])
-  assert.deepEqual([...map.keys()], ['a'])
-  assert.equal(map.get('a').reportCode, 'INC-2')
-  const filters = readRefundFilters(new URLSearchParams(`machineId=${MACHINE_1}&reportPage=2`))
-  assert.equal(filters.reportPage, 2)
-  assert.deepEqual(flaggedReportsQuery(filters, 20), { page: 2, size: 20, sort: 'createdAt,desc', flagged: true, machineId: MACHINE_1 })
-  assert.equal(readRefundFilters(new URLSearchParams('reportPage=-3')).reportPage, 0)
-  const yaml = readFileSync(`${root}api-contract/drafts/incident-reports.yaml`, 'utf8').replace(/\r\n/g, '\n')
-  assert.match(yaml, /\/api\/v1\/incident-reports:\n {4}get:/)
-  assert.match(yaml, /x-required-permission: REFUND_RECORD/)
-  assert.doesNotMatch(yaml, /\n\s+delete:/)
+test('CUSTOMER_REPORT_READ opens the report screens for ADMIN and STAFF; managing stays ADMIN only', () => {
+  assert.equal(can(['STAFF'], 'CUSTOMER_REPORT_READ'), true)
+  assert.equal(can(['STAFF'], 'CUSTOMER_REPORT_MANAGE'), false)
+  assert.equal(can(['STAFF'], 'MACHINE_REPORT_LINK_MANAGE'), false)
+  assert.deepEqual(matchRoute('/admin/customer-reports'), { page: 'customer-reports', id: undefined, permission: 'CUSTOMER_REPORT_READ', roles: ['ADMIN', 'STAFF'] })
+  assert.equal(matchRoute(`/admin/customer-reports/${id('70000000', 1)}`).page, 'customer-report-detail')
+  assert.equal(canOpen(['STAFF'], matchRoute('/admin/customer-reports')), true)
+  const item = NAV.find(entry => entry.to === '/admin/customer-reports')
+  assert.deepEqual([item.group, item.label], ['Vận hành', 'Phản ánh của khách'])
+  assert.ok(navFor(['STAFF']).includes(item))
+  assert.equal(customerReportPath(id('70000000', 1)), `/admin/customer-reports/${id('70000000', 1)}`)
+  assert.equal(customerReportPath('nope'), '/admin/customer-reports')
 })
 
-// ---- mock: report → INCIDENT ticket → W-12
-
-test('Tiêu chí xong (mock): a "đã trả nhưng không nhận hàng" report shows at once in "Cần hoàn tiền" and opens an INCIDENT ticket', async () => {
-  assert.equal(groupOf('/incident-reports'), 'incident-reports')
-  const state = setup()
-  await signIn(state, 'admin')
-  assert.equal((await incidentReportsApi.list({ flagged: true, page: 0, size: 20 })).totalElements, 0)
-  const paidCode = await codeOf(ORDER_PAID), failedCode = await codeOf(ORDER_FAILED), doneCode = await codeOf(ORDER_COMPLETED)
-
-  const paid = await report(state, { type: 'PAID_NOT_RECEIVED', orderCode: paidCode, description: 'Cửa không mở', contactPhone: '0912345678' })
-  const failed = await report(state, { type: 'PAID_NOT_RECEIVED', orderCode: failedCode })
-  await report(state, { type: 'SPOILED_FRUIT', orderCode: doneCode }) // a COMPLETED order is not flagged
-  await report(state, { type: 'MACHINE_FAULT' })
-
-  const flagged = await incidentReportsApi.list({ flagged: true, page: 0, size: 20 })
-  assert.deepEqual(flagged.content.map(row => row.reportCode).sort(), [paid.reportCode, failed.reportCode].sort())
-  const paidRow = flagged.content.find(row => row.reportCode === paid.reportCode)
-  assert.equal(paidRow.orderId, ORDER_PAID)
-  assert.equal(paidRow.orderStatus, 'PAID')
-  assert.equal(reportRowAction(paidRow), 'check-machine')
-  assert.equal(paidRow.contactPhone, '0912345678')
-  assert.ok(paidRow.ticketId)
-  assert.equal(reportRowAction(flagged.content.find(row => row.reportCode === failed.reportCode)), 'record')
-  assert.equal((await incidentReportsApi.list({ page: 0, size: 20 })).totalElements, 4)
-  assert.equal((await incidentReportsApi.list({ flagged: true, machineId: id('20000000', 2), page: 0, size: 20 })).totalElements, 0)
-  await rejects(incidentReportsApi.list({ type: 'LOST', page: 0, size: 20 }), 400)
-
-  // One OPEN INCIDENT work order per report (source CUSTOMER_REPORT), created by the system, linking the report.
-  const incidents = await workOrdersApi.list({ type: 'INCIDENT', page: 0, size: 20 })
-  assert.equal(incidents.totalElements, 4)
-  const ticket = await workOrdersApi.get(paidRow.ticketId)
-  assert.deepEqual([ticket.type, ticket.status, ticket.source, ticket.createdBy, ticket.machineId], ['INCIDENT', 'OPEN', 'CUSTOMER_REPORT', null, MACHINE_1])
-  assert.match(ticket.title, /^Sự cố: Đã trả tiền nhưng không nhận hàng · máy DEV-MACHINE-01$/)
-  assert.equal(ticket.description, 'Cửa không mở')
-  assert.deepEqual(ticket.linkedReports.map(row => [row.code, row.type]), [[paid.reportCode, 'PAID_NOT_RECEIVED']])
-  assert.ok(!('contactPhone' in ticket.linkedReports[0]), 'no contact on the work order')
-
-  // Refunding the failed order takes its report off the list; the PAID one stays (BR-15: the report changed nothing).
-  await refundsApi.record(ORDER_FAILED, { transferRef: 'FT26316000000009', paymentId: PAY_FAILED })
-  assert.deepEqual((await incidentReportsApi.list({ flagged: true, page: 0, size: 20 })).content.map(row => row.reportCode), [paid.reportCode])
-  const { ordersApi } = await import('../src/api/resources.ts')
-  assert.equal((await ordersApi.get(ORDER_PAID)).status, 'PAID')
-  // A refund of the PAID order is still refused: not a refund case.
-  await rejects(refundsApi.record(ORDER_PAID, { transferRef: 'FT26316000000010', paymentId: id('a0000000', 6) }), 409)
+test('report filters live in the URL and only contract parameters are sent (Vietnam days, no sort)', () => {
+  const filters = readReportFilters(new URLSearchParams(`status=NEW&type=MACHINE_FAULT&verdict=WHAT&machineId=${MACHINE_1}&from=2026-11-30&to=2026-11-01&hasOrder=true&page=2`))
+  assert.deepEqual(filters, { status: 'NEW', type: 'MACHINE_FAULT', verdict: '', machineId: MACHINE_1, from: '2026-11-01', to: '2026-11-30', hasOrder: 'true', page: 2 })
+  assert.deepEqual(reportListQuery(filters, 20), { page: 2, size: 20, status: 'NEW', type: 'MACHINE_FAULT', verdict: undefined, machineId: MACHINE_1, from: '2026-11-01', to: '2026-11-30', hasOrder: true })
+  assert.equal(reportListQuery(readReportFilters(new URLSearchParams('hasOrder=false')), 20).hasOrder, false)
+  assert.equal(reportListQuery(readReportFilters(new URLSearchParams('hasOrder=maybe')), 20).hasOrder, undefined)
 })
 
-test('mock: STAFF never read the report list and only see the INCIDENT work orders given to them; same lifecycle as the others', async () => {
+test('detail rules: actions by status and permission, next step, refund link, decisions and 409 codes', () => {
+  assert.deepEqual(reportActions({ status: 'NEW' }, true), ['review', 'resolve', 'reject'])
+  assert.deepEqual(reportActions({ status: 'IN_REVIEW' }, true), ['resolve', 'reject'])
+  assert.deepEqual(reportActions({ status: 'RESOLVED' }, true), [])
+  assert.deepEqual(reportActions({ status: 'NEW' }, false), [])
+  const eligible = { status: 'NEW', verdict: 'REFUND_ELIGIBLE', order: { id: id('90000000', 8) }, workOrder: { id: id('61000000', 9) } }
+  assert.equal(refundLinkOf(eligible, true), `/admin/refunds?orderId=${id('90000000', 8)}&workOrderId=${id('61000000', 9)}`)
+  assert.equal(refundLinkOf(eligible, false), null)
+  assert.equal(refundLinkOf({ ...eligible, status: 'RESOLVED' }, true), null)
+  assert.equal(refundLinkOf({ ...eligible, verdict: 'DISPENSE_PENDING' }, true), null)
+  assert.match(reportNextStep(eligible, true, true), /tự chuyển sang “Đã giải quyết · Đã hoàn tiền”/)
+  assert.match(reportNextStep(eligible, false, false), /phiếu sự cố được giao/)
+  assert.match(reportNextStep({ status: 'REJECTED', resolution: 'SPAM' }, true, true), /Đã từ chối: tin rác/)
+  assert.equal(verdictLabel('DELIVERED_PER_MACHINE'), 'Máy báo đã giao')
+  assert.match(verdictHelp('NOT_PAID'), /không có tiền để hoàn/)
+  assert.equal(resolutionLabel('NO_ACTION_NEEDED'), 'Không cần xử lý')
+  assert.equal(contactText({ name: 'A***', phone: '090****567', email: null, masked: true }), 'A*** · 090****567')
+  assert.equal(contactText(undefined), '—')
+  assert.equal(sizeText(512), '1 KB')
+  assert.equal(sizeText(1_572_864), '1,5 MB')
+  assert.deepEqual(validateDecision({ resolution: 'SPAM', note: '' }, ['FIXED', 'NO_ACTION_NEEDED', 'REFUNDED']), { resolution: 'Chọn kết quả xử lý.' })
+  assert.match(validateDecision({ resolution: 'FIXED', note: 'x'.repeat(1001) }, ['FIXED']).note, /1000/)
+  assert.deepEqual(decisionBody({ resolution: 'FIXED', note: '  ' }), { resolution: 'FIXED' })
+  assert.deepEqual(decisionBody({ resolution: 'SPAM', note: ' quảng cáo ' }), { resolution: 'SPAM', note: 'quảng cáo' })
+  assert.equal(describeFormFailure(reportActionError(new ApiError(409, 'REPORT_ALREADY_CLOSED: x'))).message, REPORT_CLOSED)
+  assert.equal(reportActionError(new ApiError(409, 'REPORT_NOT_NEW: x')).message, REPORT_NOT_NEW)
+  const other = new ApiError(400, 'x')
+  assert.equal(reportActionError(other), other)
+})
+
+// ---- mock: report → INCIDENT work order → refund
+
+test('Tiêu chí xong (mock): a "đã trả nhưng không nhận hàng" report opens an INCIDENT work order, shows in "Cần hoàn tiền" and is closed by the refund', async () => {
   const state = setup()
   await signIn(state, 'admin')
-  const mine = await report(state, { type: 'MACHINE_FAULT', description: 'Màn hình đen', contactPhone: '0987654321' })
-  const other = await report(state, { type: 'OTHER', description: 'Khay bẩn' })
-  const orders = (await workOrdersApi.list({ type: 'INCIDENT', page: 0, size: 20 })).content
-  const mineOrder = orders.find(row => row.linkedReports[0]?.code === mine.reportCode)
-  const otherOrder = orders.find(row => row.linkedReports[0]?.code === other.reportCode)
+  assert.equal((await refundsApi.candidates({ type: 'CUSTOMER_REPORT', page: 0, size: 20 })).totalElements, 0)
+  const failedCode = await codeOf(ORDER_FAILED)
+  const sent = await report(state, { type: 'PAID_NOT_RECEIVED', orderCode: failedCode, description: 'Cửa không mở', contactName: 'An', contactPhone: '0912345678' })
+  const row = await findReport(sent.reportCode)
+  assert.deepEqual([row.type, row.status, row.verdict, row.orderId, row.machineCode], ['PAID_NOT_RECEIVED', 'NEW', 'REFUND_ELIGIBLE', ORDER_FAILED, 'DEV-MACHINE-01'])
+  assert.deepEqual(row.contact, { name: 'A***', phone: '091****678', masked: true }, 'masked in the list, even for ADMIN')
+  assert.equal((await customerReportsApi.get(row.id)).contact.phone, '0912345678', 'full for CUSTOMER_REPORT_MANAGE')
+
+  // One OPEN INCIDENT work order created by the system: HIGH, due in 24 h, linking the report, no contact anywhere.
+  const ticket = await workOrdersApi.get(row.workOrder.id)
+  assert.deepEqual([ticket.type, ticket.status, ticket.source, ticket.priority, ticket.createdBy, ticket.machineId], ['INCIDENT', 'OPEN', 'CUSTOMER_REPORT', 'HIGH', null, MACHINE_1])
+  assert.equal(ticket.title, `[${sent.reportCode}] Paid, not received`)
+  assert.equal(Date.parse(ticket.dueAt) - Date.parse(ticket.createdAt), 24 * 3_600_000)
+  assert.deepEqual(ticket.linkedReports, [{ id: row.id, code: sent.reportCode, type: 'PAID_NOT_RECEIVED', verdict: 'REFUND_ELIGIBLE', status: 'NEW' }])
+  assert.doesNotMatch(JSON.stringify(ticket), /0912345678|An\b/)
+
+  // "Cần hoàn tiền": the order's own case, with the report (masked) and its work order.
+  const candidate = (await refundsApi.candidates({ type: 'CUSTOMER_REPORT', page: 0, size: 20 })).content
+  assert.deepEqual(candidate.map(entry => entry.paymentId), [PAY_FAILED])
+  assert.equal(candidate[0].type, 'DISPENSE_FAILED')
+  assert.deepEqual(candidate[0].customerReport, { id: row.id, reportCode: sent.reportCode, verdict: 'REFUND_ELIGIBLE', contactName: 'A***', contactPhone: '091****678' })
+  assert.deepEqual(candidate[0].relatedWorkOrder, { id: ticket.id, code: ticket.code })
+
+  // Recording the refund (noted on the work order) resolves the open report as REFUNDED.
+  await refundsApi.record(PAY_FAILED, { reason: 'DISPENSE_FAILED', transferReference: 'FT26316000000009', workOrderId: ticket.id })
+  const closed = await customerReportsApi.get(row.id)
+  assert.deepEqual([closed.status, closed.resolution, closed.resolvedBy.fullName], ['RESOLVED', 'REFUNDED', 'Quản trị viên'])
+  assert.equal((await workOrdersApi.get(ticket.id)).linkedReports[0].status, 'RESOLVED')
+  assert.ok((await workOrdersApi.events(ticket.id)).some(event => event.type === 'NOTE' && /^Refunded/.test(event.note)))
+  assert.equal((await refundsApi.candidates({ type: 'CUSTOMER_REPORT', page: 0, size: 20 })).totalElements, 0)
+})
+
+test('mock: a second report of the same order joins its work order (IN_REVIEW); machine faults share one; a delivered order is a CUSTOMER_REPORT candidate', async () => {
+  const state = setup()
+  await signIn(state, 'admin')
+  const failedCode = await codeOf(ORDER_FAILED), doneCode = await codeOf(ORDER_COMPLETED)
+  const first = await report(state, { type: 'PAID_NOT_RECEIVED', orderCode: failedCode, contactEmail: 'an@example.com' })
+  const second = await report(state, { type: 'PAID_NOT_RECEIVED', orderCode: failedCode, contactPhone: '0987654321' })
+  const [a, b] = [await findReport(first.reportCode), await findReport(second.reportCode)]
+  assert.equal(b.workOrder.id, a.workOrder.id)
+  assert.equal(b.status, 'IN_REVIEW')
+  assert.equal(a.contact.email, 'a***@example.com')
+  const fault1 = await findReport((await report(state, { type: 'MACHINE_FAULT', description: 'Màn hình đen' })).reportCode)
+  const fault2 = await findReport((await report(state, { type: 'OTHER', description: 'Khay bẩn' })).reportCode)
+  // MACHINE_FAULT / OTHER join the machine's unfinished INCIDENT work order from customer reports (docs, rule 2).
+  assert.equal(fault1.workOrder.id, a.workOrder.id)
+  assert.equal(fault2.workOrder.id, a.workOrder.id)
+  assert.deepEqual((await workOrdersApi.get(a.workOrder.id)).linkedReports.map(row => row.code), [a.code, b.code, fault1.code, fault2.code])
+  assert.equal((await workOrdersApi.list({ type: 'INCIDENT', page: 0, size: 20 })).totalElements, 1)
+
+  const quality = await findReport((await report(state, { type: 'PRODUCT_QUALITY', orderCode: doneCode, description: 'Dưa bị dập', contactPhone: '0912345678' }, [png()])).reportCode)
+  assert.equal(quality.verdict, 'DELIVERED_PER_MACHINE')
+  const candidates = (await refundsApi.candidates({ type: 'CUSTOMER_REPORT', page: 0, size: 20 })).content
+  assert.ok(candidates.some(entry => entry.paymentId === PAY_COMPLETED && entry.type === 'CUSTOMER_REPORT' && entry.customerReport.id === quality.id))
+
+  // Filters of the list.
+  assert.deepEqual((await customerReportsApi.list({ type: 'PRODUCT_QUALITY', page: 0, size: 20 })).content.map(row => row.id), [quality.id])
+  assert.equal((await customerReportsApi.list({ hasOrder: false, page: 0, size: 20 })).totalElements, 2)
+  assert.equal((await customerReportsApi.list({ status: 'IN_REVIEW', page: 0, size: 20 })).totalElements, 1)
+  assert.equal((await customerReportsApi.list({ verdict: 'REFUND_ELIGIBLE', page: 0, size: 20 })).totalElements, 2)
+  assert.equal((await customerReportsApi.list({ from: '2026-11-30', to: '2026-11-30', page: 0, size: 20 })).totalElements, 5)
+  assert.equal((await customerReportsApi.list({ from: '2026-11-29', to: '2026-11-29', page: 0, size: 20 })).totalElements, 0)
+  await rejects(customerReportsApi.list({ status: 'OPEN', page: 0, size: 20 }), 400)
+
+  // The photo, read with the token: the stored image with its content type.
+  const detail = await customerReportsApi.get(quality.id)
+  assert.deepEqual(detail.photos.map(photo => [photo.contentType, photo.sizeBytes]), [['image/png', 40]])
+  const blob = await customerReportsApi.photo(quality.id, detail.photos[0].id)
+  assert.equal(blob.type, 'image/png')
+  assert.equal(blob.size, 40)
+  await rejects(customerReportsApi.photo(quality.id, id('71000000', 1)), 404)
+  const token = state.token
+  state.token = null
+  await rejects(customerReportsApi.photo(quality.id, detail.photos[0].id), 401)
+  state.token = token
+})
+
+test('mock: review, resolve and reject follow the lifecycle; closed reports and wrong resolutions are refused', async () => {
+  const state = setup()
+  await signIn(state, 'admin')
+  const fault = await findReport((await report(state, { type: 'MACHINE_FAULT', description: 'Màn hình đen' })).reportCode)
+  const reviewed = await customerReportsApi.review(fault.id)
+  assert.equal(reviewed.status, 'IN_REVIEW')
+  await rejects(customerReportsApi.review(fault.id), 409, error => error.message.startsWith('REPORT_NOT_NEW:'))
+  await rejects(customerReportsApi.resolve(fault.id, { resolution: 'SPAM' }), 400, error => !!error.fieldErrors.resolution)
+  await rejects(customerReportsApi.resolve(fault.id, { resolution: 'FIXED', note: 'x'.repeat(1001) }), 400, error => !!error.fieldErrors.note)
+  const resolved = await customerReportsApi.resolve(fault.id, { resolution: 'FIXED', note: 'Khởi động lại bộ điều khiển.' })
+  assert.deepEqual([resolved.status, resolved.resolution, resolved.resolutionNote], ['RESOLVED', 'FIXED', 'Khởi động lại bộ điều khiển.'])
+  await rejects(customerReportsApi.reject(fault.id, { resolution: 'SPAM' }), 409, error => error.message.startsWith('REPORT_ALREADY_CLOSED:'))
+  await rejects(customerReportsApi.review(fault.id), 409, error => error.message.startsWith('REPORT_ALREADY_CLOSED:'))
+  const spam = await findReport((await report(state, { type: 'OTHER', description: 'quảng cáo' })).reportCode)
+  await rejects(customerReportsApi.reject(spam.id, { resolution: 'FIXED' }), 400)
+  assert.equal((await customerReportsApi.reject(spam.id, { resolution: 'SPAM' })).status, 'REJECTED')
+  await rejects(customerReportsApi.get(id('70000000', 404)), 404)
+  await rejects(customerReportsApi.get('nope'), 400)
+})
+
+test('mock: STAFF hold CUSTOMER_REPORT_READ but only see the reports of work orders assigned to them, contact masked, read only', async () => {
+  const state = setup()
+  await signIn(state, 'admin')
+  const mine = await findReport((await report(state, { type: 'MACHINE_FAULT', description: 'Màn hình đen', contactPhone: '0987654321' })).reportCode)
+  const theirs = await findReport((await report(state, { type: 'PAID_NOT_RECEIVED', orderCode: await codeOf(ORDER_FAILED), contactPhone: '0912345678' })).reportCode)
+  const unassigned = await findReport((await report(state, { type: 'PRODUCT_QUALITY', orderCode: await codeOf(ORDER_COMPLETED), description: 'x', contactEmail: 'b@example.com' })).reportCode)
+  const mineOrder = await workOrdersApi.get(mine.workOrder.id)
+  const theirOrder = await workOrdersApi.get(theirs.workOrder.id)
   await workOrdersApi.assign(mineOrder.id, { assigneeId: STAFF, version: mineOrder.version })
-  await workOrdersApi.assign(otherOrder.id, { assigneeId: id('11000000', 7), version: otherOrder.version })
+  await workOrdersApi.assign(theirOrder.id, { assigneeId: OTHER_STAFF, version: theirOrder.version })
 
   await signIn(state, 'staff')
+  assert.deepEqual((await customerReportsApi.list({ page: 0, size: 20 })).content.map(row => row.id), [mine.id])
+  const detail = await customerReportsApi.get(mine.id)
+  assert.deepEqual(detail.contact, { phone: '098****321', masked: true })
+  await rejects(customerReportsApi.get(theirs.id), 404)
+  await rejects(customerReportsApi.get(unassigned.id), 404)
+  await rejects(customerReportsApi.review(mine.id), 403)
+  await rejects(customerReportsApi.resolve(mine.id, { resolution: 'FIXED' }), 403)
+  await rejects(refundsApi.candidates({ page: 0, size: 20 }), 403)
+  // Their own INCIDENT work order follows the usual lifecycle.
   const seen = (await workOrdersApi.mine({ page: 0, size: 20 })).content.filter(row => row.type === 'INCIDENT')
   assert.deepEqual(seen.map(row => row.id), [mineOrder.id])
-  await rejects(workOrdersApi.get(otherOrder.id), 404)
-  const started = await workOrdersApi.start(mineOrder.id)
-  assert.equal(started.status, 'IN_PROGRESS')
-  const done = await workOrdersApi.complete(mineOrder.id, { resultNote: 'Khởi động lại bộ điều khiển, màn hình sáng lại.' })
-  assert.equal(done.status, 'DONE')
-  // FM8 (customer reports, not migrated yet): the draft list still expects STAFF to be refused.
-  await rejects(incidentReportsApi.list({ flagged: true, page: 0, size: 20 }), 403)
+  await rejects(workOrdersApi.get(theirOrder.id), 404)
+  assert.equal((await workOrdersApi.start(mineOrder.id)).status, 'IN_PROGRESS')
+  assert.equal((await workOrdersApi.complete(mineOrder.id, { resultNote: 'Khởi động lại bộ điều khiển, màn hình sáng lại.' })).status, 'DONE')
+})
+
+test('mock: rotating a machine\'s report QR (ADMIN) answers the new URL; the old token is 404 at once; STAFF are refused', async () => {
+  const state = setup()
+  await signIn(state, 'staff')
+  await rejects(machinesApi.rotateReportToken(MACHINE_1), 403)
+  await signIn(state, 'admin')
+  const link = await machinesApi.rotateReportToken(MACHINE_1)
+  assert.equal(link.machineId, MACHINE_1)
+  const url = new URL(link.url)
+  const token = url.pathname.split('/').pop()
+  assert.equal(url.pathname, `/report/${token}`)
+  assert.match(token, /^[A-Za-z0-9_-]{22}$/)
+  assert.notEqual(token, TOKEN_1)
+  state.token = null
+  await rejects(publicReportsApi.form(TOKEN_1), 404)
+  assert.equal((await publicReportsApi.form(token)).machineCode, 'DEV-MACHINE-01')
+  await signIn(state, 'admin')
+  await rejects(machinesApi.rotateReportToken(id('20000000', 99)), 404)
 })

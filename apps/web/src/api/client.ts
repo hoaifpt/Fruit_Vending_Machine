@@ -4,12 +4,21 @@ import { beginProgress } from '../lib/progress.ts'
 export class ApiError extends Error {
   readonly status: number
   readonly fieldErrors: Record<string, string>
-  constructor(status: number, message: string, fieldErrors: Record<string, string> = {}) {
+  /** Seconds of the `Retry-After` header of a 429 (public report form), when the server sent one. */
+  readonly retryAfterSeconds?: number
+  constructor(status: number, message: string, fieldErrors: Record<string, string> = {}, retryAfterSeconds?: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.fieldErrors = fieldErrors
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds
   }
+}
+
+/** `Retry-After` as whole seconds (delta-seconds only; an HTTP date or anything else is ignored). */
+export function retryAfterOf(value: string | null | undefined): number | undefined {
+  const text = value?.trim() ?? ''
+  return /^\d{1,6}$/.test(text) ? Number(text) : undefined
 }
 
 type QueryScalar = string | number | boolean | null | undefined
@@ -85,7 +94,7 @@ async function readError(response: Response): Promise<ApiError> {
   // Only 400/409 messages are business messages from the contract; everything else is generic.
   const backendMessage = (status === 400 || status === 409) && typeof body.message === 'string' && body.message.trim() ? body.message : ''
   const message = backendMessage || GENERIC_MESSAGES[status] || (status >= 500 ? 'Hệ thống đang gặp sự cố. Vui lòng thử lại.' : 'Yêu cầu không hợp lệ.')
-  return new ApiError(status, message, fieldErrors)
+  return new ApiError(status, message, fieldErrors, status === 429 ? retryAfterOf(response.headers.get('Retry-After')) : undefined)
 }
 
 export async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
@@ -151,6 +160,34 @@ export function serverNow(): number { return Date.now() + serverOffsetMs }
 /** Records the server time of a response received at `receivedAt` (client clock). Ignores unreadable times. */
 export function noteServerTime(serverTime: number | undefined, receivedAt = Date.now()) {
   if (typeof serverTime === 'number' && Number.isFinite(serverTime)) serverOffsetMs = serverTime - receivedAt
+}
+
+/**
+ * A binary response read with the session's Authorization header (a customer report photo, which a plain <img src>
+ * could not authenticate). Errors and 401 behave as for JSON calls; the caller makes the object URL and revokes it.
+ */
+export async function requestBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const done = beginProgress()
+  const token = config.getToken()
+  const timeout = AbortSignal.timeout(TIMEOUT_MS)
+  try {
+    let response: Response
+    try {
+      response = await config.fetcher(buildUrl(path), {
+        method: 'GET', cache: 'no-store', headers: { Accept: 'image/jpeg, image/png', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      })
+    } catch (error) {
+      if (signal?.aborted) throw error
+      throw new ApiError(0, timeout.aborted ? 'Kết nối mất quá nhiều thời gian. Vui lòng thử lại.' : 'Không thể kết nối đến hệ thống. Kiểm tra kết nối mạng và thử lại.')
+    }
+    if (!response.ok) {
+      const error = await readError(response)
+      if (response.status === 401) config.onUnauthorized(token)
+      throw error
+    }
+    return await response.blob()
+  } finally { done() }
 }
 
 export const api = {

@@ -70,7 +70,7 @@ export const COMPLETE_TIMEOUT_MS = 90_000
 const iso = (ms: number) => new Date(ms).toISOString()
 const newId = () => crypto.randomUUID()
 const decode = (value: string) => decodeURIComponent(value)
-const closed = (status: Status) => status === 'DONE' || status === 'CANCELLED'
+export const closed = (status: Status) => status === 'DONE' || status === 'CANCELLED'
 const has = (ctx: HandlerContext, code: string) => permissionsOfUser(ctx.store, ctx.user!).includes(code)
 const randomCode = (length: number) => Array.from({ length }, () => '0123456789ABCDEFGHJKMNPQRSTVWXYZ'[Math.floor(Math.random() * 32)]).join('')
 const isExpired = (item: MockItem, now: number) => item.status === 'EXPIRED' || Date.parse(item.expiresAt) <= now
@@ -142,7 +142,7 @@ export function workOrderView(store: MockStore, order: MockWorkOrder, now: numbe
   }
 }
 
-function recordEvent(store: MockStore, order: MockWorkOrder, type: NonNullable<S['WorkOrderEventResponse']['type']>, actorId: string | null, at: number,
+export function recordEvent(store: MockStore, order: MockWorkOrder, type: NonNullable<S['WorkOrderEventResponse']['type']>, actorId: string | null, at: number,
   extra: { before?: Status | null; note?: string | null; details?: Record<string, unknown> | null } = {}) {
   store.workOrderEvents.push({
     id: newId(), workOrderId: order.id, type, statusBefore: extra.before ?? null, statusAfter: order.status, actor: person(store, actorId) ?? undefined,

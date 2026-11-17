@@ -151,7 +151,7 @@ test('K6: hết giờ giữ hàng nói rõ chưa bị trừ tiền', async ({ pa
   await expect(page.getByText('Bạn chưa bị trừ tiền.')).toBeVisible()
 })
 
-test('K8: nút Báo sự cố hiện mặc định (FE 8.3), tắt được bằng cờ; QR mở đúng link máy', async ({ page }, testInfo) => {
+test('K8: nút Báo sự cố hiện mặc định (FE 8.3), tắt được bằng cờ; QR mở link báo sự cố do máy chủ cấp (token của máy)', async ({ page }, testInfo) => {
   // The off state stays reachable (VITE_KIOSK_INCIDENT_REPORT=false, or ?incident=off with the mock).
   await openKiosk(page, '?incident=off')
   await expect(page.getByRole('button', { name: 'Báo sự cố' })).toHaveCount(0)
@@ -161,7 +161,7 @@ test('K8: nút Báo sự cố hiện mặc định (FE 8.3), tắt được bằ
   const dialog = page.getByRole('dialog', { name: 'Báo sự cố với máy' })
   await auditScreen(page, testInfo, 'kiosk-incident', 'light', () => expect(dialog.getByRole('img', { name: /báo sự cố/ })).toBeVisible(), KIOSK)
   const origin = new URL(page.url()).origin
-  await expect(dialog.locator('.buy-incident-url')).toHaveText(`${origin}/bao-su-co?machine=DEV-MACHINE-01`)
+  await expect(dialog.locator('.buy-incident-url')).toHaveText(`${origin}/report/mock-report-token-dev-machine-01`)
   await dialog.getByRole('button', { name: 'Đóng' }).click()
   await expect(dialog).toBeHidden()
 })
@@ -185,7 +185,7 @@ test('K-07 (FE 8.3): máy chưa nhả được hàng thì có QR báo sự cố 
   await expect(dialog.getByRole('img', { name: /báo sự cố/ })).toBeVisible()
   await expect(dialog).toContainText(`mã đơn ${orderCode}`)
   const origin = new URL(page.url()).origin
-  await expect(dialog.locator('.buy-incident-url')).toHaveText(`${origin}/bao-su-co?machine=DEV-MACHINE-01&order=${orderCode}`)
+  await expect(dialog.locator('.buy-incident-url')).toHaveText(`${origin}/report/mock-report-token-dev-machine-01?order=${orderCode}`)
   await dialog.getByRole('button', { name: 'Đóng' }).click()
   await expect(inline).toBeFocused()
 })

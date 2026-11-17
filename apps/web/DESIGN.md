@@ -8,7 +8,7 @@ Hướng đã duyệt: `docs/design/redesign-brief.md` (Tailwind CSS v4 + shadcn
 | --- | --- | --- | --- |
 | Quản trị (ADMIN/STAFF) | `/admin/*` | `src/admin` (khung `shell/AdminShell.tsx`, bộ phận chung `kit.tsx`, màn `pages/`) | Sáng/tối/theo hệ thống |
 | Đăng nhập | `/login` | `src/pages/LoginPage.tsx` | Sáng/tối |
-| Báo sự cố (điện thoại của khách) | `/bao-su-co` | `src/pages/IncidentReportPage.tsx` | Sáng/tối |
+| Báo sự cố (điện thoại của khách) | `/report/{reportToken}` | `src/pages/IncidentReportPage.tsx` | Sáng/tối |
 | Landing | `/` | `src/pages/LandingPage.tsx` | Luôn sáng |
 | Kiosk | `/buy` | `src/pages/PurchasePage.tsx`, `src/kiosk` | Luôn sáng, màn 1280×800 |
 | 404 và màn chờ tải route | còn lại | `src/App.tsx`, `src/lib/route-message.ts` | Sáng |

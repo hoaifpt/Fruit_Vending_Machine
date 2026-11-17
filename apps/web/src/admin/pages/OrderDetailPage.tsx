@@ -22,7 +22,7 @@ import {
 } from '../order-detail.ts'
 import type { DispenseTally } from '../order-detail.ts'
 import type { AllocationRow, StepState, TimelineStep } from '../order-detail.ts'
-import { refundEntry, refundPathFor } from '../refunds.ts'
+import { refundEntry, refundPathFor, refundReasonLabel } from '../refunds.ts'
 import { useApi } from '../useApi.ts'
 import { useSession } from '../useSession.ts'
 
@@ -105,10 +105,24 @@ function OrderDetailPage({ orderId }: { orderId: string }) {
           <dt>Thanh toán lúc</dt><dd>{formatDateTime(current.paidAt)}</dd>
           <dt>Hoàn tất lúc</dt><dd>{formatDateTime(current.completedAt)}</dd>
           <dt>Hủy lúc</dt><dd>{formatDateTime(current.cancelledAt)}</dd>
+          {current.refundedAt && <><dt>Hoàn tiền lúc</dt><dd>{formatDateTime(current.refundedAt)}</dd></>}
         </dl>
       </section>
     </div>
     <Payments order={current} canPayments={canPayments} />
+    {/* Backend #72: refunds of the order, listed only for REFUND_READ (empty for STAFF). */}
+    {(current.refunds?.length ?? 0) > 0 && <section className={PANEL} aria-labelledby="refunds-title">
+      <h2 id="refunds-title" className={HEADING}>Hoàn tiền</h2>
+      <DataTable state={NONE} rows={current.refunds ?? []} rowKey={refund => refund.paymentId ?? ''} caption="Các lần hoàn tiền của đơn" columns={[
+        { head: 'Khoản thanh toán', nowrap: true, cell: refund => canPayments && refund.paymentId ? <Link to={paymentPath(refund.paymentId)} className={LINK}>{shortId(refund.paymentId)}</Link> : shortId(refund.paymentId) },
+        { head: 'Lý do', cell: refund => refundReasonLabel(refund.reason) },
+        { head: 'Số tiền', nowrap: true, cell: refund => formatMoney(refund.amount) },
+        { head: 'Hoàn lúc', cell: refund => formatDateTime(refund.refundedAt) },
+        { head: 'Mã chuyển khoản', cell: refund => <span className="font-mono text-[13px] break-all">{refund.transferReference}</span> },
+        { head: 'Người ghi nhận', cell: refund => refund.refundedBy?.fullName?.trim() || '—' },
+        { head: 'Ghi chú', cell: refund => refund.note?.trim() ? <span className="whitespace-pre-wrap">{refund.note}</span> : '—' },
+      ]} />
+    </section>}
     <Boxes rows={rows} canInventory={canInventory} slotsFailed={!!slots.error} slotsPending={slots.loading && !slots.data && !slots.error}
       paid={paid} order={current} tally={dispenseTally(current)} eventsPath={canMachines ? machineEventsPath(current.machineId) : ''} />
     <section className={PANEL} aria-labelledby="items-title">

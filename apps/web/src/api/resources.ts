@@ -1,9 +1,7 @@
 // Typed endpoint functions. Types come from schema.d.ts, generated from api-contract/api.yaml (npm run gen:api).
-import { api, request } from './client.ts'
+import { api, request, requestBlob } from './client.ts'
 import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
-import type { components as RefundsDraft, operations as RefundOperations } from './drafts/refunds'
-import type { components as IncidentDraft, operations as IncidentOperations } from './drafts/incident-reports'
 
 type S = components['schemas']
 export type Product = S['ProductResponse']
@@ -57,6 +55,11 @@ export const machinesApi = {
   create: (body: S['CreateMachineRequest']) => api.post<Machine>('/machines', body),
   update: (machineId: string, body: S['UpdateMachineRequest']) => api.put<Machine>(`/machines/${id(machineId)}`, body),
   setStatus: (machineId: string, status: S['UpdateMachineStatusRequest']['status']) => api.patch<Machine>(`/machines/${id(machineId)}/status`, { status }),
+  /**
+   * MACHINE_REPORT_LINK_MANAGE (ADMIN, backend #74): a new public report token; the old QR stops working at once (404).
+   * Answers the new form URL; 409 REPORT_LINK_NOT_CONFIGURED when the server has no PUBLIC_REPORT_BASE_URL.
+   */
+  rotateReportToken: (machineId: string) => api.post<ReportLink>(`/machines/${id(machineId)}/report-token/rotate`),
 }
 
 export const slotsApi = {
@@ -154,18 +157,33 @@ export const telemetryApi = {
   events: (machineId: string, query: MachineEventQuery, signal?: AbortSignal) => list<MachineEvent>(`/machines/${id(machineId)}/events`, query, signal),
 }
 
-// Manual refunds (screen T3 / W-12, FE 8.1): draft contract api-contract/drafts/refunds.yaml, waiting for backend issue
-// 5.1. Until it ships the real backend answers 404 here; the refunds screen then says the feature is not there yet (see
-// refundsAvailability in src/admin/refunds.ts). When 5.1 lands: move the paths into api.yaml, run gen:api, switch these
-// types to schema.d.ts and delete the draft.
-export type Refund = RefundsDraft['schemas']['RefundResponse']
-export type RefundBody = RefundsDraft['schemas']['RefundRequest']
-export type RefundListQuery = NonNullable<RefundOperations['listRefunds']['parameters']['query']>
+// Manual refunds (screen T3 / W-12, FE 8.1): api.yaml (backend #72, docs/refunds.md). REFUND_READ lists the payments
+// waiting for a refund (candidates, with the payer's account from the verified webhook), the recorded refunds and their
+// totals; PAYMENT_REFUND (ADMIN) records one: the full amount of the payment, never sent by the client. from/to are
+// Vietnam calendar days (inclusive).
+export type RefundReason = NonNullable<S['RefundPaymentRequest']['reason']>
+export type Refund = S['RefundResponse']
+export type RefundCandidate = S['RefundCandidateResponse']
+export type RefundCandidateType = NonNullable<RefundCandidate['type']>
+export type RefundSummary = S['RefundSummaryResponse']
+export type OrderRefund = S['OrderRefundResponse']
+export type RefundBody = S['RefundPaymentRequest']
+export type RefundListQuery = Query<'listRefunds'>
+export type RefundCandidateQuery = Query<'listRefundCandidates'>
+export type RefundSummaryQuery = Query<'getRefundSummary'>
 
 export const refundsApi = {
+  /** REFUNDED payments, newest refund first (no sort parameter). */
   list: (query: RefundListQuery, signal?: AbortSignal) => list<Refund>('/refunds', query, signal),
-  /** PAYMENT_REFUND (ADMIN): payment SUCCESS → REFUNDED; 409 when already refunded or not a refund case. Never retried. */
-  record: (orderId: string, body: RefundBody) => api.post<Refund>(`/orders/${id(orderId)}/refund`, body),
+  /** SUCCESS payments of finished orders still to refund, oldest waiting first (no sort parameter). */
+  candidates: (query: RefundCandidateQuery, signal?: AbortSignal) => list<RefundCandidate>('/refunds/candidates', query, signal),
+  summary: (query: RefundSummaryQuery, signal?: AbortSignal) => api.get<RefundSummary>('/refunds/summary', query, signal),
+  /**
+   * PAYMENT_REFUND: payment SUCCESS → REFUNDED (and its order when it is the paying payment of a DISPENSE_FAILED or
+   * COMPLETED order). Answers the payment detail with its `refund` block. 409 PAYMENT_ALREADY_REFUNDED,
+   * REFUND_TRANSFER_REF_USED, DISPENSE_IN_PROGRESS, REFUND_REASON_MISMATCH, PAYMENT_NOT_REFUNDABLE. Never retried.
+   */
+  record: (paymentId: string, body: RefundBody) => api.post<PaymentDetail>(`/payments/${id(paymentId)}/refund`, body),
 }
 
 // Work orders (screens O3/O4, FE 7.1/7.2): /work-orders of api-contract/api.yaml (backend #66, #68, #70, #74).
@@ -308,14 +326,43 @@ export const pricingApi = {
 
 export type { Q as QueryParams }
 
-// Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml, FE 8.2): public, no Authorization header, body is
-// multipart/form-data built by features/incident/incident.ts (buildIncidentForm). When 5.2 lands: move the path into
-// api.yaml, run gen:api, switch the type to schema.d.ts and delete the draft.
-export type IncidentReportReceipt = IncidentDraft['schemas']['IncidentReportReceipt']
-export type IncidentReport = IncidentDraft['schemas']['IncidentReportResponse']
-export type IncidentReportListQuery = NonNullable<IncidentOperations['listIncidentReports']['parameters']['query']>
-export const incidentReportsApi = {
-  create: (form: FormData, signal?: AbortSignal) => request<IncidentReportReceipt>('POST', '/public/incident-reports', { body: form, auth: false, signal }),
-  /** FE 8.3, ADMIN (PAYMENT_REFUND): reports for W-12; `flagged: true` = orders still to check for a refund. */
-  list: (query: IncidentReportListQuery, signal?: AbortSignal) => list<IncidentReport>('/incident-reports', query, signal),
+// Customer incident reports (backend #74, docs/customer-reports.md).
+// Public form (no account, no Authorization): the token of the machine's QR names the machine; the report goes as
+// multipart/form-data (part `report` = PublicReportRequest JSON, 0..3 `photos`), built by features/incident/incident.ts.
+export type ReportType = NonNullable<S['PublicReportRequest']['type']>
+export type ReportForm = S['ReportFormResponse']
+export type ReportSubmitted = S['ReportSubmittedResponse']
+export type PublicReportBody = S['PublicReportRequest']
+export type ReportLink = S['ReportLinkResponse']
+
+export const publicReportsApi = {
+  /** Machine name and code, report types and photo limits; 404 for an unknown or rotated token (or INACTIVE machine). */
+  form: (reportToken: string, signal?: AbortSignal) => request<ReportForm>('GET', `/public/report-forms/${id(reportToken)}`, { auth: false, signal }),
+  /** 201 with the same body for every accepted report; 400, 404, 413 (over 7 MB), 429 with Retry-After. */
+  submit: (reportToken: string, form: FormData, signal?: AbortSignal) =>
+    request<ReportSubmitted>('POST', `/public/report-forms/${id(reportToken)}/reports`, { body: form, auth: false, signal, timeoutMs: 60_000 }),
+}
+
+// Management side: CUSTOMER_REPORT_READ lists and reads (STAFF: only reports of work orders assigned to them, others
+// 404; contact always masked); CUSTOMER_REPORT_MANAGE (ADMIN) sees the full contact and reviews, resolves, rejects.
+export type CustomerReport = S['CustomerReportSummaryResponse']
+export type CustomerReportDetail = S['CustomerReportDetailResponse']
+export type CustomerReportListQuery = Query<'listCustomerReports'>
+export type ReportDecisionBody = S['ReportDecisionRequest']
+export type ReportStatus = NonNullable<CustomerReport['status']>
+export type ReportVerdict = NonNullable<CustomerReport['verdict']>
+export type ReportResolution = NonNullable<CustomerReport['resolution']>
+
+export const customerReportsApi = {
+  /** Newest first, no sort parameter. */
+  list: (query: CustomerReportListQuery, signal?: AbortSignal) => list<CustomerReport>('/customer-reports', query, signal),
+  get: (reportId: string, signal?: AbortSignal) => api.get<CustomerReportDetail>(`/customer-reports/${id(reportId)}`, undefined, signal),
+  /** The re-encoded image (JPEG/PNG) read with the session token: show it through an object URL, never a raw <img src>. */
+  photo: (reportId: string, photoId: string, signal?: AbortSignal) => requestBlob(`/customer-reports/${id(reportId)}/photos/${id(photoId)}`, signal),
+  /** NEW → IN_REVIEW, no body; 409 REPORT_NOT_NEW / REPORT_ALREADY_CLOSED. */
+  review: (reportId: string) => api.post<CustomerReportDetail>(`/customer-reports/${id(reportId)}/review`),
+  /** → RESOLVED with FIXED, NO_ACTION_NEEDED or REFUNDED (final). */
+  resolve: (reportId: string, body: ReportDecisionBody) => api.post<CustomerReportDetail>(`/customer-reports/${id(reportId)}/resolve`, body),
+  /** → REJECTED with SPAM or DUPLICATE (final). */
+  reject: (reportId: string, body: ReportDecisionBody) => api.post<CustomerReportDetail>(`/customer-reports/${id(reportId)}/reject`, body),
 }

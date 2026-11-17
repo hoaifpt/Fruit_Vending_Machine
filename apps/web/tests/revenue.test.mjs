@@ -330,7 +330,10 @@ test('mock: through the API, a refund recorded today for an older order shows in
   const failed = (await ordersApi.list({ status: 'DISPENSE_FAILED', page: 0, size: 20 })).content[0]
   assert.ok(failed, 'the seed has a DISPENSE_FAILED order')
   assert.notEqual(vietnamDate(Date.parse(failed.createdAt)), today)
-  const recorded = await refundsApi.record(failed.id, { transferRef: 'FT26317TEST01' })
+  // Real API of backend #72: the refund is recorded on the paying payment and answers the payment with its refund block.
+  const paying = (await ordersApi.get(failed.id)).payments.find(payment => payment.status === 'SUCCESS')
+  const refundedPayment = await refundsApi.record(paying.id, { reason: 'DISPENSE_FAILED', transferReference: 'FT26317TEST01' })
+  const recorded = { refundedAt: refundedPayment.refund.refundedAt, amount: refundedPayment.amount }
   assert.equal(vietnamDate(Date.parse(recorded.refundedAt)), today)
   const after = await loadRevenueReport(overviewRevenueFilters(today))
   assert.deepEqual(consistencyIssues(after), [])

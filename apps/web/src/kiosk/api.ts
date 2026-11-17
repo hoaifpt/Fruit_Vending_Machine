@@ -14,6 +14,8 @@ export type KioskProduct = S['KioskCatalogProductResponse']
 export type KioskOrderLine = S['KioskOrderItemResponse']
 export type KioskOrder = S['KioskOrderResponse']
 export type KioskPayment = S['KioskPaymentResponse']
+/** URL of this machine's public report form (backend #74), shown as the "Báo sự cố" QR. */
+export type KioskReportLink = S['ReportLinkResponse']
 
 export function configuredKioskKey(): string {
   const env = (import.meta as { env?: Record<string, string | undefined> }).env
@@ -27,6 +29,8 @@ export interface KioskApi {
   getOrder: (orderId: string, signal?: AbortSignal) => Promise<ApiResult<KioskOrder>>
   cancelOrder: (orderId: string) => Promise<ApiResult<KioskOrder>>
   createPayment: (orderId: string) => Promise<ApiResult<KioskPayment>>
+  /** GET /kiosk/incident-report-link; orderCode is kept by the server only when it is an order of this machine. 409 REPORT_LINK_NOT_CONFIGURED. */
+  incidentReportLink: (orderCode?: string, signal?: AbortSignal) => Promise<ApiResult<KioskReportLink>>
 }
 
 export function createKioskApi(key: string): KioskApi {
@@ -41,5 +45,6 @@ export function createKioskApi(key: string): KioskApi {
     getOrder: (orderId, signal) => call('GET', `/kiosk/orders/${id(orderId)}`, { signal, timeoutMs: 8_000 }),
     cancelOrder: orderId => call('POST', `/kiosk/orders/${id(orderId)}/cancel`),
     createPayment: orderId => call('POST', `/kiosk/orders/${id(orderId)}/payments`, { timeoutMs: 30_000 }),
+    incidentReportLink: (orderCode, signal) => call('GET', '/kiosk/incident-report-link', { query: { orderCode: orderCode || undefined }, signal, timeoutMs: 8_000 }),
   }
 }
