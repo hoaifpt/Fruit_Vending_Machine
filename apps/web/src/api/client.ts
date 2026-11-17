@@ -1,5 +1,6 @@
 // Single HTTP client for the management API. Contract: api-contract/api.yaml (types in ./schema.d.ts).
 import { beginProgress } from '../lib/progress.ts'
+import { normalizeFieldErrors } from './field-errors.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -90,11 +91,13 @@ async function readError(response: Response): Promise<ApiError> {
   if (body.fieldErrors && typeof body.fieldErrors === 'object') {
     for (const [field, message] of Object.entries(body.fieldErrors)) if (typeof message === 'string') fieldErrors[field] = message
   }
+  // `update.request.percent` (method validation) and `percent` (body validation) both reach the screens as `percent`.
+  const fields = normalizeFieldErrors(fieldErrors)
   const { status } = response
   // Only 400/409 messages are business messages from the contract; everything else is generic.
   const backendMessage = (status === 400 || status === 409) && typeof body.message === 'string' && body.message.trim() ? body.message : ''
   const message = backendMessage || GENERIC_MESSAGES[status] || (status >= 500 ? 'Hệ thống đang gặp sự cố. Vui lòng thử lại.' : 'Yêu cầu không hợp lệ.')
-  return new ApiError(status, message, fieldErrors, status === 429 ? retryAfterOf(response.headers.get('Retry-After')) : undefined)
+  return new ApiError(status, message, fields, status === 429 ? retryAfterOf(response.headers.get('Retry-After')) : undefined)
 }
 
 export async function request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
