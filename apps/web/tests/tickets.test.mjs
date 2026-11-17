@@ -5,16 +5,17 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { ApiError, configureClient } from '../src/api/client.ts'
+import { ApiError, buildUrl, configureClient } from '../src/api/client.ts'
 import { alertsApi, authApi, machinesApi, workOrdersApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { STATUS_CATALOG } from '../src/lib/status.ts'
+import { activeFilterCount } from '../src/lib/table-query.ts'
 import { ROLE_PERMISSIONS } from '../src/admin/permissions.ts'
 import { NAV, matchRoute } from '../src/admin/routes.ts'
 import { NAV_ICONS } from '../src/admin/shell/nav-icons.ts'
 import {
-  NEW_TICKET, TICKETS_PATH, TICKET_STATUSES, TICKET_TYPES, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, editValues, isOverdue, isStale,
+  NEW_TICKET, TICKETS_PATH, TICKET_STATUSES, TICKET_STATUS_ALL, TICKET_STATUS_FILTER_OPTIONS, TICKET_TYPES, UNFINISHED_TICKET_STATUSES, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, editValues, isOverdue, isStale,
   myTicketQuery, nextActions, nextStepText, readTicketFilters, restockFromSuggestionsBody, ticketActionError, ticketFilterKeys, ticketFromAlert, ticketListQuery,
   ticketPath, ticketSteps, ticketsAvailability, updateTicketBody, validateTicket,
 } from '../src/admin/tickets.ts'
@@ -73,7 +74,8 @@ test('URL filters keep contract values only; READ_ALL sends every filter, /me on
   assert.deepEqual(ticketListQuery(filters, 20), { page: 2, size: 20, status: ['DONE'], type: 'RESTOCK', source: 'SCHEDULE', priority: 'URGENT', machineId: MACHINE_1, assigneeId: STAFF, overdue: true })
   assert.deepEqual(myTicketQuery(filters, 20), { page: 2, size: 20, status: ['DONE'], overdue: true })
   const bad = readTicketFilters(new URLSearchParams('status=COMPLETED&type=X&machineId=abc&overdue=yes&page=-1'))
-  assert.deepEqual(ticketListQuery(bad, 20), { page: 0, size: 20, status: undefined, type: undefined, source: undefined, priority: undefined, machineId: undefined, assigneeId: undefined, overdue: undefined })
+  // An unknown status is dropped like the other bad values, so the default "Chưa xong" applies.
+  assert.deepEqual(ticketListQuery(bad, 20), { page: 0, size: 20, status: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'], type: undefined, source: undefined, priority: undefined, machineId: undefined, assigneeId: undefined, overdue: undefined })
   assert.deepEqual([...ticketFilterKeys(false)], ['status', 'overdue'])
   assert.equal(ticketFilterKeys(true).length, 7)
 })
@@ -152,6 +154,47 @@ test('errors: STALE_VERSION, wrong step, known blockers and a lost assignment in
 })
 
 // ---- mock of the real backend
+
+test('status filter: default "Chưa xong" sends OPEN, ASSIGNED, IN_PROGRESS (repeated param) on both lists; "Tất cả" sends none; one status sends that one', () => {
+  const unfinished = ['OPEN', 'ASSIGNED', 'IN_PROGRESS']
+  assert.deepEqual([...UNFINISHED_TICKET_STATUSES], unfinished)
+  const byDefault = readTicketFilters(new URLSearchParams(''))
+  assert.equal(byDefault.status, '')
+  assert.deepEqual(ticketListQuery(byDefault, 20).status, unfinished)
+  assert.deepEqual(myTicketQuery(byDefault, 20).status, unfinished)
+  // The default is not an active filter: "Xóa bộ lọc" comes back to it.
+  assert.equal(activeFilterCount(ticketFilterKeys(false).map(key => byDefault[key])), 0)
+  assert.equal(buildUrl('/work-orders/me', myTicketQuery(byDefault, 20), 'http://x'), 'http://x/api/v1/work-orders/me?page=0&size=20&status=OPEN&status=ASSIGNED&status=IN_PROGRESS')
+  assert.equal(buildUrl('/work-orders', ticketListQuery(byDefault, 20), 'http://x'), 'http://x/api/v1/work-orders?page=0&size=20&status=OPEN&status=ASSIGNED&status=IN_PROGRESS')
+
+  const all = readTicketFilters(new URLSearchParams(`status=${TICKET_STATUS_ALL}`))
+  assert.equal(all.status, 'ALL')
+  assert.equal(activeFilterCount(ticketFilterKeys(false).map(key => all[key])), 1)
+  assert.equal(ticketListQuery(all, 20).status, undefined)
+  assert.equal(myTicketQuery(all, 20).status, undefined)
+  assert.equal(buildUrl('/work-orders/me', myTicketQuery(all, 20), 'http://x'), 'http://x/api/v1/work-orders/me?page=0&size=20')
+
+  const done = readTicketFilters(new URLSearchParams('status=DONE'))
+  assert.deepEqual(myTicketQuery(done, 20).status, ['DONE'])
+  // Options after the default: "Tất cả", then every status with its Vietnamese label, in lifecycle order.
+  assert.deepEqual(TICKET_STATUS_FILTER_OPTIONS.map(option => option.value), ['ALL', ...TICKET_STATUSES])
+  assert.deepEqual(TICKET_STATUS_FILTER_OPTIONS.map(option => option.label), ['Tất cả', 'Chưa phân công', 'Đã phân công', 'Đang thực hiện', 'Hoàn tất', 'Đã hủy'])
+})
+
+test('mock: the default query keeps old finished work orders out of the list, for READ_ALL and for /me', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const byDefault = readTicketFilters(new URLSearchParams(''))
+  const admin = await workOrdersApi.list(ticketListQuery(byDefault, 50))
+  assert.deepEqual(admin.content.map(row => row.id).sort(), [W(1), W(2), W(3), W(5), W(6)])
+  assert.ok(admin.content.every(row => unfinishedStatus(row.status)))
+  assert.equal((await workOrdersApi.list(ticketListQuery(readTicketFilters(new URLSearchParams('status=ALL')), 50))).totalElements, 7)
+  await signIn(state, 'staff')
+  const mine = await workOrdersApi.mine(myTicketQuery(byDefault, 50))
+  assert.deepEqual(mine.content.map(row => row.id).sort(), [W(2), W(3)])
+  assert.deepEqual((await workOrdersApi.mine(myTicketQuery(readTicketFilters(new URLSearchParams('status=ALL')), 50))).content.map(row => row.id).sort(), [W(2), W(3), W(4)])
+})
+const unfinishedStatus = status => status === 'OPEN' || status === 'ASSIGNED' || status === 'IN_PROGRESS'
 
 test('Tiêu chí xong (mock): READ_ALL lists everyone\'s by priority then due time; staff get only their own (/me) and 404 on others', async () => {
   const { state } = setup()

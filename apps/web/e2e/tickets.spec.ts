@@ -54,8 +54,13 @@ test('Tiêu chí xong: STAFF chỉ thấy phiếu của mình; mỗi phiếu ch�
   await expect(page).toHaveURL('/admin/tickets')
   await expect(page.getByText('Danh sách chỉ gồm phiếu được giao cho bạn.')).toBeVisible()
   await expect(page.getByText(/^Phiếu được giao cho bạn/)).toBeVisible()
-  await expect(rows(page)).toHaveCount(3)
-  for (const n of [1, 5]) await expect(row(page, T(n))).toHaveCount(0)
+  // Default "Chưa xong": only the work to do (the DONE ticket 4 is behind "Tất cả"), so a ticket just assigned is never
+  // pushed to a later page by old finished ones (the server sorts by priority, due time, oldest first, whatever the status).
+  const status = page.getByLabel('Trạng thái', { exact: true })
+  await expect(status).toHaveValue('')
+  await expect(status.locator('option:checked')).toHaveText('Chưa xong')
+  await expect(rows(page)).toHaveCount(2)
+  for (const n of [1, 4, 5]) await expect(row(page, T(n))).toHaveCount(0)
   // No admin tools: no create, no assignee column or filter.
   await expect(page.getByRole('button', { name: 'Tạo phiếu' })).toHaveCount(0)
   await expect(table(page).getByRole('columnheader', { name: 'Người phụ trách' })).toHaveCount(0)
@@ -68,6 +73,10 @@ test('Tiêu chí xong: STAFF chỉ thấy phiếu của mình; mỗi phiếu ch�
   await expect(row(page, T(3)).getByRole('button')).toHaveCount(1)
   await expect(row(page, T(3)).getByRole('button', { name: `Hoàn tất: ${TITLES[3]}` })).toBeVisible()
   await expect(row(page, T(3))).toContainText('Quá hạn')
+  await status.selectOption({ label: 'Tất cả' })
+  await expect(page).toHaveURL('/admin/tickets?status=ALL')
+  await expect(rows(page)).toHaveCount(3)
+  for (const n of [1, 5]) await expect(row(page, T(n))).toHaveCount(0)
   await expect(row(page, T(4)).getByRole('button')).toHaveCount(0)
   await expect(row(page, T(4))).toContainText('Không còn bước nào')
 
@@ -148,7 +157,12 @@ test('Phiếu không có dòng nạp: STAFF bấm Bắt đầu (focus sang Hoàn
 test('ADMIN thấy mọi phiếu; nút đúng theo trạng thái (Phân công/Bỏ phân công/Hủy, làm thay người được giao); phân công rồi hủy kèm lý do', async ({ page }) => {
   await loginAs(page, 'ADMIN')
   await page.goto('/admin/tickets')
+  // Default "Chưa xong": the 5 unfinished of the 7 (DONE ticket 4 and CANCELLED ticket 7 left out).
+  await expect(rows(page)).toHaveCount(5)
+  for (const n of [4, 7]) await expect(row(page, T(n))).toHaveCount(0)
+  await page.goto('/admin/tickets?status=ALL')
   await expect(rows(page)).toHaveCount(7)
+  await expect(page.getByLabel('Trạng thái', { exact: true }).locator('option:checked')).toHaveText('Tất cả')
   await expect(table(page).getByRole('columnheader', { name: 'Người phụ trách' })).toBeVisible()
   await expect(page.getByText('Danh sách chỉ gồm phiếu được giao cho bạn.')).toHaveCount(0)
   const names = async (ticketId: string) => (await row(page, ticketId).getByRole('button').allInnerTexts()).map(text => text.trim())
@@ -200,7 +214,7 @@ test('ADMIN thấy mọi phiếu; nút đúng theo trạng thái (Phân công/B�
 test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp đồng) và mở phiếu từ cảnh báo; STAFF không có nút mở phiếu', async ({ page }) => {
   await loginAs(page, 'ADMIN')
   await page.goto('/admin/tickets')
-  await expect(rows(page)).toHaveCount(7)
+  await expect(rows(page)).toHaveCount(5)
   // The mock answers inside the page (no network request to inspect). It rejects any field outside
   // CreateWorkTicketRequest with a 400, so a successful create proves only contract fields were sent; the exact bodies
   // are unit-tested (createTicketBody in tests/tickets.test.mjs).
@@ -218,7 +232,8 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
   await sheet.getByLabel('Người phụ trách (không bắt buộc)').selectOption({ label: 'Lê Văn Nạp Hàng (kho.quan1@freshvend.test)' })
   await sheet.getByRole('button', { name: 'Tạo phiếu' }).click()
   await expect(sheet).toBeHidden()
-  await expect(rows(page)).toHaveCount(8)
+  // The new ticket is ASSIGNED, so it is in the default "Chưa xong" list.
+  await expect(rows(page)).toHaveCount(6)
   // The list is sorted by priority (URGENT first), then due date (backend #66): the new NORMAL ticket is not on top.
   const created = rows(page).filter({ hasText: 'Kiểm tra cảm biến cửa' })
   await expect(created).toHaveCount(1)
@@ -323,11 +338,16 @@ test('409 đóng hộp thoại và giải thích; 400 đánh dấu ô; 403, 404,
   await page.goto('/admin/tickets?scenario=error500:tickets')
   await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible()
   await page.goto('/admin/tickets?scenario=empty')
-  await expect(page.getByText('Bạn chưa được giao phiếu nào. Khi quản trị viên giao việc, phiếu sẽ hiện ở đây.')).toBeVisible()
+  await expect(page.getByText('Bạn không có phiếu nào cần làm. Khi quản trị viên giao việc, phiếu sẽ hiện ở đây.')).toBeVisible()
+  await page.getByRole('button', { name: 'Xem cả phiếu đã hoàn tất, đã hủy' }).click()
+  await expect(page).toHaveURL(/[?&]status=ALL(&|$)/)
   await page.goto('/admin/tickets?scenario=none&status=CANCELLED')
   await expect(page.getByText(/Không có phiếu khớp bộ lọc/)).toBeVisible()
   await page.getByRole('button', { name: /^Xóa bộ lọc/ }).first().click()
-  await expect(rows(page)).toHaveCount(3)
+  // Back to the default "Chưa xong" (not "Tất cả").
+  await expect(page).not.toHaveURL(/[?&]status=/)
+  await expect(page.getByLabel('Trạng thái', { exact: true }).locator('option:checked')).toHaveText('Chưa xong')
+  await expect(rows(page)).toHaveCount(2)
 })
 
 for (const theme of THEMES) {
@@ -335,11 +355,11 @@ for (const theme of THEMES) {
     await useThemeChoice(page, theme)
     await loginAs(page, 'STAFF')
     await page.goto('/admin/tickets')
-    await auditScreen(page, testInfo, 'tickets', theme, () => expect(rows(page)).toHaveCount(3))
+    await auditScreen(page, testInfo, 'tickets', theme, () => expect(rows(page)).toHaveCount(2))
     await page.goto(`/admin/tickets/${T(3)}`)
     await auditScreen(page, testInfo, 'ticket-detail', theme, () => expect(progress(page)).toBeVisible())
     await switchTo(page, 'ADMIN')
     await page.goto('/admin/tickets')
-    await auditScreen(page, testInfo, 'tickets-admin', theme, () => expect(rows(page)).toHaveCount(7))
+    await auditScreen(page, testInfo, 'tickets-admin', theme, () => expect(rows(page)).toHaveCount(5))
   })
 }

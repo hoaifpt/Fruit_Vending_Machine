@@ -12,6 +12,7 @@ import type {
   WorkOrderListQuery, WorkOrderPriority, WorkOrderSource, WorkOrderStatus, WorkOrderType,
 } from '../api/resources.ts'
 import { formatDateTime, localDateTimeToInstant } from '../lib/format.ts'
+import { statusMeta } from '../lib/status.ts'
 import { oneOf, uuidParam } from '../lib/table-query.ts'
 import { errorCode } from './form-error.ts'
 import { alertTypeHint, alertTypeLabel } from './alerts.ts'
@@ -55,8 +56,22 @@ export const TICKET_FILTER_KEYS = ['status', 'type', 'source', 'priority', 'mach
 export const MY_TICKET_FILTER_KEYS = ['status', 'overdue'] as const
 export type TicketFilterKey = typeof TICKET_FILTER_KEYS[number]
 
+/**
+ * The status filter in the URL. Absent ('') is the default "Chưa xong": GET sends status=OPEN&status=ASSIGNED&status=IN_PROGRESS,
+ * because the server sorts by priority, due time, then oldest first without looking at the status, so old finished work
+ * orders would otherwise push a work order just assigned to a later page. `status=ALL` sends no status (every status).
+ */
+export const TICKET_STATUS_ALL = 'ALL'
+export const UNFINISHED_TICKET_STATUSES = ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] as const satisfies readonly WorkOrderStatus[]
+export const TICKET_STATUS_DEFAULT_LABEL = 'Chưa xong'
+/** Options of the status select besides the default "Chưa xong" (value ''): "Tất cả", then each status in lifecycle order. */
+export const TICKET_STATUS_FILTER_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: TICKET_STATUS_ALL, label: 'Tất cả' },
+  ...TICKET_STATUSES.map(value => ({ value, label: statusMeta('ticket', value).label })),
+]
+
 export interface TicketFilters {
-  status: TicketStatus | ''; type: TicketType | ''; source: WorkOrderSource | ''; priority: WorkOrderPriority | ''
+  status: TicketStatus | typeof TICKET_STATUS_ALL | ''; type: TicketType | ''; source: WorkOrderSource | ''; priority: WorkOrderPriority | ''
   machineId: string; assigneeId: string; overdue: '' | 'true'; page: number
 }
 
@@ -64,7 +79,7 @@ export interface TicketFilters {
 export function readTicketFilters(params: URLSearchParams): TicketFilters {
   const page = Number(params.get('page') ?? '')
   return {
-    status: oneOf(params.get('status'), TICKET_STATUSES) as TicketFilters['status'],
+    status: oneOf(params.get('status'), [TICKET_STATUS_ALL, ...TICKET_STATUSES]) as TicketFilters['status'],
     type: oneOf(params.get('type'), TICKET_TYPES) as TicketFilters['type'],
     source: oneOf(params.get('source'), TICKET_SOURCES) as TicketFilters['source'],
     priority: oneOf(params.get('priority'), TICKET_PRIORITIES) as TicketFilters['priority'],
@@ -75,18 +90,24 @@ export function readTicketFilters(params: URLSearchParams): TicketFilters {
   }
 }
 
+/** `status` of the GET query: the unfinished statuses by default, none for "Tất cả", else the one chosen. */
+export function ticketStatusQuery(status: TicketFilters['status']): WorkOrderStatus[] | undefined {
+  if (status === TICKET_STATUS_ALL) return undefined
+  return status ? [status] : [...UNFINISHED_TICKET_STATUSES]
+}
+
 /** Query of GET /work-orders (WORK_ORDER_READ_ALL): only parameters of the contract, absent when not in effect. No sort: the order is fixed. */
 export function ticketListQuery(filters: TicketFilters, size: number): WorkOrderListQuery {
   return {
     page: filters.page, size,
-    status: filters.status ? [filters.status] : undefined, type: filters.type || undefined, source: filters.source || undefined,
+    status: ticketStatusQuery(filters.status), type: filters.type || undefined, source: filters.source || undefined,
     priority: filters.priority || undefined, machineId: filters.machineId || undefined, assigneeId: filters.assigneeId || undefined,
     overdue: filters.overdue ? true : undefined,
   }
 }
 /** Query of GET /work-orders/me: status and overdue only (other filters do not exist there). */
 export function myTicketQuery(filters: TicketFilters, size: number): MyWorkOrderQuery {
-  return { page: filters.page, size, status: filters.status ? [filters.status] : undefined, overdue: filters.overdue ? true : undefined }
+  return { page: filters.page, size, status: ticketStatusQuery(filters.status), overdue: filters.overdue ? true : undefined }
 }
 /** Filters shown (and counted) on the screen: everything for READ_ALL, status and overdue for "my" work orders. */
 export function ticketFilterKeys(readAll: boolean): readonly TicketFilterKey[] {

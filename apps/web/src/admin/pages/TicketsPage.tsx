@@ -1,5 +1,5 @@
 // O3 Phiếu công việc (FE 7.1): restock, maintenance and incident jobs at a machine, server-side filters on the URL, in the
-// server's order (URGENT first, then due time, then oldest). WORK_ORDER_READ_ALL reads GET /work-orders with every filter;
+// server's order (URGENT first, then due time, then oldest); unfinished work orders only unless the status filter says otherwise. WORK_ORDER_READ_ALL reads GET /work-orders with every filter;
 // everyone else reads GET /work-orders/me (status and overdue only). Managers (WORK_ORDER_MANAGE) create, assign and
 // cancel; the assignee (or a manager acting for them) starts and completes. Each row only offers the valid next step.
 // No delete. API: /work-orders of api-contract/api.yaml (backend #66).
@@ -13,14 +13,14 @@ import { formatDateTime } from '../../lib/format.ts'
 import { useQueryParams } from '../../lib/router.ts'
 import { activeFilterCount, clearFiltersPatch } from '../../lib/table-query.ts'
 import { machinePath } from '../alerts.ts'
-import { Badge, DataTable, Link, PAGE_SIZE, PageHead, Pagination, SelectFilter, enumOptions, useDialog } from '../kit.tsx'
+import { Badge, DataTable, Link, PAGE_SIZE, PageHead, Pagination, SelectFilter, useDialog } from '../kit.tsx'
 import type { Column } from '../kit.tsx'
 import { useMachineOptions, useStaffOptions } from '../options.ts'
 import { LINK } from '../payment-parts.tsx'
 import { CreateTicketSheet, DueText, PriorityText, TicketActionButtons, TicketActionDialog } from '../ticket-parts.tsx'
 import type { TicketActionState } from '../ticket-parts.tsx'
 import {
-  PRIORITY_OPTIONS, SOURCE_OPTIONS, TICKETS_MISSING, TICKET_STATUSES, TICKET_TYPE_OPTIONS, assigneeText, isClosed, isOverdue, myTicketQuery, nextActions,
+  PRIORITY_OPTIONS, SOURCE_OPTIONS, TICKETS_MISSING, TICKET_STATUS_ALL, TICKET_STATUS_DEFAULT_LABEL, TICKET_STATUS_FILTER_OPTIONS, TICKET_TYPE_OPTIONS, assigneeText, isClosed, isOverdue, myTicketQuery, nextActions,
   readTicketFilters, ticketFilterKeys, ticketListQuery, ticketOrigin, ticketPath, ticketTypeLabel, ticketsAvailability,
 } from '../tickets.ts'
 import { useApi } from '../useApi.ts'
@@ -82,15 +82,16 @@ function TicketsPage() {
 
   const empty = filterCount
     ? <>Không có phiếu khớp bộ lọc. <Button type="button" variant="link" className="h-auto p-0" onClick={() => update(clearFiltersPatch(keys))}>Xóa bộ lọc</Button></>
-    : viewer.canWrite
-      ? 'Chưa có phiếu công việc nào. Bấm “Tạo phiếu” để giao việc nạp hàng, bảo trì hoặc xử lý sự cố cho nhân viên.'
-      : 'Bạn chưa được giao phiếu nào. Khi quản trị viên giao việc, phiếu sẽ hiện ở đây.'
+    : <>{viewer.canWrite
+      ? 'Không có phiếu nào chưa xong. Bấm “Tạo phiếu” để giao việc nạp hàng, bảo trì hoặc xử lý sự cố cho nhân viên.'
+      : 'Bạn không có phiếu nào cần làm. Khi quản trị viên giao việc, phiếu sẽ hiện ở đây.'}
+      {' '}<Button type="button" variant="link" className="h-auto p-0" onClick={() => update({ status: TICKET_STATUS_ALL, page: undefined })}>Xem cả phiếu đã hoàn tất, đã hủy</Button></>
 
   return <>
     {head}
     {!readAll && !forbidden && <p className="mb-3! text-[13px] text-muted-foreground" role="note">Danh sách chỉ gồm phiếu được giao cho bạn.</p>}
     {!forbidden && <FilterBar activeCount={filterCount} onClear={() => update(clearFiltersPatch(keys))}>
-      <SelectFilter label="Trạng thái" value={filters.status} onChange={set('status')} options={enumOptions('ticket', TICKET_STATUSES)} />
+      <SelectFilter label="Trạng thái" value={filters.status} onChange={set('status')} options={[...TICKET_STATUS_FILTER_OPTIONS]} empty={TICKET_STATUS_DEFAULT_LABEL} />
       {readAll && <SelectFilter label="Loại" value={filters.type} onChange={set('type')} options={TICKET_TYPE_OPTIONS} />}
       {readAll && <SelectFilter label="Ưu tiên" value={filters.priority} onChange={set('priority')} options={PRIORITY_OPTIONS} />}
       {readAll && <SelectFilter label="Nguồn" value={filters.source} onChange={set('source')} options={SOURCE_OPTIONS} />}

@@ -305,18 +305,27 @@ test.describe('Tài khoản', () => {
     await page.goto('/admin/users')
     await page.getByRole('button', { name: 'Tạo tài khoản nhân viên' }).click()
     const sheet = page.getByRole('dialog', { name: 'Tạo tài khoản nhân viên' })
+    const email = `e2e-pw7-${run.toLowerCase()}@freshvend.test`
     await sheet.getByLabel('Họ tên').fill('E2E-Mat khau ngan')
-    await sheet.getByLabel('Email').fill(`e2e-pw7-${run.toLowerCase()}@freshvend.test`)
-    await sheet.getByLabel(/^Mật khẩu/).fill('abcdefg')
-    const answer = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/api/v1/users'))
-    await sheet.getByRole('button', { name: 'Tạo tài khoản' }).click()
-    expect((await answer).status()).toBe(400)
-    const alert = sheet.getByRole('alert')
-    await expect(alert).toBeVisible()
-    await expect.soft(alert, 'form message in Vietnamese').not.toContainText('Password must contain')
-    await expect.soft(sheet.getByLabel(/^Mật khẩu/), 'password field marked').toHaveAttribute('aria-invalid', 'true')
-    // Over 72 bytes is blocked by the FE before sending.
+    await sheet.getByLabel('Email').fill(email)
+    const password = sheet.getByLabel(/^Mật khẩu/)
+    await password.fill('abcdefg')
+    // The FE checks the default minimum (12) itself: nothing is sent, the Vietnamese sentence is under the field (its
+    // accessible description) and the field is marked invalid; no English server text reaches the form.
     const sent = countRequests(page, 'POST', /\/api\/v1\/users$/)
+    await sheet.getByRole('button', { name: 'Tạo tài khoản' }).click()
+    await expect(sheet.getByText('Mật khẩu tối thiểu 12 ký tự.', { exact: true })).toBeVisible()
+    await expect(password).toHaveAccessibleDescription('Mật khẩu tối thiểu 12 ký tự.')
+    await expect(password).toHaveAttribute('aria-invalid', 'true')
+    await expect(sheet).not.toContainText('Password must contain')
+    await expect(sheet).toBeVisible()
+    expect(sent, 'a password under 12 characters is not sent').toHaveLength(0)
+    // The server still enforces its policy on a direct call: 7 characters → 400 with a message, nothing created.
+    const short = await rejected(await admin.post(`${API}/users`, { data: { email, password: 'abcdefg', fullName: 'E2E-pw7' } }), 400)
+    expect(short.message, 'policy error carries a message').toBeTruthy()
+    expect(Object.keys(short.fieldErrors ?? {}), 'only a message, no field errors').toEqual([])
+    expect((await (await admin.get(`${API}/users?size=100`)).json()).data.content.some((u: { email: string }) => u.email === email)).toBe(false)
+    // Over 72 bytes is blocked by the FE before sending.
     await sheet.getByLabel(/^Mật khẩu/).fill('ă'.repeat(40))
     await sheet.getByRole('button', { name: 'Tạo tài khoản' }).click()
     await expect(sheet.getByText('Mật khẩu quá dài')).toBeVisible()
