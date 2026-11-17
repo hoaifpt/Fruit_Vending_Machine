@@ -212,7 +212,8 @@ test.describe('Nạp và rút hộp (Quản trị viên)', () => {
 for (const theme of THEMES) {
   test(`Ảnh + axe: inventory-load (${theme})`, async ({ page }, testInfo) => {
     await useThemeChoice(page, theme)
-    await loginAs(page, 'STAFF')
+    // A direct load is ADMIN only (INVENTORY_LOAD_DIRECT, backend #68); STAFF load through a restock work order.
+    await loginAs(page, 'ADMIN')
     await page.goto(`/admin/inventory?machineId=${MACHINE_1}`)
     await ready(page)
     await page.getByRole('button', { name: 'Nạp hộp vào ngăn B1', exact: true }).click()

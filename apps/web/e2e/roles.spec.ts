@@ -28,9 +28,14 @@ test.describe('màn Vai trò & quyền (ADMIN)', () => {
     await expect(nav.getByRole('link', { name: 'Vai trò & quyền', exact: true })).toHaveAttribute('aria-current', 'page')
     await expect(matrix(page).getByRole('columnheader', { name: /Quản trị viên/ })).toBeVisible()
     await expect(matrix(page).getByRole('columnheader', { name: /Nhân viên/ })).toBeVisible()
-    for (const group of ['Tài khoản & phân quyền', 'Sản phẩm', 'Máy, ngăn & khóa kiosk', 'Lô hàng', 'Tồn kho', 'Đơn hàng', 'Thanh toán']) {
+    // Groups of src/admin/roles.ts over the 41 codes of the real backend (docs/permission-authorization.md).
+    const groups = ['Tài khoản & phân quyền', 'Sản phẩm & giá', 'Máy, ngăn & khóa kiosk', 'Lô hàng', 'Tồn kho', 'Cảnh báo & tổng quan',
+      'Phiếu công việc, nạp hàng & bảo trì', 'Đơn hàng & báo cáo khách', 'Thanh toán & hoàn tiền', 'Báo cáo bán hàng']
+    for (const group of groups) {
       await expect(matrix(page).getByRole('columnheader', { name: group, exact: true })).toBeVisible()
     }
+    await expect(matrix(page).locator('th[scope="colgroup"]')).toHaveCount(groups.length)
+    await expect(matrix(page).locator('tbody th[scope="row"]')).toHaveCount(41)
     await expect(box(page, 'Nhân viên: Xem đơn hàng')).toBeChecked()
     await expect(box(page, 'Nhân viên: Xem thanh toán')).not.toBeChecked()
     await expect(bar(page)).toHaveText('Chưa có thay đổi nào.')
@@ -217,8 +222,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.evaluate(() => window.scrollTo({ top: 0 }))
     await matrix(page).getByRole('checkbox').first().focus()
     const actions = page.locator('[data-roles-actions]')
+    // Every cell of the matrix (2 roles × 41 permissions), not a fixed number.
+    const total = await matrix(page).getByRole('checkbox').count()
+    expect(total).toBe(82)
     let checked = 0
-    for (let step = 0; step < 40; step++) {
+    for (let step = 0; step < total + 1; step++) {
       const focused = page.locator(':focus')
       if ((await focused.getAttribute('type')) !== 'checkbox') break
       const [cell, barBox] = [await focused.boundingBox(), await actions.boundingBox()]
@@ -229,7 +237,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       checked += 1
       await page.keyboard.press('Tab')
     }
-    expect(checked).toBe(30)
+    expect(checked).toBe(total)
   })
 }
 

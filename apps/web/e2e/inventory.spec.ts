@@ -35,9 +35,10 @@ test.describe('Sơ đồ tồn kho (Quản trị viên)', () => {
     // Heads of one row share a floor line (1440px: A1 and A2 side by side, different header heights and fills).
     const floorA1 = await head(page, 'A1').boundingBox(), floorA2 = await head(page, 'A2').boundingBox()
     expect(Math.abs((floorA1!.y + floorA1!.height) - (floorA2!.y + floorA2!.height))).toBeLessThanOrEqual(1)
-    // A place is reserved for a future "-50%" label on every box, empty for now.
-    await expect(column(page, 'A1').locator('[data-discount-slot]')).toHaveCount(8)
-    await expect(column(page, 'A1').locator('[data-discount-slot]').first()).toHaveText('')
+    // The discount label is real now (discountEligibleToday, backend #61): only boxes whose batch expires today carry
+    // "Giảm giá hôm nay" (see discount.spec.ts); no A1 box does, so A1 has no label and no empty placeholder.
+    await expect(column(page, 'A1').locator('[data-box-discount]')).toHaveCount(0)
+    await expect(column(page, 'A1').locator('[data-discount-slot]')).toHaveCount(0)
     // Reload keeps the machine; the slot filter narrows to one column.
     await page.reload()
     await ready(page)

@@ -62,18 +62,19 @@ test('Luồng trọn: tạo sản phẩm → đăng ký máy → 2 ngăn → c�
   await page.waitForURL(/\?tab=slots$/)
   // The overview panel is gone: focus lands on the main button of the tab it led to, not on <body>.
   await expect(page.getByRole('button', { name: 'Thêm ngăn' })).toBeFocused()
-  await expect(page.getByText('Máy chưa có ngăn nào. Bấm “Thêm ngăn” để khai báo vị trí chứa hộp, ví dụ A1, A2.')).toBeVisible()
+  await expect(page.getByText('Máy chưa có ngăn nào. Bấm “Thêm ngăn” để khai báo cột chứa hộp: A hoặc B (máy có tối đa hai ngăn).')).toBeVisible()
 
-  let sheet = await addSlot(page, 'a1', '6')
+  // A slot is one physical column: the code is upper-cased and must be A or B (backend #52).
+  let sheet = await addSlot(page, 'a', '6')
   await expect(sheet).toHaveCount(0)
-  await expect(slotTable(page).getByRole('row').filter({ hasText: 'A1' })).toContainText('6 hộp')
+  await expect(slotTable(page).locator('tbody tr').filter({ has: page.getByRole('cell', { name: 'A', exact: true }) })).toContainText('6 hộp')
   // Same code, other case: 409 once under the slot code field.
-  sheet = await addSlot(page, 'A1', '6')
+  sheet = await addSlot(page, 'A', '6')
   const code = sheet.getByRole('textbox', { name: 'Mã ngăn' })
   await expect(code).toHaveAccessibleDescription(SLOT_TAKEN)
   await expect(code).toBeFocused()
   await expect(sheet.getByText(SLOT_TAKEN)).toHaveCount(1)
-  await code.fill('a2')
+  await code.fill('b')
   await sheet.getByRole('button', { name: 'Thêm ngăn' }).click()
   await expect(sheet).toHaveCount(0)
   await expect(slotTable(page).locator('tbody tr')).toHaveCount(2)

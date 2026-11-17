@@ -108,7 +108,7 @@ test('Tiêu chí xong: STAFF làm hết phiếu RESTOCK trên điện thoại; c
   await expect(page).toHaveURL(`/admin/alerts/${LOW_STOCK_A2}`)
 })
 
-test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, không tìm thấy, chưa có API, lỗi máy chủ, phiếu không phải nạp hàng', async ({ page }) => {
+test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, 404 từ máy chủ, không tìm thấy, lỗi máy chủ, phiếu không phải nạp hàng', async ({ page }) => {
   await loginAs(page, 'STAFF')
   await page.goto(`${RESTOCK}?scenario=409`)
   await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
@@ -116,8 +116,10 @@ test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, không tìm thấy, c
 
   await page.goto(`${RESTOCK}?scenario=403:tickets`)
   await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toBeVisible()
+  // The real API has the work orders: a 404 means the work order is gone or not the caller's (no "not shipped yet").
   await page.goto(`${RESTOCK}?scenario=missing:tickets`)
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Chưa có dữ liệu phiếu công việc')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Không tìm thấy phiếu')
+  await expect(page.getByText(/phiếu không giao cho bạn/)).toBeVisible()
   await page.goto(`${RESTOCK}?scenario=error500:tickets`)
   await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible()
   await page.goto(`/admin/tickets/${id('61000000', 5)}/restock?scenario=none`)
@@ -136,8 +138,9 @@ test('ADMIN lập kế hoạch: thêm, sửa và bỏ dòng chưa nạp; dòng t
   const plan = page.getByRole('region', { name: /Kế hoạch nạp/ })
   await plan.getByRole('button', { name: 'Sửa kế hoạch' }).click()
   await plan.getByRole('button', { name: 'Thêm dòng nạp' }).click()
-  await plan.getByLabel('Ngăn').selectOption({ label: 'Ngăn A2 (sức chứa 10)' })
-  await plan.getByLabel('Sản phẩm').selectOption({ label: 'Watermelon bowl' })
+  // "Bỏ dòng ngăn … khỏi kế hoạch" buttons also mention "ngăn": pick the line form's slot select by role.
+  await plan.getByRole('combobox', { name: /^Ngăn/ }).selectOption({ label: 'Ngăn A2 (sức chứa 10)' })
+  await plan.getByRole('combobox', { name: /^Sản phẩm/ }).selectOption({ label: 'Watermelon bowl (DEV-WATERMELON)' })
   await plan.getByLabel('Số hộp dự kiến').last().fill('2')
   await plan.getByRole('button', { name: 'Thêm dòng' }).click()
   await expect(plan.getByRole('alert')).toContainText('đã có dòng cho sản phẩm đó')

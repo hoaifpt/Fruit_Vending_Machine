@@ -68,7 +68,8 @@ test('Tiêu chí xong: phản ánh "đã trả nhưng không nhận hàng" hiệ
   await expect(row.getByRole('link', { name: /^Phiếu WO-/ })).toBeVisible()
 
   // The report detail: escaped description, full contact for ADMIN, refund link with the work order.
-  await row.getByRole('link', { name: `Mở phản ánh ${code}` }).click()
+  // The link's name is its visible text (axe label-content-name-mismatch), starting with the report code.
+  await row.getByRole('link', { name: new RegExp(`^Phản ánh ${code}`) }).click()
   await expect(page.getByRole('heading', { level: 1, name: `Phản ánh ${code}` })).toBeVisible()
   await expect(page.getByText('Đã trả tiền nhưng cửa không mở <b>gấp</b>')).toBeVisible()
   await expect(page.locator('#admin-main b')).toHaveCount(0)
@@ -131,6 +132,8 @@ test('STAFF chỉ thấy phản ánh thuộc phiếu được giao cho mình, li
     await page.getByRole('textbox', { name: /^Số điện thoại/ }).fill('0912345678')
   })
 
+  // The public form has no admin shell (no account menu): go back to an admin screen to sign out in place.
+  await go(page, '/admin/customer-reports')
   await switchInPlace(page, 'STAFF')
   await expect(page.getByRole('navigation').getByRole('link', { name: 'Hoàn tiền' })).toHaveCount(0)
   await page.getByRole('navigation').getByRole('link', { name: 'Phản ánh của khách' }).first().click()

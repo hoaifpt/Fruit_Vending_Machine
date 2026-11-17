@@ -306,7 +306,7 @@ function SlotsTab({ machine, canWrite, canKeys, canInventory, jumpTo }: { machin
     : filterCount
       ? <>Không có ngăn nào ở trạng thái này. <Button type="button" variant="link" className="h-auto p-0" onClick={clearFilters}>Xóa bộ lọc</Button></>
       : canWrite
-        ? <>Máy chưa có ngăn nào. Bấm “Thêm ngăn” để khai báo vị trí chứa hộp, ví dụ A1, A2.</>
+        ? <>Máy chưa có ngăn nào. Bấm “Thêm ngăn” để khai báo cột chứa hộp: A hoặc B (máy có tối đa hai ngăn).</>
         : 'Máy chưa có ngăn nào. Quản trị viên sẽ thêm ngăn.'
 
   return <section aria-labelledby="slots-title">

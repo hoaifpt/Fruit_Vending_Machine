@@ -123,7 +123,7 @@ function Candidates({ state, filters, canRecord, open, onPage }: {
     </span> },
     { head: 'Trường hợp', cell: row => <span className="grid gap-0.5">
       <span className="font-medium">{candidateTypeLabel(row.type)}</span>
-      {row.customerReport?.id && <Link to={customerReportPath(row.customerReport.id)} className={`${BASE_LINK} text-xs`} label={`Mở phản ánh ${row.customerReport.reportCode ?? ''}`}>
+      {row.customerReport?.id && <Link to={customerReportPath(row.customerReport.id)} className={`${BASE_LINK} text-xs`}>
         Phản ánh {row.customerReport.reportCode}{row.customerReport.verdict ? ` · ${verdictLabel(row.customerReport.verdict)}` : ''}</Link>}
       {row.relatedWorkOrder?.id && <Link to={ticketPath(row.relatedWorkOrder.id)} className={`${BASE_LINK} text-xs`}>Phiếu {row.relatedWorkOrder.code ?? shortId(row.relatedWorkOrder.id)}</Link>}
     </span> },

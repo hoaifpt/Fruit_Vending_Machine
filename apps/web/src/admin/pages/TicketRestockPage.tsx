@@ -139,12 +139,21 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkOrder; reloadT
   const batches = useApi(signal => loadBatches(productIds, batchNow, signal), `restock-batches|${productIds.join(',')}|${lineKey}|${tick}`)
 
   // A command that just ended may have changed the gates or the bowls: read everything again, and put focus back on the
-  // step heading when the block that had it ("Đang chờ máy…") went away.
+  // step heading when the block that had it ("Đang chờ máy…") went away. The control that has focus may also go away a
+  // moment later, when the figures read again remove it (a column emptied loses its command buttons): until those
+  // figures are back, focus that falls to the page goes to the step heading too.
   const lastRunning = useRef<string | undefined>(undefined)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const recoverSince = useRef<number | null>(null)
+  useEffect(() => {
+    if (recoverSince.current === null) return
+    if (lostFocus()) { recoverSince.current = null; headingRef.current?.focus() }
+    else if ((summaries.updatedAt ?? 0) > recoverSince.current && !summaries.loading) recoverSince.current = null
+  })
   useEffect(() => {
     if (lastRunning.current && !running) {
       setTick(value => value + 1)
+      recoverSince.current = Date.now()
       if (lostFocus()) headingRef.current?.focus()
     }
     lastRunning.current = running?.id
