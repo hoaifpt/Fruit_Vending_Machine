@@ -14,8 +14,8 @@ export type PageKey =
 export interface RouteMatch { page: PageKey; id?: string; permission: Permission; roles: readonly Role[] }
 
 const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
-  // O1 (FE 6.5): MACHINE_READ for the page; each block checks its own source's permission (overview.ts).
-  { pattern: /^\/admin\/overview$/, page: 'overview', permission: 'MACHINE_READ' },
+  // O1 (FE 6.5 + 9.2): GET /dashboard/overview of backend #76, DASHBOARD_READ (ADMIN, STAFF).
+  { pattern: /^\/admin\/overview$/, page: 'overview', permission: 'DASHBOARD_READ' },
   { pattern: /^\/admin\/users$/, page: 'users', permission: 'USER_READ' },
   { pattern: /^\/admin\/roles$/, page: 'roles', permission: 'PERMISSION_MANAGE' },
   { pattern: /^\/admin\/products$/, page: 'products', permission: 'PRODUCT_READ' },
@@ -44,7 +44,7 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/refunds$/, page: 'refunds', permission: 'REFUND_READ' },
   { pattern: /^\/admin\/webhook-logs$/, page: 'webhook-logs', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
   { pattern: /^\/admin\/webhook-logs\/([^/]+)$/, page: 'webhook-log-detail', permission: 'PAYMENT_WEBHOOK_LOG_READ' },
-  // R1 (FE 9.1): draft permission of api-contract/drafts/revenue-reports.yaml (BE 6.1), ADMIN only.
+  // R1 (FE 9.1): sales reports of backend #76, REPORT_SALES_READ (ADMIN); exporting needs REPORT_EXPORT.
   { pattern: /^\/admin\/reports\/revenue$/, page: 'revenue-report', permission: 'REPORT_SALES_READ' },
 ]
 
@@ -61,8 +61,8 @@ export type NavGroup = 'Vận hành' | 'Giao dịch' | 'Hệ thống'
 export interface NavItem { to: string; label: string; group: NavGroup; permission: Permission; match: PageKey[] }
 
 export const NAV: NavItem[] = [
-  // First item: the landing screen after sign-in for everyone who may read machines (homeFor).
-  { to: '/admin/overview', label: 'Tổng quan', group: 'Vận hành', permission: 'MACHINE_READ', match: ['overview'] },
+  // First item: the landing screen after sign-in for everyone holding DASHBOARD_READ (homeFor).
+  { to: '/admin/overview', label: 'Tổng quan', group: 'Vận hành', permission: 'DASHBOARD_READ', match: ['overview'] },
   { to: '/admin/machines', label: 'Máy bán hàng', group: 'Vận hành', permission: 'MACHINE_READ', match: ['machines', 'machine-detail'] },
   { to: '/admin/products', label: 'Sản phẩm', group: 'Vận hành', permission: 'PRODUCT_READ', match: ['products'] },
   { to: '/admin/batches', label: 'Lô hàng', group: 'Vận hành', permission: 'BATCH_READ', match: ['batches'] },
@@ -80,7 +80,7 @@ export const NAV: NavItem[] = [
   // Refunds of backend #72, ADMIN only.
   { to: '/admin/refunds', label: 'Hoàn tiền', group: 'Giao dịch', permission: 'REFUND_READ', match: ['refunds'] },
   { to: '/admin/webhook-logs', label: 'Webhook thanh toán', group: 'Giao dịch', permission: 'PAYMENT_WEBHOOK_LOG_READ', match: ['webhook-logs', 'webhook-log-detail'] },
-  // Draft permission (api-contract/drafts/revenue-reports.yaml, BE 6.1).
+  // Sales reports of backend #76, ADMIN only.
   { to: '/admin/reports/revenue', label: 'Báo cáo doanh thu', group: 'Giao dịch', permission: 'REPORT_SALES_READ', match: ['revenue-report'] },
   { to: '/admin/users', label: 'Tài khoản', group: 'Hệ thống', permission: 'USER_READ', match: ['users'] },
   { to: '/admin/roles', label: 'Vai trò & quyền', group: 'Hệ thống', permission: 'PERMISSION_MANAGE', match: ['roles'] },

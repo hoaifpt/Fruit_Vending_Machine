@@ -75,7 +75,7 @@ test('every nav item is governed by a held permission; nav and home follow the s
   assert.deepEqual(navFor({ roles: ['STAFF'], permissions: ['ORDER_READ'] }).map(item => item.to), ['/admin/orders'])
   assert.equal(homeFor({ roles: ['STAFF'], permissions: [] }), '/login')
   assert.equal(homeFor(['ADMIN']), '/admin/overview')
-  // Without MACHINE_READ the overview is not offered: home is the first screen the account may open.
+  // Without DASHBOARD_READ the overview is not offered: home is the first screen the account may open.
   assert.equal(homeFor({ roles: ['STAFF'], permissions: ['ORDER_READ'] }), '/admin/orders')
 })
 

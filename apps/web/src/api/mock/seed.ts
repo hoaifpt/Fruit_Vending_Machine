@@ -87,6 +87,8 @@ export interface MockStore {
   webhookLogs: MockWebhookLog[]
   /** Backend #72: the refund columns of the REFUNDED payments (one row per refunded payment). */
   refunds: MockRefund[]
+  /** Backend #76: one row per sales report export (audit_logs REPORT_EXPORTED). */
+  exportLog: { format: string; at: string; userId: string; from: string; to: string }[]
   /** Backend #74: customer reports, the report token of each machine (machines.report_token, never in a response) and the rate-limit windows. */
   customerReports: MockCustomerReport[]
   reportTokens: Record<string, string>
@@ -400,7 +402,7 @@ export function createStore(nowMs: number): MockStore {
   return {
     users, products, machines, slots, credentials, batches, items, transactions, orders, payments, alerts, workOrders, workOrderEvents, restockLines, maintenancePlans,
     pricing, webhookLogs, heartbeats, readings, machineEvents, maintenanceCommands: seedMaintenanceCommands(nowMs, { machines, users, slots, items }),
-    refunds: seedRefunds(payments, users[0]),
+    refunds: seedRefunds(payments, users[0]), exportLog: [],
     customerReports: [], reportTokens: Object.fromEntries(machines.map(machine => [machine.id!, seedReportToken(machine.code!)])),
     reportRequestLog: [], formRequestLog: [], machineReportLog: {},
     permissions: SEED_PERMISSIONS.map(permission => ({ ...permission })), roles: seedRoles(),

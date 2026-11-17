@@ -4,12 +4,12 @@ import { conflict, created, fixedPage, Form, MockHttpError, notFound, ok, pagina
 import type { Reply } from './http.ts'
 import type { MockAlert, MockCredential, MockHeartbeat, MockItem, MockOrder, MockPayment, MockRole, MockStore, MockUser } from './seed.ts'
 import type { components as AuthMe } from '../drafts/auth-me'
-import { ROLE_PERMISSIONS, PERMISSIONS } from '../../admin/permissions.ts'
-import type { Role } from '../session.ts'
+import { PERMISSIONS } from '../../admin/permissions.ts'
 import { customerReportRoutes } from './customer-reports.ts'
 import { orderRefundedAt, orderRefunds, paymentDetail, refundRoutes } from './refunds.ts'
 import { boxPrice, eligibleToday, lineDiscount, linePricing, pricingView, updatePricing } from './pricing.ts'
-import { revenueReport } from './revenue.ts'
+import { salesReportRoutes } from './revenue.ts'
+import { dashboardRoutes } from './dashboard.ts'
 import { activeWorkOrderOf, workOrderFromAlert, workOrderRoutes } from './work-orders.ts'
 
 export interface HandlerContext {
@@ -35,12 +35,8 @@ export interface KioskSimulation {
   /** The kiosk's machine is shown in MAINTENANCE (scenario `maintenance`), without changing the stored machine. */
   maintenance: boolean
 }
-/**
- * `{ permission }`: backend #48 style check against the role → permission table in the store.
- * `{ draftPermission }`: the code of a draft contract still mocked (revenue), checked against the
- * web's role table ROLE_PERMISSIONS.
- */
-export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string } | { draftPermission: string }
+/** `{ permission }`: backend #48 style check against the role → permission table in the store. */
+export type Policy = 'public' | 'any' | 'admin' | 'kiosk' | { permission: string }
 export interface Route { method: string; pattern: RegExp; policy: Policy; handle: (ctx: HandlerContext) => Reply }
 
 const RESERVATION_MS = 5 * 60_000
@@ -83,11 +79,6 @@ function within(query: URLSearchParams, fromName: string, toName: string, value:
   return (!from || at >= Date.parse(from)) && (!to || at < Date.parse(to))
 }
 const flag = (query: URLSearchParams, name: string, value: boolean) => !query.get(name) || (query.get(name) === 'true') === value
-
-/** Draft codes an account holds through its roles (proposed seed of the draft contracts). */
-export function draftPermissionsOfUser(user: Pick<MockUser, 'roles'>): string[] {
-  return [...new Set(user.roles.map(role => role.replace(/^ROLE_/, '')).flatMap(role => ROLE_PERMISSIONS[role as Role] ?? []))].sort()
-}
 
 /** Effective permissions of an account: the union of its roles' sets, read from the store on every request (like #48). */
 export function permissionsOfUser(store: MockStore, user: Pick<MockUser, 'roles'>): string[] {
@@ -692,8 +683,6 @@ export const routes: Route[] = [
   route('PUT', '/pricing/near-expiry-discount', { permission: 'PRICING_MANAGE' }, ctx => updatePricing(ctx.store, ctx.body, ctx.user!, ctx.now)),
 
   // ---- payments (ADMIN)
-  // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml, FE 9.1/9.2).
-  route('GET', '/reports/revenue', { draftPermission: 'REPORT_SALES_READ' }, ctx => ok(revenueReport(ctx.store, ctx.query, ctx.now))),
   route('GET', '/payments', 'admin', ctx => {
     const { store, query } = ctx
     const orderOf = (payment: MockPayment) => store.orders.find(order => order.id === payment.orderId)
@@ -799,6 +788,10 @@ export const routes: Route[] = [
 
   // ---- manual refunds (backend #72)
   ...refundRoutes,
+
+  // ---- dashboard and sales reports (backend #76): dashboard.ts, revenue.ts
+  ...dashboardRoutes,
+  ...salesReportRoutes,
 ]
 
 export interface RaiseAlertInput { type?: MockAlert['type']; severity?: MockAlert['severity']; machineId?: string; title?: string; message?: string | null; errorCode?: string | null }

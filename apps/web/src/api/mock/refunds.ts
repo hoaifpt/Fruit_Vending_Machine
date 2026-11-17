@@ -1,6 +1,6 @@
 // Mock of the manual refunds of the real backend (#72, docs/refunds.md, api.yaml). There is no refund table on the
 // backend: a payment REFUNDED carries the refund columns. The mock keeps them in store.refunds (one row per refunded
-// payment, also read by the revenue mock of FM9). Recording moves the payment SUCCESS → REFUNDED, and the order to
+// payment, also read by the sales report mock, revenue.ts). Recording moves the payment SUCCESS → REFUNDED, and the order to
 // REFUNDED only when it is the order's paying payment and the order is DISPENSE_FAILED or COMPLETED; a late or duplicate
 // payment never changes the order. Messages in English as the backend sends them, business 409s start with the code.
 import { conflict, Form, MockHttpError, notFound, ok, fixedPage } from './http.ts'
@@ -221,6 +221,22 @@ function listRefunds(ctx: HandlerContext): Reply {
   return ok(fixedPage(rows, query, { defaultSize: 20, maxSize: 100 }))
 }
 
+/**
+ * Current refund candidates (#72 / #74): SUCCESS payments of finished orders that are a late or duplicate payment, a
+ * failed dispense or an order with an open customer report. Also the dashboard's and the sales summary's pendingRefunds.
+ */
+export function refundCandidates(store: MockStore): { payment: MockPayment; order: MockOrder; type: CandidateType }[] {
+  const rows: { payment: MockPayment; order: MockOrder; type: CandidateType }[] = []
+  for (const payment of store.payments) {
+    if (payment.status !== 'SUCCESS') continue
+    const order = store.orders.find(candidate => candidate.id === payment.orderId)
+    if (!order || UNFINISHED_ORDER.includes(order.status)) continue
+    const type = candidateType(store, payment, order)
+    if (type) rows.push({ payment, order, type })
+  }
+  return rows
+}
+
 function listCandidates(ctx: HandlerContext): Reply {
   const { store, query } = ctx
   const errors: Record<string, string> = {}
@@ -229,12 +245,8 @@ function listCandidates(ctx: HandlerContext): Reply {
   const range = dateRange(query, errors)
   failOn(errors)
   const rows: S['RefundCandidateResponse'][] = []
-  for (const payment of store.payments) {
-    if (payment.status !== 'SUCCESS') continue
-    const order = store.orders.find(candidate => candidate.id === payment.orderId)
-    if (!order || UNFINISHED_ORDER.includes(order.status) || (machineId && order.machineId !== machineId) || !inRange(payment.paidAt, range)) continue
-    const own = candidateType(store, payment, order)
-    if (!own) continue
+  for (const { payment, order, type: own } of refundCandidates(store)) {
+    if ((machineId && order.machineId !== machineId) || !inRange(payment.paidAt, range)) continue
     const report = refundReportOf(store, order.id)
     if (type && (type === 'CUSTOMER_REPORT' ? !report : own !== type)) continue
     const workOrder = report?.workOrderId ? store.workOrders.find(candidate => candidate.id === report.workOrderId) : undefined

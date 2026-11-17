@@ -167,14 +167,46 @@ export function noteServerTime(serverTime: number | undefined, receivedAt = Date
  * could not authenticate). Errors and 401 behave as for JSON calls; the caller makes the object URL and revokes it.
  */
 export async function requestBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  return (await requestFile(path, { accept: 'image/jpeg, image/png', signal })).blob
+}
+
+/** A file answered by the server: its bytes, the name of `Content-Disposition` (when readable) and its type. */
+export interface FileResult { blob: Blob; fileName?: string; contentType: string }
+
+/**
+ * File name of a `Content-Disposition` header: `filename*=UTF-8''…` (RFC 5987) wins over `filename="…"`. Path parts
+ * and control characters are dropped, so the name can be given to a download link as is. Undefined when absent.
+ */
+export function fileNameFromDisposition(header: string | null | undefined): string | undefined {
+  if (!header) return undefined
+  let name: string | undefined
+  const extended = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header)
+  if (extended) {
+    try { name = decodeURIComponent(extended[2].trim().replace(/^"|"$/g, '')) } catch { name = undefined }
+  }
+  if (!name) {
+    const plain = /filename\s*=\s*("(?:[^"\\]|\\.)*"|[^;]+)/i.exec(header)
+    if (plain) name = plain[1].trim().replace(/^"|"$/g, '').replace(/\\(.)/g, '$1')
+  }
+  // eslint-disable-next-line no-control-regex
+  const clean = name?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g, '').trim()
+  return clean || undefined
+}
+
+/**
+ * A binary response read with the session's Authorization header: a customer report photo (which a plain <img src>
+ * could not authenticate) or a report export (CSV/PDF attachment). Errors and 401 behave as for JSON calls.
+ */
+export async function requestFile(path: string, options: { query?: RequestOptions['query']; accept?: string; signal?: AbortSignal; timeoutMs?: number } = {}): Promise<FileResult> {
+  const { query, accept = '*/*', signal, timeoutMs = TIMEOUT_MS } = options
   const done = beginProgress()
   const token = config.getToken()
-  const timeout = AbortSignal.timeout(TIMEOUT_MS)
+  const timeout = AbortSignal.timeout(timeoutMs)
   try {
     let response: Response
     try {
-      response = await config.fetcher(buildUrl(path), {
-        method: 'GET', cache: 'no-store', headers: { Accept: 'image/jpeg, image/png', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      response = await config.fetcher(buildUrl(path, query), {
+        method: 'GET', cache: 'no-store', headers: { Accept: accept, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       })
     } catch (error) {
@@ -186,7 +218,8 @@ export async function requestBlob(path: string, signal?: AbortSignal): Promise<B
       if (response.status === 401) config.onUnauthorized(token)
       throw error
     }
-    return await response.blob()
+    const blob = await response.blob()
+    return { blob, fileName: fileNameFromDisposition(response.headers.get('Content-Disposition')), contentType: response.headers.get('Content-Type') ?? blob.type }
   } finally { done() }
 }
 

@@ -1,5 +1,5 @@
 // Typed endpoint functions. Types come from schema.d.ts, generated from api-contract/api.yaml (npm run gen:api).
-import { api, request, requestBlob } from './client.ts'
+import { api, request, requestBlob, requestFile } from './client.ts'
 import type { components, operations } from './schema'
 import type { components as RolesDraft } from './drafts/roles-permissions'
 
@@ -365,4 +365,39 @@ export const customerReportsApi = {
   resolve: (reportId: string, body: ReportDecisionBody) => api.post<CustomerReportDetail>(`/customer-reports/${id(reportId)}/resolve`, body),
   /** → REJECTED with SPAM or DUPLICATE (final). */
   reject: (reportId: string, body: ReportDecisionBody) => api.post<CustomerReportDetail>(`/customer-reports/${id(reportId)}/reject`, body),
+}
+
+// Dashboard and sales reports (backend #76, docs/reports.md). Every figure is computed by the server; the web only
+// shows it. from / to are inclusive business-zone dates (yyyy-MM-dd, at most 366 days); machineId and productId repeat
+// (at most 20 each, an unknown id is 400). A sale is a delivered order at completed_at; refunds count at refunded_at.
+export type DashboardOverview = S['DashboardOverviewResponse']
+export type DashboardMachine = S['MachineDetail']
+export type SalesSummary = S['SalesSummary']
+export type SalesSeries = S['SalesSeries']
+export type SalesBucket = S['SalesBucket']
+export type SalesGranularity = NonNullable<SalesSeries['granularity']>
+export type PeakHours = S['PeakHours']
+export type PeakHour = S['PeakHour']
+export type ProductReport = S['ProductReport']
+export type ProductSales = S['ProductSales']
+export type ProductSort = NonNullable<ProductReport['sortBy']>
+export type MachineReport = S['MachineReport']
+export type MachineSales = S['MachineSales']
+export type SalesQuery = Query<'getSalesSummary'>
+export type SalesExportFormat = Query<'exportSalesReport'>['format']
+
+export const dashboardApi = {
+  /** DASHBOARD_READ (ADMIN, STAFF); `today` and `refunds` only with REPORT_SALES_READ (absent otherwise). Poll every 30 s. */
+  overview: (signal?: AbortSignal) => api.get<DashboardOverview>('/dashboard/overview', undefined, signal),
+}
+
+export const salesReportsApi = {
+  summary: (query: SalesQuery, signal?: AbortSignal) => api.get<SalesSummary>('/reports/sales/summary', query, signal),
+  timeseries: (query: Query<'getSalesTimeseries'>, signal?: AbortSignal) => api.get<SalesSeries>('/reports/sales/timeseries', query, signal),
+  peakHours: (query: Query<'getSalesPeakHours'>, signal?: AbortSignal) => api.get<PeakHours>('/reports/sales/peak-hours', query, signal),
+  products: (query: Query<'getSalesByProduct'>, signal?: AbortSignal) => api.get<ProductReport>('/reports/sales/products', query, signal),
+  machines: (query: Query<'getSalesByMachine'>, signal?: AbortSignal) => api.get<MachineReport>('/reports/sales/machines', query, signal),
+  /** REPORT_EXPORT: the CSV / PDF attachment (freshvend-sales_<from>_<to>.<ext>), read with the session token. */
+  export: (query: Query<'exportSalesReport'>, signal?: AbortSignal) =>
+    requestFile('/reports/sales/export', { query, accept: query.format === 'PDF' ? 'application/pdf, application/json' : 'text/csv, application/json', signal, timeoutMs: 60_000 }),
 }

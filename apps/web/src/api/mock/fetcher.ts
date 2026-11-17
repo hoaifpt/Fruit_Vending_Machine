@@ -1,7 +1,7 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceOrders, draftPermissionsOfUser, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
+import { advanceOrders, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
 import { advanceMaintenanceCommands } from './work-orders.ts'
 import type { HandlerContext, KioskSimulation, Policy, RaiseAlertInput } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
@@ -9,7 +9,7 @@ import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'pricing', 'customer-reports', 'refunds', 'reports'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'pricing', 'customer-reports', 'refunds', 'reports', 'dashboard'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -40,8 +40,10 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   'maintenance-commands': 'maintenance-commands',
   // Near-expiry discount setting of backend #61.
   pricing: 'pricing',
-  // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml).
+  // Sales reports of backend #76 (summary, timeseries, peak hours, products, machines, export).
   reports: 'reports',
+  // Dashboard of backend #76 (GET /dashboard/overview).
+  dashboard: 'dashboard',
 }
 
 export function groupOf(path: string): MockGroup | null {
@@ -148,6 +150,12 @@ function emptied(data: unknown): unknown {
   if (data && typeof data === 'object') {
     if ('content' in data) return { ...data, content: [], totalElements: 0, totalPages: 0 }
     if ('products' in data) return { ...data, products: [] }
+    // Dashboard (#76): nothing needs attention, no machine listed; money blocks (when present) at zero.
+    if ('machinesDetail' in data) {
+      const zeros = (block: unknown) => block && typeof block === 'object' ? Object.fromEntries(Object.keys(block).map(key => [key, key === 'date' ? (block as Record<string, unknown>)[key] : 0])) : block
+      const dashboard = data as Record<string, unknown>
+      return Object.fromEntries(Object.entries(dashboard).map(([key, value]) => [key, key === 'machinesDetail' ? [] : key === 'generatedAt' ? value : zeros(value)]))
+    }
   }
   return data
 }
@@ -215,7 +223,6 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
     if (policy === 'admin' && !user.roles.includes('ADMIN')) throw new MockHttpError(403, 'Access denied')
     // Backend #48: permissions are read from the role table on every request, so a change applies to the next call.
     if (typeof policy === 'object' && 'permission' in policy && !permissionsOfUser(store, user).includes(policy.permission)) throw new MockHttpError(403, 'Access denied')
-    if (typeof policy === 'object' && 'draftPermission' in policy && !draftPermissionsOfUser(user).includes(policy.draftPermission)) throw new MockHttpError(403, 'Access denied')
     return user
   }
 

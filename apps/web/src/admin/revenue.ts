@@ -1,32 +1,34 @@
-// R1 Báo cáo doanh thu (FE 9.1) and the revenue block of O1 Tổng quan (FE 9.2). Pure rules, unit-tested: filters in
-// the URL, the request, the figures shown, the chart scale and the CSV file. One source for every number: the screen,
-// the CSV and the overview all read the same GET /reports/revenue response (draft api-contract/drafts/revenue-reports.yaml,
-// waiting for BE 6.1) through loadRevenueReport, and display it with the same FIGURES list.
-import { api, ApiError } from '../api/client.ts'
-import type { components } from '../api/drafts/revenue-reports'
+// R1 Báo cáo bán hàng (FE 9.1) and the revenue block of O1 Tổng quan (FE 9.2) on the real sales report API of backend
+// #76 (api.yaml, docs/reports.md). Pure rules, unit-tested: filters in the URL, the requests, labels of the figures,
+// the chart scale and the export. Every number is the server's: the screen shows the five GET /reports/sales/* answers
+// for one set of filters, and the CSV / PDF file is GET /reports/sales/export with the same filters (rendered by the
+// server from the same query, so the file says what the screen says). Definitions (docs/reports.md §1): a sale is a
+// delivered order, counted at completed_at; refunds are counted at refunded_at; discounts and refunds stay separate.
+import { ApiError } from '../api/client.ts'
+import { salesReportsApi } from '../api/resources.ts'
+import type {
+  MachineReport, PeakHours, ProductReport, ProductSort, SalesBucket, SalesExportFormat, SalesGranularity, SalesQuery, SalesSeries, SalesSummary,
+} from '../api/resources.ts'
 import { formatDate, formatMoney } from '../lib/format.ts'
 import { uuidParam } from '../lib/table-query.ts'
 import { addDays, daysBetween, isDateString } from './maintenance-schedules.ts'
-
-type R = components['schemas']
-export type RevenueReport = R['RevenueReportResponse']
-export type RevenueFigures = R['RevenueFigures']
-export type RevenueBucket = R['RevenueBucket']
-export type ProductRevenue = R['ProductRevenue']
-export type RevenueGroupBy = R['RevenueGroupBy']
+import { REFUND_REASONS, REFUND_REASON_LABELS } from './refunds.ts'
 
 export const REVENUE_PATH = '/admin/reports/revenue'
-/** Longest range the draft accepts (counting both ends). */
-export const MAX_RANGE_DAYS = 92
+/** Longest range the API accepts (both ends counted, docs/reports.md §2). */
+export const MAX_RANGE_DAYS = 366
+/** Rows of the product table (the API allows 1..100; the export always has every product). */
+export const PRODUCT_LIMIT = 20
 
-export const revenueApi = {
-  report: (query: { fromDate: string; toDate: string; productId?: string; groupBy?: RevenueGroupBy }, signal?: AbortSignal) =>
-    api.get<RevenueReport>('/reports/revenue', query, signal),
+// ---- filters (URL: from, to, machineId, productId, granularity=week|month, productSort=quantity)
+
+export interface RevenueFilters {
+  from: string; to: string
+  /** One machine / product (the API accepts up to 20; the screen filters on one). '' = all. */
+  machineId: string; productId: string
+  granularity: SalesGranularity
+  productSort: ProductSort
 }
-
-// ---- filters (URL: from, to, productId, group=day|hour)
-
-export interface RevenueFilters { from: string; to: string; productId: string; groupBy: RevenueGroupBy }
 
 export type RevenuePreset = 'today' | '7d' | '30d' | 'month'
 export const PRESETS: { key: RevenuePreset; label: string }[] = [
@@ -45,6 +47,10 @@ export function presetOf(range: { from: string; to: string }, today: string): Re
   return PRESETS.find(({ key }) => { const preset = presetRange(key, today); return preset.from === range.from && preset.to === range.to })?.key
 }
 
+export const GRANULARITIES: readonly SalesGranularity[] = ['DAY', 'WEEK', 'MONTH']
+export const GRANULARITY_LABELS: Record<SalesGranularity, string> = { DAY: 'Theo ngày', WEEK: 'Theo tuần', MONTH: 'Theo tháng' }
+export const PRODUCT_SORT_LABELS: Record<ProductSort, string> = { NET_SALES: 'Doanh số cao nhất', QUANTITY: 'Bán nhiều hộp nhất' }
+
 /**
  * Filters from the URL. Missing dates default to the last 7 days; values that are not valid are dropped (and named in
  * `ignored`, so the screen can say why the URL was not followed). Order of from/to is NOT fixed here: validateRange says so.
@@ -58,17 +64,26 @@ export function readRevenueFilters(params: URLSearchParams, today: string): { fi
     return raw && isDateString(raw) ? raw : fallback[name]
   }
   const from = date('from'), to = date('to')
-  const rawProduct = params.get('productId') ?? ''
-  const productId = uuidParam(rawProduct)
-  if (rawProduct && !productId) ignored.push('productId')
-  const rawGroup = params.get('group')
-  if (rawGroup && rawGroup !== 'day' && rawGroup !== 'hour') ignored.push('group')
-  return { filters: { from, to, productId, groupBy: rawGroup === 'hour' ? 'HOUR_OF_DAY' : 'DAY' }, ignored }
+  const id = (name: 'machineId' | 'productId') => {
+    const raw = params.get(name) ?? ''
+    const value = uuidParam(raw)
+    if (raw && !value) ignored.push(name)
+    return value
+  }
+  const machineId = id('machineId'), productId = id('productId')
+  const rawGranularity = (params.get('granularity') ?? '').toUpperCase()
+  if (rawGranularity && !GRANULARITIES.includes(rawGranularity as SalesGranularity)) ignored.push('granularity')
+  const granularity = GRANULARITIES.includes(rawGranularity as SalesGranularity) ? rawGranularity as SalesGranularity : 'DAY'
+  const rawSort = (params.get('productSort') ?? '').toUpperCase()
+  if (rawSort && rawSort !== 'QUANTITY' && rawSort !== 'NET_SALES') ignored.push('productSort')
+  return { filters: { from, to, machineId, productId, granularity, productSort: rawSort === 'QUANTITY' ? 'QUANTITY' : 'NET_SALES' }, ignored }
 }
 
-export const FILTER_LABELS: Record<string, string> = { from: 'Từ ngày', to: 'Đến ngày', productId: 'Sản phẩm', group: 'Nhóm theo' }
+export const FILTER_LABELS: Record<string, string> = {
+  from: 'Từ ngày', to: 'Đến ngày', machineId: 'Máy', productId: 'Sản phẩm', granularity: 'Chia theo', productSort: 'Sắp xếp sản phẩm',
+}
 
-/** Field errors of a range, checked before any request (the server checks the same rules). */
+/** Field errors of a range, checked before any request (the server checks the same rules and answers 400). */
 export function validateRange(from: string, to: string): Partial<Record<'from' | 'to', string>> {
   if (!isDateString(from)) return { from: 'Chọn ngày bắt đầu.' }
   if (!isDateString(to)) return { to: 'Chọn ngày kết thúc.' }
@@ -77,119 +92,165 @@ export function validateRange(from: string, to: string): Partial<Record<'from' |
   return {}
 }
 
-export function revenueQuery(filters: RevenueFilters) {
-  return { fromDate: filters.from, toDate: filters.to, productId: filters.productId || undefined, groupBy: filters.groupBy }
+/** The common parameters of every /reports/sales/* call: only what the contract names; an empty filter is not sent. */
+export function salesQuery(filters: Pick<RevenueFilters, 'from' | 'to' | 'machineId' | 'productId'>): SalesQuery {
+  return {
+    from: filters.from, to: filters.to,
+    ...(filters.machineId ? { machineId: [filters.machineId] } : {}),
+    ...(filters.productId ? { productId: [filters.productId] } : {}),
+  }
 }
 export function revenueKey(filters: RevenueFilters): string {
-  return `${filters.from}|${filters.to}|${filters.productId}|${filters.groupBy}`
+  return [filters.from, filters.to, filters.machineId, filters.productId, filters.granularity, filters.productSort].join('|')
 }
 /** Link to the report with these filters (dates always written, so the link shows the same numbers tomorrow). */
 export function revenueHref(filters: Partial<RevenueFilters> & { from: string; to: string }): string {
   const params = new URLSearchParams({ from: filters.from, to: filters.to })
+  if (filters.machineId) params.set('machineId', filters.machineId)
   if (filters.productId) params.set('productId', filters.productId)
-  if (filters.groupBy === 'HOUR_OF_DAY') params.set('group', 'hour')
+  if (filters.granularity && filters.granularity !== 'DAY') params.set('granularity', filters.granularity.toLowerCase())
+  if (filters.productSort === 'QUANTITY') params.set('productSort', 'quantity')
   return `${REVENUE_PATH}?${params}`
 }
 
-/** What the overview (O1) loads: the "7 ngày qua" report of the screen, all products, per day (today is its last row). */
-export function overviewRevenueFilters(today: string): RevenueFilters {
-  return { ...presetRange('7d', today), productId: '', groupBy: 'DAY' }
+// ---- loading
+
+/** The five answers shown for one set of filters; `key` says which filters they answer. */
+export interface SalesReport {
+  key: string
+  summary: SalesSummary; series: SalesSeries; peak: PeakHours; products: ProductReport; machines: MachineReport
 }
 
-/** The single loader of revenue figures (report screen and overview). */
-export function loadRevenueReport(filters: RevenueFilters, signal?: AbortSignal): Promise<RevenueReport> {
-  return revenueApi.report(revenueQuery(filters), signal)
+/** The screen's loader: the five report endpoints in parallel, for exactly the same filters. */
+export async function loadSalesReport(filters: RevenueFilters, signal?: AbortSignal): Promise<SalesReport> {
+  const query = salesQuery(filters)
+  const [summary, series, peak, products, machines] = await Promise.all([
+    salesReportsApi.summary(query, signal),
+    salesReportsApi.timeseries({ ...query, granularity: filters.granularity }, signal),
+    salesReportsApi.peakHours(query, signal),
+    salesReportsApi.products({ ...query, sortBy: filters.productSort, limit: PRODUCT_LIMIT }, signal),
+    salesReportsApi.machines(query, signal),
+  ])
+  return { key: revenueKey(filters), summary, series, peak, products, machines }
+}
+
+/** What the overview (O1) loads besides the dashboard: the summary of the last 7 days (today is its last day). */
+export function overviewWeek(today: string): { from: string; to: string } {
+  return presetRange('7d', today)
+}
+export function loadWeekSummary(today: string, signal?: AbortSignal): Promise<SalesSummary> {
+  return salesReportsApi.summary(salesQuery({ ...overviewWeek(today), machineId: '', productId: '' }), signal)
 }
 
 /**
- * A backend without BE 6.1 answers 404 for the path. With a product filter a 404 may also be an unknown product (the
- * client shows 404 messages generically), so that case is reported separately (productNotFound).
+ * 400 of the report API: the range or an id was refused (the message names the id). Field errors, when the server
+ * sends them, are keyed by query parameter (from, to, machineId, productId).
  */
-export function revenueMissing(error: unknown, productFiltered = false): boolean {
-  return error instanceof ApiError && error.status === 404 && !productFiltered
+export function reportRejected(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 400
 }
-export function productNotFound(error: unknown, productFiltered: boolean): boolean {
-  return error instanceof ApiError && error.status === 404 && productFiltered
-}
-export const REVENUE_MISSING = 'Chưa có dữ liệu doanh thu: máy chủ chưa có API báo cáo (BE 6.1). Màn này sẽ có số liệu khi API được triển khai.'
 
-// ---- figures (same list for the screen and the CSV)
+// ---- figures (labels and hints; the values are the server's)
 
-export type FigureKey = keyof RevenueFigures
+export type FigureKey = 'netRevenue' | 'netSales' | 'grossSales' | 'discounts' | 'deliveredRefunds' | 'ordersSold' | 'averageOrderValue' | 'moneyCollected' | 'moneyRefunded' | 'failedDispenses'
 export interface Figure { key: FigureKey; label: string; money: boolean; hint: string }
+/** Tiles in reading order: what the business keeps first, then how it is made up, then the cash view. */
 export const FIGURES: readonly Figure[] = [
-  { key: 'orderCount', label: 'Số đơn', money: false, hint: 'Đơn đã thanh toán, tính theo giờ thanh toán.' },
-  { key: 'quantity', label: 'Số hộp', money: false, hint: 'Hộp bán ra trong các đơn đó.' },
-  { key: 'grossAmount', label: 'Giá gốc', money: true, hint: 'Tổng giá niêm yết trước giảm giá.' },
-  { key: 'discountAmount', label: 'Tiền giảm', money: true, hint: 'Giảm giá cận hạn đã cho khách.' },
-  { key: 'paidAmount', label: 'Khách trả', money: true, hint: 'Giá gốc trừ tiền giảm.' },
-  { key: 'refundCount', label: 'Số đơn hoàn', money: false, hint: 'Đơn đã hoàn tiền, tính theo lúc hoàn.' },
-  { key: 'refundAmount', label: 'Tiền hoàn', money: true, hint: 'Tiền đã trả lại khách, tính theo lúc hoàn.' },
-  { key: 'netAmount', label: 'Thực thu', money: true, hint: 'Khách trả trừ tiền hoàn.' },
+  { key: 'netRevenue', label: 'Doanh thu thuần', money: true, hint: 'Doanh số sau giảm giá trừ tiền hoàn của đơn đã giao.' },
+  { key: 'netSales', label: 'Doanh số sau giảm giá', money: true, hint: 'Khách trả cho các đơn đã giao trong khoảng.' },
+  { key: 'grossSales', label: 'Doanh số gốc', money: true, hint: 'Giá niêm yết của các đơn đó, trước giảm giá.' },
+  { key: 'discounts', label: 'Tiền giảm', money: true, hint: 'Giảm giá cận hạn đã cho khách.' },
+  { key: 'deliveredRefunds', label: 'Hoàn tiền đơn đã giao', money: true, hint: 'Hoàn vì chất lượng hoặc lý do khác, tính theo lúc hoàn.' },
+  { key: 'ordersSold', label: 'Số đơn đã giao', money: false, hint: 'Đơn nhả hộp xong trong khoảng.' },
+  { key: 'averageOrderValue', label: 'Giá trị trung bình/đơn', money: true, hint: 'Doanh số sau giảm giá chia số đơn, làm tròn xuống.' },
+  { key: 'moneyCollected', label: 'Tiền đã thu', money: true, hint: 'Khoản thanh toán thành công theo lúc trả (dòng tiền).' },
+  { key: 'moneyRefunded', label: 'Tiền đã hoàn', money: true, hint: 'Mọi khoản hoàn theo lúc hoàn, gồm cả đơn không giao được.' },
+  { key: 'failedDispenses', label: 'Đơn nhả hàng lỗi', money: false, hint: 'Đơn trả tiền trong khoảng mà máy không nhả được hộp.' },
 ]
-export const ZERO_FIGURES: RevenueFigures = { orderCount: 0, quantity: 0, grossAmount: 0, discountAmount: 0, paidAmount: 0, refundCount: 0, refundAmount: 0, netAmount: 0 }
 
+/** A figure of the summary (0 when the server left it out). */
+export function figureValue(summary: SalesSummary, key: FigureKey): number {
+  if (key === 'moneyRefunded') return summary.moneyRefunded?.total ?? 0
+  return summary[key] ?? 0
+}
 /** A figure as the screen shows it: `35.000 ₫` for money, `1.234` for counts. */
-export function figureText(figure: Pick<Figure, 'money'>, value: number): string {
-  return figure.money ? formatMoney(value) : value.toLocaleString('vi-VN')
+export function figureText(figure: Pick<Figure, 'money'>, value: number | undefined): string {
+  return figure.money ? formatMoney(value ?? 0) : (value ?? 0).toLocaleString('vi-VN')
 }
 
-export function hasActivity(figures: RevenueFigures): boolean {
-  return figures.orderCount > 0 || figures.refundCount > 0
+/** Anything happened in the range (a sale, a refund or a payment); otherwise the screen shows its empty state. */
+export function hasActivity(summary: SalesSummary): boolean {
+  return (summary.ordersSold ?? 0) > 0 || (summary.deliveredRefunds ?? 0) > 0 || (summary.moneyRefunded?.total ?? 0) > 0
+    || (summary.moneyCollected ?? 0) > 0 || (summary.failedDispenses ?? 0) > 0
 }
 
-export const GROUP_LABELS: Record<RevenueGroupBy, string> = { DAY: 'Theo ngày', HOUR_OF_DAY: 'Theo giờ trong ngày' }
+/** Refunds of the range by reason, every reason listed in the refunds screen's order (absent reasons are 0). */
+export function refundsByReason(summary: SalesSummary): { reason: string; label: string; amount: number }[] {
+  const byReason = summary.moneyRefunded?.byReason ?? {}
+  return REFUND_REASONS.map(reason => ({ reason, label: REFUND_REASON_LABELS[reason], amount: byReason[reason] ?? 0 }))
+}
+
+/** `12,5%` (one decimal as the server rounds it). */
+export function shareText(percent: number | undefined): string {
+  return `${(percent ?? 0).toLocaleString('vi-VN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
+// ---- time series and peak hours
+
+const dm = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`
+const monthEnd = (date: string) => addDays(`${addDays(`${date.slice(0, 8)}28`, 4).slice(0, 8)}01`, -1)
+
+/** Row label of a bucket: `13/11/2026`, `02/11 – 08/11/2026`, `Tháng 11/2026` (with its days when the range cut it). */
+export function bucketLabel(bucket: Pick<SalesBucket, 'start' | 'end'>, granularity: SalesGranularity): string {
+  const start = bucket.start ?? '', end = bucket.end ?? start
+  if (!isDateString(start)) return '—'
+  if (granularity === 'DAY' || start === end) return formatDate(start)
+  if (granularity === 'WEEK') return `${dm(start)} – ${formatDate(end)}`
+  const month = `Tháng ${start.slice(5, 7)}/${start.slice(0, 4)}`
+  return start.endsWith('-01') && end === monthEnd(start) ? month : `${month} (${dm(start)} – ${dm(end)})`
+}
+/** Short axis label: `13/11`, `02/11`, `11/2026`. */
+export function bucketShortLabel(bucket: Pick<SalesBucket, 'start'>, granularity: SalesGranularity): string {
+  const start = bucket.start ?? ''
+  if (!isDateString(start)) return ''
+  return granularity === 'MONTH' ? `${start.slice(5, 7)}/${start.slice(0, 4)}` : dm(start)
+}
+export const bucketKey = (bucket: Pick<SalesBucket, 'start'>) => bucket.start ?? ''
+
 const hh = (hour: number) => String(hour).padStart(2, '0')
-/** Row label of a bucket: `13/11/2026`, or `13:00–13:59`. */
-export function bucketLabel(bucket: Pick<RevenueBucket, 'date' | 'hour'>): string {
-  if (bucket.date) return formatDate(bucket.date)
-  return typeof bucket.hour === 'number' ? `${hh(bucket.hour)}:00–${hh(bucket.hour)}:59` : '—'
+/** `09:00–09:59`. */
+export const hourLabel = (hour: number) => `${hh(hour)}:00–${hh(hour)}:59`
+/** Rows of the 7 × 24 matrix: Monday first, as the API sends them. */
+export const WEEKDAYS: readonly { short: string; long: string }[] = [
+  { short: 'T2', long: 'Thứ Hai' }, { short: 'T3', long: 'Thứ Ba' }, { short: 'T4', long: 'Thứ Tư' }, { short: 'T5', long: 'Thứ Năm' },
+  { short: 'T6', long: 'Thứ Sáu' }, { short: 'T7', long: 'Thứ Bảy' }, { short: 'CN', long: 'Chủ nhật' },
+]
+/** The 24 hours 0..23 in order, each with its figures (an hour missing from the answer is 0). */
+export function hoursOfDay(peak: Pick<PeakHours, 'hours'>): { hour: number; ordersSold: number; netSales: number }[] {
+  return Array.from({ length: 24 }, (_, hour) => {
+    const row = peak.hours?.find(candidate => candidate.hour === hour)
+    return { hour, ordersSold: row?.ordersSold ?? 0, netSales: row?.netSales ?? 0 }
+  })
 }
-/** Short axis label: `13/11`, or `13h`. */
-export function bucketShortLabel(bucket: Pick<RevenueBucket, 'date' | 'hour'>): string {
-  if (bucket.date) return `${bucket.date.slice(8, 10)}/${bucket.date.slice(5, 7)}`
-  return typeof bucket.hour === 'number' ? `${bucket.hour}h` : ''
+/** Busiest hours (most orders, then most sales, then earliest), at most `count`, only hours with a sale. */
+export function busiestHours(peak: Pick<PeakHours, 'hours'>, count = 3): { hour: number; ordersSold: number; netSales: number }[] {
+  return hoursOfDay(peak).filter(row => row.ordersSold > 0)
+    .sort((a, b) => b.ordersSold - a.ordersSold || b.netSales - a.netSales || a.hour - b.hour).slice(0, count)
 }
-export function bucketKey(bucket: Pick<RevenueBucket, 'date' | 'hour'>): string {
-  return bucket.date ?? `h${bucket.hour ?? ''}`
+/** Largest cell of the weekday × hour matrix (scale of the heat map; at least 1). */
+export function matrixMax(matrix: readonly (readonly number[])[] | undefined): number {
+  return Math.max(1, ...(matrix ?? []).flat().filter(value => Number.isFinite(value)))
 }
-
-/** Today's bucket of a DAY report (zero when the day has no bucket, e.g. the date rolled over since the request). */
-export function figuresOfDay(report: RevenueReport, date: string): RevenueFigures {
-  const bucket = report.buckets.find(candidate => candidate.date === date)
-  return bucket ? pickFigures(bucket) : ZERO_FIGURES
-}
-export function pickFigures(source: RevenueFigures): RevenueFigures {
-  return Object.fromEntries(FIGURES.map(({ key }) => [key, source[key] ?? 0])) as unknown as RevenueFigures
-}
-
-/**
- * Checks the invariants of the draft (gross - discount = paid, paid - refund = net, buckets and products add up to the
- * totals; across products only boxes and amounts, since an order with several products counts once per product). Returns what is off, in words; empty when the report is consistent. The screen shows these, so a backend
- * bug is visible instead of silently showing numbers that do not add up.
- */
-export function consistencyIssues(report: RevenueReport): string[] {
-  const issues: string[] = []
-  const rowRules = (name: string, row: RevenueFigures) => {
-    if (row.grossAmount - row.discountAmount !== row.paidAmount) issues.push(`${name}: giá gốc trừ tiền giảm khác khách trả.`)
-    if (row.paidAmount - row.refundAmount !== row.netAmount) issues.push(`${name}: khách trả trừ tiền hoàn khác thực thu.`)
-  }
-  rowRules('Tổng', report.totals)
-  for (const bucket of report.buckets) rowRules(bucketLabel(bucket), bucket)
-  for (const product of report.byProduct) rowRules(product.productName, product)
-  const sum = (rows: readonly RevenueFigures[], key: FigureKey) => rows.reduce((total, row) => total + row[key], 0)
-  for (const { key, label } of FIGURES) {
-    if (report.buckets.length && sum(report.buckets, key) !== report.totals[key]) issues.push(`${label} của các dòng ${report.groupBy === 'DAY' ? 'ngày' : 'giờ'} không cộng ra tổng.`)
-    // An order with several products counts once per product, so only boxes and amounts add up across products.
-    if (report.byProduct.length && key !== 'orderCount' && key !== 'refundCount' && sum(report.byProduct, key) !== report.totals[key]) issues.push(`${label} của các sản phẩm không cộng ra tổng.`)
-  }
-  return issues
+/** Shade step 0..4 of a heat-map cell (0 = no sale). */
+export function heatLevel(value: number, max: number): number {
+  if (!value || value <= 0) return 0
+  return Math.min(4, Math.max(1, Math.ceil((value / max) * 4)))
 }
 
 // ---- chart
 
 export interface ChartScale { min: number; max: number; ticks: number[] }
-/** "Nice" axis from 0 that covers every value (negative net days included), with 3–5 ticks at 1/2/5 × 10^k steps. */
+/** "Nice" axis from 0 that covers every value (negative periods included), with 3–5 ticks at 1/2/5 × 10^k steps. */
 export function chartScale(values: readonly number[]): ChartScale {
   const high = Math.max(0, ...values), low = Math.min(0, ...values)
   const span = high - low
@@ -215,97 +276,23 @@ export function compactMoney(value: number): string {
   return number(value)
 }
 
-// ---- describing the report (screen subtitle, CSV header, print)
+// ---- describing the report
 
-export function scopeText(report: Pick<RevenueReport, 'fromDate' | 'toDate' | 'groupBy'>, productName: string | undefined): string {
-  const range = report.fromDate === report.toDate ? `Ngày ${formatDate(report.fromDate)}` : `Từ ${formatDate(report.fromDate)} đến ${formatDate(report.toDate)}`
-  return `${range} · ${productName ? `Sản phẩm ${productName}` : 'Tất cả sản phẩm'} · ${GROUP_LABELS[report.groupBy]}`
+export function scopeText(filters: Pick<RevenueFilters, 'from' | 'to'>, machineName: string | undefined, productName: string | undefined): string {
+  const range = filters.from === filters.to ? `Ngày ${formatDate(filters.from)}` : `Từ ${formatDate(filters.from)} đến ${formatDate(filters.to)}`
+  return `${range} · ${machineName ? `Máy ${machineName}` : 'Tất cả máy'} · ${productName ? `Sản phẩm ${productName}` : 'Tất cả sản phẩm'}`
 }
 
-// ---- CSV
+// ---- export (server-rendered CSV / PDF)
 
-/**
- * One cell. Numbers are written as plain integers (no thousands separator, no ₫) so a spreadsheet reads them as numbers.
- * Text that a spreadsheet would run as a formula (= + - @, tab, CR, LF) gets a leading apostrophe, also when spaces,
- * NBSP or zero-width spaces come first (Excel skips them before a formula); text with a comma, quote or line break is
- * quoted.
- */
-export function csvCell(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''
-  let text = /^[\s\u200b]*[=+\-@\t\r\n]/.test(value) ? `'${value}` : value
-  if (/[",\r\n]/.test(text) || text !== text.trim()) text = `"${text.replaceAll('"', '""')}"`
-  return text
+export const EXPORT_FORMATS: readonly SalesExportFormat[] = ['CSV', 'PDF']
+/** Parameters of GET /reports/sales/export: the format and the screen's filters, nothing else. */
+export function exportQuery(filters: RevenueFilters, format: SalesExportFormat) {
+  return { format, ...salesQuery(filters) }
 }
-const csvRow = (cells: readonly (string | number | null | undefined)[]) => cells.map(csvCell).join(',')
-const figureCells = (row: RevenueFigures) => FIGURES.map(({ key }) => row[key])
-const figureHeads = () => FIGURES.map(({ label, money }) => money ? `${label} (VND)` : label)
-
-/** A day in the CSV: ISO `2026-11-13`, read as the same date by Excel whatever the regional settings (13/11 vs 11/13). */
-export const csvDate = (date: string) => date
-/** A moment in the CSV, Vietnam time: `2026-11-13 13:05`. */
-export function csvDateTime(instant: string): string {
-  const ms = Date.parse(instant)
-  return Number.isFinite(ms) ? new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ') : instant
+/** Name of the downloaded file: the server's (Content-Disposition) or the same pattern when it cannot be read. */
+export function exportFileName(filters: Pick<RevenueFilters, 'from' | 'to'>, format: SalesExportFormat, serverName?: string): string {
+  return serverName || `freshvend-sales_${filters.from}_${filters.to}.${format.toLowerCase()}`
 }
-/** Row label of a bucket in the CSV: the ISO day, or the same hour range as the screen. */
-export const csvBucketLabel = (bucket: Pick<RevenueBucket, 'date' | 'hour'>) => bucket.date ? csvDate(bucket.date) : bucketLabel(bucket)
-/** Shown next to the export button: what to do when Excel puts a whole row in one column (list separator `;`). */
-export const CSV_EXCEL_HINT = 'Nếu Excel dồn mọi thứ vào một cột: mở bằng Dữ liệu > Từ văn bản/CSV, chọn dấu phẩy.'
-
-/**
- * The CSV file of a report: the scope, the totals, one row per day/hour and one row per product, with exactly the
- * figures of the screen. UTF-8 with BOM (Excel reads Vietnamese), comma separated, CRLF line ends; dates are ISO
- * (yyyy-MM-dd, Vietnam calendar) so no regional setting can swap day and month. No `sep=,` line: Excel then ignores
- * the BOM and breaks the Vietnamese text.
- */
-export function revenueCsv(report: RevenueReport, productName: string | undefined): string {
-  const rows: (string | number | null | undefined)[][] = [
-    ['Báo cáo doanh thu FreshVend'],
-    ['Từ ngày', csvDate(report.fromDate)],
-    ['Đến ngày', csvDate(report.toDate)],
-    ['Sản phẩm', productName ?? 'Tất cả sản phẩm'],
-    ['Nhóm theo', GROUP_LABELS[report.groupBy]],
-    ['Múi giờ', report.timeZone],
-    ['Lập lúc', csvDateTime(report.generatedAt)],
-    [],
-    ['Tổng'],
-    ['', ...figureHeads()],
-    ['Tổng', ...figureCells(report.totals)],
-    [],
-    [GROUP_LABELS[report.groupBy]],
-    [report.groupBy === 'DAY' ? 'Ngày' : 'Giờ', ...figureHeads()],
-    ...report.buckets.map(bucket => [csvBucketLabel(bucket), ...figureCells(bucket)]),
-    [],
-    ['Theo sản phẩm'],
-    ['SKU', 'Sản phẩm', ...figureHeads()],
-    ...report.byProduct.map(product => [product.sku, product.productName, ...figureCells(product)]),
-  ]
-  return `﻿${rows.map(csvRow).join('\r\n')}\r\n`
-}
-/** `doanh-thu_2026-11-07_2026-11-13.csv`, with the SKU when one product is filtered. */
-export function csvFileName(report: Pick<RevenueReport, 'fromDate' | 'toDate'>, sku?: string): string {
-  const product = sku ? `_${sku.replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')}` : ''
-  return `doanh-thu_${report.fromDate}_${report.toDate}${product}.csv`
-}
-
-/** Splits a CSV produced by revenueCsv back into cells (quoted cells included); used by tests to compare with the screen. */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = []
-  let row: string[] = [], cell = '', quoted = false
-  const source = text.replace(/^﻿/, '')
-  for (let index = 0; index < source.length; index += 1) {
-    const char = source[index]
-    if (quoted) {
-      if (char === '"' && source[index + 1] === '"') { cell += '"'; index += 1 }
-      else if (char === '"') quoted = false
-      else cell += char
-    } else if (char === '"') quoted = true
-    else if (char === ',') { row.push(cell); cell = '' }
-    else if (char === '\r') continue
-    else if (char === '\n') { row.push(cell); rows.push(row); row = []; cell = '' }
-    else cell += char
-  }
-  if (cell || row.length) { row.push(cell); rows.push(row) }
-  return rows
-}
+/** Shown next to the export buttons. */
+export const EXPORT_HINT = 'File do máy chủ tạo từ đúng bộ lọc đang xem: CSV mở được bằng Excel (UTF-8), PDF khổ A4. Mỗi lần xuất được ghi nhật ký.'
