@@ -23,7 +23,8 @@ async function expectTouchTarget(locator: Locator, what: string) {
 
 test.describe('Nhân viên trên điện thoại 390px', () => {
   test.use({ viewport: PHONE })
-  test.beforeEach(async ({ page }) => { await loginAs(page, 'STAFF') })
+  // A direct load (no work order) is ADMIN only since backend #68 (INVENTORY_LOAD_DIRECT); STAFF load through a restock.
+  test.beforeEach(async ({ page }) => { await loginAs(page, 'ADMIN') })
 
   test('Nạp 5 hộp rồi rút 1 hộp: dưới 2 phút, ít bước, vùng chạm ≥ 44px, bàn phím số', async ({ page }) => {
     await page.goto(`/admin/inventory?machineId=${MACHINE_1}`)

@@ -1,11 +1,12 @@
-// FE 8.3: kiosk QR with the order code, INCIDENT work tickets opened from customer reports, and the flagged reports of
-// W-12 "Cần hoàn tiền" (drafts incident-reports.yaml, work-tickets.yaml, refunds.yaml) on the mock API.
+// FE 8.3: kiosk QR with the order code, INCIDENT work orders opened from customer reports (real /work-orders of api.yaml,
+// source CUSTOMER_REPORT, linkedReports), and the flagged reports of W-12 "Cần hoàn tiền" (drafts incident-reports.yaml,
+// refunds.yaml, still FM8) on the mock API.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ApiError, configureClient } from '../src/api/client.ts'
-import { authApi, incidentReportsApi, refundsApi, ticketsApi } from '../src/api/resources.ts'
+import { authApi, incidentReportsApi, refundsApi, workOrdersApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { buildIncidentForm, draftFromSearch, emptyDraft } from '../src/features/incident/incident.ts'
@@ -63,34 +64,29 @@ test('the form opened from K-07 pre-selects "Đã trả tiền nhưng không nh�
 
 // ---- ticket vocabulary
 
-test('INCIDENT is a listed ticket type "Sự cố", but not one an admin can create by hand', () => {
+test('INCIDENT is a listed work order type "Sự cố"; the real API also lets a manager create one by hand', () => {
   assert.deepEqual([...TICKET_TYPES], ['RESTOCK', 'MAINTENANCE', 'INCIDENT'])
-  assert.deepEqual([...CREATABLE_TICKET_TYPES], ['RESTOCK', 'MAINTENANCE'])
+  assert.deepEqual([...CREATABLE_TICKET_TYPES], ['RESTOCK', 'MAINTENANCE', 'INCIDENT'])
   assert.equal(ticketTypeLabel('INCIDENT'), 'Sự cố')
   assert.ok(TICKET_TYPE_OPTIONS.some(option => option.value === 'INCIDENT' && option.label === 'Sự cố'))
   assert.equal(readTicketFilters(new URLSearchParams('type=INCIDENT')).type, 'INCIDENT')
-  const errors = validateTicket({ ...NEW_TICKET, type: 'INCIDENT', machineId: MACHINE_1, title: 'x' })
-  assert.match(errors.type, /tự động từ báo cáo của khách/)
-  const yaml = readFileSync(`${root}api-contract/drafts/work-tickets.yaml`, 'utf8').replace(/\r\n/g, '\n')
-  assert.ok(yaml.includes('enum: [RESTOCK, MAINTENANCE, INCIDENT]'))
-  assert.match(yaml, /CreateWorkTicketRequest:[\s\S]*?enum: \[RESTOCK, MAINTENANCE\]\n/)
-  assert.match(yaml, /\n {8}incidentReport:/)
-  assert.match(yaml, /contactPhone is only sent to callers holding TICKET_WRITE/)
+  assert.deepEqual(validateTicket({ ...NEW_TICKET, type: 'INCIDENT', machineId: MACHINE_1, title: 'x' }), {})
+  const yaml = readFileSync(`${root}api-contract/api.yaml`, 'utf8').replace(/\r\n/g, '\n')
+  assert.ok(yaml.includes('"CUSTOMER_REPORT"') && yaml.includes('"linkedReports"'))
 })
 
 test('incident labels, list origin, next step and photo links', () => {
   assert.equal(incidentTypeLabel('PAID_NOT_RECEIVED'), 'Đã trả tiền nhưng không nhận hàng')
   assert.equal(incidentTypeLabel('MACHINE_FAULT'), 'Máy lỗi')
   assert.equal(incidentTypeLabel('NEW_KIND'), 'NEW_KIND')
-  assert.equal(ticketOrigin({ type: 'INCIDENT', alertId: null, incidentReport: { reportCode: 'INC-20261109-7KQ2' } }), 'từ báo cáo INC-20261109-7KQ2')
-  assert.equal(ticketOrigin({ type: 'INCIDENT', alertId: null }), 'từ báo cáo của khách')
-  assert.equal(ticketOrigin({ type: 'MAINTENANCE', alertId: 'a' }), 'từ cảnh báo')
-  assert.equal(ticketOrigin({ type: 'RESTOCK', alertId: null }), '')
-  const base = { id: 't', type: 'INCIDENT', status: 'OPEN', assigneeId: null, assigneeName: null }
-  const admin = { userId: 'admin', canWrite: true }, staff = { userId: STAFF, canWrite: false }
-  assert.match(nextStepText(base, admin), /Đọc báo cáo của khách/)
+  assert.equal(ticketOrigin({ source: 'CUSTOMER_REPORT' }), 'từ phản ánh của khách')
+  assert.equal(ticketOrigin({ source: 'ALERT' }), 'từ cảnh báo')
+  assert.equal(ticketOrigin({ source: 'MANUAL' }), '')
+  const base = { id: 't', type: 'INCIDENT', status: 'OPEN' }
+  const admin = { userId: 'admin', canReadAll: true, canWrite: true, canExecute: true }, staff = { userId: STAFF, canReadAll: false, canWrite: false, canExecute: true }
+  assert.match(nextStepText(base, admin), /Chọn nhân viên phụ trách/)
   assert.deepEqual(nextActions(base, admin), ['assign', 'cancel'])
-  const working = { ...base, status: 'IN_PROGRESS', assigneeId: STAFF, assigneeName: 'Nhân viên vận hành' }
+  const working = { ...base, status: 'IN_PROGRESS', assignee: { id: STAFF, fullName: 'Nhân viên vận hành' } }
   assert.deepEqual(nextActions(working, staff), ['complete'])
   assert.match(nextStepText(working, staff), /không hoàn tiền/)
   assert.equal(safePhotoUrl('https://files.example/p.jpg?sig=1'), 'https://files.example/p.jpg?sig=1')
@@ -149,21 +145,15 @@ test('Tiêu chí xong (mock): a "đã trả nhưng không nhận hàng" report s
   assert.equal((await incidentReportsApi.list({ flagged: true, machineId: id('20000000', 2), page: 0, size: 20 })).totalElements, 0)
   await rejects(incidentReportsApi.list({ type: 'LOST', page: 0, size: 20 }), 400)
 
-  // One OPEN INCIDENT ticket per report, created by "Hệ thống", carrying the report.
-  const incidents = await ticketsApi.list({ type: 'INCIDENT', page: 0, size: 20 })
+  // One OPEN INCIDENT work order per report (source CUSTOMER_REPORT), created by the system, linking the report.
+  const incidents = await workOrdersApi.list({ type: 'INCIDENT', page: 0, size: 20 })
   assert.equal(incidents.totalElements, 4)
-  const ticket = await ticketsApi.get(paidRow.ticketId)
-  assert.equal(ticket.type, 'INCIDENT')
-  assert.equal(ticket.status, 'OPEN')
-  assert.equal(ticket.createdById, null)
-  assert.equal(ticket.createdByName, 'Hệ thống')
-  assert.equal(ticket.machineId, MACHINE_1)
+  const ticket = await workOrdersApi.get(paidRow.ticketId)
+  assert.deepEqual([ticket.type, ticket.status, ticket.source, ticket.createdBy, ticket.machineId], ['INCIDENT', 'OPEN', 'CUSTOMER_REPORT', null, MACHINE_1])
   assert.match(ticket.title, /^Sự cố: Đã trả tiền nhưng không nhận hàng · máy DEV-MACHINE-01$/)
-  assert.equal(ticket.incidentReport.reportCode, paid.reportCode)
-  assert.equal(ticket.incidentReport.orderCode, paidCode)
-  assert.equal(ticket.incidentReport.orderFlagged, true)
-  assert.equal(ticket.incidentReport.contactPhone, '0912345678')
-  assert.equal(ticket.incidentReport.description, 'Cửa không mở')
+  assert.equal(ticket.description, 'Cửa không mở')
+  assert.deepEqual(ticket.linkedReports.map(row => [row.code, row.type]), [[paid.reportCode, 'PAID_NOT_RECEIVED']])
+  assert.ok(!('contactPhone' in ticket.linkedReports[0]), 'no contact on the work order')
 
   // Refunding the failed order takes its report off the list; the PAID one stays (BR-15: the report changed nothing).
   await refundsApi.record(ORDER_FAILED, { transferRef: 'FT26316000000009', paymentId: PAY_FAILED })
@@ -174,29 +164,25 @@ test('Tiêu chí xong (mock): a "đã trả nhưng không nhận hàng" report s
   await rejects(refundsApi.record(ORDER_PAID, { transferRef: 'FT26316000000010', paymentId: id('a0000000', 6) }), 409)
 })
 
-test('mock: admins cannot create INCIDENT tickets by hand; STAFF never read the report list and only see INCIDENT tickets given to them, without the phone', async () => {
+test('mock: STAFF never read the report list and only see the INCIDENT work orders given to them; same lifecycle as the others', async () => {
   const state = setup()
   await signIn(state, 'admin')
-  await rejects(ticketsApi.create({ type: 'INCIDENT', machineId: MACHINE_1, title: 'Sự cố tự tạo' }), 400, error => !!error.fieldErrors.type)
   const mine = await report(state, { type: 'MACHINE_FAULT', description: 'Màn hình đen', contactPhone: '0987654321' })
   const other = await report(state, { type: 'OTHER', description: 'Khay bẩn' })
-  const tickets = (await ticketsApi.list({ type: 'INCIDENT', page: 0, size: 20 })).content
-  const mineTicket = tickets.find(ticket => ticket.incidentReport.reportCode === mine.reportCode)
-  const otherTicket = tickets.find(ticket => ticket.incidentReport.reportCode === other.reportCode)
-  await ticketsApi.assign(mineTicket.id, { assigneeId: STAFF })
-  await ticketsApi.assign(otherTicket.id, { assigneeId: id('11000000', 7) })
+  const orders = (await workOrdersApi.list({ type: 'INCIDENT', page: 0, size: 20 })).content
+  const mineOrder = orders.find(row => row.linkedReports[0]?.code === mine.reportCode)
+  const otherOrder = orders.find(row => row.linkedReports[0]?.code === other.reportCode)
+  await workOrdersApi.assign(mineOrder.id, { assigneeId: STAFF, version: mineOrder.version })
+  await workOrdersApi.assign(otherOrder.id, { assigneeId: id('11000000', 7), version: otherOrder.version })
 
   await signIn(state, 'staff')
-  await rejects(incidentReportsApi.list({ flagged: true, page: 0, size: 20 }), 403)
-  const seen = (await ticketsApi.list({ type: 'INCIDENT', page: 0, size: 20 })).content
-  assert.deepEqual(seen.map(ticket => ticket.id), [mineTicket.id])
-  assert.equal(seen[0].incidentReport.contactPhone, null)
-  assert.equal(seen[0].incidentReport.description, 'Màn hình đen')
-  await rejects(ticketsApi.get(otherTicket.id), 404)
-  // Same lifecycle as the other tickets.
-  const started = await ticketsApi.start(mineTicket.id)
+  const seen = (await workOrdersApi.mine({ page: 0, size: 20 })).content.filter(row => row.type === 'INCIDENT')
+  assert.deepEqual(seen.map(row => row.id), [mineOrder.id])
+  await rejects(workOrdersApi.get(otherOrder.id), 404)
+  const started = await workOrdersApi.start(mineOrder.id)
   assert.equal(started.status, 'IN_PROGRESS')
-  assert.equal(started.incidentReport.contactPhone, null)
-  const done = await ticketsApi.complete(mineTicket.id, { note: 'Khởi động lại bộ điều khiển, màn hình sáng lại.' })
-  assert.equal(done.status, 'COMPLETED')
+  const done = await workOrdersApi.complete(mineOrder.id, { resultNote: 'Khởi động lại bộ điều khiển, màn hình sáng lại.' })
+  assert.equal(done.status, 'DONE')
+  // FM8 (customer reports, not migrated yet): the draft list still expects STAFF to be refused.
+  await rejects(incidentReportsApi.list({ flagged: true, page: 0, size: 20 }), 403)
 })

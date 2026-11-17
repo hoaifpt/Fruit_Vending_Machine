@@ -92,24 +92,21 @@ test.describe('Quản trị (1440)', () => {
     await expect(listRow).toContainText('17.500 ₫Đã giảm 17.500 ₫')
   })
 
-  test('I2: hộp cận hạn có nhãn -50% và giá bán kèm giá gốc gạch; hộp còn hạn xa giữ chỗ nhãn trống', async ({ page }) => {
+  test('I2: hộp có lô hết hạn hôm nay mang nhãn “Giảm giá hôm nay” (discountEligibleToday, không có giá); khối cài đặt giảm giá', async ({ page }) => {
     await page.goto(`/admin/inventory?machineId=${MACHINE_1}`)
     await expect(column(page, 'B1')).toContainText('Đang chặn ngăn')
-    const tags = column(page, 'A2').locator('[data-discount-slot]')
+    const tags = column(page, 'A2').locator('[data-box-discount]')
     await expect(tags).toHaveCount(6)
-    for (const tag of await tags.all()) await expect(tag).toHaveText('-50%')
-    const price = column(page, 'A2').locator('[data-box-price]').first()
-    await expect(price).toContainText('12.500 ₫')
-    await expect(price.locator('s')).toHaveText('25.000 ₫')
-    // Screen readers get the discount in words with the box description.
-    await expect(column(page, 'A2').locator('li[data-head] .sr-only').first()).toContainText('giảm giá hộp cận hạn: Giá 12.500 ₫, giá gốc 25.000 ₫, giảm 50%')
-    await expect(column(page, 'A1').locator('[data-discount-slot]').first()).toHaveText('')
-    await expect(column(page, 'A1').locator('[data-box-price]')).toHaveCount(0)
+    for (const tag of await tags.all()) await expect(tag).toHaveText('Giảm giá hôm nay')
+    // Screen readers get the label with the box description; no price is shown on a box (the API has none).
+    await expect(column(page, 'A2').locator('li[data-head] .sr-only').first()).toContainText('giảm giá hôm nay')
+    await expect(column(page, 'A1').locator('[data-box-discount]')).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Giảm giá hộp hết hạn trong ngày' })).toContainText('giảm 50 %')
 
     await page.getByRole('button', { name: 'Danh sách hộp' }).click()
     const table = page.getByRole('table', { name: 'Danh sách hộp' })
-    await expect(table.getByRole('columnheader', { name: 'Giá bán' })).toBeVisible()
-    await expect(table.locator('[data-price-discounted]').first()).toContainText('12.500 ₫Giá gốc 25.000 ₫-50%')
+    await expect(table.getByRole('columnheader', { name: 'Giảm giá' })).toBeVisible()
+    await expect(table.locator('[data-box-discount]').first()).toHaveText('Giảm giá hôm nay')
   })
 })
 
@@ -120,6 +117,6 @@ for (const theme of THEMES) {
     await page.goto(`/admin/orders/${ORDER_DISCOUNTED}`)
     await auditScreen(page, testInfo, 'order-discount', theme, () => expect(lines(page).locator('[data-price-discounted]')).toBeVisible())
     await page.goto(`/admin/inventory?machineId=${MACHINE_1}`)
-    await auditScreen(page, testInfo, 'inventory-discount', theme, () => expect(column(page, 'A2').locator('[data-box-price]').first()).toBeVisible())
+    await auditScreen(page, testInfo, 'inventory-discount', theme, () => expect(column(page, 'A2').locator('[data-box-discount]').first()).toBeVisible())
   })
 }

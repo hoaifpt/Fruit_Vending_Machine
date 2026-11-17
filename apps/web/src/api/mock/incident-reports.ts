@@ -1,11 +1,13 @@
 // Mock of the public incident report (FE 8.2, draft api-contract/drafts/incident-reports.yaml, backend 5.2).
 // The multipart body arrives as a plain object (fetcher.ts turns FormData into { field: string | MockUploadedFile }).
-// Reports are kept in store.incidentReports and, as the backend would (FE 8.3), each one opens an OPEN INCIDENT work
-// ticket in store.tickets; orders, payments, inventory and machines never change (BR-15). GET /incident-reports is the
+// Reports are kept in store.incidentReports and, as the backend does (#74), each one opens an OPEN INCIDENT work order
+// (source CUSTOMER_REPORT) in store.workOrders; orders, payments, inventory and machines never change (BR-15). GET /incident-reports is the
 // admin read of W-12 ("Cần hoàn tiền" lists the flagged ones).
 import { created, Form, MockHttpError, ok, paginate } from './http.ts'
 import type { Route, HandlerContext } from './handlers.ts'
-import type { MockStore, MockTicket } from './seed.ts'
+import type { MockStore } from './seed.ts'
+import { createWorkOrder } from './work-orders.ts'
+import type { MockWorkOrder } from './work-orders.ts'
 import type { components } from '../drafts/incident-reports'
 
 type D = components['schemas']
@@ -97,23 +99,15 @@ function createReport(ctx: HandlerContext) {
   return created(receipt)
 }
 
-/** Same transaction as the report on the backend: one OPEN INCIDENT ticket, no assignee, created by "Hệ thống". */
-export function openIncidentTicket(store: MockStore, report: MockIncidentReport, machineName: string | null): MockTicket {
-  const ticket: MockTicket = {
-    id: crypto.randomUUID(), type: 'INCIDENT', status: 'OPEN', title: `Sự cố: ${TYPE_TITLES[report.type]} · máy ${report.machineCode}`.slice(0, 200),
-    description: report.description, machineId: report.machineId, machineCode: report.machineCode, machineName, alertId: null, dueAt: null,
-    assigneeId: null, assigneeName: null, createdById: null, createdByName: 'Hệ thống',
-    assignedAt: null, assignedById: null, assignedByName: null, startedAt: null, startedById: null, startedByName: null,
-    completedAt: null, completedById: null, completedByName: null, completionNote: null,
-    cancelledAt: null, cancelledById: null, cancelledByName: null, cancelReason: null, createdAt: report.createdAt, updatedAt: report.createdAt,
-    incidentReport: {
-      id: report.id, reportCode: report.reportCode, type: report.type, orderId: report.orderId, orderCode: report.orderCode, orderFlagged: report.orderFlagged,
-      description: report.description, contactPhone: report.contactPhone, hasPhoto: !!report.photo, photoUrl: null, createdAt: report.createdAt,
-    },
-  }
-  store.tickets.push(ticket)
-  report.ticketId = ticket.id
-  return ticket
+/** Same transaction as the report on the backend: one OPEN INCIDENT work order, no assignee, created by the system. */
+export function openIncidentTicket(store: MockStore, report: MockIncidentReport, _machineName: string | null): MockWorkOrder {
+  const order = createWorkOrder(store, {
+    type: 'INCIDENT', source: 'CUSTOMER_REPORT', machineId: report.machineId, title: `Sự cố: ${TYPE_TITLES[report.type]} · máy ${report.machineCode}`.slice(0, 200),
+    description: report.description, priority: report.orderFlagged ? 'HIGH' : 'NORMAL', createdById: null,
+    linkedReports: [{ id: report.id, code: report.reportCode, type: report.type, verdict: report.orderFlagged ? 'REFUND_CANDIDATE' : 'UNVERIFIED', status: 'NEW' }],
+  }, Date.parse(report.createdAt))
+  report.ticketId = order.id
+  return order
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

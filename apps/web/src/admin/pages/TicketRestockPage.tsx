@@ -1,22 +1,21 @@
-// O4 Thực hiện phiếu nạp hàng (FE 7.2), made for a phone at the machine (390 px): one step per screen block with a
-// progress bar: (1) start the ticket and open the refill door (OPEN_REFILL, machine in MAINTENANCE), (2) take out
-// expired or damaged bowls, (3) load each line, (4) close the door (CLOSE_REFILL), (5) reconcile plan and result, then
-// complete; the server closes the related LOW_STOCK alerts and the screen says how many, with links.
-// Route /admin/tickets/:id/restock (its own screen rather than a mode of the detail page: a phone needs the whole width
-// for one step, a URL that resumes after a reload, and the detail page stays the same for every ticket type).
-// The step always follows server data (ticket and lines, the machine's maintenance command history, the bowls of the
-// lines' slots: restock.ts), so a reload lands on the right step; while the door is open the person may move between
-// "Rút hộp", "Nạp theo dòng" and "Đóng cửa nạp". Bowls are taken out by hand while the door is open and recorded through
-// the ticket (rules of POST /inventory/{id}/remove, FE 4.3), not with REMOVE_ITEM: that command needs the machine to drop
-// the bottom bowl into the service tray one at a time, which it does not do while the refill door is open.
-// Drafts: api-contract/drafts/work-tickets.yaml (BE 4.4) and machine-maintenance.yaml (BE 4.2). Nothing is deleted.
+// O4 Thực hiện phiếu nạp hàng (FE 7.2), made for a phone at the machine (390 px): one step per block with a progress bar:
+// (1) start the work order (the machine goes MAINTENANCE), (2) take the old bowls out with maintenance commands linked to
+// the work order (REMOVE_ITEM / EMPTY_COLUMN with a reason), (3) load each planned line from one batch (opening the refill
+// gate of the column when needed), (4) close every refill gate (CLOSE_REFILL), (5) compare plan and result, give a reason
+// for every line loaded ≠ planned, and complete. Route /admin/tickets/:id/restock.
+// API (api-contract/api.yaml, backend #64/#66/#68): GET /work-orders/{id}/restock (lines, loads, linked commands, bowls
+// removed by reason), POST .../restock-lines/{lineId}/loads (RESTOCK_EXECUTE, IN_PROGRESS, the assignee or an Admin),
+// POST /machines/{machineId}/slots/{slotId}/maintenance-commands with workOrderId and an Idempotency-Key, POST /complete
+// with lineVariances. RESTOCK_PLAN (Admin) also plans the lines here (add, change, take out while nothing was loaded).
+// The step always follows server data (work order, lines, the machine's slots and running command: restock.ts), so a
+// reload lands on the right step. Nothing is deleted: bowls taken out stay in the history as REMOVED.
 import { useEffect, useId, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import { Check, Lock as LockIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { ApiError } from '../../api/client.ts'
-import { alertsApi, batchesApi, inventoryApi, machinesApi, maintenanceCommandsApi, slotsApi, ticketsApi } from '../../api/resources.ts'
-import type { Batch, InventoryItem, InventorySummary, Machine, MaintenanceCommand, MaintenanceCommandType, RestockLine, WorkTicket } from '../../api/resources.ts'
+import { batchesApi, machinesApi, maintenanceCommandsApi, restockApi, slotsApi, workOrdersApi } from '../../api/resources.ts'
+import type { Batch, InventorySummary, LinkedMaintenanceCommand, Machine, MaintenanceCommand, MaintenanceReason, RestockLine, RestockView, Slot, WorkOrder } from '../../api/resources.ts'
 import { Button } from '../../components/ui/button.tsx'
 import { FormField } from '../../components/ui/form-field.tsx'
 import { Input, NativeSelect, Textarea } from '../../components/ui/input.tsx'
@@ -29,79 +28,57 @@ import { CONNECTION_POLL_MS } from '../connection.ts'
 import { ValidationError } from '../form-error.ts'
 import { fitConflictText, parseBoxCount, quantityHint, roomLines } from '../inventory-load.ts'
 import type { FitConflict, LoadRoom, Reload } from '../inventory-load.ts'
-import { ConfirmDialog, ErrorState, Link, Loading, PageHead } from '../kit.tsx'
+import { ConfirmDialog, ErrorState, Link, Loading, PageHead, useForm } from '../kit.tsx'
 import {
-  COMMAND_INFO, MAINTENANCE_IDLE_POLL_MS, MAINTENANCE_MISSING, MAINTENANCE_POLL_MS, commandStatusLabel, commandStatusText, failureText,
-  isMaintenanceMissing, machineLock, needsRefresh, runningCommand, sendMaintenanceCommand,
+  COMMAND_INFO, MAINTENANCE_IDLE_POLL_MS, MAINTENANCE_POLL_MS, REASON_OPTIONS, commandLabel, commandStatusLabel, commandStatusText, createAttempts,
+  isMaintenanceMissing, machineLock, needsRefresh, reasonLabel, runningCommand, sendMaintenanceCommand, slotPlan,
 } from '../maintenance-commands.ts'
-import type { Lock } from '../maintenance-commands.ts'
+import type { ColumnOperation, Lock } from '../maintenance-commands.ts'
+import { ReconcileDialog } from '../maintenance-parts.tsx'
+import { useProductOptions } from '../options.ts'
 import {
-  NOTE_MAX, REMOVE_REASONS, RESTOCK_STEPS, STEP_LABELS, bowls, commandHistoryState, defaultQuantity, describeCompleteError, differenceText, describeLineLoadError,
-  describeLineRemoveError, hasRestockLines, leftToLoad, lineLoadBody, lineQuantityProblem, lineRemoveBody, reconcile, refillSince, refillText,
-  removalPlan, resolvedText, restockCompleteBody, restockStep, shownStep, stepProgress, stepState,
+  NEW_LINE, RESTOCK_STEPS, STEP_LABELS, bowls, columnState, columnText, defaultQuantity, describeCompleteError, describeLineLoadError, describePlanError,
+  differenceText, leftToLoad, lineInputBody, lineLoadBody, lineQuantityProblem, linkedAttention, openGates, reconcile, removedText, restockCompleteBody,
+  restockStep, shownStep, stepProgress, stepState, updateLineBody, validateLine, varianceField,
 } from '../restock.ts'
-import type { RemovalPlan, RestockStep, RestockStepKey } from '../restock.ts'
-import { TICKETS_MISSING, TICKET_NOT_FOUND, assigneeText, isMine, ticketActionError, ticketPath, ticketsAvailability } from '../tickets.ts'
+import type { LineValues, RestockStep, RestockStepKey } from '../restock.ts'
+import { TICKET_LIMITS, assigneeText, isClosed, mayExecute, ticketActionError, ticketPath } from '../tickets.ts'
 import type { TicketViewer } from '../tickets.ts'
 import { errorMessage, useApi } from '../useApi.ts'
 import type { ApiState } from '../useApi.ts'
 import { useConnection } from '../useConnection.ts'
 import { useSession } from '../useSession.ts'
 import { useTicketViewer } from '../useTicketViewer.ts'
+import { TicketUnavailable, loadTicket } from '../work-order-load.ts'
 
 const PANEL = 'min-w-0 rounded-xl border bg-card p-4 shadow-xs sm:p-5'
 const ERROR_BOX = 'rounded-lg border border-destructive/30 bg-destructive/8 px-3.5 py-2.5 text-[13px] text-destructive'
 const NOTE_BOX = 'rounded-lg border bg-muted/40 px-3.5 py-2.5 text-[13px]'
+const CARD = 'grid gap-3 rounded-lg border px-3.5 py-3'
 /** Touch targets of at least 44 px; full width on a phone. */
 const BIG = 'h-11 w-full sm:w-auto'
 const LINK = 'font-medium text-primary underline underline-offset-4 focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+const HEADING = 'font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
 const MACHINE_POLL_MS = 10_000
 /** Read in event handlers only (render stays pure). */
 const clock = () => Date.now()
 /** Focus fell back to the page (the focused control was removed from the screen). */
 const lostFocus = () => !document.activeElement || document.activeElement === document.body
 
-class TicketUnavailable extends Error {
-  readonly kind: 'missing' | 'not-found'
-  constructor(kind: 'missing' | 'not-found') { super(kind === 'missing' ? TICKETS_MISSING : TICKET_NOT_FOUND); this.kind = kind }
-}
-/** GET /work-tickets/{id}; on 404 one list probe tells an unknown (or someone else's) id from a backend without BE 4.3. */
-async function loadTicket(ticketId: string, signal: AbortSignal): Promise<WorkTicket> {
-  try { return await ticketsApi.get(ticketId, signal) } catch (error) {
-    const code = error instanceof ApiError ? error.status : undefined
-    if (code === 405 || code === 501) throw new TicketUnavailable('missing')
-    if (code === 400) throw new TicketUnavailable('not-found')
-    if (code !== 404) throw error
-    let probe: unknown
-    try { await ticketsApi.list({ page: 0, size: 1 }, signal) } catch (listError) { probe = listError }
-    throw new TicketUnavailable(probe !== undefined && ticketsAvailability(probe) === 'missing' ? 'missing' : 'not-found')
-  }
-}
-
-interface SlotStock { summary: InventorySummary; items: InventoryItem[] }
-/** Free places and the AVAILABLE / EXPIRED bowls of every line's slot (the bowls that may be taken out). */
-async function loadStock(machineId: string, lines: readonly RestockLine[], signal: AbortSignal): Promise<Record<string, SlotStock>> {
-  const entries = await Promise.all(lines.map(async line => {
-    const [summary, available, expired] = await Promise.all([
-      slotsApi.summary(machineId, line.slotId, signal),
-      inventoryApi.list({ machineId, slotId: line.slotId, status: 'AVAILABLE', page: 0, size: 100 }, signal),
-      inventoryApi.list({ machineId, slotId: line.slotId, status: 'EXPIRED', page: 0, size: 100 }, signal),
-    ])
-    const stock: SlotStock = { summary, items: [...available.content, ...expired.content] }
-    return [line.id, stock] as [string, SlotStock]
-  }))
+/** Free places and old bowls of every line's slot. */
+async function loadSummaries(machineId: string, slotIds: readonly string[], signal: AbortSignal): Promise<Record<string, InventorySummary>> {
+  const entries = await Promise.all(slotIds.map(async slotId => [slotId, await slotsApi.summary(machineId, slotId, signal)] as const))
   return Object.fromEntries(entries)
 }
-
 interface LineBatches { byProduct: Record<string, Batch[]>; counts: Record<string, LoadedCount> }
 /** Loadable batches of each line's product (earliest expiry first) and how many bowls each has already given. */
-async function loadBatches(lines: readonly RestockLine[], now: number, signal: AbortSignal): Promise<LineBatches> {
-  const products = [...new Set(lines.map(line => line.productId))]
-  const pages = await Promise.all(products.map(productId => batchesApi.list({ productId, page: 0, size: 100, sort: 'expiresAt,asc' }, signal)))
-  const byProduct = Object.fromEntries(products.map((productId, index) => [productId, pages[index].content.filter(batch => Date.parse(batch.expiresAt ?? '') > now)]))
+async function loadBatches(productIds: readonly string[], now: number, signal: AbortSignal): Promise<LineBatches> {
+  const pages = await Promise.all(productIds.map(productId => batchesApi.list({ productId, page: 0, size: 100, sort: 'expiresAt,asc' }, signal)))
+  const byProduct = Object.fromEntries(productIds.map((productId, index) => [productId, pages[index].content.filter(batch => Date.parse(batch.expiresAt ?? '') > now)]))
   const counts = await countLoaded(Object.values(byProduct).flat().map(batch => batch.id!).filter(Boolean), signal)
   return { byProduct, counts }
 }
+const unique = <T,>(values: T[]) => [...new Set(values)]
 
 const BACK_LIST = { to: '/admin/tickets', label: 'Danh sách phiếu công việc' }
 
@@ -120,12 +97,10 @@ function TicketRestockPage({ ticketId }: { ticketId: string }) {
   }
   if (!ticket) return <><PageHead title="Thực hiện nạp hàng" back={BACK_LIST} /><Loading label="Đang tải phiếu nạp hàng…" rows={5} /></>
   const back = { to: ticketPath(ticket.id), label: 'Chi tiết phiếu' }
-  if (!hasRestockLines(ticket)) return <>
-    <PageHead title={ticket.title} back={back} subtitle={`Máy ${ticket.machineCode}`} />
+  if (ticket.type !== 'RESTOCK') return <>
+    <PageHead title={ticket.title ?? 'Phiếu công việc'} back={back} subtitle={`Máy ${ticket.machineCode}`} />
     <div role="status" className={cn(PANEL, 'grid gap-3 text-[14px]')}>
-      <p>{ticket.type === 'RESTOCK'
-        ? 'Phiếu này chưa có dòng nạp hàng (ngăn nào, bao nhiêu hộp) nên không làm theo từng bước được.'
-        : 'Đây là phiếu bảo trì, không phải phiếu nạp hàng.'}</p>
+      <p>Đây không phải phiếu nạp hàng nên không làm theo từng bước ở đây.</p>
       <p className="text-muted-foreground">Làm việc tại máy rồi bấm “Hoàn tất” ở trang chi tiết phiếu và ghi lại đã làm gì.</p>
       <p><Button asChild variant="outline" className={BIG}><Link to={back.to}>Về chi tiết phiếu</Link></Button></p>
     </div>
@@ -133,58 +108,65 @@ function TicketRestockPage({ ticketId }: { ticketId: string }) {
   return <RestockRun ticket={ticket} reloadTicket={state.reload} back={back} />
 }
 
-function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reloadTicket: () => void; back: { to: string; label: string } }) {
+function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkOrder; reloadTicket: () => void; back: { to: string; label: string } }) {
   const viewer = useTicketViewer()
   const { can } = useSession()
-  const machineId = ticket.machineId
-  const lines = ticket.restockLines ?? []
-  const mine = isMine(ticket, viewer)
-  const lineKey = lines.map(line => `${line.id}:${line.loadedQuantity}:${line.removedQuantity}`).join(',')
+  const ticketId = ticket.id!, machineId = ticket.machineId!
+  // Bumped after every change at the machine: everything below reads again.
+  const [tick, setTick] = useState(0)
+  const refresh = () => setTick(value => value + 1)
+  const view = useApi(signal => restockApi.view(ticketId, signal), `restock-view|${ticketId}|${ticket.version}|${ticket.updatedAt}|${tick}`)
+  const lines = view.data?.lines ?? []
+  const lineKey = lines.map(line => `${line.id}:${line.loadedQuantity}:${line.plannedQuantity}:${line.productId}`).join(',')
 
-  // Maintenance command history: every 2 s while a command runs, else every 30 s.
+  // The machine's newest maintenance command: every 2 s while one runs, else every 30 s.
   const [fast, setFast] = useState(false)
-  const commands = useApi(signal => maintenanceCommandsApi.list(machineId, { page: 0, size: 10 }, signal), `restock-commands|${machineId}`,
+  const commands = useApi(signal => maintenanceCommandsApi.list({ machineId, page: 0, size: 1 }, signal), `restock-commands|${machineId}`,
     { pollMs: fast ? MAINTENANCE_POLL_MS : MAINTENANCE_IDLE_POLL_MS, stopOn: isMaintenanceMissing })
   const [sent, setSent] = useState<MaintenanceCommand | null>(null)
-  const listed = !!sent && !!commands.data?.content.some(command => command.id === sent.id || command.createdAt > sent.createdAt)
-  const running = runningCommand(commands.data?.content.slice(0, 1)) ?? (sent && !listed ? sent : undefined)
+  const listed = !!sent && !!commands.data?.content.some(command => command.id === sent.id || (command.createdAt ?? '') > (sent.createdAt ?? ''))
+  const running = runningCommand(commands.data?.content) ?? (sent && !listed ? sent : undefined)
   if (commands.data && fast !== !!running) setFast(!!running)
   const missing = isMaintenanceMissing(commands.error) && !commands.data
 
-  const machine = useApi(signal => machinesApi.get(machineId, signal), `restock-machine|${machineId}`, { pollMs: Math.min(MACHINE_POLL_MS, CONNECTION_POLL_MS) })
+  const machine = useApi(signal => machinesApi.get(machineId, signal), `restock-machine|${machineId}|${tick}`, { pollMs: Math.min(MACHINE_POLL_MS, CONNECTION_POLL_MS) })
   const shown = useConnection(machine.data?.lastSeenAt, machine, machine.data?.connectivity)
-  const stock = useApi(signal => loadStock(machineId, lines, signal), `restock-stock|${ticket.id}|${lineKey}`)
+  const slots = useApi(signal => slotsApi.list(machineId, { page: 0, size: 100 }, signal), `restock-slots|${machineId}|${tick}`)
+  const slotIds = unique(lines.map(line => line.slotId ?? '')).filter(Boolean)
+  const summaries = useApi(signal => loadSummaries(machineId, slotIds, signal), `restock-summaries|${slotIds.join(',')}|${lineKey}|${tick}`)
   const [batchNow] = useState(() => Date.now())
-  const batches = useApi(signal => loadBatches(lines, batchNow, signal), `restock-batches|${ticket.id}|${lineKey}`)
+  const productIds = unique(lines.map(line => line.productId ?? '')).filter(Boolean)
+  const batches = useApi(signal => loadBatches(productIds, batchNow, signal), `restock-batches|${productIds.join(',')}|${lineKey}|${tick}`)
 
-  // A command that just ended may have changed the door or the bowls: read everything again. Its "Đang chờ máy…" block
-  // (which had focus after sending) is gone: when focus fell back to the page, put it on the step heading.
+  // A command that just ended may have changed the gates or the bowls: read everything again, and put focus back on the
+  // step heading when the block that had it ("Đang chờ máy…") went away.
   const lastRunning = useRef<string | undefined>(undefined)
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const { reload: reloadCommands } = commands, { reload: reloadStock } = stock, { reload: reloadMachine } = machine
   useEffect(() => {
     if (lastRunning.current && !running) {
-      reloadCommands(); reloadStock(); reloadMachine()
+      setTick(value => value + 1)
       if (lostFocus()) headingRef.current?.focus()
     }
     lastRunning.current = running?.id
-  }, [running, reloadCommands, reloadStock, reloadMachine])
+  }, [running])
 
-  const plans: Record<string, RemovalPlan> = Object.fromEntries(lines.map(line => [line.id, removalPlan(stock.data?.[line.id]?.items ?? [], stock.updatedAt ?? 0)]))
-  const expiredLeft = stock.data ? Object.values(plans).reduce((total, plan) => total + plan.expired.length, 0) : undefined
-  const derived = restockStep({ status: ticket.status, startedAt: ticket.startedAt, lines, commands: commands.data?.content, expiredLeft, doorByHand: missing })
+  const gates = openGates(slots.data?.content)
+  const derived = restockStep({ status: ticket.status, lines, gatesOpen: gates.length, running })
   const [chosen, setChosen] = useState<RestockStepKey | null>(null)
-  const step = shownStep(derived, chosen, missing)
-  const history = commandHistoryState({ status: ticket.status, loaded: !!commands.data, error: commands.error, missing })
-  const refill = refillSince(commands.data?.content, ticket.startedAt)
-
+  const step = shownStep(derived, chosen, gates.length)
+  const executes = mayExecute(ticket, viewer) && !!ticket.assignee?.id
+  const canLoad = executes && can('RESTOCK_EXECUTE')
+  const canPlan = can('RESTOCK_PLAN') && !isClosed(ticket)
   const lock = machineLock({
     canMaintain: can('MAINTENANCE_COMMAND_EXECUTE'), canChangeStatus: can('MACHINE_WRITE'), machineStatus: machine.data?.status ?? 'ACTIVE',
     connection: shown.shown, neverConnected: shown.never, running, missing,
   })
   const lockRef = useRef<HTMLDivElement>(null)
+  const waitRef = useRef<HTMLParagraphElement>(null)
+  const [attempts] = useState(createAttempts)
   const [busy, setBusy] = useState<string | null>(null)
   const [failureOf, setFailureOf] = useState<{ step: RestockStep; text: string } | null>(null)
+  const [reconciling, setReconciling] = useState<LinkedMaintenanceCommand | null>(null)
 
   // Focus the step heading when the step changes (not on first render), so keyboard and screen reader users follow.
   const previous = useRef<RestockStep | null>(null)
@@ -192,20 +174,8 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
     if (previous.current && previous.current !== step) headingRef.current?.focus()
     previous.current = step
   }, [step])
-  // The button just used is replaced (Bắt đầu → "Đã bắt đầu…", Mở cửa → "Đang chờ máy…"): move focus to what replaced
-  // it, so keyboard and screen reader users do not land back at the top of the page.
-  const waitRef = useRef<HTMLParagraphElement>(null)
-  const openRef = useRef<HTMLButtonElement>(null)
-  const focusNext = useRef<'started' | 'sent' | null>(null)
-  useEffect(() => {
-    if (focusNext.current === 'started' && ticket.status !== 'ASSIGNED') {
-      focusNext.current = null
-      ;(lockRef.current ?? openRef.current ?? headingRef.current)?.focus()
-    } else if (focusNext.current === 'sent' && waitRef.current) {
-      focusNext.current = null
-      waitRef.current.focus()
-    }
-  })
+  const focusWait = useRef(false)
+  useEffect(() => { if (focusWait.current && waitRef.current) { focusWait.current = false; waitRef.current.focus() } })
   // A failure belongs to the step it happened on: moving to another step hides it.
   const failure = failureOf?.step === step ? failureOf.text : ''
   const setFailure = (text: string) => setFailureOf(text ? { step, text } : null)
@@ -214,67 +184,73 @@ function RestockRun({ ticket, reloadTicket, back }: { ticket: WorkTicket; reload
     if (busy) return
     setBusy('start'); setFailure('')
     try {
-      await ticketsApi.start(ticket.id)
-      toast.success('Đã bắt đầu phiếu', { description: `Máy ${ticket.machineCode}` })
-      focusNext.current = 'started'; reloadTicket()
+      await workOrdersApi.start(ticketId)
+      toast.success('Đã bắt đầu phiếu', { description: `Máy ${ticket.machineCode} chuyển sang Bảo trì.` })
+      reloadTicket(); refresh()
     } catch (error) {
       setFailure(errorMessage(ticketActionError(error, 'start', 'detail')))
-      if (error instanceof ApiError && (error.status === 409 || error.status === 403)) reloadTicket()
+      if (error instanceof ApiError && (error.status === 409 || error.status === 404)) reloadTicket()
     } finally { setBusy(null) }
   }
-  async function send(type: MaintenanceCommandType) {
-    if (busy) return
-    if (lock) { lockRef.current?.focus(); return }
-    setBusy(type); setFailure('')
+  /** One column command linked to this work order (old bowls out, refill gate). Returns whether it was sent. */
+  async function send(operation: ColumnOperation, slot: { id?: string; slotCode?: string }, reason?: MaintenanceReason, note?: string): Promise<boolean> {
+    if (busy) return false
+    if (lock) { lockRef.current?.focus(); return false }
+    setBusy(`${operation}|${slot.id}`); setFailure('')
     try {
-      const command = await sendMaintenanceCommand(machineId, type, { reason: `Phiếu nạp hàng: ${ticket.title}` })
-      focusNext.current = 'sent'; setSent(command); reloadCommands()
-      toast.success(`Đã gửi lệnh “${COMMAND_INFO[type].label}”`, { description: `Máy ${ticket.machineCode}. Chờ máy báo xong.` })
+      const command = await sendMaintenanceCommand(attempts, machineId, slot.id!, operation, { reason, note, workOrderId: ticketId })
+      focusWait.current = true; setSent(command); commands.reload()
+      toast.success(`Đã gửi lệnh “${COMMAND_INFO[operation].label}”`, { description: `Ngăn ${slot.slotCode}. Chờ máy báo xong.` })
+      return true
     } catch (error) {
       setFailure(errorMessage(error))
-      if (needsRefresh(error)) { reloadMachine(); reloadCommands() }
+      if (needsRefresh(error)) { machine.reload(); commands.reload(); refresh(); reloadTicket() }
+      return false
     } finally { setBusy(null) }
   }
-  const go = (next: RestockStepKey) => { setChosen(next) }
-  const readOnly = !mine
+  const go = (next: RestockStepKey) => setChosen(next)
   const progress = stepProgress(step)
+  const attention = linkedAttention(view.data?.maintenanceCommands)
+  const commandBlock = { lock, lockRef, reloadMachine: machine.reload, running, waitRef, attention, reconcile: setReconciling }
 
+  const readOnly = !executes
   return <>
-    <PageHead title={ticket.title} back={back} subtitle={`Nạp hàng · máy ${ticket.machineCode}${ticket.machineName ? ` · ${ticket.machineName}` : ''}`} />
+    <PageHead title={ticket.title ?? 'Phiếu nạp hàng'} back={back} subtitle={`Nạp hàng · ${ticket.code ?? ''} · máy ${ticket.machineCode}${ticket.machineName ? ` · ${ticket.machineName}` : ''}`} />
     <div className="mx-auto grid max-w-2xl gap-4">
       <StepBar step={step} progress={progress} />
-      {readOnly && <p role="status" className={NOTE_BOX}>
-        Phiếu này giao cho <strong className="font-medium">{assigneeText(ticket)}</strong>; chỉ người được giao mới thực hiện các bước. Bạn đang xem tiến độ.
+      {readOnly && !isClosed(ticket) && <p role="status" className={NOTE_BOX}>
+        {ticket.assignee?.id
+          ? <>Phiếu này giao cho <strong className="font-medium">{assigneeText(ticket)}</strong>; chỉ người được giao (hoặc quản trị viên) thực hiện các bước. Bạn đang xem tiến độ.</>
+          : 'Phiếu chưa có người phụ trách nên chưa thực hiện được. Quản trị viên phân công ở trang chi tiết phiếu.'}
       </p>}
-      {history === 'loading' ? <Loading label="Đang đọc lịch sử lệnh của máy để biết đang ở bước nào…" rows={3} />
-        : history === 'failed' ? <section className={PANEL} aria-labelledby="restock-history-error">
-          <h2 id="restock-history-error" ref={headingRef} tabIndex={-1} className="mb-1 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Chưa biết phiếu đang ở bước nào</h2>
-          <p className="text-[13px] text-muted-foreground">Không đọc được lịch sử lệnh của máy (mở, đóng cửa nạp) nên chưa xác định được cửa nạp đang mở hay đã đóng. Số hộp đã nạp, đã rút trong phiếu vẫn được giữ trên máy chủ.</p>
-          <ErrorState error={commands.error} retry={reloadCommands} />
-        </section>
+      {canPlan && view.data && <PlanPanel ticket={ticket} machineId={machineId} lines={lines} slots={slots.data?.content} changed={() => { refresh(); reloadTicket() }} />}
+      {view.error && !view.data ? <section className={PANEL} aria-labelledby="restock-view-error">
+        <h2 id="restock-view-error" ref={headingRef} tabIndex={-1} className={cn('mb-1 text-base font-semibold', HEADING)}>Chưa đọc được kế hoạch nạp</h2>
+        <ErrorState error={view.error} retry={view.reload} />
+      </section>
+        : !view.data || (!slots.data && !slots.error) ? <Loading label="Đang đọc kế hoạch nạp và các ngăn của máy…" rows={3} />
         : <section className={PANEL} aria-labelledby="restock-step-title">
-          <h2 id="restock-step-title" ref={headingRef} tabIndex={-1} className="mb-1 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+          <h2 id="restock-step-title" ref={headingRef} tabIndex={-1} className={cn('mb-1 text-base font-semibold', HEADING)}>
             {step === 'done' ? (ticket.status === 'CANCELLED' ? 'Phiếu đã hủy' : 'Phiếu đã hoàn tất') : `Bước ${progress.index}/${progress.total}: ${progress.label}`}
           </h2>
           {failure && <p role="alert" className={cn(ERROR_BOX, 'my-3')}>{failure}</p>}
-          {step === 'open' && <OpenStep ticket={ticket} viewer={viewer} readOnly={readOnly} lock={lock} lockRef={lockRef} reloadMachine={reloadMachine}
-            running={running} commands={commands.data?.content} busy={busy} start={start} open={() => send('OPEN_REFILL')} openRef={openRef} waitRef={waitRef} />}
-          {step === 'remove' && <RemoveStep ticket={ticket} lines={lines} stock={stock} plans={plans} readOnly={readOnly}
-            changed={() => { setChosen('remove'); reloadTicket(); reloadStock() }} next={() => go('load')} />}
-          {step === 'load' && <LoadStep ticket={ticket} lines={lines} stock={stock} batches={batches} readOnly={readOnly}
-            changed={() => { setChosen('load'); reloadTicket() }} refreshFigures={() => { reloadStock(); batches.reload() }}
+          {step === 'start' && <StartStep ticket={ticket} viewer={viewer} lines={lines} executes={executes} busy={busy} start={start} />}
+          {step === 'remove' && <RemoveStep lines={lines} view={view.data} slots={slots.data?.content} summaries={summaries} readOnly={readOnly} busy={busy}
+            send={send} next={() => go('load')} block={commandBlock} />}
+          {step === 'load' && <LoadStep ticketId={ticketId} lines={lines} slots={slots.data?.content} summaries={summaries} batches={batches} readOnly={!canLoad} busy={busy}
+            send={send} block={commandBlock} changed={() => { setChosen('load'); refresh(); reloadTicket() }} refreshFigures={refresh}
             back={() => go('remove')} next={() => go('close')} />}
-          {step === 'close' && <CloseStep ticket={ticket} lines={lines} readOnly={readOnly} lock={lock} lockRef={lockRef} reloadMachine={reloadMachine}
-            running={running} commands={commands.data?.content} busy={busy} missing={missing} refill={refillText(refill)} waitRef={waitRef}
-            close={() => send('CLOSE_REFILL')} back={() => go('load')} byHand={() => go('reconcile')} />}
-          {step === 'reconcile' && <ReconcileStep ticket={ticket} lines={lines} readOnly={readOnly} missing={missing} busy={busy}
-            reopen={() => { setChosen(null); void send('OPEN_REFILL') }} back={missing ? () => go('load') : undefined} completed={reloadTicket} />}
-          {step === 'done' && <DoneStep ticket={ticket} lines={lines} machine={machine.data} />}
+          {step === 'close' && <CloseStep lines={lines} gates={gates} readOnly={readOnly} busy={busy} send={send} block={commandBlock}
+            back={() => go('load')} next={() => go('reconcile')} />}
+          {step === 'reconcile' && <ReconcileStep ticket={ticket} lines={lines} readOnly={readOnly} back={() => go('load')}
+            completed={() => { reloadTicket(); refresh() }} stale={() => { setChosen(null); reloadTicket(); refresh() }} />}
+          {step === 'done' && <DoneStep ticket={ticket} lines={lines} view={view.data} machine={machine.data} />}
         </section>}
       <p className="text-[13px] text-muted-foreground">
         Mỗi bước được lưu trên máy chủ: tải lại trang hoặc mở lại phiếu trên máy khác sẽ tiếp tục đúng bước. <Link to={back.to} className={LINK}>Xem chi tiết phiếu</Link>
       </p>
     </div>
+    {reconciling && <ReconcileDialog command={reconciling} close={() => setReconciling(null)} done={() => { commands.reload(); refresh() }} />}
   </>
 }
 
@@ -302,200 +278,179 @@ function StepBar({ step, progress }: { step: RestockStep; progress: { index: num
   </div>
 }
 
-function LockNotice({ lock, lockRef, reloadMachine }: { lock: Lock; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void }) {
-  return <div ref={lockRef} tabIndex={-1} data-lock={lock.code}
-    className="my-3 flex gap-3 rounded-xl border border-status-warning-foreground/30 bg-status-warning px-4 py-3.5 text-[13px] text-status-warning-foreground focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none">
-    <LockIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-    <div className="grid min-w-0 gap-1">
-      <p className="font-semibold">Chưa gửi lệnh được</p>
-      <p>{lock.reason}</p>
-      <p><strong className="font-semibold">Việc cần làm:</strong> {lock.next}</p>
-      {(lock.code === 'status' || lock.code === 'offline') && <p className="mt-1!">
-        <Button type="button" variant="outline" className="h-11" onClick={reloadMachine}>Kiểm tra lại trạng thái máy</Button>
-      </p>}
-    </div>
-  </div>
+interface CommandBlock {
+  lock: Lock | null; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void; running?: Pick<MaintenanceCommand, 'operation' | 'status' | 'slotCode'>
+  waitRef: Ref<HTMLParagraphElement>; attention?: LinkedMaintenanceCommand; reconcile: (command: LinkedMaintenanceCommand) => void
 }
+type Send = (operation: ColumnOperation, slot: { id?: string; slotCode?: string }, reason?: MaintenanceReason, note?: string) => Promise<boolean>
 
-/** The newest attempt of a door command for this ticket, when it failed or timed out (shown with what to do). */
-function failedAttempt(commands: readonly MaintenanceCommand[] | undefined, type: MaintenanceCommandType, since: string | null | undefined): MaintenanceCommand | undefined {
-  const start = Date.parse(since ?? '')
-  const last = commands?.find(command => command.type === type && Date.parse(command.createdAt) >= start)
-  return last && (last.status === 'FAILED' || last.status === 'TIMEOUT') ? last : undefined
+/** What blocks the commands now (lock with the next step), the command the machine is running, and a linked one in trouble. */
+function CommandState({ block, readOnly }: { block: CommandBlock; readOnly: boolean }) {
+  const { lock, lockRef, reloadMachine, running, waitRef, attention, reconcile } = block
+  return <>
+    {running && <p ref={waitRef} tabIndex={-1} role="status" className={cn(NOTE_BOX, 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring')}>
+      <strong className="font-medium">Đang chờ máy: “{commandLabel(running.operation)}”{running.slotCode ? ` ngăn ${running.slotCode}` : ''}</strong> ({commandStatusLabel(running.status).toLowerCase()}). {commandStatusText(running.status)} Trang tự cập nhật mỗi 2 giây.
+    </p>}
+    {!running && attention && <div role="alert" className={cn(ERROR_BOX, 'grid gap-2')}>
+      <p>Lệnh “{commandLabel(attention.operation)}”{attention.slotCode ? ` ngăn ${attention.slotCode}` : ''} gửi lúc {formatDateTime(attention.createdAt)}: {commandStatusLabel(attention.status).toLowerCase()}.{' '}
+        {attention.status === 'NEEDS_RECONCILIATION' ? 'Máy đã nhận lệnh nhưng không báo kết quả: kiểm tra tại máy rồi đối soát trước khi tiếp tục.' : 'Không có gì thay đổi; kiểm tra tại máy rồi gửi lại.'}</p>
+      {attention.status === 'NEEDS_RECONCILIATION' && !readOnly && <p><Button type="button" variant="outline" className="h-11" onClick={() => reconcile(attention)}>Đối soát lệnh này</Button></p>}
+    </div>}
+    {!running && !readOnly && lock && <div ref={lockRef} tabIndex={-1} data-lock={lock.code}
+      className="flex gap-3 rounded-xl border border-status-warning-foreground/30 bg-status-warning px-4 py-3.5 text-[13px] text-status-warning-foreground focus-visible:ring-3 focus-visible:ring-ring/40 focus-visible:outline-none">
+      <LockIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      <div className="grid min-w-0 gap-1">
+        <p className="font-semibold">Chưa gửi lệnh được</p>
+        <p>{lock.reason}</p>
+        <p><strong className="font-semibold">Việc cần làm:</strong> {lock.next}</p>
+        {(lock.code === 'status' || lock.code === 'offline') && <p className="mt-1!"><Button type="button" variant="outline" className="h-11" onClick={reloadMachine}>Kiểm tra lại trạng thái máy</Button></p>}
+      </div>
+    </div>}
+  </>
 }
-
-function CommandWait({ command, waitRef }: { command: MaintenanceCommand; waitRef?: Ref<HTMLParagraphElement> }) {
-  return <p ref={waitRef} tabIndex={-1} role="status" className={cn(NOTE_BOX, 'my-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring')}>
-    <strong className="font-medium">Đang chờ máy: “{COMMAND_INFO[command.type].label}”</strong> ({commandStatusLabel(command.status).toLowerCase()}). {commandStatusText(command.status)} Trang tự cập nhật mỗi 2 giây.
-  </p>
-}
-function CommandFailure({ command }: { command: MaintenanceCommand }) {
-  return <p role="alert" className={cn(ERROR_BOX, 'my-3')}>
-    Lệnh “{COMMAND_INFO[command.type].label}” gửi lúc {formatDateTime(command.createdAt)} không thành công: {command.status === 'FAILED' ? failureText(command.failureCode) : commandStatusText(command.status)} Kiểm tra tại máy rồi gửi lại.
-  </p>
-}
-
-function OpenStep({ ticket, viewer, readOnly, lock, lockRef, reloadMachine, running, commands, busy, start, open, openRef, waitRef }: {
-  ticket: WorkTicket; viewer: TicketViewer; readOnly: boolean; lock: Lock | null; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void
-  running?: MaintenanceCommand; commands?: readonly MaintenanceCommand[]; busy: string | null; start: () => void; open: () => void
-  openRef: Ref<HTMLButtonElement>; waitRef: Ref<HTMLParagraphElement>
+function CommandButton({ label, busyLabel, pending, blocked, locked, onClick, variant = 'outline' }: {
+  label: string; busyLabel?: string; pending: boolean; blocked?: string; locked: boolean; onClick: () => void; variant?: 'outline' | 'default' | 'destructive'
 }) {
-  const started = ticket.status === 'IN_PROGRESS'
-  const failed = started && !running ? failedAttempt(commands, 'OPEN_REFILL', ticket.startedAt) : undefined
+  const hintId = useId()
+  return <span className="grid gap-1">
+    <Button type="button" variant={locked ? 'outline' : variant} className={cn(BIG, locked && 'border-dashed')} aria-disabled={locked || !!blocked || pending ? true : undefined}
+      aria-describedby={blocked ? hintId : undefined} onClick={() => { if (!blocked && !pending) onClick() }}>
+      {locked && <LockIcon aria-hidden="true" />}{pending ? (busyLabel ?? 'Đang gửi…') : label}
+    </Button>
+    {blocked && <span id={hintId} className="text-[13px] text-muted-foreground">{blocked}</span>}
+  </span>
+}
+
+function StartStep({ ticket, viewer, lines, executes, busy, start }: { ticket: WorkOrder; viewer: TicketViewer; lines: readonly RestockLine[]; executes: boolean; busy: string | null; start: () => void }) {
   return <div className="grid gap-3 text-[14px]">
-    <p className="text-muted-foreground">Tới máy <strong className="font-medium text-foreground">{ticket.machineCode}</strong>, bắt đầu phiếu rồi mở cửa nạp. Máy phải ở trạng thái Bảo trì để kiosk không bán hàng khi cửa nạp đang mở.</p>
-    <ol className="grid gap-3">
-      <li className="grid gap-2 rounded-lg border px-3.5 py-3">
-        <span className="font-medium">1. Bắt đầu phiếu</span>
-        {started
-          ? <span className="text-[13px] text-muted-foreground"><Check aria-hidden="true" className="mr-1 inline size-4 text-primary" />Đã bắt đầu lúc {formatDateTime(ticket.startedAt)}.</span>
-          : readOnly ? <span className="text-[13px] text-muted-foreground">Chờ {assigneeText(ticket, viewer)} bắt đầu tại máy.</span>
-          : <>
-            <span className="text-[13px] text-muted-foreground">Hệ thống ghi tên bạn và thời điểm bắt đầu.</span>
-            <Button type="button" className={BIG} disabled={!!busy} onClick={start}>{busy === 'start' ? 'Đang bắt đầu…' : 'Bắt đầu phiếu'}</Button>
-          </>}
-      </li>
-      <li className={cn('grid gap-2 rounded-lg border px-3.5 py-3', !started && 'text-muted-foreground')}>
-        <span className="font-medium">2. Mở cửa nạp</span>
-        <span className="text-[13px] text-muted-foreground">{COMMAND_INFO.OPEN_REFILL.does.replace(' Tồn kho không đổi; nhập số hộp đã nạp ở màn Tồn kho.', '')}</span>
-        {started && running && <CommandWait command={running} waitRef={waitRef} />}
-        {started && failed && <CommandFailure command={failed} />}
-        {started && !running && !readOnly && lock && <LockNotice lock={lock} lockRef={lockRef} reloadMachine={reloadMachine} />}
-        {started && !running && !readOnly && <Button ref={openRef} type="button" className={cn(BIG, lock && 'border-dashed')} variant={lock ? 'outline' : 'default'}
-          aria-disabled={lock || busy ? true : undefined} onClick={open}>
-          {lock && <LockIcon aria-hidden="true" />}{busy === 'OPEN_REFILL' ? 'Đang gửi…' : failed ? 'Gửi lại lệnh mở cửa nạp' : 'Mở cửa nạp hàng'}
-        </Button>}
-        {!started && <span className="text-[13px]">Bắt đầu phiếu trước.</span>}
-      </li>
-    </ol>
+    <p className="text-muted-foreground">Tới máy <strong className="font-medium text-foreground">{ticket.machineCode}</strong> rồi bắt đầu phiếu: máy chuyển sang Bảo trì để kiosk không bán trong lúc rút và nạp hộp.</p>
+    {lines.length > 0 && <ul className="grid gap-1.5 text-[13px]" aria-label="Kế hoạch nạp">
+      {lines.map(line => <li key={line.id} className="rounded-md bg-muted/40 px-3 py-2">Ngăn {line.slotCode} · {line.productName}: nạp {bowls(line.plannedQuantity ?? 0)}</li>)}
+    </ul>}
+    {!lines.length && <p className={NOTE_BOX}>Phiếu chưa có dòng nạp (ngăn, sản phẩm, số hộp) nên chưa bắt đầu được. Quản trị viên lập kế hoạch ở khối “Kế hoạch nạp” phía trên.</p>}
+    {ticket.status === 'OPEN' && <p className={NOTE_BOX}>Phiếu chưa có người phụ trách. Quản trị viên phân công ở trang chi tiết phiếu.</p>}
+    {ticket.status === 'ASSIGNED' && (executes
+      ? <Button type="button" className={BIG} disabled={!!busy || !lines.length} onClick={start}>{busy === 'start' ? 'Đang bắt đầu…' : 'Bắt đầu phiếu'}</Button>
+      : <p className="text-[13px] text-muted-foreground">Chờ {assigneeText(ticket, viewer)} bắt đầu tại máy.</p>)}
   </div>
 }
 
-function RemoveStep({ ticket, lines, stock, plans, readOnly, changed, next }: {
-  ticket: WorkTicket; lines: readonly RestockLine[]; stock: ApiState<Record<string, SlotStock>>; plans: Record<string, RemovalPlan>; readOnly: boolean
-  changed: () => void; next: () => void
+/** Step 2: per column, what is there now and the two ways to take bowls out (linked to the work order). */
+function RemoveStep({ lines, view, slots, summaries, readOnly, busy, send, next, block }: {
+  lines: readonly RestockLine[]; view: RestockView; slots?: readonly Slot[]; summaries: ApiState<Record<string, InventorySummary>>; readOnly: boolean; busy: string | null
+  send: Send; next: () => void; block: CommandBlock
 }) {
-  const [pending, setPending] = useState<string | null>(null)
-  const [problem, setProblem] = useState<{ itemId: string; text: string } | null>(null)
-  const [asking, setAsking] = useState<{ line: RestockLine; item: InventoryItem } | null>(null)
-  const left = Object.values(plans).reduce((total, plan) => total + plan.expired.length, 0)
-  async function remove(line: RestockLine, item: InventoryItem, reason: string) {
-    try {
-      await ticketsApi.removeItem(ticket.id, line.id, lineRemoveBody(item.id ?? '', reason))
-      toast.success(`Đã ghi nhận rút 1 hộp ở ngăn ${line.slotCode}`, { description: `Lý do: ${reason}. Hộp chuyển sang Đã rút và được ghi vào lịch sử kho.` })
-      changed()
-      // The button of the bowl just taken out disappears: keep keyboard focus in its slot.
-      document.getElementById(`remove-${line.id}`)?.focus()
-    } catch (error) {
-      const { error: shown, stale } = describeLineRemoveError(error)
-      if (stale) changed()
-      throw shown
-    }
-  }
-  async function removeExpired(line: RestockLine, item: InventoryItem) {
-    if (pending) return
-    setPending(item.id ?? ''); setProblem(null)
-    try { await remove(line, item, REMOVE_REASONS.expired) } catch (error) { setProblem({ itemId: item.id ?? '', text: errorMessage(error) }) } finally { setPending(null) }
-  }
-  if (stock.error && !stock.data) return <ErrorState error={stock.error} retry={stock.reload} />
-  if (!stock.data) return <Loading label="Đang đọc các hộp trong ngăn…" rows={3} />
+  const columns = unique(lines.map(line => line.slotId ?? '')).filter(Boolean)
+  const [asking, setAsking] = useState<{ slotId: string; slotCode: string; count: number; reason: MaintenanceReason } | null>(null)
+  if (summaries.error && !summaries.data) return <ErrorState error={summaries.error} retry={summaries.reload} />
+  if (!summaries.data) return <Loading label="Đang đọc các hộp trong ngăn…" rows={3} />
   return <div className="grid gap-4 text-[14px]">
-    <p className="text-muted-foreground">Cửa nạp đang mở. Lấy ra các hộp hết hạn (và hộp dập, hỏng nếu thấy) rồi xác nhận từng hộp ở đây. Hộp rút ra không bị xóa: hộp chuyển sang Đã rút và được ghi vào lịch sử kho kèm lý do.</p>
-    {lines.map(line => {
-      const plan = plans[line.id]
-      return <section key={line.id} aria-labelledby={`remove-${line.id}`} className="grid gap-2 rounded-lg border px-3.5 py-3">
-        <h3 id={`remove-${line.id}`} tabIndex={-1} className="font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Ngăn {line.slotCode}</h3>
-        <p className="text-[13px] text-muted-foreground">
-          {plan.expired.length ? `${bowls(plan.expired.length)} hết hạn cần rút.` : 'Không còn hộp hết hạn.'}
-          {line.removedQuantity ? ` Đã rút ${bowls(line.removedQuantity)} trong phiếu này.` : ''}
-          {plan.locked ? ` ${bowls(plan.locked)} đang giữ cho đơn hoặc nhả lỗi: không rút ở đây.` : ''}
-        </p>
-        {plan.expired.length > 0 && <ul className="grid gap-2" aria-label={`Hộp hết hạn ở ngăn ${line.slotCode}`}>
-          {plan.expired.map((item, index) => <li key={item.id} className="grid gap-2 rounded-md bg-muted/40 px-3 py-2.5">
-            <span className="text-[13px]"><strong className="font-medium">Hộp {index + 1}{index === 0 ? ' (đáy ngăn)' : ''}</strong> · lô {item.batchCode ?? '—'} · hết hạn {formatDateTime(item.expiresAt)}</span>
-            {problem && problem.itemId === item.id && <span role="alert" className="text-[13px] text-destructive">{problem.text}</span>}
-            {!readOnly && <Button type="button" variant="outline" className={BIG} disabled={!!pending} aria-label={`Đã rút hộp này: hộp ${index + 1} hết hạn ở ngăn ${line.slotCode}`}
-              onClick={() => removeExpired(line, item)}>{pending === item.id ? 'Đang ghi nhận…' : 'Đã rút hộp này'}</Button>}
-          </li>)}
-        </ul>}
-        {!readOnly && plan.others.length > 0 && <details className="text-[13px]">
-          <summary className="flex min-h-11 cursor-pointer items-center font-medium text-primary">Rút hộp dập, hỏng ({bowls(plan.others.length)} còn bán được)</summary>
-          <ul className="mt-2 grid gap-2" aria-label={`Hộp còn bán được ở ngăn ${line.slotCode}`}>
-            {plan.others.map((item, index) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2">
-              <span>Hộp {index + 1} · lô {item.batchCode ?? '—'} · hạn {formatDateTime(item.expiresAt)}</span>
-              <Button type="button" variant="outline" className="h-11" aria-label={`Rút vì hỏng: hộp ${index + 1} ở ngăn ${line.slotCode}`} onClick={() => setAsking({ line, item })}>Rút vì hỏng</Button>
-            </li>)}
-          </ul>
-        </details>}
-      </section>
+    <p className="text-muted-foreground">Lấy hộp hết hạn, hỏng hoặc nhả lỗi ra trước khi nạp: máy mở cổng dưới cho hộp rơi ra. Hộp rút ra không bị xóa, được ghi Đã rút kèm lý do.</p>
+    <CommandState block={block} readOnly={readOnly} />
+    {columns.map(slotId => {
+      const slot = slots?.find(candidate => candidate.id === slotId)
+      const slotCode = slot?.slotCode ?? lines.find(line => line.slotId === slotId)?.slotCode ?? ''
+      return <RemoveCard key={slotId} slotId={slotId} slotCode={slotCode} gateOpen={!!slot?.refillGateOpen} summary={summaries.data?.[slotId]} readOnly={readOnly}
+        busy={busy} locked={!!block.lock || !!block.running} send={send} askEmpty={setAsking} />
     })}
-    {left > 0 && <p className={NOTE_BOX}>Còn {bowls(left)} hết hạn trong các ngăn: ngăn có hộp hết hạn ở đáy không bán được. Nếu không tìm thấy hộp, vẫn có thể tiếp tục và ghi lại ở bước Đối chiếu.</p>}
-    {!readOnly && <Button type="button" className={BIG} onClick={next}>Tiếp tục: Nạp theo dòng</Button>}
-    {asking && <ConfirmDialog title={`Rút 1 hộp hỏng ở ngăn ${asking.line.slotCode}?`} confirmLabel="Rút hộp" danger close={() => setAsking(null)}
-      successMessage="Đã rút hộp" successDescription={`Ngăn ${asking.line.slotCode} · lý do “${REMOVE_REASONS.damaged}”`}
-      message={<p>Hộp lô {asking.item.batchCode ?? '—'} chuyển sang Đã rút với lý do “{REMOVE_REASONS.damaged}” và không bán lại được. Hộp không bị xóa: lịch sử kho giữ lại.</p>}
-      onConfirm={() => remove(asking.line, asking.item, REMOVE_REASONS.damaged)} />}
+    <p className={NOTE_BOX}>{removedText(view.removedByReason)}</p>
+    {!readOnly && <Button type="button" className={BIG} disabled={!!block.running} onClick={next}>Tiếp tục: Nạp theo dòng</Button>}
+    {asking && <ConfirmDialog title={`Xả cả ngăn ${asking.slotCode}?`} confirmLabel="Xả cả ngăn" danger close={() => setAsking(null)}
+      successMessage="Đã gửi lệnh xả ngăn" successDescription={`Ngăn ${asking.slotCode} · ${reasonLabel(asking.reason)}`}
+      message={<p>{COMMAND_INFO.EMPTY_COLUMN.does} Ngăn đang có {bowls(asking.count)}. Lý do ghi lại: “{reasonLabel(asking.reason)}”.</p>}
+      onConfirm={async () => { if (!(await send('EMPTY_COLUMN', { id: asking.slotId, slotCode: asking.slotCode }, asking.reason))) throw new Error('Chưa gửi được lệnh. Xem thông báo phía trên rồi thử lại.') }} />}
   </div>
 }
 
-function LoadStep({ ticket, lines, stock, batches, readOnly, changed, refreshFigures, back, next }: {
-  ticket: WorkTicket; lines: readonly RestockLine[]; stock: ApiState<Record<string, SlotStock>>; batches: ApiState<LineBatches>; readOnly: boolean
-  changed: () => void; refreshFigures: () => void; back: () => void; next: () => void
+function RemoveCard({ slotId, slotCode, gateOpen, summary, readOnly, busy, locked, send, askEmpty }: {
+  slotId: string; slotCode: string; gateOpen: boolean; summary?: InventorySummary; readOnly: boolean; busy: string | null; locked: boolean
+  send: Send; askEmpty: (target: { slotId: string; slotCode: string; count: number; reason: MaintenanceReason }) => void
+}) {
+  const state = columnState(summary)
+  const reasonId = useId()
+  const [reason, setReason] = useState<MaintenanceReason | ''>('')
+  const chosen: MaintenanceReason = reason || (state?.toRemove ? 'EXPIRED' : 'RESTOCK')
+  const head = slotPlan('REMOVE_ITEM', summary, gateOpen), all = slotPlan('EMPTY_COLUMN', summary, gateOpen)
+  return <section aria-labelledby={`remove-${slotId}`} className={CARD}>
+    <h3 id={`remove-${slotId}`} tabIndex={-1} className={HEADING}>Ngăn {slotCode}</h3>
+    <p className="text-[13px] text-muted-foreground">{columnText(state)}</p>
+    {!readOnly && state && state.present > 0 && <>
+      <FormField label="Lý do rút" hint="Ghi vào lịch sử hộp.">
+        <NativeSelect id={reasonId} value={chosen} className="h-11 text-base sm:text-sm" onChange={event => setReason(event.target.value as MaintenanceReason)}>
+          {REASON_OPTIONS.filter(option => option.value !== 'OTHER').map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </NativeSelect>
+      </FormField>
+      <div className="grid gap-2 sm:flex sm:flex-wrap">
+        <CommandButton label={`Rút hộp đáy ngăn ${slotCode}`} pending={busy === `REMOVE_ITEM|${slotId}`} blocked={head.blocked} locked={locked}
+          onClick={() => void send('REMOVE_ITEM', { id: slotId, slotCode }, chosen)} />
+        <CommandButton label={`Xả cả ngăn ${slotCode}`} pending={busy === `EMPTY_COLUMN|${slotId}`} blocked={all.blocked} locked={locked} variant="destructive"
+          onClick={() => askEmpty({ slotId, slotCode, count: all.count, reason: chosen })} />
+      </div>
+    </>}
+  </section>
+}
+
+/** Step 3: load every line from a batch; the refill gate of a column can be opened from here. */
+function LoadStep({ ticketId, lines, slots, summaries, batches, readOnly, busy, send, block, changed, refreshFigures, back, next }: {
+  ticketId: string; lines: readonly RestockLine[]; slots?: readonly Slot[]; summaries: ApiState<Record<string, InventorySummary>>; batches: ApiState<LineBatches>
+  readOnly: boolean; busy: string | null; send: Send; block: CommandBlock; changed: () => void; refreshFigures: () => void; back: () => void; next: () => void
 }) {
   const short = lines.reduce((total, line) => total + leftToLoad(line), 0)
   return <div className="grid gap-4 text-[14px]">
-    <p className="text-muted-foreground">Xếp hộp vào từng ngăn rồi ghi số hộp thực tế. Số mặc định là phần còn lại của kế hoạch, không vượt chỗ trống của ngăn.</p>
-    {(stock.error && !stock.data) ? <ErrorState error={stock.error} retry={stock.reload} />
-      : lines.map(line => <LineLoadCard key={line.id} ticket={ticket} line={line} stock={stock} batches={batches} readOnly={readOnly} changed={changed} refreshFigures={refreshFigures} />)}
-    {short > 0 && <p className={NOTE_BOX}>Còn {bowls(short)} chưa nạp theo kế hoạch. Nếu không đủ hộp, vẫn có thể đóng cửa nạp và ghi lý do ở bước Đối chiếu.</p>}
+    <p className="text-muted-foreground">Xếp hộp vào từng ngăn rồi ghi số hộp thực tế theo lô. Số mặc định là phần còn lại của kế hoạch, không vượt chỗ trống của ngăn.</p>
+    <CommandState block={block} readOnly={readOnly} />
+    {(summaries.error && !summaries.data) ? <ErrorState error={summaries.error} retry={summaries.reload} />
+      : lines.map(line => <LineLoadCard key={line.id} ticketId={ticketId} line={line} slot={slots?.find(slot => slot.id === line.slotId)} summary={summaries.data?.[line.slotId ?? '']}
+        batches={batches} readOnly={readOnly} busy={busy} locked={!!block.lock || !!block.running} send={send} changed={changed} refreshFigures={refreshFigures} />)}
+    {short > 0 && <p className={NOTE_BOX}>Còn {bowls(short)} chưa nạp theo kế hoạch. Nếu không đủ hộp, vẫn tiếp tục được và ghi lý do ở bước Đối chiếu.</p>}
     {!readOnly && <div className="grid gap-2 sm:flex sm:flex-wrap">
-      <Button type="button" className={BIG} onClick={next}>Tiếp tục: Đóng cửa nạp</Button>
-      <Button type="button" variant="outline" className={BIG} onClick={back}>Quay lại: Rút hộp hỏng</Button>
+      <Button type="button" className={BIG} onClick={next}>Tiếp tục: Đóng cổng nạp</Button>
+      <Button type="button" variant="outline" className={BIG} onClick={back}>Quay lại: Rút hộp cũ</Button>
     </div>}
   </div>
 }
 
-function LineLoadCard({ ticket, line, stock, batches, readOnly, changed, refreshFigures }: {
-  ticket: WorkTicket; line: RestockLine; stock: ApiState<Record<string, SlotStock>>; batches: ApiState<LineBatches>; readOnly: boolean
-  changed: () => void; refreshFigures: () => void
+function LineLoadCard({ ticketId, line, slot, summary, batches, readOnly, busy, locked, send, changed, refreshFigures }: {
+  ticketId: string; line: RestockLine; slot?: Slot; summary?: InventorySummary; batches: ApiState<LineBatches>; readOnly: boolean; busy: string | null; locked: boolean
+  send: Send; changed: () => void; refreshFigures: () => void
 }) {
   const titleId = useId()
-  const [picked, setPicked] = useState(line.batchId ?? '')
+  const [picked, setPicked] = useState('')
   const [typed, setTyped] = useState<string | null>(null)
   const [errors, setErrors] = useState<{ batchId?: string; quantity?: string }>({})
   const [failure, setFailure] = useState('')
+  const [inversion, setInversion] = useState('')
   const [pending, setPending] = useState(false)
   const [more, setMore] = useState(false)
   const [conflict, setConflict] = useState<(FitConflict & { since: number }) | null>(null)
-  const options = batches.data?.byProduct[line.productId] ?? []
+  const options = batches.data?.byProduct[line.productId ?? ''] ?? []
   const batchId = options.some(batch => batch.id === picked) ? picked : options[0]?.id ?? ''
   const batch = options.find(candidate => candidate.id === batchId)
   const count = batchId ? batches.data?.counts[batchId] : undefined
-  const summary = stock.data?.[line.id]?.summary
   const room: LoadRoom = {
     slotCode: line.slotCode, free: summary?.remainingCapacity, capacity: summary?.capacity,
     batchCode: batch?.batchCode, declared: batch?.quantity, loaded: count?.ok ? count.loaded : undefined,
   }
   const quantity = typed ?? defaultQuantity(line, room)
-  const source = conflict?.kind === 'slot' ? stock : batches
-  const reload: Reload = !conflict ? 'ok' : source.loading || (!source.error && !((source.updatedAt ?? 0) > conflict.since)) ? 'pending' : source.error ? 'failed' : 'ok'
+  const reload: Reload = !conflict ? 'ok' : batches.loading ? 'pending' : batches.error ? 'failed' : (batches.updatedAt ?? 0) > conflict.since ? 'ok' : 'pending'
   const quantityError = errors.quantity ? (conflict ? fitConflictText(conflict, room, reload) : errors.quantity) : lineQuantityProblem(quantity, room)
-  const full = line.loadedQuantity >= line.plannedQuantity
+  const full = (line.loadedQuantity ?? 0) >= (line.plannedQuantity ?? 0)
   const lineFacts = roomLines(room)
+  const gateOpen = !!slot?.refillGateOpen
 
-  async function submit() {
+  async function submit(acknowledge = false) {
     if (pending) return
-    setFailure(''); setConflict(null)
+    setFailure(''); setConflict(null); if (!acknowledge) setInversion('')
     let body
-    try { body = lineLoadBody(batchId, quantity, room) } catch (error) {
+    try { body = lineLoadBody(batchId, quantity, room, acknowledge) } catch (error) {
       if (error instanceof ValidationError) { setErrors(error.fieldErrors); return }
       throw error
     }
     setPending(true); setErrors({})
     try {
-      await ticketsApi.loadLine(ticket.id, line.id, body)
-      toast.success(`Đã nạp ${bowls(body.quantity)} vào ngăn ${line.slotCode}`, { description: `Lô ${batch?.batchCode ?? ''}. Đã ghi vào lịch sử kho.` })
-      setTyped(null); setMore(false)
+      const result = await restockApi.load(ticketId, line.id!, body)
+      toast.success(`Đã nạp ${bowls(result.loaded ?? body.quantity)} vào ngăn ${line.slotCode}`, { description: `Lô ${batch?.batchCode ?? ''}. Đã ghi vào lịch sử kho.` })
+      setTyped(null); setMore(false); setInversion('')
       changed()
       // When the line is now full its form gives way to "Nạp thêm": keep keyboard focus on the line.
       document.getElementById(titleId)?.focus()
@@ -504,178 +459,187 @@ function LineLoadCard({ ticket, line, stock, batches, readOnly, changed, refresh
       if (described.refresh) refreshFigures()
       if (described.stale) changed()
       if (described.conflict) setConflict({ ...described.conflict, since: clock() })
-      if (described.error instanceof ValidationError) setErrors(described.error.fieldErrors)
+      if (described.inversion) setInversion(described.inversion)
+      else if (described.error instanceof ValidationError) setErrors(described.error.fieldErrors)
       else setFailure(errorMessage(described.error))
     } finally { setPending(false) }
   }
 
-  return <section aria-labelledby={titleId} className="grid gap-3 rounded-lg border px-3.5 py-3">
+  return <section aria-labelledby={titleId} className={CARD}>
     <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-      <h3 id={titleId} tabIndex={-1} className="font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">Ngăn {line.slotCode} · {line.productName}</h3>
+      <h3 id={titleId} tabIndex={-1} className={HEADING}>Ngăn {line.slotCode} · {line.productName}</h3>
       <span className={cn('text-[13px]', full ? 'font-medium text-foreground' : 'text-muted-foreground')}>
         {full ? <><Check aria-hidden="true" className="mr-1 inline size-4 text-primary" />Đã nạp đủ</> : `Còn ${bowls(leftToLoad(line))}`}
       </span>
     </div>
     <dl className="grid grid-cols-3 gap-2 text-center text-[13px]">
-      <div className="rounded-md bg-muted/40 px-2 py-1.5"><dt className="text-muted-foreground">Kế hoạch</dt><dd className="font-semibold">{bowls(line.plannedQuantity)}</dd></div>
-      <div className="rounded-md bg-muted/40 px-2 py-1.5"><dt className="text-muted-foreground">Đã nạp</dt><dd className="font-semibold">{bowls(line.loadedQuantity)}</dd></div>
+      <div className="rounded-md bg-muted/40 px-2 py-1.5"><dt className="text-muted-foreground">Kế hoạch</dt><dd className="font-semibold">{bowls(line.plannedQuantity ?? 0)}</dd></div>
+      <div className="rounded-md bg-muted/40 px-2 py-1.5"><dt className="text-muted-foreground">Đã nạp</dt><dd className="font-semibold">{bowls(line.loadedQuantity ?? 0)}</dd></div>
       <div className="rounded-md bg-muted/40 px-2 py-1.5"><dt className="text-muted-foreground">Chỗ trống</dt><dd className="font-semibold">{summary ? `${summary.remainingCapacity ?? '—'}/${summary.capacity ?? '—'}` : '…'}</dd></div>
     </dl>
+    {(line.loads ?? []).length > 0 && <ul className="grid gap-1 text-[13px] text-muted-foreground" aria-label={`Các lần nạp ngăn ${line.slotCode}`}>
+      {(line.loads ?? []).map((load, index) => <li key={`${load.loadedAt}-${index}`}>{formatDateTime(load.loadedAt)} · {bowls(load.quantity ?? 0)} lô {load.batchCode}{load.actorName ? ` · ${load.actorName}` : ''}</li>)}
+    </ul>}
+    <p className="text-[13px]">{gateOpen ? 'Cổng nạp đang mở: ngăn không bán cho tới khi đóng.' : 'Cổng nạp đang đóng.'}</p>
+    {!readOnly && !gateOpen && <CommandButton label={`Mở cổng nạp ngăn ${line.slotCode}`} pending={busy === `OPEN_REFILL|${line.slotId}`} locked={locked}
+      blocked={slotPlan('OPEN_REFILL', summary, gateOpen).blocked} onClick={() => void send('OPEN_REFILL', { id: line.slotId, slotCode: line.slotCode })} />}
     {readOnly ? null : full && !more
       ? <Button type="button" variant="outline" className={BIG} onClick={() => setMore(true)}>Nạp thêm vào ngăn {line.slotCode}</Button>
       : <div className="grid gap-3">
         <FormField label="Lô hàng" required error={errors.batchId}
-          hint={batches.error && !batches.data ? 'Không tải được danh sách lô. Bấm Tải lại số liệu.' : !batches.data ? 'Đang tải lô còn hạn…' : options.length ? (batch ? `Hạn dùng ${formatDateTime(batch.expiresAt)}${batch.id === line.batchId ? ' · lô gợi ý của phiếu' : ''}.` : undefined) : 'Không còn lô nào của sản phẩm này còn hạn. Tạo lô mới ở màn Lô hàng hoặc ghi lý do ở bước Đối chiếu.'}>
-          <NativeSelect value={batchId} className="h-11 text-base sm:text-sm" onChange={event => { setPicked(event.target.value); setErrors({}); setConflict(null); setTyped(null) }}>
+          hint={batches.error && !batches.data ? 'Không tải được danh sách lô. Bấm Tải lại số liệu.' : !batches.data ? 'Đang tải lô còn hạn…' : options.length ? (batch ? `Hạn dùng ${formatDateTime(batch.expiresAt)}.` : undefined) : 'Không còn lô nào của sản phẩm này còn hạn. Tạo lô mới ở màn Lô hàng hoặc ghi lý do ở bước Đối chiếu.'}>
+          <NativeSelect value={batchId} className="h-11 text-base sm:text-sm" onChange={event => { setPicked(event.target.value); setErrors({}); setConflict(null); setTyped(null); setInversion('') }}>
             {!options.length && <option value="">Không có lô còn hạn</option>}
-            {options.map(option => <option key={option.id} value={option.id}>{option.batchCode} · HSD {formatDateTime(option.expiresAt)}{option.id === line.batchId ? ' (gợi ý)' : ''}</option>)}
+            {options.map(option => <option key={option.id} value={option.id}>{option.batchCode} · HSD {formatDateTime(option.expiresAt)}</option>)}
           </NativeSelect>
         </FormField>
         <FormField label="Số hộp nạp lần này" required error={quantityError || undefined} hint={quantityHint(room)}>
           <Input value={quantity} inputMode="numeric" autoComplete="off" className="h-11 text-base sm:text-sm"
-            onChange={event => { setTyped(event.target.value); setErrors(previous => ({ ...previous, quantity: undefined })); setConflict(null) }} />
+            onChange={event => { setTyped(event.target.value); setErrors(previous => ({ ...previous, quantity: undefined })); setConflict(null); setInversion('') }} />
         </FormField>
         {(lineFacts.slot || lineFacts.batch) && <p className="text-[13px] text-muted-foreground">{[lineFacts.slot, lineFacts.batch, lineFacts.max].filter(Boolean).join('. ')}</p>}
+        {inversion && <div role="alert" className="grid gap-2 rounded-lg border border-status-warning-foreground/30 bg-status-warning px-3.5 py-2.5 text-[13px] text-status-warning-foreground">
+          <p>{inversion}</p>
+          <p><Button type="button" variant="outline" className="h-11" disabled={pending} onClick={() => void submit(true)}>Vẫn nạp lô này</Button></p>
+        </div>}
         {failure && <p role="alert" className={ERROR_BOX}>{failure}</p>}
         <div className="grid gap-2 sm:flex sm:flex-wrap">
-          <Button type="button" className={BIG} disabled={pending} onClick={submit}>{pending ? 'Đang ghi nhận…' : `Nạp ${quantity && parseBoxCount(quantity) ? bowls(parseBoxCount(quantity)!) : 'hộp'} vào ngăn ${line.slotCode}`}</Button>
+          <Button type="button" className={BIG} disabled={pending} onClick={() => void submit()}>{pending ? 'Đang ghi nhận…' : `Nạp ${quantity && parseBoxCount(quantity) ? bowls(parseBoxCount(quantity)!) : 'hộp'} vào ngăn ${line.slotCode}`}</Button>
           {(conflict || failure) && <Button type="button" variant="outline" className={BIG} onClick={refreshFigures}>Tải lại số liệu</Button>}
         </div>
       </div>}
   </section>
 }
 
-function CloseStep({ ticket, lines, readOnly, lock, lockRef, reloadMachine, running, commands, busy, missing, refill, waitRef, close, back, byHand }: {
-  ticket: WorkTicket; lines: readonly RestockLine[]; readOnly: boolean; lock: Lock | null; lockRef: Ref<HTMLDivElement>; reloadMachine: () => void
-  running?: MaintenanceCommand; commands?: readonly MaintenanceCommand[]; busy: string | null; missing: boolean; refill: string; waitRef: Ref<HTMLParagraphElement>
-  close: () => void; back: () => void; byHand: () => void
+/** Step 4: every refill gate of the machine closed (completion is refused while one is open). */
+function CloseStep({ lines, gates, readOnly, busy, send, block, back, next }: {
+  lines: readonly RestockLine[]; gates: readonly Slot[]; readOnly: boolean; busy: string | null; send: Send; block: CommandBlock; back: () => void; next: () => void
 }) {
-  const loaded = lines.reduce((total, line) => total + line.loadedQuantity, 0)
-  const failed = !running ? failedAttempt(commands, 'CLOSE_REFILL', ticket.startedAt) : undefined
+  const loaded = lines.reduce((total, line) => total + (line.loadedQuantity ?? 0), 0)
   return <div className="grid gap-3 text-[14px]">
-    <p className="text-muted-foreground">Đã nạp {bowls(loaded)} trong phiếu này. Kiểm tra các ngăn đã xếp gọn rồi đóng cửa nạp: máy khóa cửa và bật lại cảm biến khay.</p>
-    {missing
-      ? <>
-        <p role="status" className={NOTE_BOX}>{MAINTENANCE_MISSING}</p>
-        {!readOnly && <Button type="button" className={BIG} onClick={byHand}>Đã đóng cửa tại máy, tiếp tục đối chiếu</Button>}
-      </>
-      : <>
-        <p className="text-[13px]">{refill}</p>
-        {running && <CommandWait command={running} waitRef={waitRef} />}
-        {failed && <CommandFailure command={failed} />}
-        {!running && !readOnly && lock && <LockNotice lock={lock} lockRef={lockRef} reloadMachine={reloadMachine} />}
-        {!running && !readOnly && <Button type="button" className={cn(BIG, lock && 'border-dashed')} variant={lock ? 'outline' : 'default'} aria-disabled={lock || busy ? true : undefined} onClick={close}>
-          {lock && <LockIcon aria-hidden="true" />}{busy === 'CLOSE_REFILL' ? 'Đang gửi…' : failed ? 'Gửi lại lệnh đóng cửa nạp' : 'Đóng cửa nạp hàng'}
-        </Button>}
-      </>}
-    {!readOnly && !running && <Button type="button" variant="outline" className={BIG} onClick={back}>Quay lại: Nạp theo dòng</Button>}
+    <p className="text-muted-foreground">Đã nạp {bowls(loaded)} trong phiếu này. Kiểm tra các ngăn đã xếp gọn rồi đóng cổng nạp: ngăn có cổng mở không bán được và phiếu chưa hoàn tất được.</p>
+    <CommandState block={block} readOnly={readOnly} />
+    {gates.length
+      ? <ul className="grid gap-2" aria-label="Ngăn đang mở cổng nạp">
+        {gates.map(slot => <li key={slot.id} className={CARD}>
+          <span>Ngăn {slot.slotCode}: cổng nạp đang mở.</span>
+          {!readOnly && <CommandButton label={`Đóng cổng nạp ngăn ${slot.slotCode}`} variant="default" pending={busy === `CLOSE_REFILL|${slot.id}`} locked={!!block.lock || !!block.running}
+            onClick={() => void send('CLOSE_REFILL', slot)} />}
+        </li>)}
+      </ul>
+      : <p role="status" className={NOTE_BOX}><Check aria-hidden="true" className="mr-1 inline size-4 text-primary" />Mọi cổng nạp của máy đã đóng.</p>}
+    {!readOnly && <div className="grid gap-2 sm:flex sm:flex-wrap">
+      {!gates.length && <Button type="button" className={BIG} onClick={next}>Tiếp tục: Đối chiếu</Button>}
+      <Button type="button" variant="outline" className={BIG} onClick={back}>Quay lại: Nạp theo dòng</Button>
+    </div>}
   </div>
 }
 
-function ReconcileTable({ lines }: { lines: readonly RestockLine[] }) {
+function ReconcileTable({ lines, reasons }: { lines: readonly RestockLine[]; reasons?: boolean }) {
   const result = reconcile(lines)
-  return <div className="grid gap-2">
-    <table className="w-full table-fixed border-collapse text-[13px]">
-      <caption className="sr-only">Đối chiếu kế hoạch và thực tế theo ngăn</caption>
-      <thead><tr className="border-b text-left text-muted-foreground">
-        <th scope="col" className="py-2 pr-2 font-medium">Ngăn</th>
-        <th scope="col" className="py-2 pr-2 text-right font-medium">Kế hoạch</th>
-        <th scope="col" className="py-2 pr-2 text-right font-medium">Đã nạp</th>
-        <th scope="col" className="py-2 text-right font-medium">Chênh lệch</th>
-      </tr></thead>
-      <tbody>
-        {result.rows.map(row => <tr key={row.lineId} className="border-b align-top">
-          <th scope="row" className="py-2 pr-2 text-left font-medium">{row.slotCode}<span className="block text-xs font-normal text-muted-foreground">{row.productName}</span></th>
-          <td className="py-2 pr-2 text-right tabular-nums">{row.planned}</td>
-          <td className="py-2 pr-2 text-right tabular-nums">{row.loaded}</td>
-          <td className={cn('py-2 text-right', row.difference !== 0 && 'font-semibold')}>{row.text}</td>
-        </tr>)}
-      </tbody>
-      <tfoot><tr>
-        <th scope="row" className="py-2 pr-2 text-left">Tổng</th>
-        <td className="py-2 pr-2 text-right font-semibold tabular-nums">{result.planned}</td>
-        <td className="py-2 pr-2 text-right font-semibold tabular-nums">{result.loaded}</td>
-        <td className="py-2 text-right font-semibold">{result.noteRequired && result.difference === 0 ? 'Lệch theo ngăn' : reconcileTotal(result.difference)}</td>
-      </tr></tfoot>
-    </table>
-    <p className="text-[13px] text-muted-foreground">Đã rút {bowls(result.removed)} hết hạn hoặc hỏng trong phiếu này.</p>
-  </div>
+  return <table className="w-full table-fixed border-collapse text-[13px]">
+    <caption className="sr-only">Đối chiếu kế hoạch và thực tế theo ngăn</caption>
+    <thead><tr className="border-b text-left text-muted-foreground">
+      <th scope="col" className="py-2 pr-2 font-medium">Ngăn</th>
+      <th scope="col" className="py-2 pr-2 text-right font-medium">Kế hoạch</th>
+      <th scope="col" className="py-2 pr-2 text-right font-medium">Đã nạp</th>
+      <th scope="col" className="py-2 text-right font-medium">Chênh lệch</th>
+    </tr></thead>
+    <tbody>
+      {result.rows.map(row => <tr key={row.lineId} className="border-b align-top">
+        <th scope="row" className="py-2 pr-2 text-left font-medium">{row.slotCode}<span className="block text-xs font-normal text-muted-foreground">{row.productName}</span>
+          {reasons && row.savedReason && <span className="block text-xs font-normal break-words whitespace-pre-wrap">Lý do: {row.savedReason}</span>}</th>
+        <td className="py-2 pr-2 text-right tabular-nums">{row.planned}</td>
+        <td className="py-2 pr-2 text-right tabular-nums">{row.loaded}</td>
+        <td className={cn('py-2 text-right', row.difference !== 0 && 'font-semibold')}>{row.text}</td>
+      </tr>)}
+    </tbody>
+    <tfoot><tr>
+      <th scope="row" className="py-2 pr-2 text-left">Tổng</th>
+      <td className="py-2 pr-2 text-right font-semibold tabular-nums">{result.planned}</td>
+      <td className="py-2 pr-2 text-right font-semibold tabular-nums">{result.loaded}</td>
+      <td className="py-2 text-right font-semibold">{result.varianceLines && result.difference === 0 ? 'Lệch theo ngăn' : result.difference === 0 ? 'Khớp' : differenceText(result.difference)}</td>
+    </tr></tfoot>
+  </table>
 }
-const reconcileTotal = (difference: number) => difference === 0 ? 'Khớp' : differenceText(difference)
 
-function ReconcileStep({ ticket, lines, readOnly, missing, busy, reopen, back, completed }: {
-  ticket: WorkTicket; lines: readonly RestockLine[]; readOnly: boolean; missing: boolean; busy: string | null
-  reopen: () => void; back?: () => void; completed: () => void
+/** Step 5: plan against result, a reason for every line loaded ≠ planned, the result note, then complete. */
+function ReconcileStep({ ticket, lines, readOnly, back, completed, stale }: {
+  ticket: WorkOrder; lines: readonly RestockLine[]; readOnly: boolean; back: () => void; completed: () => void; stale: () => void
 }) {
   const result = reconcile(lines)
   const [note, setNote] = useState('')
-  const [noteError, setNoteError] = useState('')
+  const [reasons, setReasons] = useState<Record<string, string>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
   const [failure, setFailure] = useState('')
   const [pending, setPending] = useState(false)
-  const noteRef = useRef<HTMLTextAreaElement>(null)
+  const formRef = useRef<HTMLDivElement>(null)
+  const focusFirst = () => requestAnimationFrame(() => formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
   async function complete() {
     if (pending) return
     setFailure('')
-    const { body, error } = restockCompleteBody(note, result.noteRequired)
-    if (!body) { setNoteError(error ?? ''); noteRef.current?.focus(); return }
-    setPending(true); setNoteError('')
+    const { body, errors: problems } = restockCompleteBody(note, result.rows, reasons)
+    if (!body) { setErrors(problems ?? {}); focusFirst(); return }
+    setPending(true); setErrors({})
     try {
-      const done = await ticketsApi.complete(ticket.id, body)
-      toast.success('Đã hoàn tất phiếu nạp hàng', { description: resolvedText(done.resolvedAlertIds?.length ?? 0) })
+      await workOrdersApi.complete(ticket.id!, body)
+      toast.success('Đã hoàn tất phiếu nạp hàng', { description: 'Cảnh báo liên kết đã được đóng; cảnh báo tồn kho của ngăn đã nạp tự đóng khi đủ hàng.' })
       completed()
     } catch (error) {
-      const shown = describeCompleteError(error)
-      if (shown instanceof ValidationError) { setNoteError(shown.fieldErrors.note ?? ''); noteRef.current?.focus() } else setFailure(errorMessage(shown))
-      if (error instanceof ApiError && (error.status === 409 || error.status === 403)) completed()
+      const shown = describeCompleteError(error, result.rows)
+      if (shown.error instanceof ValidationError) { setErrors(shown.error.fieldErrors); focusFirst() } else setFailure(errorMessage(shown.error))
+      if (shown.stale) stale()
       setPending(false)
     }
   }
-  return <div className="grid gap-4 text-[14px]">
-    <p className="text-muted-foreground">Cửa nạp đã đóng. So số hộp đã nạp với kế hoạch; nếu lệch, ghi lý do để quản trị viên đối chiếu.</p>
-    <ReconcileTable lines={lines} />
+  const differing = result.rows.filter(row => row.difference !== 0)
+  return <div ref={formRef} className="grid gap-4 text-[14px]">
+    <p className="text-muted-foreground">Mọi cổng nạp đã đóng. So số hộp đã nạp với kế hoạch; dòng nào lệch phải có lý do để quản trị viên đối chiếu.</p>
+    <ReconcileTable lines={lines} reasons />
     {!readOnly && <>
-      <FormField label={result.noteRequired ? 'Ghi chú đối chiếu' : 'Ghi chú (không bắt buộc)'} required={result.noteRequired} error={noteError || undefined}
-        hint={`${result.noteRequired ? 'Bắt buộc vì số hộp đã nạp khác kế hoạch. ' : ''}${note.trim().length}/${NOTE_MAX} ký tự.`}>
-        <Textarea ref={noteRef} value={note} maxLength={NOTE_MAX} rows={3} className="text-base sm:text-sm" onChange={event => { setNote(event.target.value); setNoteError('') }} />
+      {differing.map(row => <FormField key={row.lineId} label={`Lý do lệch ngăn ${row.slotCode} (${row.text.toLowerCase()})`} required={!row.savedReason}
+        error={errors[varianceField(row.lineId)] || undefined} hint={row.savedReason ? `Đã có lý do: “${row.savedReason}”. Nhập để thay.` : 'Bắt buộc vì số hộp đã nạp khác kế hoạch. Tối đa 500 ký tự.'}>
+        <Input value={reasons[row.lineId] ?? ''} maxLength={500} className="h-11 text-base sm:text-sm"
+          onChange={event => { const value = event.target.value; setReasons(previous => ({ ...previous, [row.lineId]: value })); setErrors(previous => ({ ...previous, [varianceField(row.lineId)]: '' })) }} />
+      </FormField>)}
+      <FormField label="Kết quả nạp hàng" required error={errors.resultNote || undefined} hint={`Đã làm gì tại máy. ${note.trim().length}/${TICKET_LIMITS.note} ký tự.`}>
+        <Textarea value={note} maxLength={TICKET_LIMITS.note} rows={3} className="text-base sm:text-sm" onChange={event => { setNote(event.target.value); setErrors(previous => ({ ...previous, resultNote: '' })) }} />
       </FormField>
       {failure && <p role="alert" className={ERROR_BOX}>{failure}</p>}
-      <p className="text-[13px] text-muted-foreground">Hoàn tất xong, hệ thống tự đóng các cảnh báo Ngăn sắp hết hàng của những ngăn đã nạp đủ. Phiếu đã hoàn tất không mở lại được.</p>
+      <p className="text-[13px] text-muted-foreground">Hoàn tất xong, cảnh báo liên kết với phiếu được đóng và hệ thống kiểm tra lại tồn kho của máy. Máy vẫn ở Bảo trì cho tới khi quản trị viên bật lại. Phiếu đã hoàn tất không mở lại được.</p>
       <div className="grid gap-2 sm:flex sm:flex-wrap">
         <Button type="button" className={BIG} disabled={pending} onClick={complete}>{pending ? 'Đang hoàn tất…' : 'Hoàn tất phiếu'}</Button>
-        {missing && back
-          ? <Button type="button" variant="outline" className={BIG} onClick={back}>Quay lại: Nạp theo dòng</Button>
-          : <Button type="button" variant="outline" className={BIG} disabled={!!busy || pending} onClick={reopen}>{busy === 'OPEN_REFILL' ? 'Đang gửi…' : 'Mở lại cửa nạp để nạp thêm'}</Button>}
+        <Button type="button" variant="outline" className={BIG} disabled={pending} onClick={back}>Quay lại: Nạp thêm</Button>
       </div>
     </>}
   </div>
 }
 
-function DoneStep({ ticket, lines, machine }: { ticket: WorkTicket; lines: readonly RestockLine[]; machine?: Machine }) {
+function DoneStep({ ticket, lines, view, machine }: { ticket: WorkOrder; lines: readonly RestockLine[]; view: RestockView; machine?: Machine }) {
   const { can } = useSession()
   const inMaintenance = machine?.status === 'MAINTENANCE'
   const overview = can('MACHINE_WRITE') ? machinePath(ticket.machineId) : ''
-  const ids = ticket.resolvedAlertIds ?? []
   const canAlerts = can('ALERT_READ')
-  const alerts = useApi(signal => (canAlerts && ids.length ? Promise.all(ids.map(alertId => alertsApi.get(alertId, signal))) : Promise.resolve([])), `restock-alerts|${ids.join(',')}|${canAlerts}`)
   if (ticket.status === 'CANCELLED') return <div className="grid gap-2 text-[14px]">
-    <p>Phiếu đã bị hủy lúc {formatDateTime(ticket.cancelledAt)}{ticket.cancelledByName ? ` bởi ${ticket.cancelledByName}` : ''}.</p>
+    <p>Phiếu đã bị hủy lúc {formatDateTime(ticket.cancelledAt)}{ticket.cancelledBy?.fullName ? ` bởi ${ticket.cancelledBy.fullName}` : ''}.</p>
     {ticket.cancelReason && <p className="whitespace-pre-wrap break-words">Lý do: {ticket.cancelReason}</p>}
     <p className="text-muted-foreground">Không còn bước nào. Các hộp đã nạp hoặc đã rút trước khi hủy vẫn được giữ trong lịch sử kho.</p>
   </div>
+  const alerts = ticket.linkedAlerts ?? []
   return <div className="grid gap-4 text-[14px]">
-    <p>Hoàn tất lúc {formatDateTime(ticket.completedAt)}{ticket.completedByName ? ` bởi ${ticket.completedByName}` : ''}.</p>
-    <ReconcileTable lines={lines} />
-    {ticket.completionNote && <p className={cn(NOTE_BOX, 'whitespace-pre-wrap break-words')}><span className="text-muted-foreground">Ghi chú: </span>{ticket.completionNote}</p>}
-    <div role="status" className="grid gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3.5 py-3">
-      <p className="font-medium">{resolvedText(ids.length)}</p>
-      {ids.length > 0 && <ul className="grid gap-1">
-        {ids.map((alertId, index) => {
-          const alert = alerts.data?.find(candidate => candidate.id === alertId)
-          const label = alert ? `${alertTypeLabel(alert.type)}${alert.slotCode ? ` · ngăn ${alert.slotCode}` : ''} (đã đóng)` : alertFallback(!!alerts.error, index, ids.length)
-          return <li key={alertId}>{canAlerts ? <Link to={alertPath(alertId)} className={cn(LINK, 'inline-flex min-h-11 items-center')}>{label}</Link> : label}</li>
+    <p>Hoàn tất lúc {formatDateTime(ticket.completedAt)}{ticket.completedBy?.fullName ? ` bởi ${ticket.completedBy.fullName}` : ''}.</p>
+    <ReconcileTable lines={lines} reasons />
+    <p className={NOTE_BOX}>{removedText(view.removedByReason)}</p>
+    {ticket.resultNote && <p className={cn(NOTE_BOX, 'whitespace-pre-wrap break-words')}><span className="text-muted-foreground">Kết quả: </span>{ticket.resultNote}</p>}
+    {alerts.length > 0 && <div role="status" className="grid gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3.5 py-3">
+      <p className="font-medium">Cảnh báo liên kết với phiếu</p>
+      <ul className="grid gap-1">
+        {alerts.map(alert => {
+          const label = `${alertTypeLabel(alert.type)}${alert.title ? ` · ${alert.title}` : ''} (${alert.status === 'RESOLVED' ? 'đã đóng' : 'chưa đóng'})`
+          return <li key={alert.id}>{canAlerts && alert.id ? <Link to={alertPath(alert.id)} className={cn(LINK, 'inline-flex min-h-11 items-center')}>{label}</Link> : label}</li>
         })}
-      </ul>}
-    </div>
+      </ul>
+    </div>}
     {inMaintenance && <div className={cn(NOTE_BOX, 'grid gap-2')}>
       <p><strong className="font-medium">Máy {ticket.machineCode} vẫn ở trạng thái Bảo trì</strong> nên kiosk chưa bán hàng. Xong việc tại máy thì chuyển máy về Hoạt động{overview ? ' ở thẻ Tổng quan của máy.' : ': nhờ Quản trị viên đổi trạng thái máy.'}</p>
       {overview && <p><Button asChild variant="outline" className={BIG}><Link to={overview}>Mở thẻ Tổng quan của máy {ticket.machineCode}</Link></Button></p>}
@@ -684,10 +648,127 @@ function DoneStep({ ticket, lines, machine }: { ticket: WorkTicket; lines: reado
   </div>
 }
 
-/** Name of a closed alert link while its details load (or when they cannot be read): stable and meaningful. */
-function alertFallback(failed: boolean, index: number, total: number): string {
-  const which = total > 1 ? ` ${index + 1}/${total}` : ''
-  return failed ? `Cảnh báo đã đóng${which}: mở để xem chi tiết` : `Cảnh báo đã đóng${which} (đang tải tên…)`
+/** RESTOCK_PLAN: the planned lines; a line is changed or taken out only while nothing was loaded against it. */
+function PlanPanel({ ticket, machineId, lines, slots, changed }: { ticket: WorkOrder; machineId: string; lines: readonly RestockLine[]; slots?: readonly Slot[]; changed: () => void }) {
+  const [open, setOpen] = useState(!lines.length)
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<RestockLine | null>(null)
+  const panelId = useId()
+  return <section aria-labelledby={`${panelId}-title`} className={cn(PANEL, 'grid gap-3 text-[14px]')}>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h2 id={`${panelId}-title`} className="text-base font-semibold">Kế hoạch nạp ({lines.length} dòng)</h2>
+      <Button type="button" variant="ghost" className="max-sm:h-11" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(value => !value)}>{open ? 'Thu gọn' : 'Sửa kế hoạch'}</Button>
+    </div>
+    {open && <div id={panelId} className="grid gap-3">
+      <p className="text-[13px] text-muted-foreground">Mỗi dòng là một ngăn, một sản phẩm và số hộp dự kiến. Dòng đã có hộp nạp vào thì không đổi được nữa (ghi chênh lệch ở bước Đối chiếu).</p>
+      {lines.map(line => <PlanLine key={line.id} ticketId={ticket.id!} line={line} capacity={slots?.find(slot => slot.id === line.slotId)?.capacity} changed={changed} remove={() => setRemoving(line)} />)}
+      {adding
+        ? <AddLine ticketId={ticket.id!} machineId={machineId} slots={slots} close={() => setAdding(false)} changed={changed} />
+        : <Button type="button" variant="outline" className={BIG} onClick={() => setAdding(true)}>Thêm dòng nạp</Button>}
+    </div>}
+    {removing && <ConfirmDialog title={`Bỏ dòng ngăn ${removing.slotCode} khỏi kế hoạch?`} confirmLabel="Bỏ khỏi kế hoạch" close={() => setRemoving(null)}
+      successMessage="Đã bỏ dòng khỏi kế hoạch" successDescription={`Ngăn ${removing.slotCode} · ${removing.productName}`}
+      message={<p>Dòng “{removing.productName}, {bowls(removing.plannedQuantity ?? 0)}” chưa có hộp nào được nạp nên có thể bỏ khỏi kế hoạch. Tồn kho và lịch sử không thay đổi.</p>}
+      onConfirm={async () => {
+        try { await restockApi.removeLine(ticket.id!, removing.id!) } catch (error) {
+          const shown = describePlanError(error)
+          if (shown.stale) changed()
+          throw shown.error
+        }
+        changed()
+      }} />}
+  </section>
+}
+
+function PlanLine({ ticketId, line, capacity, changed, remove }: { ticketId: string; line: RestockLine; capacity?: number; changed: () => void; remove: () => void }) {
+  const [value, setValue] = useState(String(line.plannedQuantity ?? ''))
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+  const loaded = (line.loadedQuantity ?? 0) > 0
+  const inputId = useId()
+  async function save() {
+    if (pending) return
+    const problems = validateLine({ slotId: line.slotId ?? '', productId: line.productId ?? '', plannedQuantity: value }, capacity)
+    if (problems.plannedQuantity) { setError(problems.plannedQuantity); return }
+    const body = updateLineBody(line, { plannedQuantity: value, productId: line.productId ?? '' })
+    if (!body) { setError('Số hộp chưa đổi.'); return }
+    setPending(true); setError('')
+    try {
+      await restockApi.updateLine(ticketId, line.id!, body)
+      toast.success('Đã lưu dòng nạp', { description: `Ngăn ${line.slotCode} · ${bowls(body.plannedQuantity ?? line.plannedQuantity ?? 0)}` })
+      changed()
+    } catch (failure) {
+      const shown = describePlanError(failure)
+      setError(errorMessage(shown.error))
+      if (shown.stale) changed()
+    } finally { setPending(false) }
+  }
+  return <div className="grid gap-2 rounded-lg border px-3.5 py-3 sm:grid-cols-[1fr_auto] sm:items-end">
+    <div className="grid gap-1">
+      <span className="font-medium">Ngăn {line.slotCode} · {line.productName}</span>
+      {loaded
+        ? <span className="text-[13px] text-muted-foreground">Kế hoạch {bowls(line.plannedQuantity ?? 0)}, đã nạp {bowls(line.loadedQuantity ?? 0)}: không đổi được nữa.</span>
+        : <FormField label="Số hộp dự kiến" error={error || undefined} hint={capacity ? `Tối đa ${bowls(capacity)} (sức chứa ngăn).` : undefined}>
+          <Input id={inputId} value={value} inputMode="numeric" className="h-11 text-base sm:w-32 sm:text-sm" onChange={event => { setValue(event.target.value); setError('') }} />
+        </FormField>}
+    </div>
+    {!loaded && <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" className="h-11" disabled={pending} onClick={save}>{pending ? 'Đang lưu…' : 'Lưu'}</Button>
+      <Button type="button" variant="ghost" className="h-11" aria-label={`Bỏ dòng ngăn ${line.slotCode} khỏi kế hoạch`} onClick={remove}>Bỏ khỏi kế hoạch</Button>
+    </div>}
+  </div>
+}
+
+function AddLine({ ticketId, machineId, slots, close, changed }: { ticketId: string; machineId: string; slots?: readonly Slot[]; close: () => void; changed: () => void }) {
+  const products = useProductOptions(true)
+  const form = useForm<LineValues>({ ...NEW_LINE })
+  const { values, errors } = form
+  const [failure, setFailure] = useState('')
+  const [pending, setPending] = useState(false)
+  const usable = (slots ?? []).filter(slot => slot.machineId === machineId && slot.status !== 'INACTIVE')
+  const capacity = usable.find(slot => slot.id === values.slotId)?.capacity
+  async function add() {
+    if (pending) return
+    setFailure('')
+    const problems = validateLine(values, capacity)
+    if (Object.keys(problems).length) { form.setErrors(problems); return }
+    setPending(true)
+    try {
+      await restockApi.addLine(ticketId, lineInputBody(values))
+      toast.success('Đã thêm dòng nạp')
+      changed(); close()
+    } catch (error) {
+      if (error instanceof ApiError && Object.keys(error.fieldErrors).length) form.setErrors(error.fieldErrors)
+      const shown = describePlanError(error)
+      setFailure(errorMessage(shown.error))
+      if (shown.stale) changed()
+      setPending(false)
+    }
+  }
+  return <div className="grid gap-3 rounded-lg border border-dashed px-3.5 py-3">
+    <div className="grid gap-3 sm:grid-cols-3">
+      <FormField label="Ngăn" required error={errors.slotId || undefined}>
+        <NativeSelect value={values.slotId} className="h-11 text-base sm:text-sm" onChange={event => form.set('slotId')(event.target.value)}>
+          <option value="">Chọn ngăn…</option>
+          {usable.map(slot => <option key={slot.id} value={slot.id}>Ngăn {slot.slotCode} (sức chứa {slot.capacity})</option>)}
+        </NativeSelect>
+      </FormField>
+      <FormField label="Sản phẩm" required error={errors.productId || undefined}>
+        <NativeSelect value={values.productId} className="h-11 text-base sm:text-sm" onChange={event => form.set('productId')(event.target.value)}>
+          <option value="">Chọn sản phẩm…</option>
+          {products.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </NativeSelect>
+      </FormField>
+      <FormField label="Số hộp dự kiến" required error={errors.plannedQuantity || undefined}>
+        <Input value={values.plannedQuantity} inputMode="numeric" className="h-11 text-base sm:text-sm" onChange={event => form.set('plannedQuantity')(event.target.value)} />
+      </FormField>
+    </div>
+    {failure && <p role="alert" className={ERROR_BOX}>{failure}</p>}
+    <div className="flex flex-wrap gap-2">
+      <Button type="button" className="h-11" disabled={pending} onClick={add}>{pending ? 'Đang thêm…' : 'Thêm dòng'}</Button>
+      <Button type="button" variant="ghost" className="h-11" disabled={pending} onClick={close}>Hủy</Button>
+    </div>
+  </div>
 }
 
 export default TicketRestockPage

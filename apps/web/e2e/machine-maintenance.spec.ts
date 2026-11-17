@@ -2,7 +2,7 @@
 // Done criterion: the command buttons are locked with the reason while the machine is not MAINTENANCE (still focusable,
 // nothing is sent), and EMPTY_COLUMN asks for a confirmation naming the slot and how many bowls will be taken out.
 // Also: the way to MAINTENANCE from the lock (ADMIN) or who to ask (STAFF), OFFLINE machine, a command followed until it
-// ends (PENDING → … → SUCCESS, bowls removed), the machine refusing RESET (FAILED), 400/409 from the server, the API not
+// ends (PENDING → … → COMPLETED, bowls removed), the machine refusing RESET (FAILED), 400/409 from the server, the API not
 // there yet (404) and 403; screenshots + axe at 1440/768/390 light and dark.
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
@@ -11,7 +11,8 @@ import { auditScreen, loginAs, THEMES, useThemeChoice } from './support.ts'
 const id = (n: number) => `20000000-0000-0000-0000-${String(n).padStart(12, '0')}`
 const DEV_01 = `/admin/machines/${id(1)}`
 const DEV_02 = `/admin/machines/${id(2)}`
-const COMMANDS_PATH = (n: number) => `/machines/${id(n)}/maintenance-commands`
+/** POSTs of a machine's column commands (/machines/{id}/slots/{slotId}/maintenance-commands) and its RESET. */
+const COMMANDS_PATH = (n: number) => `/machines/${id(n)}/`
 
 const tab = (page: Page, name: string) => page.getByRole('tablist', { name: 'Thông tin máy' }).getByRole('tab', { name })
 const lockNotice = (page: Page) => page.locator('[data-lock]')
@@ -21,7 +22,7 @@ const slotSelect = (page: Page) => page.getByLabel('Ngăn cần thao tác')
 
 async function posts(page: Page, n: number): Promise<number> {
   return page.evaluate(path => (window as unknown as { __fvMock: { requests: (prefix: string) => { method: string }[] } }).__fvMock
-    .requests(path).filter(request => request.method === 'POST').length, COMMANDS_PATH(n))
+    .requests(path).filter(request => request.method === 'POST' && /\/(maintenance-commands|reset)$/.test((request as { path?: string }).path ?? '')).length, COMMANDS_PATH(n))
 }
 async function resumeHeartbeat(page: Page, code: string) {
   await page.evaluate(machine => (window as unknown as { __fvMock: { resumeHeartbeat: (machine: string) => string } }).__fvMock.resumeHeartbeat(machine), code)
@@ -76,14 +77,14 @@ test.describe('Tiêu chí xong (Quản trị viên)', () => {
     await expect(command(page, 'OPEN_REFILL')).not.toHaveAttribute('aria-disabled', 'true')
   })
 
-  test('EMPTY_COLUMN cần xác nhận nêu ngăn và số hộp; hủy không gửi; xác nhận thì theo dõi tới Thành công và hộp bị rút', async ({ page }) => {
+  test('EMPTY_COLUMN cần xác nhận nêu ngăn và số hộp; hủy không gửi; xác nhận thì theo dõi tới Đã xong và hộp bị rút', async ({ page }) => {
     await page.goto(`${DEV_01}?tab=maintenance`)
     await toMaintenance(page)
     await slotSelect(page).selectOption({ label: 'Ngăn B1 (Hoạt động)' })
     await expect(page.getByText(/^Đang có 2 hộp/)).toBeVisible()
     await command(page, 'EMPTY_COLUMN').click()
     let dialog = page.getByRole('alertdialog')
-    await expect(dialog.getByRole('heading', { name: 'Rút hết 2 hộp ở ngăn B1?' })).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'Xả hết 2 hộp ở ngăn B1?' })).toBeVisible()
     await expect(dialog).toContainText('Máy DEV-MACHINE-01, ngăn B1: 2 hộp sẽ bị rút và chuyển sang Đã rút. Không hoàn tác được')
     await dialog.getByRole('button', { name: 'Hủy' }).click()
     await expect(dialog).toHaveCount(0)
@@ -97,11 +98,11 @@ test.describe('Tiêu chí xong (Quản trị viên)', () => {
     await expect(dialog).toHaveCount(0)
     expect(await posts(page, 1)).toBe(1)
     const first = history(page).locator('tbody tr').first()
-    await expect(first).toContainText('Rút hết hộp trong ngăn')
+    await expect(first).toContainText('Xả cả ngăn')
     await expect(first).toContainText('Ghi chú: Hộp hết hạn')
     // While it runs the buttons are locked by the running command.
     await expect(lockNotice(page)).toHaveAttribute('data-lock', 'running')
-    await expect(first).toContainText('Thành công', { timeout: 15_000 })
+    await expect(first).toContainText('Đã xong', { timeout: 15_000 })
     await expect(first).toContainText('Ngăn B1 · đã rút 2 hộp')
     await expect(lockNotice(page)).toHaveCount(0)
     await expect(page.getByText(/^Đang có 0 hộp/)).toBeVisible()
@@ -113,18 +114,18 @@ test.describe('Tiêu chí xong (Quản trị viên)', () => {
     await toMaintenance(page)
     await command(page, 'RESET').click()
     const dialog = page.getByRole('alertdialog')
-    await expect(dialog.getByRole('heading', { name: 'Khởi động lại bộ nhả hàng của máy DEV-MACHINE-01?' })).toBeVisible()
+    await expect(dialog.getByRole('heading', { name: 'Khởi động lại bộ điều khiển của máy DEV-MACHINE-01?' })).toBeVisible()
     await dialog.getByRole('button', { name: 'Khởi động lại' }).click()
     // The seed's newest row is an older refused RESET: wait for the new row first.
     await expect(history(page).locator('tbody tr')).toHaveCount(4)
     const first = history(page).locator('tbody tr').first()
-    await expect(first).toContainText('Thất bại', { timeout: 15_000 })
-    await expect(first).toContainText('Bộ nhả hàng không ở trạng thái lỗi FAULT')
+    // Backend #64: RESET_ACCEPTED completes the command at once (the controller of DEV-MACHINE-01 is not in FAULT).
+    await expect(first).toContainText('Đã xong', { timeout: 15_000 })
     await expect(lockNotice(page)).toHaveCount(0)
     await command(page, 'OPEN_REFILL').click()
     await expect(page.getByRole('alertdialog')).toHaveCount(0)
-    await expect(first).toContainText('Mở cửa nạp hàng')
-    await expect(first).toContainText('Thành công', { timeout: 15_000 })
+    await expect(first).toContainText('Mở cổng nạp')
+    await expect(first).toContainText('Đã xong', { timeout: 15_000 })
     await expect(page.getByText(/^Cửa nạp: đang mở/)).toBeVisible()
   })
 
@@ -168,7 +169,7 @@ test.describe('Tiêu chí xong (Quản trị viên)', () => {
     const first = history(page).locator('tbody tr').first()
     await expect(first).toContainText('Khởi động lại bộ nhả hàng')
     await page.clock.fastForward(5_000)
-    await expect(first).toContainText('Thành công', { timeout: 15_000 })
+    await expect(first).toContainText('Đã xong', { timeout: 15_000 })
   })
 
   test('Chưa có API (404): báo chưa có và khóa nút; 403 giải thích quyền', async ({ page }) => {

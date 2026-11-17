@@ -4,16 +4,15 @@
 import { requestWithMeta } from '../api/client.ts'
 import type { ApiResult, RequestOptions } from '../api/client.ts'
 import type { components } from '../api/schema'
-import type { components as PricingDraft } from '../api/drafts/pricing-discount'
 
 type S = components['schemas']
 export type KioskIdentity = S['KioskIdentityResponse']
 export type KioskCatalog = S['KioskCatalogResponse']
-// Near-expiry discount fields (FE 7.5): DRAFT api-contract/drafts/pricing-discount.yaml (backend 4.1), optional.
-type P = PricingDraft['schemas']
+// Near-expiry discount (backend #61): catalog price/originalPrice/discountPercent/discountReason, order lines
+// originalUnitPrice/discountPercent/discountReason and the order's discountAmount, all in api.yaml.
 export type KioskProduct = S['KioskCatalogProductResponse']
-export type KioskOrderLine = S['KioskOrderItemResponse'] & P['OrderItemPricing']
-export type KioskOrder = Omit<S['KioskOrderResponse'], 'items'> & P['OrderPricing'] & { items?: KioskOrderLine[] }
+export type KioskOrderLine = S['KioskOrderItemResponse']
+export type KioskOrder = S['KioskOrderResponse']
 export type KioskPayment = S['KioskPaymentResponse']
 
 export function configuredKioskKey(): string {

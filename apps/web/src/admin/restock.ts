@@ -7,7 +7,10 @@
 // data (work order, lines, slots' refillGateOpen, the machine's running command), so a reload resumes at the right step.
 // Quantities follow the load rules of FE 4.3 (inventory-load.ts). Nothing is ever deleted.
 import { ApiError } from '../api/client.ts'
-import type { CompleteWorkOrderBody, InventorySummary, LineVariance, MaintenanceOperation, RestockLine, SlotSuggestion, WorkOrder } from '../api/resources.ts'
+import type {
+  CompleteWorkOrderBody, InventorySummary, LineVariance, LinkedMaintenanceCommand, MaintenanceOperation, RestockLine, RestockLineInput, Slot, SlotSuggestion,
+  UpdateRestockLineBody, WorkOrder,
+} from '../api/resources.ts'
 import { ValidationError, errorCode } from './form-error.ts'
 import type { LoadRoom } from './inventory-load.ts'
 import { LOAD_MAX_PER_REQUEST, QUANTITY_INVALID, fitConflictText, loadMax, parseBoxCount, quantityProblem } from './inventory-load.ts'
@@ -273,5 +276,63 @@ export function describeCompleteError(error: unknown, rows: readonly ReconcileRo
   if (code === 'MACHINE_COMMAND_IN_PROGRESS') return { error: new ApiError(409, 'Còn lệnh bảo trì chưa xong hoặc chờ đối soát. Chờ lệnh xong (hoặc đối soát ở thẻ Bảo trì của máy) rồi hoàn tất.'), stale: true }
   if (error.status === 409) return { error: new ApiError(409, RESTOCK_STALE), stale: true }
   if (error.status === 404 || error.status === 403) return { error: new ApiError(error.status, RESTOCK_NOT_ASSIGNEE), stale: true }
+  return { error, stale: false }
+}
+
+// ---- refill gates and linked maintenance commands
+
+/** Slots of the machine whose refill gate is open (POST /complete refuses with REFILL_GATE_OPEN while any is). */
+export function openGates<T extends Pick<Slot, 'refillGateOpen'>>(slots: readonly T[] | undefined): T[] {
+  return (slots ?? []).filter(slot => slot.refillGateOpen)
+}
+/** The newest maintenance command of this work order that needs attention: it failed, or waits for a reconciliation. */
+export function linkedAttention<T extends Pick<LinkedMaintenanceCommand, 'status' | 'createdAt'>>(commands: readonly T[] | undefined): T | undefined {
+  const newest = [...(commands ?? [])].sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0]
+  return newest && (newest.status === 'FAILED' || newest.status === 'NEEDS_RECONCILIATION') ? newest : undefined
+}
+
+// ---- planning lines (RESTOCK_PLAN, only while nothing was loaded against a line)
+
+export const PLAN_LINE_MAX = 1000
+export interface LineValues { slotId: string; productId: string; plannedQuantity: string; [key: string]: string }
+export const NEW_LINE: LineValues = { slotId: '', productId: '', plannedQuantity: '' }
+
+/** Client checks of a planned line: slot, product, 1..capacity (the server checks again). */
+export function validateLine(values: LineValues, capacity?: number): Record<string, string> {
+  const errors: Record<string, string> = {}
+  if (!values.slotId) errors.slotId = 'Chọn ngăn.'
+  if (!values.productId) errors.productId = 'Chọn sản phẩm.'
+  const quantity = parseBoxCount(values.plannedQuantity)
+  const max = Math.min(capacity ?? PLAN_LINE_MAX, PLAN_LINE_MAX)
+  if (quantity === undefined || quantity < 1) errors.plannedQuantity = QUANTITY_INVALID
+  else if (quantity > max) errors.plannedQuantity = `Tối đa ${bowls(max)} (sức chứa của ngăn).`
+  return errors
+}
+/** Body of POST .../restock-lines. */
+export function lineInputBody(values: LineValues): RestockLineInput {
+  return { slotId: values.slotId, productId: values.productId, plannedQuantity: parseBoxCount(values.plannedQuantity) ?? 0 }
+}
+/** Body of PATCH .../restock-lines/{lineId}: only what changed; undefined when nothing did. */
+export function updateLineBody(line: Pick<RestockLine, 'plannedQuantity' | 'productId'>, values: Pick<LineValues, 'plannedQuantity' | 'productId'>): UpdateRestockLineBody | undefined {
+  const body: UpdateRestockLineBody = {}
+  const quantity = parseBoxCount(values.plannedQuantity)
+  if (quantity !== undefined && quantity !== line.plannedQuantity) body.plannedQuantity = quantity
+  if (values.productId && values.productId !== line.productId) body.productId = values.productId
+  return Object.keys(body).length ? body : undefined
+}
+
+const PLAN_CONFLICTS: Readonly<Record<string, string>> = {
+  LINE_ALREADY_LOADED: 'Dòng này đã có hộp được nạp nên không sửa hay bỏ được nữa. Ghi chênh lệch ở bước Đối chiếu.',
+  DUPLICATE_LINE: 'Ngăn này đã có dòng cho sản phẩm đó. Sửa số hộp của dòng đang có thay vì thêm dòng mới.',
+  SLOT_INACTIVE: 'Ngăn đang ngừng hoạt động nên không lập kế hoạch nạp được. Bật ngăn trước.',
+  PRODUCT_INACTIVE: 'Sản phẩm đang ngừng bán nên không nạp được. Chọn sản phẩm khác.',
+  INVALID_WORK_ORDER_TRANSITION: 'Phiếu đã hoàn tất hoặc đã hủy nên không đổi kế hoạch được nữa.',
+}
+/** A failed planning call in words; `stale` when the screen must reload. */
+export function describePlanError(error: unknown): { error: unknown; stale: boolean } {
+  if (!(error instanceof ApiError)) return { error, stale: false }
+  const code = errorCode(error)
+  if (error.status === 409) return { error: new ApiError(409, (code && PLAN_CONFLICTS[code]) || 'Kế hoạch vừa thay đổi ở nơi khác. Trang đã tải lại; kiểm tra rồi thử lại.'), stale: true }
+  if (error.status === 404) return { error: new ApiError(404, 'Không tìm thấy dòng hoặc phiếu này nữa. Trang đã tải lại.'), stale: true }
   return { error, stale: false }
 }

@@ -1,14 +1,15 @@
 // The `fetch` replacement given to configureClient: picks the mocked groups, applies ?scenario=, routes to a handler.
 import { errorResponse, MockHttpError, successResponse } from './http.ts'
 import type { Reply } from './http.ts'
-import { advanceMaintenanceCommands, advanceOrders, draftPermissionsOfUser, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
+import { advanceOrders, draftPermissionsOfUser, payLatestKioskOrder, permissionsOfUser, raiseAlert, routes, setHeartbeat, syncHeartbeats } from './handlers.ts'
+import { advanceMaintenanceCommands } from './work-orders.ts'
 import type { HandlerContext, KioskSimulation, Policy, RaiseAlertInput } from './handlers.ts'
 import { expireSince, readScenario, scenarioApplies } from './scenario.ts'
 import type { Scenario, ScenarioStorage } from './scenario.ts'
 import { createStore } from './seed.ts'
 import type { MockAlert, MockUser } from './seed.ts'
 
-export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'incident-reports', 'refunds', 'reports'] as const
+export const MOCK_GROUPS = ['auth', 'users', 'products', 'machines', 'slots', 'kiosk-credentials', 'batches', 'inventory', 'orders', 'payments', 'webhook-logs', 'kiosk', 'roles', 'alerts', 'telemetry', 'tickets', 'maintenance-schedules', 'maintenance-commands', 'pricing', 'incident-reports', 'refunds', 'reports'] as const
 export type MockGroup = (typeof MOCK_GROUPS)[number]
 
 export interface MockSelection { all: boolean; groups: MockGroup[]; unknown: string[] }
@@ -29,17 +30,25 @@ const TOP_LEVEL_GROUPS: Record<string, MockGroup> = {
   alerts: 'alerts',
   // Draft of backend 5.1 (api-contract/drafts/refunds.yaml, FE 8.1).
   refunds: 'refunds',
-  // Draft of backend 4.3 (api-contract/drafts/work-tickets.yaml).
-  'work-tickets': 'tickets',
+  // Work orders of backend #66/#68 (api.yaml): list, detail, actions, restock lines and loads.
+  'work-orders': 'tickets',
   // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): admin read of reports for W-12 (FE 8.3).
   'incident-reports': 'incident-reports',
-  // Draft of backend 4.5 (api-contract/drafts/maintenance-schedules.yaml).
-  'maintenance-schedules': 'maintenance-schedules',
+  // Maintenance plans of backend #70 (api.yaml); the group keeps the name of the screen.
+  'maintenance-plans': 'maintenance-schedules',
+  // Maintenance commands of backend #64 (history, detail, reconcile).
+  'maintenance-commands': 'maintenance-commands',
+  // Near-expiry discount setting of backend #61.
+  pricing: 'pricing',
   // Draft of backend 6.1 (api-contract/drafts/revenue-reports.yaml).
   reports: 'reports',
 }
 
 export function groupOf(path: string): MockGroup | null {
+  // Maintenance commands of backend #64: one column's command and the controller RESET (before the slots group).
+  if (/^\/machines\/[^/]+\/(slots\/[^/]+\/maintenance-commands|reset)\/?$/.test(path)) return 'maintenance-commands'
+  // Restock suggestions and the restock work order from them (backend #68) belong to the work orders.
+  if (/^\/machines\/[^/]+\/(restock-suggestions|restock-work-orders)\/?$/.test(path)) return 'tickets'
   if (/^\/machines\/[^/]+\/kiosk-credentials(\/|$)/.test(path)) return 'kiosk-credentials'
   if (/^\/machines\/[^/]+\/slots(\/|$)/.test(path)) return 'slots'
   // Draft of backend 5.1 (api-contract/drafts/refunds.yaml): recording a refund belongs with GET /refunds, not orders.
@@ -48,8 +57,6 @@ export function groupOf(path: string): MockGroup | null {
   if (/^\/machines\/[^/]+\/(telemetry|events)(\/|$)/.test(path)) return 'telemetry'
   // Draft of backend 5.2 (api-contract/drafts/incident-reports.yaml): public report form of FE 8.2.
   if (/^\/public\/incident-reports(\/|$)/.test(path)) return 'incident-reports'
-  // Draft of backend 4.2 (api-contract/drafts/machine-maintenance.yaml): its own group, like telemetry.
-  if (/^\/machines\/[^/]+\/maintenance-commands(\/|$)/.test(path)) return 'maintenance-commands'
   return TOP_LEVEL_GROUPS[path.split('/')[1] ?? ''] ?? null
 }
 
@@ -212,7 +219,7 @@ export function createMockFetcher(selection: MockSelection, overrides: Partial<M
       if (route.method !== method) continue
       const match = route.pattern.exec(path)
       if (!match) continue
-      const ctx: HandlerContext = { store, now: options.now(), params: match.groups ?? {}, query, body, user: undefined, machineId: '', options: simulation }
+      const ctx: HandlerContext = { store, now: options.now(), params: match.groups ?? {}, query, body, user: undefined, machineId: '', options: simulation, headers }
       if (route.policy === 'kiosk') ctx.machineId = kioskMachineId(headers.get('x-kiosk-key'))
       else if (route.policy !== 'public') ctx.user = authenticate(route.policy, headers.get('authorization'))
       advanceOrders(ctx)

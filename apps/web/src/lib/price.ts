@@ -1,6 +1,6 @@
 // Display of prices with a near-expiry discount (FE 7.5, screens K1, T1, I2), shared by the kiosk and the admin so every
 // screen writes money the same way (formatMoney: `35.000 ₫`). Display only: the backend decides the discount and the
-// amount to pay (draft api-contract/drafts/pricing-discount.yaml); these helpers never compute a price to charge. A
+// amount to pay (backend #61, api.yaml); these helpers never compute a price to charge. A
 // response without the discount fields (the real API today) reads as "no discount" and shows the plain price.
 import { formatMoney } from './format.ts'
 

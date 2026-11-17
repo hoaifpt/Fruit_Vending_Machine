@@ -181,7 +181,10 @@ test('remove: reason required, trimmed, at most 500; quick reasons fit; body is 
 test('mock: load through the API, then the 409 scenario on /inventory/load answers with the contract example', async () => {
   const state = { token: null, search: '' }
   configureClient({ baseUrl: '', fetcher: createMockFetcher(parseSelection('all'), { getSearch: () => state.search }), getToken: () => state.token, onUnauthorized: () => {} })
+  // Backend #68: a direct load (no work order) needs INVENTORY_LOAD_DIRECT, ADMIN only; STAFF load through a restock.
   state.token = (await authApi.login({ email: MOCK_ACCOUNTS.staff, password: MOCK_PASSWORDS.staff })).accessToken
+  await assert.rejects(inventoryApi.load(loadBody(filled)), error => error.status === 403)
+  state.token = (await authApi.login({ email: MOCK_ACCOUNTS.admin, password: MOCK_PASSWORDS.admin })).accessToken
   const result = await inventoryApi.load(loadBody(filled))
   assert.equal(result.quantity, 5)
   // B1 had 2 boxes: 7/10 now, so 4 more do not fit (real capacity check of the mock).

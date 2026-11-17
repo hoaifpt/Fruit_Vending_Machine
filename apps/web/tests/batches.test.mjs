@@ -145,6 +145,9 @@ test('mock: loaded count is totalElements of /inventory?batchId (all statuses), 
   await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-05', productId: INACTIVE_PRODUCT_ID, expiresAt: body.manufacturedAt }), error => error.status === 409 && describeSaveError(error).fieldErrors?.productId === PRODUCT_INACTIVE)
   await assert.rejects(batchesApi.create({ ...body, batchCode: 'FM4-TEST-06', expiresAt: body.manufacturedAt }), error => error.status === 400 && !Object.keys(error.fieldErrors).length)
 
+  // A direct load is ADMIN only since backend #68 (INVENTORY_LOAD_DIRECT); staff created the batch above.
+  await assert.rejects(inventoryApi.load({ batchId: created.id, slotId: '30000000-0000-0000-0000-000000000002', quantity: 2 }), error => error.status === 403)
+  token = (await authApi.login({ email: MOCK_ACCOUNTS.admin, password: MOCK_PASSWORDS.admin })).accessToken
   await inventoryApi.load({ batchId: created.id, slotId: '30000000-0000-0000-0000-000000000002', quantity: 2 })
   assert.deepEqual((await countLoaded([created.id]))[created.id], { ok: true, loaded: 2 })
   assert.equal(loadedView(2, created.quantity).text, '2 / 3 hộp')

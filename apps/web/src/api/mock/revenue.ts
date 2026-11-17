@@ -34,7 +34,7 @@ export function refundShares(lines: readonly Pick<MockOrderItem, 'totalPrice'>[]
   return shares
 }
 const lineGross = (line: MockOrderItem) => (line.originalUnitPrice ?? line.unitPrice ?? 0) * line.quantity
-const lineDiscount = (line: MockOrderItem) => line.discountAmount ?? 0
+const lineDiscount = (line: MockOrderItem) => lineGross(line) - line.totalPrice
 
 function addSale(target: Figures, lines: readonly MockOrderItem[]) {
   target.orderCount += 1

@@ -1,9 +1,10 @@
 // I2/I3 Tồn kho: map of a machine (`?machineId=`, default view) where each slot is a column of stacked boxes, the bottom
 // one (the head) being the box sold next. A head that is expired or failed to dispense blocks the slot: it says
 // "Đang chặn ngăn" and, when the API allows it, offers "Rút hộp". `?view=list` keeps the list of boxes with its filters.
-// INVENTORY_WRITE: load N boxes in a Sheet (from the page header, or "Nạp hộp" on a slot column with machine and slot
-// filled in) showing the free places and what the batch can still take, and take a box out in a Sheet with a required
-// reason. Rules: ../inventory-map.ts (map), ../inventory-load.ts (load/remove). Each slot links to its history and a
+// INVENTORY_LOAD_DIRECT (ADMIN, backend #68): load N boxes without a work order in a Sheet (from the page header, or
+// "Nạp hộp" on a slot column with machine and slot filled in) showing the free places and what the batch can still take;
+// STAFF load through a restock work order. INVENTORY_WRITE: take a box out in a Sheet with a required reason. A box whose
+// batch expires today carries "Giảm giá hôm nay" (discountEligibleToday, backend #61); the setting is shown above. Rules: ../inventory-map.ts (map), ../inventory-load.ts (load/remove). Each slot links to its history and a
 // blocking head to the history of that box (screen I4, ./InventoryHistoryPage.tsx).
 // Connectivity (FE 6.4): the machine picker and the map header show "Trực tuyến" / "Mất kết nối (OFFLINE)" (180 s rule of
 // ../connection.ts), reloaded every 30 s, with a warning on the map while the machine is OFFLINE.
@@ -20,8 +21,6 @@ import { Skeleton } from '../../components/ui/skeleton.tsx'
 import { StatusBadge } from '../../components/ui/status-badge.tsx'
 import { cn } from '../../lib/cn.ts'
 import { formatDateTime } from '../../lib/format.ts'
-import { discountReasonText, priceView } from '../../lib/price.ts'
-import { PriceTag } from '../../components/ui/price-tag.tsx'
 import { linkHandler, useQueryParams } from '../../lib/router.ts'
 import { statusMeta } from '../../lib/status.ts'
 import { countLoaded } from '../batches.ts'
@@ -45,6 +44,8 @@ import type { Connectivity } from '../connection.ts'
 import { useApi } from '../useApi.ts'
 import { useLiveLastSeen } from '../useConnection.ts'
 import { useSession } from '../useSession.ts'
+import { DiscountSetting } from '../pricing-parts.tsx'
+import { DISCOUNT_TODAY } from '../pricing.ts'
 
 const SORTS = [{ value: 'loadedAt,desc', label: 'Nạp gần nhất' }, { value: 'updatedAt,desc', label: 'Cập nhật gần nhất' }, { value: 'status,asc', label: 'Trạng thái' }]
 const VIEW_LABELS: Record<InventoryView, string> = { map: 'Sơ đồ ngăn', list: 'Danh sách hộp' }
@@ -85,7 +86,8 @@ function useFocusAfter(): FocusAfter {
 function InventoryPage() {
   const { params, update } = useQueryParams()
   const { view, machineId, slotId } = readMapQuery(params)
-  const canWrite = useSession().can('INVENTORY_WRITE')
+  const { can } = useSession()
+  const canWrite = can('INVENTORY_WRITE'), canLoad = can('INVENTORY_LOAD_DIRECT')
   const [load, setLoad] = useState<LoadPrefill | null>(null)
   const [changes, setChanges] = useState(0)
   const focusAfter = useFocusAfter()
@@ -97,10 +99,11 @@ function InventoryPage() {
 
   return <>
     <PageHead title="Tồn kho"
-      subtitle={`Mỗi ngăn là một cột hộp xếp chồng: hộp dưới cùng (hộp đáy) được bán và đẩy ra tiếp theo. Hộp đáy hết hạn hoặc nhả hàng thất bại chặn cả ngăn cho tới khi được rút ra.${canWrite ? '' : ' Bạn chỉ xem; nạp và rút hộp do người có quyền thực hiện.'}`}
-      actions={canWrite && !loadHidden ? <Button type="button" data-focus-key="inventory-load" className="max-sm:h-11" onClick={() => setLoad({ machineId: machineId || undefined, slotId: (view === 'map' ? slotId : listSlot) || undefined })}>
+      subtitle={`Mỗi ngăn là một cột hộp xếp chồng: hộp dưới cùng (hộp đáy) được bán và đẩy ra tiếp theo. Hộp đáy hết hạn hoặc nhả hàng thất bại chặn cả ngăn cho tới khi được rút ra.${canWrite ? '' : ' Bạn chỉ xem; nạp và rút hộp do người có quyền thực hiện.'}${canWrite && !canLoad ? ' Nạp hộp làm qua phiếu nạp hàng được giao (mục Phiếu công việc).' : ''}`}
+      actions={canLoad && !loadHidden ? <Button type="button" data-focus-key="inventory-load" className="max-sm:h-11" onClick={() => setLoad({ machineId: machineId || undefined, slotId: (view === 'map' ? slotId : listSlot) || undefined })}>
         <ArrowDownToLine aria-hidden="true" />Nạp hộp</Button> : undefined} />
     <InventoryTabs current="items" />
+    <DiscountSetting />
     <div className="mb-4 flex flex-wrap items-center gap-2">
       <span id="inventory-view-label" className="text-[13px] text-muted-foreground">Cách xem</span>
       <div role="group" aria-labelledby="inventory-view-label" className="inline-flex gap-1 rounded-lg border bg-muted p-1">
@@ -286,7 +289,8 @@ function Column({ column, canWrite, remove, load }: { column: SlotColumn; canWri
   const { slot, summary } = column
   const inactive = slot.status !== 'ACTIVE'
   const removable = canWrite && column.state.kind === 'blocked' && column.state.removable
-  const loadable = canWrite && !inactive && column.machineStatus !== 'INACTIVE' && column.free > 0
+  const canLoad = useSession().can('INVENTORY_LOAD_DIRECT')
+  const loadable = canLoad && !inactive && column.machineStatus !== 'INACTIVE' && column.free > 0
   const newest = column.boxes[column.boxes.length - 1]
   const suggested = newest && !isExpiredBox(newest) ? newest.batchId : undefined
   return <section aria-labelledby={titleId} tabIndex={-1} data-focus-key={removable ? undefined : `slot-${slot.id}`} data-slot-column={slot.slotCode}
@@ -326,8 +330,8 @@ function Column({ column, canWrite, remove, load }: { column: SlotColumn; canWri
 
 /**
  * One box. The head (position 1) carries the marker of what happens next; a blocking head explains why and offers
- * "Rút hộp" when the API allows it. The discount slot on the right holds the "-50%" tag of a near-expiry box (FE 7.5,
- * draft pricing-discount.yaml; the server decides the discount) and stays empty, keeping the layout, otherwise.
+ * "Rút hộp" when the API allows it. A box whose batch expires today says "Giảm giá hôm nay" (discountEligibleToday of
+ * backend #61: the server decides; the price itself is only known on the kiosk and the order).
  */
 function Box({ item, position, column, canWrite, remove }: { item: InventoryItem; position: number; column: SlotColumn; canWrite: boolean; remove: (target: RemoveTarget) => void }) {
   const head = position === 1
@@ -337,7 +341,6 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
   const describedBy = useId()
   const lockedId = useId()
   const isAdmin = useSession().roles.includes('ADMIN')
-  const price = boxPriceView(item)
   const tone = blocking
     ? 'border-2 border-destructive bg-destructive/8'
     : head && state.kind === 'reserved' ? 'border-2 border-status-warning-foreground/50 bg-status-warning'
@@ -347,7 +350,7 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
             : status ? 'border border-destructive/40 bg-destructive/5' : 'border bg-background'
   const headTone = blocking ? 'text-destructive' : state.kind === 'reserved' ? 'text-status-warning-foreground' : column.selling ? 'text-primary' : 'text-foreground'
   return <li data-box-status={item.status} data-head={head || undefined} data-blocking={blocking || undefined} className={cn('grid gap-1 rounded-md px-2 py-1.5', tone)}>
-    <span className="sr-only">{boxDescription(item, position, column)}{price.discounted ? `, ${discountReasonText(item.discountReason).toLowerCase()}: ${price.spoken}` : ''}</span>
+    <span className="sr-only">{boxDescription(item, position, column)}{item.discountEligibleToday ? `, ${DISCOUNT_TODAY.toLowerCase()}` : ''}</span>
     {head && <span aria-hidden="true" className={cn('text-[11px] font-semibold tracking-wide uppercase', headTone)}>{headLabel(column)}</span>}
     <div aria-hidden="true" className="flex items-start gap-1.5">
       <span className="min-w-5 pt-px text-[11px] tabular-nums text-muted-foreground">#{position}</span>
@@ -355,9 +358,8 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
         <span className="truncate text-[13px] font-medium" title={item.productName}>{item.productName}</span>
         <span className="text-[11px] leading-tight whitespace-nowrap text-muted-foreground">HSD {formatDateTime(item.expiresAt)}</span>
         <span className="truncate font-mono text-[11px] leading-tight text-muted-foreground" title={item.batchCode}>{item.batchCode}</span>
-        {price.discounted && <span data-box-price="" className="text-[11px] leading-tight whitespace-nowrap"><span className="font-semibold">{price.current}</span> <s className="text-muted-foreground">{price.original}</s></span>}
+        {item.discountEligibleToday && <DiscountLabel />}
       </span>
-      <DiscountSlot label={price.tag} />
     </div>
     {status && !head && <span aria-hidden="true" className={cn('justify-self-start rounded-full px-1.5 text-[11px] font-medium', item.status === 'RESERVED' ? 'bg-status-warning text-status-warning-foreground' : 'bg-status-danger text-status-danger-foreground')}>{status}</span>}
     {/* A held or plain head: its marker above already says it; an expired box behind a held head keeps its word. */}
@@ -383,13 +385,9 @@ function Box({ item, position, column, canWrite, remove }: { item: InventoryItem
   </li>
 }
 
-/** Selling price of a box now, from the server's draft pricing fields; no fields (real API today) reads as no discount. */
-const boxPriceView = (item: InventoryItem) => priceView({ price: item.unitPrice, originalPrice: item.originalUnitPrice, discountPercent: item.discountPercent })
-
-/** Place of the discount tag ("-50%", FE 7.5): empty but kept when the box has no discount, so box layout never moves. */
-function DiscountSlot({ label }: { label?: string }) {
-  if (!label) return <span data-discount-slot="" aria-hidden="true" className="h-5 w-10 shrink-0" />
-  return <span data-discount-slot="" className="inline-flex h-5 w-10 shrink-0 items-center justify-center rounded-full bg-status-danger text-[11px] font-semibold text-status-danger-foreground">{label}</span>
+/** "Giảm giá hôm nay": the box's batch expires today and the discount is on (words, not colour alone). */
+function DiscountLabel() {
+  return <span data-box-discount="" className="justify-self-start rounded-full bg-status-warning px-1.5 text-[11px] font-medium whitespace-nowrap text-status-warning-foreground">{DISCOUNT_TODAY}</span>
 }
 
 // ---- list (boxes with filters)
@@ -415,8 +413,7 @@ function ListView({ canWrite, changes, changed, load, hideLoad }: {
   const forbidden = state.error instanceof ApiError && state.error.status === 403
   useReportLoadable(forbidden, hideLoad)
   const filters = listFilterCount(query)
-  // Selling price column only when the server sends it (draft pricing-discount.yaml, FE 7.5).
-  const priced = state.data?.content?.some(item => typeof item.unitPrice === 'number') ?? false
+  const canLoad = useSession().can('INVENTORY_LOAD_DIRECT')
   const clearFilters = () => update(Object.fromEntries(LIST_FILTER_KEYS.map(key => [key, undefined])))
 
   const empty = filters
@@ -425,7 +422,7 @@ function ListView({ canWrite, changes, changed, load, hideLoad }: {
       <span className="block">Chưa có hộp nào trong kho. Hộp xuất hiện ở đây sau khi được nạp vào ngăn của một máy.</span>
       <span className="mt-3 flex flex-wrap justify-center gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => update({ view: undefined })}>Mở sơ đồ ngăn</Button>
-        {canWrite && <Button type="button" size="sm" onClick={() => load({})}><ArrowDownToLine aria-hidden="true" />Nạp hộp</Button>}
+        {canLoad && <Button type="button" size="sm" onClick={() => load({})}><ArrowDownToLine aria-hidden="true" />Nạp hộp</Button>}
       </span>
     </>
 
@@ -455,7 +452,7 @@ function ListView({ canWrite, changes, changed, load, hideLoad }: {
       { head: 'Ngăn', cell: item => item.slotCode },
       { head: 'Trạng thái', cell: item => <Badge domain="box" value={item.status} /> },
       { head: 'Hết hạn', cell: item => <>{formatDateTime(item.expiresAt)}{item.expired && <> <Badge value="expired" /></>}</> },
-      ...(priced ? [{ head: 'Giá bán', nowrap: true, cell: (item: InventoryItem) => <PriceTag view={boxPriceView(item)} reason={item.discountReason} /> }] : []),
+      { head: 'Giảm giá', nowrap: true, cell: item => item.discountEligibleToday ? <DiscountLabel /> : <span className="text-muted-foreground">Không<span className="sr-only"> giảm giá</span></span> },
       { head: 'Nạp lúc', cell: item => formatDateTime(item.loadedAt) },
       { head: 'Thao tác', cell: item => <div className="flex flex-wrap items-center gap-1.5">
         <Button asChild size="sm" variant="ghost"><a href={boxHistoryPath(item.id)} onClick={linkHandler(boxHistoryPath(item.id))}

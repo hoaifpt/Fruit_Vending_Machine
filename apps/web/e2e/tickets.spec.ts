@@ -196,7 +196,7 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
   // CreateWorkTicketRequest with a 400, so a successful create proves only contract fields were sent; the exact bodies
   // are unit-tested (createTicketBody in tests/tickets.test.mjs).
   const creates = () => page.evaluate(() => (window as unknown as { __fvMock: { requests: (prefix: string) => { method: string; path: string }[] } }).__fvMock
-    .requests('/work-tickets').filter(entry => entry.method === 'POST' && entry.path === '/work-tickets').length)
+    .requests('/work-orders').filter(entry => entry.method === 'POST' && entry.path === '/work-orders').length)
   await page.getByRole('button', { name: 'Tạo phiếu' }).click()
   const sheet = page.getByRole('dialog', { name: 'Tạo phiếu công việc' })
   await sheet.getByRole('button', { name: 'Tạo phiếu' }).click()
@@ -248,7 +248,7 @@ test('ADMIN tạo phiếu từ danh sách (chỉ gửi trường có trong hợp
   await expect(fromAlertRow.getByRole('button')).toHaveCount(0)
   await fromAlertRow.getByRole('link', { name: /^Thực hiện nạp hàng: / }).click()
   await expect(page).toHaveURL(`${ticketUrl}/restock`)
-  await expect(page.locator('#restock-step-title')).toHaveText('Bước 1/5: Mở cửa nạp')
+  await expect(page.locator('#restock-step-title')).toHaveText('Bước 1/5: Bắt đầu')
   await expect(page.getByText(/chưa có dòng nạp hàng/)).toHaveCount(0)
   await page.getByRole('link', { name: 'Xem chi tiết phiếu' }).click()
   await expect(progress(page)).toContainText('Phiếu nạp 1 ngăn (B1), tổng 8 hộp theo kế hoạch.')

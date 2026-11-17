@@ -26,12 +26,12 @@ const ROUTES: { pattern: RegExp; page: PageKey; permission: Permission }[] = [
   { pattern: /^\/admin\/inventory\/history$/, page: 'inventory-history', permission: 'INVENTORY_READ' },
   { pattern: /^\/admin\/alerts$/, page: 'alerts', permission: 'ALERT_READ' },
   { pattern: /^\/admin\/alerts\/([^/]+)$/, page: 'alert-detail', permission: 'ALERT_READ' },
-  // O3 (FE 7.1): draft permission of api-contract/drafts/work-tickets.yaml; staff only receive their own tickets.
+  // O3 (FE 7.1): /work-orders of api.yaml (backend #66); without WORK_ORDER_READ_ALL only the caller's own work orders.
   { pattern: /^\/admin\/tickets$/, page: 'tickets', permission: 'WORK_ORDER_READ_ASSIGNED' },
   { pattern: /^\/admin\/tickets\/([^/]+)$/, page: 'ticket-detail', permission: 'WORK_ORDER_READ_ASSIGNED' },
   // O4 (FE 7.2): carrying out a RESTOCK ticket on a phone; the server only discloses the ticket to its assignee/admins.
   { pattern: /^\/admin\/tickets\/([^/]+)\/restock$/, page: 'ticket-restock', permission: 'WORK_ORDER_READ_ASSIGNED' },
-  // O5 (FE 7.3): draft permission of api-contract/drafts/maintenance-schedules.yaml; changes need MAINTENANCE_PLAN_MANAGE.
+  // O5 (FE 7.3): /maintenance-plans of api.yaml (backend #70); changes need MAINTENANCE_PLAN_MANAGE.
   { pattern: /^\/admin\/maintenance-schedules$/, page: 'maintenance-schedules', permission: 'MAINTENANCE_PLAN_READ' },
   { pattern: /^\/admin\/orders$/, page: 'orders', permission: 'ORDER_READ' },
   { pattern: /^\/admin\/orders\/([^/]+)$/, page: 'order-detail', permission: 'ORDER_READ' },
@@ -66,9 +66,9 @@ export const NAV: NavItem[] = [
   { to: '/admin/inventory', label: 'Tồn kho', group: 'Vận hành', permission: 'INVENTORY_READ', match: ['inventory', 'inventory-history'] },
   // ALERT_READ of api.yaml (backend #58, V17).
   { to: '/admin/alerts', label: 'Cảnh báo', group: 'Vận hành', permission: 'ALERT_READ', match: ['alerts', 'alert-detail'] },
-  // Draft permission (api-contract/drafts/work-tickets.yaml, BE 4.3).
+  // Work orders of backend #66.
   { to: '/admin/tickets', label: 'Phiếu công việc', group: 'Vận hành', permission: 'WORK_ORDER_READ_ASSIGNED', match: ['tickets', 'ticket-detail', 'ticket-restock'] },
-  // Draft permission (api-contract/drafts/maintenance-schedules.yaml, BE 4.5).
+  // Maintenance plans of backend #70.
   { to: '/admin/maintenance-schedules', label: 'Lịch bảo trì', group: 'Vận hành', permission: 'MAINTENANCE_PLAN_READ', match: ['maintenance-schedules'] },
   { to: '/admin/orders', label: 'Đơn hàng', group: 'Giao dịch', permission: 'ORDER_READ', match: ['orders', 'order-detail'] },
   { to: '/admin/payments', label: 'Thanh toán', group: 'Giao dịch', permission: 'PAYMENT_READ', match: ['payments', 'payment-detail'] },

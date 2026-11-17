@@ -30,8 +30,8 @@ import { DataTable, ErrorState, Loading, Pagination } from '../kit.tsx'
 import type { Column } from '../kit.tsx'
 import {
   COMMAND_INFO, MAINTENANCE_IDLE_POLL_MS, MAINTENANCE_MISSING, MAINTENANCE_PAGE_SIZE, MAINTENANCE_POLL_MS, NOTE_MAX, REASON_OPTIONS,
-  commandDetail, commandLabel, commandStatusText, createAttempts, describeMaintenanceError, gateText, isMaintenanceMissing, isRemoval, machineLock,
-  needsReconciliation, needsRefresh, reconcileBody, runningCommand, sendMaintenanceCommand, sendReset, slotPlan,
+  commandDetail, commandLabel, commandStatusText, createAttempts, gateText, isMaintenanceMissing, isRemoval, machineLock,
+  needsReconciliation, needsRefresh, runningCommand, sendMaintenanceCommand, sendReset, slotPlan,
 } from '../maintenance-commands.ts'
 import type { ColumnOperation, Lock, SlotPlan } from '../maintenance-commands.ts'
 import { useApi, errorMessage } from '../useApi.ts'

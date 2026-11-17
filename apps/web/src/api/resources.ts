@@ -238,6 +238,8 @@ export const restockApi = {
   addLine: (workOrderId: string, body: RestockLineInput) => api.post<RestockLine>(`/work-orders/${id(workOrderId)}/restock-lines`, body),
   /** Only while nothing was loaded against the line (409 LINE_ALREADY_LOADED). */
   updateLine: (workOrderId: string, lineId: string, body: UpdateRestockLineBody) => api.patch<RestockLine>(`/work-orders/${id(workOrderId)}/restock-lines/${id(lineId)}`, body),
+  /** Takes a planned line out of the plan, only while nothing was loaded against it (409 LINE_ALREADY_LOADED). */
+  removeLine: (workOrderId: string, lineId: string) => api.delete<void>(`/work-orders/${id(workOrderId)}/restock-lines/${id(lineId)}`),
   /** Bowls physically placed in the line's column from one batch; never retried automatically. */
   load: (workOrderId: string, lineId: string, body: RestockLoadBody) => api.post<RestockLoadResult>(`/work-orders/${id(workOrderId)}/restock-lines/${id(lineId)}/loads`, body),
 }

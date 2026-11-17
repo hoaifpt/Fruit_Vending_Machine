@@ -1,8 +1,8 @@
-// O4 Thực hiện phiếu nạp hàng (issue FE 7.2) on the mock API (drafts of BE 4.4 and 4.2), on a phone (390 × 844).
-// Done criterion: a STAFF account carries out a whole RESTOCK ticket on the phone (start, open the refill door, take out
-// the expired bowls, load each line, close the door, reconcile with a note when short, complete) and the related
-// LOW_STOCK alert is closed by the system. Also: the lock while the machine is not in MAINTENANCE, the capacity limit,
-// 401/403/404/409/500, a backend without maintenance commands, screenshots + axe at each step.
+// O4 Thực hiện phiếu nạp hàng (issue FE 7.2) on the mock of the real API (backend #64/#66/#68), on a phone (390 × 844).
+// Done criterion: a STAFF account carries out a whole RESTOCK work order on the phone (start, take the expired bowls of
+// B1 out with a command linked to the work order, open B1's refill gate, load each line, close the gate, give a reason for
+// the line loaded short, complete) and the linked LOW_STOCK alert is closed. Also: the lock while the machine is offline,
+// the capacity limit, 401/403/404/409/500, screenshots + axe at each step.
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 import { auditScreen, checkNoHorizontalScroll, loginAs, THEMES, useThemeChoice, VIEWPORTS } from './support.ts'
@@ -19,115 +19,96 @@ test.use({ viewport: { width: 390, height: 844 } })
 const stepHeading = (page: Page) => page.locator('#restock-step-title')
 const activeTag = (page: Page) => page.evaluate(() => document.activeElement?.tagName ?? 'BODY')
 const slotCard = (page: Page, name: RegExp | string) => page.getByRole('region', { name })
-async function setMachineStatus(page: Page, status: 'ACTIVE' | 'MAINTENANCE') {
-  await page.evaluate(value => (window as unknown as { __fvMock: { setMachineStatus: (machine: string, status: string) => void } }).__fvMock.setMachineStatus('DEV-MACHINE-01', value), status)
+async function stopMachine(page: Page) {
+  await page.evaluate(() => (window as unknown as { __fvMock: { stopHeartbeat: (machine: string) => void } }).__fvMock.stopHeartbeat('DEV-MACHINE-01'))
+}
+async function resumeMachine(page: Page) {
+  await page.evaluate(() => (window as unknown as { __fvMock: { resumeHeartbeat: (machine: string) => void } }).__fvMock.resumeHeartbeat('DEV-MACHINE-01'))
 }
 
-test('Tiêu chí xong: STAFF làm hết phiếu RESTOCK trên điện thoại; cảnh báo LOW_STOCK của ngăn đã nạp đủ tự đóng', async ({ page }, testInfo) => {
+test('Tiêu chí xong: STAFF làm hết phiếu RESTOCK trên điện thoại; cảnh báo LOW_STOCK liên kết được đóng', async ({ page }, testInfo) => {
   test.setTimeout(120_000)
   await loginAs(page, 'STAFF')
   await page.goto(`/admin/tickets/${T2}`)
   await page.getByRole('link', { name: 'Thực hiện nạp hàng từng bước' }).click()
   await expect(page).toHaveURL(RESTOCK)
-  await expect(page.getByRole('group', { name: 'Tiến độ nạp hàng' }).locator('[aria-current="step"]')).toContainText('Mở cửa nạp')
-  await expect(stepHeading(page)).toHaveText('Bước 1/5: Mở cửa nạp')
+  await expect(page.getByRole('group', { name: 'Tiến độ nạp hàng' }).locator('[aria-current="step"]')).toContainText('Bắt đầu')
+  await expect(stepHeading(page)).toHaveText('Bước 1/5: Bắt đầu')
+  await expect(page.getByRole('list', { name: 'Kế hoạch nạp' })).toContainText('Ngăn B1 · Mixed fruit bowl: nạp 6 hộp')
 
-  // (1) Start, then the door: locked while the machine is ACTIVE, with the reason and who can fix it.
+  // (1) Start: the machine goes MAINTENANCE and the step moves to the old bowls.
   await page.getByRole('button', { name: 'Bắt đầu phiếu' }).focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByText(/^Đã bắt đầu lúc \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}\.$/)).toBeVisible()
-  const lock = page.locator('[data-lock="status"]')
-  // The start button is gone: focus moves to what comes next (here the reason the door cannot be opened yet).
-  await expect(lock).toBeFocused()
-  expect(await activeTag(page)).not.toBe('BODY')
-  await expect(lock).toContainText('Lệnh bảo trì chỉ gửi được khi máy ở trạng thái Bảo trì')
-  await expect(lock).toContainText('Nhờ Quản trị viên chuyển máy sang Bảo trì')
-  // The locked button stays focusable (aria-disabled); using it moves focus to the reason.
-  await page.getByRole('button', { name: 'Mở cửa nạp hàng' }).focus()
-  await page.keyboard.press('Enter')
-  await expect(lock).toBeFocused()
-  await auditScreen(page, testInfo, 'restock-open-locked', 'light', () => expect(lock).toBeVisible(), PHONE)
-  // An administrator elsewhere puts the machine in MAINTENANCE; the staff checks again.
-  await setMachineStatus(page, 'MAINTENANCE')
-  await page.getByRole('button', { name: 'Kiểm tra lại trạng thái máy' }).click()
-  await expect(lock).toHaveCount(0)
-  await page.getByRole('button', { name: 'Mở cửa nạp hàng' }).focus()
-  await page.keyboard.press('Enter')
-  const waiting = page.getByRole('status').filter({ hasText: 'Đang chờ máy: “Mở cửa nạp hàng”' })
-  await expect(waiting).toBeVisible()
-  // The button became "Đang chờ máy…": focus follows it instead of falling back to the page.
-  await expect(waiting).toBeFocused()
-  expect(await activeTag(page)).not.toBe('BODY')
-
-  // (2) The door is open: B1 has two expired bowls to take out.
-  await expect(stepHeading(page)).toHaveText('Bước 2/5: Rút hộp hỏng', { timeout: COMMAND_WAIT })
+  await expect(stepHeading(page)).toHaveText('Bước 2/5: Rút hộp cũ')
   await expect(stepHeading(page)).toBeFocused()
+
+  // (2) The machine goes silent: commands are locked with the reason; back online, B1 is emptied (2 expired bowls).
+  await stopMachine(page)
   const b1 = slotCard(page, 'Ngăn B1')
-  await expect(b1).toContainText('2 hộp hết hạn cần rút.')
+  await expect(b1).toContainText('2 hộp hết hạn hoặc nhả lỗi cần rút')
   await auditScreen(page, testInfo, 'restock-remove', 'light', () => expect(b1).toBeVisible(), PHONE)
-  await b1.getByRole('button', { name: 'Đã rút hộp này: hộp 1 hết hạn ở ngăn B1' }).click()
-  await expect(b1).toContainText('1 hộp hết hạn cần rút.')
-  await b1.getByRole('button', { name: 'Đã rút hộp này: hộp 1 hết hạn ở ngăn B1' }).click()
-  await expect(b1).toContainText('Không còn hộp hết hạn. Đã rút 2 hộp trong phiếu này.')
+  await resumeMachine(page)
+  await b1.getByRole('button', { name: 'Xả cả ngăn B1' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Xả cả ngăn B1?' })
+  await expect(confirm).toContainText('Hộp hết hạn')
+  await confirm.getByRole('button', { name: 'Xả cả ngăn' }).click()
+  const waiting = page.getByRole('status').filter({ hasText: 'Đang chờ máy: “Xả cả ngăn” ngăn B1' })
+  await expect(waiting).toBeVisible()
+  await expect(page.getByText('Đã rút 2 hộp trong phiếu này (Hộp hết hạn: 2).')).toBeVisible({ timeout: COMMAND_WAIT })
+  expect(await activeTag(page)).not.toBe('BODY')
   await page.getByRole('button', { name: 'Tiếp tục: Nạp theo dòng' }).click()
 
-  // (3) Load each line: the count defaults to the plan within the free places; more than fits is refused as typed.
+  // (3) Open B1's refill gate, load each line: the count defaults to the plan within the free places.
   await expect(stepHeading(page)).toHaveText('Bước 3/5: Nạp theo dòng')
-  const a2 = slotCard(page, 'Ngăn A2 · Watermelon bowl')
-  await expect(a2.getByLabel('Số hộp nạp lần này')).toHaveValue('4')
-  await a2.getByRole('button', { name: 'Nạp 4 hộp vào ngăn A2' }).click()
-  await expect(a2).toContainText('Đã nạp đủ')
-  await expect(a2.getByRole('heading', { name: 'Ngăn A2 · Watermelon bowl' })).toBeFocused()
   const b1Load = slotCard(page, 'Ngăn B1 · Mixed fruit bowl')
+  await b1Load.getByRole('button', { name: 'Mở cổng nạp ngăn B1' }).click()
+  await expect(b1Load).toContainText('Cổng nạp đang mở', { timeout: COMMAND_WAIT })
   const count = b1Load.getByLabel('Số hộp nạp lần này')
   await expect(count).toHaveValue('6')
   await count.fill('11')
   await expect(count).toHaveAccessibleDescription(/Ngăn B1 chỉ còn trống 10 chỗ/)
-  await count.fill('5')
+  await count.fill('6')
   await auditScreen(page, testInfo, 'restock-load', 'light', () => expect(b1Load).toBeVisible(), PHONE)
-  await b1Load.getByRole('button', { name: 'Nạp 5 hộp vào ngăn B1' }).click()
-  await expect(b1Load).toContainText('Còn 1 hộp')
-  await expect(page.getByText('Còn 1 hộp chưa nạp theo kế hoạch.')).toBeVisible()
-  await page.getByRole('button', { name: 'Tiếp tục: Đóng cửa nạp' }).click()
+  await b1Load.getByRole('button', { name: 'Nạp 6 hộp vào ngăn B1' }).click()
+  await expect(b1Load).toContainText('Đã nạp đủ')
+  const a2 = slotCard(page, 'Ngăn A2 · Watermelon bowl')
+  await a2.getByLabel('Số hộp nạp lần này').fill('3')
+  await a2.getByRole('button', { name: 'Nạp 3 hộp vào ngăn A2' }).click()
+  await expect(a2).toContainText('Còn 1 hộp')
+  await page.getByRole('button', { name: 'Tiếp tục: Đóng cổng nạp' }).click()
 
-  // (4) Close the door.
-  await expect(stepHeading(page)).toHaveText('Bước 4/5: Đóng cửa nạp')
-  await page.getByRole('button', { name: 'Đóng cửa nạp hàng' }).click()
+  // (4) Close the open gate.
+  await expect(stepHeading(page)).toHaveText('Bước 4/5: Đóng cổng nạp')
+  await page.getByRole('button', { name: 'Đóng cổng nạp ngăn B1' }).click()
+  await expect(page.getByText('Mọi cổng nạp của máy đã đóng.')).toBeVisible({ timeout: COMMAND_WAIT })
+  await page.getByRole('button', { name: 'Tiếp tục: Đối chiếu' }).click()
 
-  // (5) Reconcile: B1 is one short, so the note is required.
-  await expect(stepHeading(page)).toHaveText('Bước 5/5: Đối chiếu', { timeout: COMMAND_WAIT })
+  // (5) Reconcile: A2 is one short, so its reason and the result are required.
+  await expect(stepHeading(page)).toHaveText('Bước 5/5: Đối chiếu')
   const table = page.getByRole('table', { name: 'Đối chiếu kế hoạch và thực tế theo ngăn' })
-  await expect(table.getByRole('row', { name: /^A2/ })).toContainText('Khớp kế hoạch')
-  await expect(table.getByRole('row', { name: /^B1/ })).toContainText('Thiếu 1 hộp')
+  await expect(table.getByRole('row', { name: /^B1/ })).toContainText('Khớp kế hoạch')
+  await expect(table.getByRole('row', { name: /^A2/ })).toContainText('Thiếu 1 hộp')
   await auditScreen(page, testInfo, 'restock-reconcile', 'light', () => expect(table).toBeVisible(), PHONE)
   await page.getByRole('button', { name: 'Hoàn tất phiếu' }).click()
-  const note = page.getByLabel('Ghi chú đối chiếu')
-  await expect(note).toBeFocused()
-  await expect(note).toHaveAttribute('aria-invalid', 'true')
-  await expect(note).toHaveAccessibleDescription(/Số hộp đã nạp khác kế hoạch/)
-  await note.fill('Lô trộn chỉ còn 5 hộp mang theo.')
+  const reason = page.getByLabel(/Lý do lệch ngăn A2/)
+  await expect(reason).toHaveAttribute('aria-invalid', 'true')
+  await reason.fill('Lô dưa hấu chỉ mang theo 3 hộp.')
+  await page.getByLabel('Kết quả nạp hàng').fill('Đã xả B1 và nạp đủ; A2 thiếu 1.')
   await page.getByRole('button', { name: 'Hoàn tất phiếu' }).click()
 
-  // Done: the server closed the LOW_STOCK alert of A2 (loaded in full) and says so, with a link.
+  // Done: the linked LOW_STOCK alert of A2 is closed, the reason is kept, the machine stays in MAINTENANCE.
   await expect(stepHeading(page)).toHaveText('Phiếu đã hoàn tất')
-  await expect(stepHeading(page)).toBeFocused()
-  const result = page.getByRole('status').filter({ hasText: 'Đã tự đóng 1 cảnh báo Ngăn sắp hết hàng của máy này.' })
-  await expect(result).toBeVisible()
-  await expect(page.getByText('Ghi chú: Lô trộn chỉ còn 5 hộp mang theo.')).toBeVisible()
-  // The machine is still in MAINTENANCE: a reminder to switch it back (a STAFF account asks an administrator).
+  const linked = page.getByRole('status').filter({ hasText: 'Cảnh báo liên kết với phiếu' })
+  await expect(linked).toContainText('(đã đóng)')
+  await expect(page.getByText('Lý do: Lô dưa hấu chỉ mang theo 3 hộp.')).toBeVisible()
   await expect(page.locator('p').filter({ hasText: 'Máy DEV-MACHINE-01 vẫn ở trạng thái Bảo trì' })).toContainText('nhờ Quản trị viên đổi trạng thái máy')
-  await expect(page.getByRole('link', { name: /Mở thẻ Tổng quan của máy/ })).toHaveCount(0)
-  await auditScreen(page, testInfo, 'restock-done', 'light', () => expect(result).toBeVisible(), PHONE)
+  await auditScreen(page, testInfo, 'restock-done', 'light', () => expect(linked).toBeVisible(), PHONE)
   await expect(page.getByRole('button', { name: /xóa|xoá|delete/i })).toHaveCount(0)
-  await result.getByRole('link', { name: 'Ngăn sắp hết hàng · ngăn A2 (đã đóng)' }).click()
+  await linked.getByRole('link').first().click()
   await expect(page).toHaveURL(`/admin/alerts/${LOW_STOCK_A2}`)
-  const handling = page.getByRole('region', { name: 'Xử lý' })
-  await expect(handling).toContainText('Hệ thống')
-  await expect(handling).toContainText('Tự đóng khi hoàn tất phiếu nạp hàng “Nạp thêm hộp ngăn A2 · máy DEV-MACHINE-01”: đã nạp 4 hộp vào ngăn A2.')
-  await expect(page.getByRole('region', { name: 'Thông tin cảnh báo' })).toContainText('Đã xử lý')
 })
 
-test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, không tìm thấy, chưa có API, lỗi máy chủ, phiếu không phải nạp hàng, máy chủ chưa có lệnh bảo trì', async ({ page }) => {
+test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, không tìm thấy, chưa có API, lỗi máy chủ, phiếu không phải nạp hàng', async ({ page }) => {
   await loginAs(page, 'STAFF')
   await page.goto(`${RESTOCK}?scenario=409`)
   await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
@@ -143,29 +124,26 @@ test('Trạng thái lỗi: 409 khi bắt đầu, 403, 401, không tìm thấy, c
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Không tìm thấy phiếu')
   await expect(page.getByText(/phiếu không giao cho bạn/)).toBeVisible()
   await page.goto(`/admin/tickets/${id('61000000', 4)}/restock`)
-  await expect(page.getByRole('status').filter({ hasText: 'Đây là phiếu bảo trì, không phải phiếu nạp hàng.' })).toBeVisible()
-
-  // A backend without maintenance commands (BE 4.2 missing): the door is handled by hand and the restock goes on.
-  await page.goto(`${RESTOCK}?scenario=missing:maintenance-commands`)
-  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
-  await expect(stepHeading(page)).toHaveText('Bước 2/5: Rút hộp hỏng')
-
-  // The machine's command history cannot be read (500, 403): no guessed step, an explanation and a retry.
-  await page.goto(`${RESTOCK}?scenario=error500:maintenance-commands`)
-  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
-  const unknown = page.getByRole('heading', { name: 'Chưa biết phiếu đang ở bước nào' })
-  await expect(unknown).toBeVisible()
-  await expect(unknown).toBeFocused()
-  await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible()
-  await expect(page.getByText('Đang đọc lịch sử lệnh của máy để biết đang ở bước nào…')).toHaveCount(0)
-  await expect(page.getByText(/chưa có lệnh mở\/đóng nào thành công|Cửa nạp chưa được mở cho phiếu này/)).toHaveCount(0)
-  await page.goto(`${RESTOCK}?scenario=403:maintenance-commands`)
-  await page.getByRole('button', { name: 'Bắt đầu phiếu' }).click()
-  await expect(page.getByRole('heading', { name: 'Chưa biết phiếu đang ở bước nào' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Không có quyền truy cập' })).toBeVisible()
+  await expect(page.getByRole('status').filter({ hasText: 'Đây không phải phiếu nạp hàng' })).toBeVisible()
 
   await page.goto(`${RESTOCK}?scenario=401:tickets`)
   await expect(page).toHaveURL(/\/login\?next=/)
+})
+
+test('ADMIN lập kế hoạch: thêm, sửa và bỏ dòng chưa nạp; dòng trùng bị từ chối', async ({ page }) => {
+  await loginAs(page, 'ADMIN')
+  await page.goto(RESTOCK)
+  const plan = page.getByRole('region', { name: /Kế hoạch nạp/ })
+  await plan.getByRole('button', { name: 'Sửa kế hoạch' }).click()
+  await plan.getByRole('button', { name: 'Thêm dòng nạp' }).click()
+  await plan.getByLabel('Ngăn').selectOption({ label: 'Ngăn A2 (sức chứa 10)' })
+  await plan.getByLabel('Sản phẩm').selectOption({ label: 'Watermelon bowl' })
+  await plan.getByLabel('Số hộp dự kiến').last().fill('2')
+  await plan.getByRole('button', { name: 'Thêm dòng' }).click()
+  await expect(plan.getByRole('alert')).toContainText('đã có dòng cho sản phẩm đó')
+  await plan.getByRole('button', { name: 'Bỏ dòng ngăn B1 khỏi kế hoạch' }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Bỏ khỏi kế hoạch' }).click()
+  await expect(plan.getByRole('heading')).toHaveText('Kế hoạch nạp (1 dòng)')
 })
 
 for (const theme of THEMES) {
@@ -173,7 +151,7 @@ for (const theme of THEMES) {
     await useThemeChoice(page, theme)
     await loginAs(page, 'STAFF')
     await page.goto(RESTOCK)
-    await auditScreen(page, testInfo, 'restock', theme, () => expect(stepHeading(page)).toHaveText('Bước 1/5: Mở cửa nạp'))
+    await auditScreen(page, testInfo, 'restock', theme, () => expect(stepHeading(page)).toHaveText('Bước 1/5: Bắt đầu'))
     await checkNoHorizontalScroll(page, 'restock', theme, PHONE[0])
   })
 }

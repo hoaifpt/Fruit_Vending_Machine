@@ -1,32 +1,34 @@
-// FE 7.1 Phiếu công việc: pure rules (filters, next step per role and status, forms, error text) and the mock of the
-// draft contract api-contract/drafts/work-tickets.yaml (staff only receive their own tickets, 409 on a wrong step,
-// 403 when staff try an admin step or someone else's step).
+// FE 7.1 Phiếu công việc on the real API (/work-orders of api-contract/api.yaml, backend #66): pure rules (filters, next
+// step per permission and status, forms with the version, error text) and the mock that plays the backend (READ_ALL lists
+// everyone's, /me the caller's own, someone else's work order is 404, STALE_VERSION, INVALID_WORK_ORDER_TRANSITION).
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ApiError, configureClient } from '../src/api/client.ts'
-import { authApi, ticketsApi } from '../src/api/resources.ts'
+import { alertsApi, authApi, machinesApi, workOrdersApi } from '../src/api/resources.ts'
 import { createMockFetcher, groupOf, parseSelection } from '../src/api/mock/fetcher.ts'
 import { MOCK_ACCOUNTS, MOCK_PASSWORDS } from '../src/api/mock/seed.ts'
 import { STATUS_CATALOG } from '../src/lib/status.ts'
-import { PERMISSIONS as DRAFT_PERMISSIONS, can } from '../src/admin/permissions.ts'
-import { NAV, matchRoute, navFor } from '../src/admin/routes.ts'
+import { ROLE_PERMISSIONS } from '../src/admin/permissions.ts'
+import { NAV, matchRoute } from '../src/admin/routes.ts'
 import { NAV_ICONS } from '../src/admin/shell/nav-icons.ts'
 import {
-  NEW_TICKET, TICKETS_PATH, TICKET_STATUSES, TICKET_TYPES, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, isOverdue, isStale,
-  nextActions, nextStepText, readTicketFilters, ticketActionError, ticketFilterKeys, ticketFromAlert, ticketListQuery, ticketPath, ticketSteps,
-  ticketsAvailability, validateTicket,
+  NEW_TICKET, TICKETS_PATH, TICKET_STATUSES, TICKET_TYPES, actionLabel, assigneeText, cancelBody, completeBody, createTicketBody, editValues, isOverdue, isStale,
+  myTicketQuery, nextActions, nextStepText, readTicketFilters, restockFromSuggestionsBody, ticketActionError, ticketFilterKeys, ticketFromAlert, ticketListQuery,
+  ticketPath, ticketSteps, ticketsAvailability, updateTicketBody, validateTicket,
 } from '../src/admin/tickets.ts'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
+const yaml = readFileSync(`${root}api-contract/api.yaml`, 'utf8').replace(/\r\n/g, '\n')
 const id = (prefix, n) => `${prefix}-0000-0000-0000-${String(n).padStart(12, '0')}`
 const ADMIN = id('11000000', 1)
 const STAFF = id('11000000', 2)
 const OTHER = id('11000000', 7)
 const MACHINE_1 = id('20000000', 1)
 const MACHINE_2 = id('20000000', 2)
-const T = n => id('61000000', n)
+const MACHINE_3 = id('20000000', 3)
+const W = n => id('61000000', n)
 
 function setup() {
   const state = { token: null, clock: Date.parse('2026-12-04T03:00:00Z'), search: '' }
@@ -40,257 +42,209 @@ async function signIn(state, account) {
 async function rejects(promise, status, check) {
   await assert.rejects(promise, error => error instanceof ApiError && error.status === status && (!check || check(error)))
 }
+const adminViewer = { userId: ADMIN, canReadAll: true, canWrite: true, canExecute: true }
+const staffViewer = { userId: STAFF, canReadAll: false, canWrite: false, canExecute: true }
+const order = (status, fields = {}) => ({ id: 'w', type: 'MAINTENANCE', status, assignee: status === 'OPEN' ? undefined : { id: STAFF, fullName: 'Nhân viên vận hành' }, ...fields })
 
-// ---- vocabulary and contract
+// ---- contract and vocabulary
 
-test('statuses are the ticket domain of status.ts (COMPLETED, not DONE), in lifecycle order; the draft uses the same', () => {
-  assert.deepEqual([...TICKET_STATUSES], Object.keys(STATUS_CATALOG.ticket))
-  assert.ok(!TICKET_STATUSES.includes('DONE'))
-  const yaml = readFileSync(`${root}api-contract/drafts/work-tickets.yaml`, 'utf8')
-  assert.ok(yaml.includes(`enum: [${TICKET_STATUSES.join(', ')}]`))
-  assert.ok(yaml.includes(`enum: [${TICKET_TYPES.join(', ')}]`))
-  for (const path of ['/api/v1/work-tickets:', '/api/v1/work-tickets/{id}:', '/assign:', '/start:', '/complete:', '/cancel:']) assert.ok(yaml.includes(path), path)
-  for (const field of ['assignedByName', 'startedByName', 'completedByName', 'completionNote', 'cancelledByName', 'cancelReason']) assert.match(yaml, new RegExp(`\\n        ${field}:`), field)
-  assert.doesNotMatch(yaml, /\n\s+delete:/, 'tickets are never deleted')
+test('statuses are WorkOrderStatus of api.yaml (DONE), in lifecycle order, and the ticket domain of status.ts', () => {
+  assert.deepEqual([...TICKET_STATUSES], ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'DONE', 'CANCELLED'])
+  assert.deepEqual(Object.keys(STATUS_CATALOG.ticket), [...TICKET_STATUSES])
+  assert.match(yaml, /- "OPEN"\n\s+- "ASSIGNED"\n\s+- "IN_PROGRESS"\n\s+- "DONE"\n\s+- "CANCELLED"/)
+  assert.deepEqual([...TICKET_TYPES], ['RESTOCK', 'MAINTENANCE', 'INCIDENT'])
+  for (const path of ['/work-orders', '/work-orders/me', '/work-orders/{id}/assign', '/work-orders/{id}/unassign', '/work-orders/{id}/complete']) assert.ok(yaml.includes(`"/api/v1${path}":`), path)
 })
 
-test('draft permissions: WORK_ORDER_READ_ASSIGNED for ADMIN and STAFF, WORK_ORDER_MANAGE for ADMIN only; route, nav in "Vận hành"', () => {
-  assert.ok(DRAFT_PERMISSIONS.includes('WORK_ORDER_READ_ASSIGNED') && DRAFT_PERMISSIONS.includes('WORK_ORDER_MANAGE'))
-  assert.equal(can(['ADMIN'], 'WORK_ORDER_READ_ASSIGNED'), true)
-  assert.equal(can(['ADMIN'], 'WORK_ORDER_MANAGE'), true)
-  assert.equal(can(['STAFF'], 'WORK_ORDER_READ_ASSIGNED'), true)
-  assert.equal(can(['STAFF'], 'WORK_ORDER_MANAGE'), false)
-  assert.deepEqual(matchRoute('/admin/tickets'), { page: 'tickets', id: undefined, permission: 'WORK_ORDER_READ_ASSIGNED', roles: ['ADMIN', 'STAFF'] })
-  assert.equal(matchRoute(`/admin/tickets/${T(1)}`).page, 'ticket-detail')
-  const item = NAV.find(entry => entry.to === TICKETS_PATH)
-  assert.equal(item.group, 'Vận hành')
-  assert.equal(item.label, 'Phiếu công việc')
-  // Once GET /auth/me lists permissions, an account without WORK_ORDER_READ_ASSIGNED has no ticket screen.
-  assert.equal(navFor({ roles: ['STAFF'], permissions: ['ALERT_READ'] }).some(entry => entry.to === TICKETS_PATH), false)
-  assert.equal(ticketPath(T(1)), `/admin/tickets/${T(1)}`)
-})
-
-// ---- list filters
-
-test('URL filters keep contract values only; the assignee filter is sent only by those who see every ticket', () => {
-  const filters = readTicketFilters(new URLSearchParams(`status=DONE&type=RESTOCK&machineId=x&assigneeId=${STAFF}&sort=title,asc&page=-1`))
-  assert.deepEqual(filters, { status: '', type: 'RESTOCK', machineId: '', assigneeId: STAFF, sort: { field: 'createdAt', direction: 'desc' }, page: 0 })
-  assert.deepEqual(ticketListQuery(filters, 20, true), { page: 0, size: 20, sort: 'createdAt,desc', status: undefined, type: 'RESTOCK', machineId: undefined, assigneeId: STAFF })
-  assert.equal(ticketListQuery(filters, 20, false).assigneeId, undefined)
-  assert.deepEqual(readTicketFilters(new URLSearchParams('sort=dueAt,asc&status=IN_PROGRESS')).sort, { field: 'dueAt', direction: 'asc' })
-  assert.deepEqual([...ticketFilterKeys(false)], ['status', 'type', 'machineId'])
-  assert.deepEqual([...ticketFilterKeys(true)], ['status', 'type', 'machineId', 'assigneeId'])
-})
-
-// ---- next step per role and status (done criterion)
-
-test('Tiêu chí xong: nút chỉ hiện đúng bước tiếp theo theo vai trò và trạng thái', () => {
-  const admin = { userId: ADMIN, canWrite: true }
-  const staff = { userId: STAFF, canWrite: false }
-  const ticket = (status, assigneeId = STAFF) => ({ status, assigneeId: status === 'OPEN' ? null : assigneeId })
-  const matrix = viewer => Object.fromEntries(TICKET_STATUSES.map(status => [status, nextActions(ticket(status), viewer)]))
-  assert.deepEqual(matrix(admin), { OPEN: ['assign', 'cancel'], ASSIGNED: ['assign', 'cancel'], IN_PROGRESS: ['cancel'], COMPLETED: [], CANCELLED: [] })
-  assert.deepEqual(matrix(staff), { OPEN: [], ASSIGNED: ['start'], IN_PROGRESS: ['complete'], COMPLETED: [], CANCELLED: [] })
-  // Someone else's ticket: staff never get a button for it.
-  assert.deepEqual(TICKET_STATUSES.map(status => nextActions(ticket(status, OTHER), staff)), [[], [], [], [], []])
-  // An admin who is the assignee also gets the assignee's step.
-  assert.deepEqual(nextActions({ status: 'ASSIGNED', assigneeId: ADMIN }, admin), ['assign', 'start', 'cancel'])
-  // No session id: nothing is "mine".
-  assert.deepEqual(nextActions(ticket('ASSIGNED'), { userId: undefined, canWrite: false }), [])
-  assert.equal(actionLabel('assign', { status: 'OPEN' }), 'Phân công')
-  assert.equal(actionLabel('assign', { status: 'ASSIGNED' }), 'Đổi người phụ trách')
-  assert.deepEqual(['start', 'complete', 'cancel'].map(action => actionLabel(action, { status: 'ASSIGNED' })), ['Bắt đầu', 'Hoàn tất', 'Hủy phiếu'])
-})
-
-test('next step sentence, assignee text and overdue hint', () => {
-  const base = { assigneeId: STAFF, assigneeName: 'Nhân viên vận hành' }
-  const staff = { userId: STAFF, canWrite: false }
-  assert.match(nextStepText({ ...base, status: 'ASSIGNED' }, staff), /bấm “Bắt đầu”/)
-  assert.equal(nextStepText({ ...base, status: 'ASSIGNED' }, { userId: ADMIN, canWrite: true }), 'Chờ Nhân viên vận hành bắt đầu tại máy.')
-  assert.match(nextStepText({ ...base, status: 'IN_PROGRESS' }, staff), /“Hoàn tất”/)
-  assert.match(nextStepText({ status: 'OPEN', assigneeId: null }, { userId: ADMIN, canWrite: true }), /Chọn nhân viên/)
-  assert.match(nextStepText({ ...base, status: 'CANCELLED' }, staff), /đã hủy/)
-  assert.equal(assigneeText(base, staff), 'Nhân viên vận hành (bạn)')
-  assert.equal(assigneeText({ assigneeId: null }), 'Chưa phân công')
-  assert.equal(assigneeText({ assigneeId: OTHER, assigneeName: null }), `Tài khoản …${OTHER.slice(-8)}`)
-  const now = Date.parse('2026-12-04T03:00:00Z')
-  assert.equal(isOverdue({ status: 'IN_PROGRESS', dueAt: '2026-12-04T02:00:00Z' }, now), true)
-  assert.equal(isOverdue({ status: 'COMPLETED', dueAt: '2026-12-04T02:00:00Z' }, now), false)
-  assert.equal(isOverdue({ status: 'ASSIGNED', dueAt: null }, now), false)
-})
-
-test('history lists who did each step and when, with the note and the cancel reason', () => {
-  const steps = ticketSteps({
-    status: 'CANCELLED', createdAt: '2026-12-04T01:00:00Z', createdById: ADMIN, createdByName: 'Quản trị viên',
-    assignedAt: '2026-12-04T01:05:00Z', assignedById: ADMIN, assignedByName: 'Quản trị viên', assigneeId: STAFF, assigneeName: 'Nhân viên vận hành',
-    startedAt: null, completedAt: null, cancelledAt: '2026-12-04T02:00:00Z', cancelledById: ADMIN, cancelledByName: null, cancelReason: '  Máy đã thay  ',
-  })
-  assert.deepEqual(steps.map(step => step.key), ['created', 'assigned', 'cancelled'])
-  assert.equal(steps[0].at, '04/12/2026 08:00')
-  assert.equal(steps[1].note, 'Giao cho Nhân viên vận hành')
-  assert.equal(steps[2].by, `Tài khoản …${ADMIN.slice(-8)}`)
-  assert.equal(steps[2].note, 'Lý do: Máy đã thay')
-})
-
-// ---- forms
-
-test('create form: client checks, and only filled optional fields are sent', () => {
-  const now = Date.parse('2026-12-04T03:00:00Z')
-  assert.deepEqual(Object.keys(validateTicket({ ...NEW_TICKET }, now)).sort(), ['machineId', 'title', 'type'])
-  assert.equal(validateTicket({ ...NEW_TICKET, type: 'RESTOCK', machineId: MACHINE_1, title: 'x', dueAt: '2026-12-04T09:00' }, now).dueAt, 'Thời hạn phải ở tương lai.')
-  assert.deepEqual(validateTicket({ ...NEW_TICKET, type: 'RESTOCK', machineId: MACHINE_1, title: 'x', dueAt: '2026-12-04T11:00' }, now), {})
-  assert.deepEqual(createTicketBody({ ...NEW_TICKET, type: 'MAINTENANCE', machineId: MACHINE_1, title: '  Vệ sinh  ', description: '   ' }), { type: 'MAINTENANCE', machineId: MACHINE_1, title: 'Vệ sinh' })
-  assert.deepEqual(createTicketBody({ ...NEW_TICKET, type: 'RESTOCK', machineId: MACHINE_1, title: 'Nạp', description: 'Ngăn A2', dueAt: '2026-12-04T11:00', alertId: id('60000000', 5), assigneeId: STAFF }),
-    { type: 'RESTOCK', machineId: MACHINE_1, title: 'Nạp', description: 'Ngăn A2', dueAt: '2026-12-04T04:00:00.000Z', alertId: id('60000000', 5), assigneeId: STAFF })
-  assert.deepEqual(completeBody('  '), {})
-  assert.deepEqual(completeBody(' Đã nạp 6 hộp '), { note: 'Đã nạp 6 hộp' })
-  assert.ok(cancelBody('   ').error)
-  assert.ok(cancelBody('x'.repeat(501)).error)
-  assert.deepEqual(cancelBody(' Trùng phiếu ').body, { reason: 'Trùng phiếu' })
-})
-
-test('"Mở phiếu" from an alert: same machine and alert id; restock for stock alerts, maintenance otherwise', () => {
-  const values = ticketFromAlert({ id: id('60000000', 5), type: 'LOW_STOCK', machineId: MACHINE_1, machineCode: 'DEV-MACHINE-01', slotCode: 'A2' })
-  assert.equal(values.type, 'RESTOCK')
-  assert.equal(values.machineId, MACHINE_1)
-  assert.equal(values.alertId, id('60000000', 5))
-  assert.equal(values.title, 'Ngăn sắp hết hàng · máy DEV-MACHINE-01, ngăn A2')
-  assert.equal(values.assigneeId, '')
-  assert.equal(ticketFromAlert({ id: id('60000000', 2), type: 'MACHINE_OFFLINE', machineId: MACHINE_2, machineCode: 'DEV-MACHINE-02', slotCode: null }).type, 'MAINTENANCE')
-})
-
-test('errors: 409 and a lost assignment explained in Vietnamese with the next step; others kept; 404 means BE 4.3 missing', () => {
-  const conflict = ticketActionError(new ApiError(409, 'Ticket is not ASSIGNED'), 'start', 'detail')
-  assert.match(conflict.message, /không còn ở trạng thái chờ bắt đầu.*Trang đã được tải lại/)
-  assert.match(ticketActionError(new ApiError(409, 'x'), 'cancel').message, /Danh sách đã được tải lại/)
-  assert.match(ticketActionError(new ApiError(403, 'Only the assignee'), 'complete').message, /không còn giao cho bạn/)
-  const forbidden = new ApiError(403, 'Access denied')
-  assert.equal(ticketActionError(forbidden, 'cancel'), forbidden)
-  assert.equal(isStale(new ApiError(409, 'x'), 'assign'), true)
-  assert.equal(isStale(new ApiError(403, 'x'), 'start'), true)
-  assert.equal(isStale(new ApiError(403, 'x'), 'cancel'), false)
-  assert.equal(isStale(new ApiError(400, 'x'), 'complete'), false)
-  assert.equal(ticketsAvailability(new ApiError(404, 'x')), 'missing')
-  assert.equal(ticketsAvailability(new ApiError(500, 'x')), 'error')
-})
-
-// ---- mock of the draft contract
-
-test('mock: the endpoints form their own group "tickets"', () => {
-  assert.equal(groupOf('/work-tickets'), 'tickets')
-  assert.equal(groupOf(`/work-tickets/${T(1)}/start`), 'tickets')
-  assert.deepEqual(parseSelection('tickets').groups, ['tickets'])
-})
-
-test('Tiêu chí xong (mock): staff only receive their own tickets, whatever filter they send; admins see all', async () => {
-  const { state } = setup()
-  await signIn(state, 'admin')
-  const all = await ticketsApi.list({ page: 0, size: 100 })
-  assert.equal(all.totalElements, 7)
-  assert.deepEqual([...new Set(all.content.map(ticket => ticket.status))].sort(), [...TICKET_STATUSES].sort())
-  assert.equal((await ticketsApi.list({ page: 0, size: 100, assigneeId: OTHER })).totalElements, 2)
-  assert.equal((await ticketsApi.list({ page: 0, size: 100, status: 'OPEN' })).content[0].assigneeId, null)
-
-  await signIn(state, 'staff')
-  const mine = await ticketsApi.list({ page: 0, size: 100 })
-  assert.equal(mine.totalElements, 3)
-  assert.ok(mine.content.every(ticket => ticket.assigneeId === STAFF))
-  // Asking for someone else's tickets still answers with the caller's own.
-  assert.ok((await ticketsApi.list({ page: 0, size: 100, assigneeId: OTHER })).content.every(ticket => ticket.assigneeId === STAFF))
-  assert.equal((await ticketsApi.list({ page: 0, size: 100, status: 'OPEN' })).totalElements, 0)
-  // Someone else's ticket is not disclosed: 404 like an unknown id.
-  await rejects(ticketsApi.get(T(5)), 404)
-  await rejects(ticketsApi.get('nope'), 400)
-  assert.equal((await ticketsApi.get(T(2))).status, 'ASSIGNED')
-  // Bad filters are a 400 with the field.
-  await rejects(ticketsApi.list({ page: 0, size: 20, status: 'DONE' }), 400, error => !!error.fieldErrors.status)
-})
-
-test('mock: staff start then complete their own ticket (who and when recorded); wrong step 409; admin steps 403', async () => {
-  const { state } = setup()
-  await signIn(state, 'staff')
-  await rejects(ticketsApi.complete(T(2), {}), 409, error => error.message === 'Ticket is not IN_PROGRESS')
-  const started = await ticketsApi.start(T(2))
-  assert.equal(started.status, 'IN_PROGRESS')
-  assert.equal(started.startedById, STAFF)
-  assert.equal(started.startedByName, 'Nhân viên vận hành')
-  assert.equal(started.startedAt, '2026-12-04T03:00:00.000Z')
-  await rejects(ticketsApi.start(T(2)), 409, error => error.message === 'Ticket is not ASSIGNED')
-  await rejects(ticketsApi.complete(T(2), { note: 'x', extra: 1 }), 400, error => !!error.fieldErrors.extra)
-  const done = await ticketsApi.complete(T(2), { note: 'Đã nạp 6 hộp vào ngăn A2' })
-  assert.equal(done.status, 'COMPLETED')
-  assert.equal(done.completedById, STAFF)
-  assert.equal(done.completionNote, 'Đã nạp 6 hộp vào ngăn A2')
-  // Admin steps.
-  await rejects(ticketsApi.cancel(T(3), { reason: 'x' }), 403)
-  await rejects(ticketsApi.assign(T(3), { assigneeId: STAFF }), 403)
-  await rejects(ticketsApi.create({ type: 'RESTOCK', machineId: MACHINE_1, title: 'x' }), 403)
-
-  // An admin is not the assignee: start/complete are refused even though they see the ticket.
-  await signIn(state, 'admin')
-  await rejects(ticketsApi.start(T(5)), 403)
-  await rejects(ticketsApi.complete(T(6), {}), 403)
-})
-
-test('mock: admin creates (OPEN, or ASSIGNED with an assignee), assigns, cancels with a reason; 400 and 409 rules', async () => {
-  const { state } = setup()
-  await signIn(state, 'admin')
-  await rejects(ticketsApi.create({ type: 'FIX', machineId: 'x', title: ' ', dueAt: '2026-12-01T00:00:00Z', assigneeId: ADMIN, id: 'x' }), 400, error =>
-    ['type', 'machineId', 'title', 'dueAt', 'assigneeId', 'id'].every(field => error.fieldErrors[field]))
-  await rejects(ticketsApi.create({ type: 'RESTOCK', machineId: MACHINE_2, title: 'x', alertId: id('60000000', 5) }), 400, error => error.fieldErrors.alertId === 'Alert belongs to another machine')
-  await rejects(ticketsApi.create({ type: 'RESTOCK', machineId: MACHINE_1, title: 'x', alertId: id('60000000', 6) }), 409, error => error.message === 'Alert is already RESOLVED')
-
-  const open = await ticketsApi.create({ type: 'MAINTENANCE', machineId: MACHINE_1, title: 'Kiểm tra cửa' })
-  assert.equal(open.status, 'OPEN')
-  assert.equal(open.createdById, ADMIN)
-  assert.equal(open.assignedAt, null)
-  const assigned = await ticketsApi.create({ type: 'RESTOCK', machineId: MACHINE_1, title: 'Nạp A2', alertId: id('60000000', 5), assigneeId: STAFF, dueAt: '2026-12-04T09:00:00Z' })
-  assert.equal(assigned.status, 'ASSIGNED')
-  assert.equal(assigned.assigneeName, 'Nhân viên vận hành')
-  assert.equal(assigned.assignedByName, 'Quản trị viên')
-  assert.equal(assigned.alertId, id('60000000', 5))
-
-  await rejects(ticketsApi.assign(open.id, { assigneeId: id('11000000', 3) }), 400, error => !!error.fieldErrors.assigneeId) // INACTIVE staff
-  assert.equal((await ticketsApi.assign(open.id, { assigneeId: OTHER })).assigneeId, OTHER)
-  await rejects(ticketsApi.assign(T(3), { assigneeId: OTHER }), 409) // IN_PROGRESS
-  await rejects(ticketsApi.cancel(open.id, { reason: '  ' }), 400, error => !!error.fieldErrors.reason)
-  const cancelled = await ticketsApi.cancel(open.id, { reason: 'Trùng phiếu' })
-  assert.equal(cancelled.status, 'CANCELLED')
-  assert.equal(cancelled.cancelledById, ADMIN)
-  assert.equal(cancelled.cancelReason, 'Trùng phiếu')
-  assert.equal(cancelled.assigneeId, OTHER, 'the assignee stays on record')
-  await rejects(ticketsApi.cancel(open.id, { reason: 'x' }), 409)
-  await rejects(ticketsApi.cancel(T(4), { reason: 'x' }), 409) // COMPLETED
-
-  // The new assigned ticket shows up in that staff member's own list.
-  await signIn(state, 'staff')
-  assert.equal((await ticketsApi.list({ page: 0, size: 100 })).totalElements, 4)
-})
-
-// ---- FM7 acceptance fixes
-
-test('RESTOCK ticket with lines: the assignee gets one "Thực hiện nạp hàng" link instead of the plain Bắt đầu / Hoàn tất', () => {
-  const admin = { userId: ADMIN, canWrite: true }
-  const staff = { userId: STAFF, canWrite: false }
-  const lines = [{ id: 'l1', slotId: 's', slotCode: 'A2', productId: 'p', productName: 'Watermelon bowl', plannedQuantity: 4, loadedQuantity: 0, removedQuantity: 0 }]
-  const restock = (status, assigneeId = STAFF) => ({ type: 'RESTOCK', restockLines: lines, status, assigneeId: status === 'OPEN' ? null : assigneeId })
-  const matrix = viewer => Object.fromEntries(TICKET_STATUSES.map(status => [status, nextActions(restock(status), viewer)]))
-  assert.deepEqual(matrix(staff), { OPEN: [], ASSIGNED: ['restock'], IN_PROGRESS: ['restock'], COMPLETED: [], CANCELLED: [] })
-  assert.deepEqual(matrix(admin), { OPEN: ['assign', 'cancel'], ASSIGNED: ['assign', 'cancel'], IN_PROGRESS: ['cancel'], COMPLETED: [], CANCELLED: [] })
-  assert.deepEqual(nextActions(restock('ASSIGNED', ADMIN), admin), ['assign', 'restock', 'cancel'])
-  assert.deepEqual(nextActions(restock('IN_PROGRESS', OTHER), staff), [])
-  for (const status of TICKET_STATUSES) assert.ok(!nextActions(restock(status), staff).some(action => action === 'start' || action === 'complete'), status)
-  // Without lines (or a MAINTENANCE ticket) the plain buttons stay.
-  assert.deepEqual(nextActions({ type: 'RESTOCK', restockLines: [], status: 'ASSIGNED', assigneeId: STAFF }, staff), ['start'])
-  assert.deepEqual(nextActions({ type: 'MAINTENANCE', restockLines: lines, status: 'IN_PROGRESS', assigneeId: STAFF }, staff), ['complete'])
-  assert.equal(actionLabel('restock', { status: 'ASSIGNED' }), 'Thực hiện nạp hàng')
-  const named = { ...restock('ASSIGNED'), assigneeName: 'Nhân viên vận hành' }
-  assert.match(nextStepText(named, staff), /mở “Thực hiện nạp hàng”/)
-  assert.doesNotMatch(nextStepText(named, staff), /bấm “Bắt đầu”/)
-  assert.match(nextStepText({ ...named, status: 'IN_PROGRESS' }, staff), /đóng cửa nạp và đối chiếu/)
-  assert.equal(nextStepText(named, admin), 'Chờ Nhân viên vận hành bắt đầu tại máy.')
-})
-
-test('every sidebar item has an icon (the schedules item too)', () => {
+test('permissions: READ_ASSIGNED for both roles, READ_ALL and MANAGE ADMIN only, EXECUTE both; route and nav in "Vận hành"', () => {
+  for (const code of ['WORK_ORDER_READ_ASSIGNED', 'WORK_ORDER_EXECUTE']) assert.ok(ROLE_PERMISSIONS.STAFF.includes(code), code)
+  for (const code of ['WORK_ORDER_READ_ALL', 'WORK_ORDER_MANAGE']) assert.ok(!ROLE_PERMISSIONS.STAFF.includes(code) && ROLE_PERMISSIONS.ADMIN.includes(code), code)
+  assert.equal(matchRoute(TICKETS_PATH)?.page, 'tickets')
+  assert.equal(matchRoute(`${TICKETS_PATH}/${W(2)}/restock`)?.page, 'ticket-restock')
+  assert.equal(NAV.find(item => item.to === TICKETS_PATH)?.group, 'Vận hành')
   for (const item of NAV) assert.ok(NAV_ICONS[item.to], item.to)
+  assert.equal(groupOf('/work-orders'), 'tickets')
+  assert.equal(groupOf(`/work-orders/${W(1)}/restock-lines`), 'tickets')
+  assert.equal(groupOf(`/machines/${MACHINE_1}/restock-suggestions`), 'tickets')
+})
+
+test('URL filters keep contract values only; READ_ALL sends every filter, /me only status and overdue', () => {
+  const filters = readTicketFilters(new URLSearchParams(`status=DONE&type=RESTOCK&source=SCHEDULE&priority=URGENT&machineId=${MACHINE_1}&assigneeId=${STAFF}&overdue=true&page=2`))
+  assert.deepEqual(ticketListQuery(filters, 20), { page: 2, size: 20, status: ['DONE'], type: 'RESTOCK', source: 'SCHEDULE', priority: 'URGENT', machineId: MACHINE_1, assigneeId: STAFF, overdue: true })
+  assert.deepEqual(myTicketQuery(filters, 20), { page: 2, size: 20, status: ['DONE'], overdue: true })
+  const bad = readTicketFilters(new URLSearchParams('status=COMPLETED&type=X&machineId=abc&overdue=yes&page=-1'))
+  assert.deepEqual(ticketListQuery(bad, 20), { page: 0, size: 20, status: undefined, type: undefined, source: undefined, priority: undefined, machineId: undefined, assigneeId: undefined, overdue: undefined })
+  assert.deepEqual([...ticketFilterKeys(false)], ['status', 'overdue'])
+  assert.equal(ticketFilterKeys(true).length, 7)
+})
+
+test('Tiêu chí xong: nút chỉ hiện đúng bước tiếp theo theo quyền và trạng thái', () => {
+  const matrix = viewer => Object.fromEntries(TICKET_STATUSES.map(status => [status, nextActions(order(status), viewer)]))
+  assert.deepEqual(matrix(staffViewer), { OPEN: [], ASSIGNED: ['start'], IN_PROGRESS: ['complete'], DONE: [], CANCELLED: [] })
+  assert.deepEqual(matrix(adminViewer), { OPEN: ['assign', 'cancel'], ASSIGNED: ['start', 'assign', 'unassign', 'cancel'], IN_PROGRESS: ['complete', 'assign', 'cancel'], DONE: [], CANCELLED: [] })
+  // Someone else's work order: staff get nothing; never a delete.
+  assert.deepEqual(nextActions(order('ASSIGNED', { assignee: { id: OTHER } }), staffViewer), [])
+  for (const status of TICKET_STATUSES) assert.ok(!nextActions(order(status), adminViewer).includes('delete'))
+  // RESTOCK: one "Thực hiện nạp hàng" link replaces Bắt đầu / Hoàn tất.
+  assert.deepEqual(nextActions(order('ASSIGNED', { type: 'RESTOCK' }), staffViewer), ['restock'])
+  assert.deepEqual(nextActions(order('IN_PROGRESS', { type: 'RESTOCK' }), staffViewer), ['restock'])
+  assert.equal(actionLabel('restock', { status: 'ASSIGNED' }), 'Thực hiện nạp hàng')
+  assert.equal(actionLabel('assign', { status: 'OPEN' }), 'Phân công')
+  assert.equal(actionLabel('assign', { status: 'IN_PROGRESS' }), 'Đổi người phụ trách')
+})
+
+test('next step sentence, assignee text and overdue as the server says', () => {
+  assert.match(nextStepText(order('OPEN'), adminViewer), /Chọn nhân viên phụ trách/)
+  assert.match(nextStepText(order('ASSIGNED'), staffViewer), /bấm “Bắt đầu”: máy chuyển sang Bảo trì/)
+  assert.match(nextStepText(order('ASSIGNED', { type: 'RESTOCK' }), staffViewer), /mở “Thực hiện nạp hàng”/)
+  assert.match(nextStepText(order('IN_PROGRESS', { type: 'RESTOCK' }), staffViewer), /cổng nạp đã đóng/)
+  assert.match(nextStepText(order('DONE'), staffViewer), /Máy vẫn ở Bảo trì/)
+  assert.equal(assigneeText(order('ASSIGNED'), staffViewer), 'Nhân viên vận hành (bạn)')
+  assert.equal(assigneeText(order('OPEN')), 'Chưa phân công')
+  assert.equal(isOverdue({ overdue: true, status: 'IN_PROGRESS' }), true)
+  assert.equal(isOverdue({ overdue: true, status: 'DONE' }), false)
+})
+
+test('history: one row per event, the system when there is no actor, the note kept', () => {
+  const steps = ticketSteps([
+    { id: 'e1', type: 'CREATED', actor: null, createdAt: '2026-12-04T02:00:00Z' },
+    { id: 'e2', type: 'COMPLETED', actor: { id: STAFF, fullName: 'Nhân viên vận hành' }, note: ' Đã vệ sinh ', createdAt: '2026-12-04T03:05:00Z' },
+  ])
+  assert.deepEqual(steps.map(step => [step.label, step.by, step.note]), [['Tạo phiếu', 'Hệ thống', undefined], ['Hoàn tất', 'Nhân viên vận hành', 'Đã vệ sinh']])
+  assert.equal(steps[1].at, '04/12/2026 10:05')
+})
+
+test('forms: create body has only filled fields; edit sends the version and what changed; complete and cancel bodies', () => {
+  const values = { ...NEW_TICKET, type: 'MAINTENANCE', machineId: MACHINE_1, title: ' Vệ sinh ', priority: 'HIGH' }
+  assert.deepEqual(validateTicket(values), {})
+  assert.deepEqual(createTicketBody(values), { type: 'MAINTENANCE', machineId: MACHINE_1, title: 'Vệ sinh', priority: 'HIGH' })
+  assert.ok(validateTicket({ ...NEW_TICKET }).type && validateTicket({ ...NEW_TICKET }).machineId)
+  assert.deepEqual(validateTicket({ ...NEW_TICKET, type: 'RESTOCK', machineId: MACHINE_1 }, Date.now(), true), {}, 'a restock from suggestions needs no title')
+  assert.deepEqual(restockFromSuggestionsBody({ ...NEW_TICKET, type: 'RESTOCK', machineId: MACHINE_1, assigneeId: STAFF }), { fromSuggestions: true, priority: 'NORMAL', assigneeId: STAFF })
+  const ticket = { id: 'w', title: 'Cũ', description: 'Mô tả', priority: 'NORMAL', dueAt: null, version: 4 }
+  assert.equal(updateTicketBody(ticket, editValues(ticket)), undefined)
+  assert.deepEqual(updateTicketBody(ticket, { ...editValues(ticket), title: 'Mới', description: '' }), { version: 4, title: 'Mới', description: '' })
+  assert.deepEqual(completeBody(' xong '), { body: { resultNote: 'xong' } })
+  assert.match(completeBody('  ').error, /bắt buộc/)
+  assert.deepEqual(cancelBody('Máy hỏng', 4), { body: { reason: 'Máy hỏng', version: 4 } })
+})
+
+test('"Mở phiếu" from an alert: stock alerts open a RESTOCK, others a MAINTENANCE on the alert machine', () => {
+  assert.equal(ticketFromAlert({ id: 'a', type: 'LOW_STOCK', machineId: MACHINE_1, machineCode: 'DEV-MACHINE-01', slotCode: 'A2' }).type, 'RESTOCK')
+  const maintenance = ticketFromAlert({ id: 'a', type: 'MACHINE_OFFLINE', machineId: MACHINE_2, machineCode: 'DEV-MACHINE-02', slotCode: null })
+  assert.equal(maintenance.type, 'MAINTENANCE')
+  assert.equal(maintenance.machineId, MACHINE_2)
+  assert.match(maintenance.title, /DEV-MACHINE-02/)
+})
+
+test('errors: STALE_VERSION, wrong step, known blockers and a lost assignment in Vietnamese; 404 on the list means no API', () => {
+  const stale = ticketActionError(new ApiError(409, 'STALE_VERSION: work order WO-1 was changed'), 'assign', 'detail')
+  assert.match(stale.message, /vừa bị người khác thay đổi, đã tải lại/)
+  assert.equal(isStale(new ApiError(409, 'STALE_VERSION: x'), 'assign'), true)
+  const blocked = ticketActionError(new ApiError(409, 'RESTOCK_WITHOUT_LINES: x'), 'start')
+  assert.match(blocked.message, /chưa có dòng nạp/)
+  assert.equal(isStale(new ApiError(409, 'MACHINE_HAS_ACTIVE_ORDERS: x'), 'start'), false, 'a blocker keeps the dialog open')
+  assert.match(ticketActionError(new ApiError(409, 'INVALID_WORK_ORDER_TRANSITION: x'), 'start', 'list').message, /Danh sách đã được tải lại/)
+  assert.match(ticketActionError(new ApiError(404, 'x'), 'complete').message, /không còn giao cho bạn/)
+  assert.equal(ticketsAvailability(new ApiError(404, 'x')), 'missing')
+  assert.equal(ticketsAvailability(new ApiError(403, 'x')), 'forbidden')
+  assert.equal(ticketPath(W(1)), `/admin/tickets/${W(1)}`)
+})
+
+// ---- mock of the real backend
+
+test('Tiêu chí xong (mock): READ_ALL lists everyone\'s by priority then due time; staff get only their own (/me) and 404 on others', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const all = await workOrdersApi.list({ page: 0, size: 50 })
+  assert.equal(all.totalElements, 7)
+  assert.equal(all.content[0].priority, 'URGENT')
+  assert.ok(all.content.every(row => /^WO-\d{8}-[0-9A-F]{4}$/.test(row.code)))
+  assert.deepEqual((await workOrdersApi.list({ status: ['DONE', 'CANCELLED'], page: 0, size: 50 })).content.map(row => row.id).sort(), [W(4), W(7)])
+  assert.deepEqual((await workOrdersApi.list({ source: 'SCHEDULE', page: 0, size: 50 })).content.map(row => row.id).sort(), [W(4), W(5)])
+  assert.deepEqual((await workOrdersApi.list({ overdue: true, page: 0, size: 50 })).content.map(row => row.id).sort(), [W(3), W(5)])
+  await rejects(workOrdersApi.list({ status: ['COMPLETED'], page: 0, size: 5 }), 400)
+
+  await signIn(state, 'staff')
+  await rejects(workOrdersApi.list({ page: 0, size: 5 }), 403)
+  const mine = await workOrdersApi.mine({ page: 0, size: 50 })
+  assert.deepEqual(mine.content.map(row => row.id).sort(), [W(2), W(3), W(4)])
+  assert.ok(mine.content.every(row => row.assignee.id === STAFF))
+  await rejects(workOrdersApi.get(W(6)), 404)
+  const restock = await workOrdersApi.get(W(2))
+  assert.deepEqual(restock.restockSummary, { lines: 2, plannedTotal: 10, loadedTotal: 0, varianceLines: 2 })
+  assert.equal(restock.linkedAlerts[0].type, 'LOW_STOCK')
+  const done = await workOrdersApi.get(W(4))
+  assert.deepEqual([done.status, done.source, done.maintenancePlan.title, done.completedBy.id], ['DONE', 'SCHEDULE', 'Vệ sinh khay nhả hàng', STAFF])
+  assert.deepEqual((await workOrdersApi.events(W(4))).map(event => event.type), ['CREATED', 'ASSIGNED', 'STARTED', 'COMPLETED'])
+})
+
+test('mock: staff start (machine → MAINTENANCE) and complete their own work order with a result note; wrong steps 409', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const created = await workOrdersApi.create({ type: 'MAINTENANCE', machineId: MACHINE_1, title: 'Lau kính', assigneeId: STAFF })
+  assert.deepEqual([created.status, created.source, created.assignee.id, created.version], ['ASSIGNED', 'MANUAL', STAFF, 0])
+  await signIn(state, 'staff')
+  await rejects(workOrdersApi.complete(created.id, { resultNote: 'x' }), 409, error => error.message.startsWith('INVALID_WORK_ORDER_TRANSITION'))
+  const started = await workOrdersApi.start(created.id)
+  assert.equal(started.status, 'IN_PROGRESS')
+  assert.equal((await workOrdersApi.start(created.id)).status, 'IN_PROGRESS', 'starting again answers it unchanged')
+  await signIn(state, 'admin')
+  assert.equal((await machinesApi.get(MACHINE_1)).status, 'MAINTENANCE')
+  await signIn(state, 'staff')
+  await workOrdersApi.note(created.id, 'Đã tháo khay')
+  await rejects(workOrdersApi.complete(created.id, { resultNote: ' ' }), 400, error => !!error.fieldErrors.resultNote)
+  const done = await workOrdersApi.complete(created.id, { resultNote: 'Đã lau kính' })
+  assert.deepEqual([done.status, done.resultNote, done.completedBy.id], ['DONE', 'Đã lau kính', STAFF])
+  assert.deepEqual((await workOrdersApi.events(created.id)).map(event => event.type), ['CREATED', 'ASSIGNED', 'STARTED', 'NOTE', 'COMPLETED'])
+  await rejects(workOrdersApi.note(created.id, 'muộn'), 409)
+})
+
+test('mock: admin assigns, unassigns, edits and cancels with the version; a stale version is 409 STALE_VERSION', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const open = await workOrdersApi.get(W(1))
+  assert.equal(open.status, 'OPEN')
+  await rejects(workOrdersApi.assign(W(1), { assigneeId: id('11000000', 3), version: open.version }), 400, error => !!error.fieldErrors.assigneeId)
+  const assigned = await workOrdersApi.assign(W(1), { assigneeId: STAFF, version: open.version })
+  assert.equal(assigned.version, open.version + 1)
+  await rejects(workOrdersApi.assign(W(1), { assigneeId: OTHER, version: open.version }), 409, error => error.message.startsWith('STALE_VERSION'))
+  const back = await workOrdersApi.unassign(W(1), assigned.version)
+  assert.deepEqual([back.status, back.assignee], ['OPEN', null])
+  const edited = await workOrdersApi.update(W(1), { version: back.version, title: 'Kiểm tra Wi-Fi', priority: 'HIGH' })
+  assert.deepEqual([edited.title, edited.priority], ['Kiểm tra Wi-Fi', 'HIGH'])
+  await rejects(workOrdersApi.cancel(W(1), { reason: 'Trùng', version: back.version }), 409, error => error.message.startsWith('STALE_VERSION'))
+  const cancelled = await workOrdersApi.cancel(W(1), { reason: 'Trùng việc', version: edited.version })
+  assert.deepEqual([cancelled.status, cancelled.cancelReason], ['CANCELLED', 'Trùng việc'])
+  await rejects(workOrdersApi.cancel(W(1), { reason: 'x', version: cancelled.version }), 409)
+  await signIn(state, 'staff')
+  await rejects(workOrdersApi.create({ type: 'MAINTENANCE', machineId: MACHINE_1, title: 'x' }), 403)
+})
+
+test('mock: start checks: INACTIVE machine, RESTOCK without lines; an INCIDENT keeps the machine selling unless stopMachine', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const inactive = await workOrdersApi.create({ type: 'MAINTENANCE', machineId: MACHINE_3, title: 'Lắp đặt', assigneeId: ADMIN })
+  await rejects(workOrdersApi.start(inactive.id), 409, error => error.message.startsWith('MACHINE_INACTIVE'))
+  const empty = await workOrdersApi.create({ type: 'RESTOCK', machineId: MACHINE_1, title: 'Nạp', assigneeId: ADMIN })
+  await rejects(workOrdersApi.start(empty.id), 409, error => error.message.startsWith('RESTOCK_WITHOUT_LINES'))
+  const incident = await workOrdersApi.create({ type: 'INCIDENT', machineId: MACHINE_1, title: 'Khách báo', assigneeId: ADMIN })
+  await workOrdersApi.start(incident.id)
+  assert.equal((await machinesApi.get(MACHINE_1)).status, 'ACTIVE')
+  await rejects(workOrdersApi.create({ type: 'MAINTENANCE', machineId: MACHINE_1, title: 'x', restockLines: [] }), 400, error => !!error.fieldErrors.restockLines)
+})
+
+test('mock: a work order from an alert links it (alert ACKNOWLEDGED, workOrderCode); completing resolves it unless asked not to', async () => {
+  const { state } = setup()
+  await signIn(state, 'admin')
+  const alert = (await alertsApi.list({ type: 'HIGH_TEMPERATURE', page: 0, size: 5 })).content[0]
+  const created = await alertsApi.createWorkOrder(alert.id, { assigneeId: ADMIN })
+  assert.deepEqual([created.source, created.type, created.priority, created.status], ['ALERT', 'MAINTENANCE', 'HIGH', 'ASSIGNED'])
+  const linked = await alertsApi.get(alert.id)
+  assert.deepEqual([linked.status, linked.workOrderId, linked.workOrderCode], ['ACKNOWLEDGED', created.id, created.code])
+  await rejects(alertsApi.createWorkOrder(alert.id, {}), 409, error => error.message.startsWith('ALERT_ALREADY_HANDLED'))
+  await workOrdersApi.start(created.id)
+  await workOrdersApi.complete(created.id, { resultNote: 'Đã chỉnh nhiệt độ' })
+  const resolved = await alertsApi.get(alert.id)
+  assert.deepEqual([resolved.status, resolved.resolutionNote, resolved.workOrderId], ['RESOLVED', `Resolved by ${created.code}`, null])
 })
